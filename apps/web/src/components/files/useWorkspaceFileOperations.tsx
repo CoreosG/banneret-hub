@@ -65,7 +65,10 @@ export function useWorkspaceFileOperations(options: {
   const canWrite = useEnvironmentScope(environmentId, AuthFilesystemWriteScope) && options.enabled;
   const canRead = useEnvironmentScope(environmentId, AuthFilesystemReadScope) && options.enabled;
   const [dropDirectory, setDropDirectory] = useState<string | null>(null);
-  const dropPointRef = useRef({ x: 0, y: 0 });
+  // Where the conflict menu opens: the drop point, or the cursor (undefined) for menu uploads.
+  const dropPointRef = useRef<{ x: number; y: number } | undefined>(undefined);
+  // Pierre renames and moves rows itself; the next path sync must rebuild, not diff stale paths.
+  const treeResetRef = useRef(false);
   const pendingRenameRef = useRef<string | null>(null);
 
   const reportError = (title: string, error: unknown) =>
@@ -97,7 +100,10 @@ export function useWorkspaceFileOperations(options: {
     const where = targetDirectory || gt("the workspace root");
     const toastId = toastManager.add({
       type: "loading",
-      title: gt("Uploading {count} files to {where}", { count: String(files.length), where }),
+      title: gt("Uploading {count, plural, one {# file} other {# files}} to {where}", {
+        count: files.length,
+        where,
+      }),
       timeout: 0,
     });
     try {
@@ -117,7 +123,9 @@ export function useWorkspaceFileOperations(options: {
       if (result.failed.length > 0) {
         toastManager.add({
           type: "error",
-          title: gt("{count} uploads failed", { count: String(result.failed.length) }),
+          title: gt("{count, plural, one {# upload} other {# uploads}} failed", {
+            count: result.failed.length,
+          }),
           description: result.failed
             .slice(0, 3)
             .map((failure) => `${failure.relativePath}: ${failure.message}`)
@@ -126,9 +134,11 @@ export function useWorkspaceFileOperations(options: {
       } else {
         toastManager.add({
           type: "success",
-          title: gt("Uploaded {count} files", { count: String(result.uploaded) }),
+          title: gt("Uploaded {count, plural, one {# file} other {# files}}", {
+            count: result.uploaded,
+          }),
           ...(result.skipped > 0
-            ? { description: gt("Skipped {count} existing", { count: String(result.skipped) }) }
+            ? { description: gt("Skipped {count} existing", { count: result.skipped }) }
             : {}),
         });
       }
@@ -145,6 +155,7 @@ export function useWorkspaceFileOperations(options: {
     input.type = "file";
     input.multiple = true;
     input.addEventListener("change", () => {
+      dropPointRef.current = undefined;
       const files = Array.from(input.files ?? []).map((file) => ({
         relativePath: file.name,
         file,
@@ -184,10 +195,10 @@ export function useWorkspaceFileOperations(options: {
     const api = readLocalApi();
     const confirmed = await api?.dialogs.confirm(
       isDirectory
-        ? gt("Delete the folder '{name}' and everything in it? This cannot be undone.", {
+        ? gt("Delete the folder “{name}” and everything in it? This cannot be undone.", {
             name: baseName(relativePath),
           })
-        : gt("Delete '{name}'? This cannot be undone.", { name: baseName(relativePath) }),
+        : gt("Delete “{name}”? This cannot be undone.", { name: baseName(relativePath) }),
       { variant: "destructive" },
     );
     if (!confirmed) return;
@@ -214,6 +225,13 @@ export function useWorkspaceFileOperations(options: {
         </div>
       ),
 
+    /** True once after the tree moved or renamed rows on its own. */
+    consumeTreeReset: useStableCallback(() => {
+      const reset = treeResetRef.current;
+      treeResetRef.current = false;
+      return reset;
+    }),
+
     /** Starts the inline rename a new folder asked for, once its row exists. */
     flushPendingRename: useStableCallback(() => {
       const path = pendingRenameRef.current;
@@ -226,6 +244,7 @@ export function useWorkspaceFileOperations(options: {
       canDrag: () => canWrite,
       canDrop: () => canWrite,
       onDropComplete: (event: FileTreeDropResult) => {
+        treeResetRef.current = true;
         const target = event.target.directoryPath ? stripSlash(event.target.directoryPath) : "";
         const sources = event.draggedPaths.map(stripSlash);
         void (async () => {
@@ -243,6 +262,7 @@ export function useWorkspaceFileOperations(options: {
     renaming: {
       canRename: () => canWrite,
       onRename: (event: FileTreeRenameEvent) => {
+        treeResetRef.current = true;
         const from = stripSlash(event.sourcePath);
         const to = stripSlash(event.destinationPath);
         void move(from, to).then(() => options.reload([parentOf(from), parentOf(to)]));

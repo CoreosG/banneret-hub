@@ -214,7 +214,7 @@ export default function FileBrowserPanel({
     },
     tree: () => model,
   });
-  const { flushPendingRename } = fileOps;
+  const { consumeTreeReset, flushPendingRename } = fileOps;
   const entryKindsRef = useRef(entryKinds);
   const previousTreePathsRef = useRef<readonly string[] | null>(null);
   const syncingSelectionRef = useRef(false);
@@ -493,7 +493,7 @@ export default function FileBrowserPanel({
       return;
     }
     const updates = buildFileTreePathUpdates(previousTreePaths, treePaths);
-    if (shouldRebuildFileTree(previousTreePaths, treePaths, updates)) {
+    if (consumeTreeReset() || shouldRebuildFileTree(previousTreePaths, treePaths, updates)) {
       // A reset keeps old search matches, so search closes first and recomputes afterwards.
       const activeSearch = model.isSearchOpen() ? model.getSearchValue() : null;
       if (activeSearch !== null) model.closeSearch();
@@ -508,7 +508,7 @@ export default function FileBrowserPanel({
       model.scrollToPath(followedRevealRef.current, { focus: false, offset: "center" });
     }
     flushPendingRename();
-  }, [ready, entryKinds, model, treePaths, flushPendingRename]);
+  }, [ready, entryKinds, model, treePaths, consumeTreeReset, flushPendingRename]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- expands every directory in the Pierre tree model while expand-all is on and no search is active
   useEffect(() => {
