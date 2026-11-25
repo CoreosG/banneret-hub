@@ -54,8 +54,8 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const windows = platform === "win32";
   if (Option.isNone(runtime)) {
     const script = windows
-      ? "irm https://t3.codes/install.ps1 | iex"
-      : "curl -fsSL https://t3.codes/install.sh | sh";
+      ? "irm https://github.com/CoreosG/banneret-hub/releases/latest/download/install.ps1 | iex"
+      : "curl -fsSL https://github.com/CoreosG/banneret-hub/releases/latest/download/install.sh | sh";
     return yield* new CliInstallError({
       reason: `Only the standalone t3 can install itself. Use \`${script}\`, or Settings in the desktop app.`,
     });
@@ -71,7 +71,7 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const binDir = path.resolve(
     environment.T3CODE_INSTALL_BIN_DIR?.trim() || path.join(home, ".local", "bin"),
   );
-  const name = windows ? "t3.cmd" : "t3";
+  const name = windows ? "banneret.cmd" : "banneret";
   const link = path.join(binDir, name);
   const failed = (reason: string) => (cause: unknown) => new CliInstallError({ reason, cause });
 
@@ -157,7 +157,7 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
       if ((windows || absolute) && same(entry)) return null;
       const dir = absolute ? entry : windows || !cwd ? undefined : path.resolve(cwd, entry);
       if (dir === undefined || detectCliRunner(`${dir}/`) !== null) continue;
-      for (const name of windows ? ["t3.cmd", "t3.exe"] : ["t3"]) {
+      for (const name of windows ? ["banneret.cmd", "banneret.exe"] : ["banneret"]) {
         const candidate = path.join(dir, name);
         if (!(yield* resolveCommandPath(candidate, { env: environment }))) continue;
         if (windows) return candidate;
@@ -326,13 +326,13 @@ export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R, E
   // Any t3 already installed means no prompt: ours (even when off PATH) or another on PATH.
   // Runners put their own cache's node_modules/.bin on PATH, so skip those.
   const windows = platform === "win32";
-  const names = windows ? ["t3.cmd", "t3.exe"] : ["t3"];
+  const names = windows ? ["banneret.cmd", "banneret.exe"] : ["banneret"];
   const launchers = yield* fs
     .readFileString(path.join(runtimeDir, "launchers"))
     .pipe(Effect.orElseSucceed(() => ""));
   const candidates = [
     ...launchers.split(/\r?\n/).filter((launcher) => path.isAbsolute(launcher)),
-    path.join(path.dirname(runtimeDir), "bin", windows ? "t3.cmd" : "t3"),
+    path.join(path.dirname(runtimeDir), "bin", windows ? "banneret.cmd" : "banneret"),
     ...(environment.PATH ?? environment.Path ?? "")
       .split(windows ? ";" : ":")
       .filter(

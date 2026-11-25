@@ -218,7 +218,7 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
   ]
     .filter((entry) => entry.trim().length > 0)
     .map((directory) => ({
-      shimPath: path.join(directory, "t3.cmd"),
+      shimPath: path.join(directory, "banneret.cmd"),
       parseTarget: windowsShimTarget,
     }));
   if (versionsDir !== undefined) {
@@ -226,7 +226,7 @@ export const findWindowsShim = Effect.fn("cli.update.find_windows_shim")(functio
       .readFileString(path.join(path.dirname(versionsDir), "launchers"))
       .pipe(Effect.orElseSucceed(() => ""));
     for (const shimPath of recorded.split(/\r?\n/)) {
-      if (path.isAbsolute(shimPath) && path.basename(shimPath).toLowerCase() === "t3.cmd") {
+      if (path.isAbsolute(shimPath) && path.basename(shimPath).toLowerCase() === "banneret.cmd") {
         candidates.push({ shimPath, parseTarget: generatedWindowsShimTarget });
       }
     }

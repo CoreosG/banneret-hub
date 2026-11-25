@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="{{BG_TOP}}"/>
+      <stop offset="1" stop-color="{{BG_BOTTOM}}"/>
+    </linearGradient>
+  </defs>
+  <rect x="{{INSET}}" y="{{INSET}}" width="{{SIZE}}" height="{{SIZE}}" rx="{{RADIUS}}" fill="url(#bg)"/>
+  <g transform="translate(512 512) scale({{MARK_SCALE}}) translate(-530 -516)" color="{{FG}}">
+    <rect x="268" y="176" width="64" height="680" rx="32" fill="currentColor"/>
+    <circle cx="300" cy="168" r="52" fill="currentColor"/>
+    <path d="M332 236 H792 L660 400 L792 564 H332 Z" fill="currentColor"/>
+  </g>
+</svg>

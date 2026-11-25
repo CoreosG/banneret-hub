@@ -204,7 +204,7 @@ async function serviceUnitFromEnvironment(
   if (unitName.endsWith(".xml")) {
     const localAppData = env.LOCALAPPDATA?.trim();
     if (!localAppData) return undefined;
-    const path = NodePath.win32.join(localAppData, "t3code", unitName);
+    const path = NodePath.win32.join(localAppData, "banneret-hub", unitName);
     const taskName = serviceTaskName(env.USERDOMAIN ?? "", env.USERNAME ?? "");
     return { path, reload: () => registerServiceTask(path, taskName) };
   }
@@ -804,7 +804,8 @@ async function terminateChild(
 }
 
 /** Task Scheduler names are machine-wide, so each Windows account runs its own task. */
-export const serviceTaskName = (domain: string, userName: string) => `t3code-${domain}-${userName}`;
+export const serviceTaskName = (domain: string, userName: string) =>
+  `banneret-hub-${domain}-${userName}`;
 
 export const serviceLauncherLockPath = (baseDir: string) =>
   NodePath.join(baseDir, "runtime", SERVICE_LAUNCHER_LOCK_FILE);

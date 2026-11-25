@@ -273,7 +273,7 @@ const sanitizeWslRuntimeId = (value: string): string => value.replace(/[^A-Za-z0
 
 const runtimeParentAssignment = (t3Home: string | null): string =>
   t3Home === null
-    ? 'runtime_parent="$HOME/.t3/wsl-runtime"'
+    ? 'runtime_parent="$HOME/.banneret/wsl-runtime"'
     : `runtime_parent=${shellQuote(`${t3Home}/wsl-runtime`)}`;
 
 // A null archive path asks for a staging directory to copy the archive into, unless the cache is ready.

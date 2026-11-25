@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.coreosg.banneret-hub</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Banneret Hub</name>
+  <summary>Desktop GUI for coding agents (unofficial T3 Code fork)</summary>
+  <developer id="com.coreosg">
+    <name>CoreosG</name>
+  </developer>
+  <description>
+    <p>
+      Banneret Hub is an unofficial fork of the T3 Code source code. It is not
+      affiliated with, endorsed by, or maintained by T3 Tools, Inc.
+    </p>
+  </description>
+  <launchable type="desktop-id">banneret-hub.desktop</launchable>
+  <icon type="stock">banneret-hub</icon>
+  <provides>
+    <binary>banneret-hub</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <url type="homepage">https://github.com/CoreosG/banneret-hub</url>
+  <url type="bugtracker">https://github.com/CoreosG/banneret-hub/issues</url>
+</component>

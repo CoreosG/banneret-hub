@@ -653,12 +653,12 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
       // PATH first, resolved like the shell does: it decides which t3 the user runs. An empty
       // entry of a nonempty PATH is the working directory; an empty PATH searches nothing.
       ...(searchPath.length === 0 ? [] : searchPath.split(":")).map((directory) =>
-        path.resolve(cwd, directory || ".", "t3"),
+        path.resolve(cwd, directory || ".", "banneret"),
       ),
       path.join(
         environment["T3CODE_INSTALL_BIN_DIR"] ||
           path.join(yield* HostProcess.HomeDirectory, ".local", "bin"),
-        "t3",
+        "banneret",
       ),
       ...recorded.split(/\r?\n/),
     ].filter((candidate) => path.isAbsolute(candidate));
@@ -706,7 +706,7 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
   const platform = yield* HostProcess.Platform;
   const environment = yield* HostProcess.Environment;
   const home = yield* HostProcess.HomeDirectory;
-  const launcherName = platform === "win32" ? "t3.cmd" : "t3";
+  const launcherName = platform === "win32" ? "banneret.cmd" : "banneret";
   const launchersFile = path.join(baseDir, PINNED_RUNTIME_DIR, PINNED_RUNTIME_LAUNCHERS_FILE);
   const recorded = (yield* fs.readFileString(launchersFile).pipe(Effect.orElseSucceed(() => "")))
     .split(/\r?\n/)

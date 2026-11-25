@@ -1,0 +1,161 @@
+name: Banneret sync
+
+# Daily: merges the newest upstream T3 Code stable tag (vX.Y.Z) into main.
+# - Clean merge (conflicts only in our brand assets are auto-resolved): push main, then release.
+# - Real conflicts or a failed identity check: open a PR from sync/<tag> for a human (or agent).
+#
+# Needs the SYNC_TOKEN secret: a fine-grained token for this repo with Contents, Pull requests
+# and Workflows read/write. GITHUB_TOKEN cannot push upstream's .github/workflows changes.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to merge (empty: newest stable)"
+        required: false
+        type: string
+
+concurrency:
+  group: banneret-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Merge upstream
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    outputs:
+      merged: ${{ steps.merge.outputs.merged }}
+      ref: ${{ steps.merge.outputs.ref }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Find upstream tag
+        id: tag
+        env:
+          REQUESTED: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch --no-tags upstream '+refs/tags/v*:refs/upstream-tags/v*'
+          if [[ -n "$REQUESTED" ]]; then
+            tag="$REQUESTED"
+          else
+            tag="$(git for-each-ref --format='%(refname:lstrip=2)' refs/upstream-tags \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          fi
+          current="$(cat scripts/banneret/UPSTREAM_TAG)"
+          newest="$(printf '%s\n%s\n' "$current" "$tag" | sort -V | tail -1)"
+          if [[ "$tag" == "$current" || "$newest" == "$current" ]]; then
+            echo "Already on $current; nothing to sync."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Syncing $current -> $tag"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge
+        id: merge
+        if: steps.tag.outputs.tag != ''
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "banneret-sync[bot]"
+          git config user.email "banneret-sync@users.noreply.github.com"
+          echo "merged=false" >> "$GITHUB_OUTPUT"
+
+          open_pr() {
+            local reason="$1"
+            git merge --abort 2>/dev/null || true
+            git reset -q --hard origin/main
+            branch="sync/$TAG"
+            git push -f origin "refs/upstream-tags/$TAG:refs/heads/$branch"
+            if gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q .; then
+              echo "PR for $branch already open."
+            else
+              {
+                echo "Upstream T3 Code $TAG could not be merged automatically: $reason"
+                echo
+                echo "Resolve by merging this branch into main locally:"
+                echo '```sh'
+                echo "git fetch origin $branch && git merge origin/$branch"
+                echo "echo $TAG > scripts/banneret/UPSTREAM_TAG"
+                echo "node scripts/banneret/check-identity.mjs"
+                echo '```'
+                echo "Then run the **Banneret release** workflow."
+                echo
+                echo "$2"
+              } > pr-body.md
+              gh pr create --base main --head "$branch" --title "chore: sync upstream T3 Code $TAG" --body-file pr-body.md
+            fi
+          }
+
+          if ! git merge --no-ff --no-edit -m "chore: sync upstream T3 Code $TAG" "refs/upstream-tags/$TAG"; then
+            conflicted="$(git diff --name-only --diff-filter=U)"
+            # Our icons overwrite upstream's at the same paths; keep ours, everything else needs a human.
+            unresolved="$(printf '%s\n' "$conflicted" | grep -vE '^(assets/(prod|nightly|dev)/|apps/web/public/.*\.(png|ico)$)' || true)"
+            if [[ -n "$unresolved" ]]; then
+              open_pr "merge conflicts." "Conflicted files:"$'\n'"$(printf -- '- `%s`\n' $conflicted)"
+              exit 0
+            fi
+            printf '%s\n' "$conflicted" | xargs -r git checkout --ours --
+            printf '%s\n' "$conflicted" | xargs -r git add --
+            git commit --no-edit
+          fi
+
+          echo "$TAG" > scripts/banneret/UPSTREAM_TAG
+          git add scripts/banneret/UPSTREAM_TAG
+          git commit --amend --no-edit
+
+          if ! node scripts/banneret/check-identity.mjs > identity.log 2>&1; then
+            cat identity.log
+            open_pr "upstream added official T3 Code identity that Banneret must rename." "$(cat identity.log)"
+            exit 0
+          fi
+
+          git push origin HEAD:main
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Upstream's own workflows (CI, deploys, mobile builds) must never run here.
+      - name: Disable upstream workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow list --all --json name,path,state \
+            --jq '.[] | select(.state == "active") | select(.path | test("/banneret-") | not) | .path' \
+            | while read -r path; do
+                echo "Disabling $path"
+                gh workflow disable "$(basename "$path")" || true
+              done
+
+  release:
+    name: Release
+    needs: sync
+    if: needs.sync.outputs.merged == 'true'
+    permissions:
+      actions: read
+      contents: write
+    uses: ./.github/workflows/banneret-release.yml
+    with:
+      ref: ${{ needs.sync.outputs.ref }}

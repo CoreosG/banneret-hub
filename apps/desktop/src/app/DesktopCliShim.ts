@@ -141,7 +141,7 @@ export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment[
   environment.path.join(
     environment.baseDir,
     "bin",
-    environment.platform === "win32" ? "t3.cmd" : "t3",
+    environment.platform === "win32" ? "banneret.cmd" : "banneret",
   );
 
 export const install = Effect.gen(function* () {
