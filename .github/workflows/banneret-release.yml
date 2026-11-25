@@ -226,6 +226,7 @@ jobs:
           shopt -s nullglob
           # One arch per platform, so upstream's arm64+x64 manifest merge does not apply:
           # macOS arm64 already writes latest-mac.yml; Windows feeds read <channel>.yml.
+          rm -f builder-debug.yml
           for manifest in *-win-x64.yml; do mv "$manifest" "${manifest%-win-x64.yml}.yml"; done
           sha256sum t3-*.tar.gz t3-*.zip > SHA256SUMS
           ls -la
