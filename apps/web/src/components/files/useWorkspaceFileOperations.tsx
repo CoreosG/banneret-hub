@@ -131,6 +131,16 @@ export function useWorkspaceFileOperations(options: {
             .map((failure) => `${failure.relativePath}: ${failure.message}`)
             .join("\n"),
         });
+      } else if (result.uploaded === 0) {
+        toastManager.add({
+          type: "info",
+          title: gt(
+            "Nothing uploaded: {count, plural, one {# file} other {# files}} already existed",
+            {
+              count: result.skipped,
+            },
+          ),
+        });
       } else {
         toastManager.add({
           type: "success",
