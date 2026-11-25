@@ -8,6 +8,7 @@ import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 import { resolveTaggedSourceVersion } from "../../scripts/lib/tagged-source-version.ts";
 import rootPackageJson from "../../package.json" with { type: "json" };
 import packageJson from "./package.json" with { type: "json" };
+import { banneretBrandPlugin } from "../../scripts/banneret/brand.mjs";
 import { WeightedShardSequencer } from "./src/testUtils/weightedShardSequencer.ts";
 
 // NSIS install time tracks file count, not bytes.
@@ -98,6 +99,7 @@ export default mergeConfig(
     },
     pack: {
       plugins: [
+        banneretBrandPlugin(),
         {
           // Every server module reads its version from this manifest import.
           name: "t3code:build-version",

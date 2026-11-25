@@ -21,6 +21,13 @@ Banneret Hub is upstream T3 Code plus a thin layer of our own commits. Keep that
 | Deep-link scheme              | `t3code://`, shared with T3 Code on purpose (pairing links work with the official mobile app; links open whichever app registered last) |
 | T3 Connect, product analytics | off (no relay or Clerk keys at build time; analytics key and host blank)                                                                |
 
+UI copy still says "T3 Code" in source. `scripts/banneret/brand.mjs` rewrites it to "Banneret Hub" in
+production bundles only (web, server and desktop `vite.config.ts`), and re-keys the translation
+catalogs to match, because General Translation keys each string by a hash of its English source. Tests
+and dev servers keep upstream's text. If the build fails with "cannot reproduce translation key",
+General Translation changed its hashing: update `hashCatalogSource` to match `hashSource` in the
+`generaltranslation` package.
+
 ## Versions
 
 Upstream `X.Y.Z` becomes `X.Y.(Z*100 + n)`: upstream `0.1.12` ships as `0.1.1200`, our own follow-up releases on that base are `0.1.1201`, `0.1.1202`. Versions always increase, so updaters see every release as newer. Release tags are `v<version>` because remote hosts download the server from `releases/download/v<version>`.

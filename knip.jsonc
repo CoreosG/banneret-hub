@@ -47,6 +47,7 @@
         "verify-windows-desktop-artifact.ts",
         // Banneret Hub maintenance scripts, run by hand and by banneret-*.yml.
         "banneret/*.mjs",
+        "banneret/*.d.mts",
       ],
       "ignoreDependencies": ["esbuild"],
       // The `t3` npm package's files: copied into the package, never imported.

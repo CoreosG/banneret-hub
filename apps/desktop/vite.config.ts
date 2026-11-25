@@ -6,6 +6,7 @@ import { Rolldown } from "vite-plus/pack";
 
 import { isDesktopRuntimeExternalDependency } from "../../scripts/lib/desktop-external-packages.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import { banneretBrandPlugin } from "../../scripts/banneret/brand.mjs";
 
 const repoEnv = loadRepoEnv();
 const domTests = ["src/preview/PickPreload.test.ts"];
@@ -91,6 +92,7 @@ export default defineConfig({
     {
       format: "cjs",
       outDir: "dist-electron",
+      plugins: [banneretBrandPlugin()],
       dts: false,
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
@@ -108,6 +110,7 @@ export default defineConfig({
     {
       format: "cjs",
       outDir: "dist-electron",
+      plugins: [banneretBrandPlugin()],
       dts: false,
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
@@ -130,6 +133,7 @@ export default defineConfig({
       // boot.cjs requires the other two at runtime, so all three stay separate files.
       format: "cjs",
       outDir: "dist-electron",
+      plugins: [banneretBrandPlugin()],
       dts: false,
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
@@ -142,6 +146,7 @@ export default defineConfig({
     {
       format: "cjs",
       outDir: "dist-electron",
+      plugins: [banneretBrandPlugin()],
       dts: false,
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
@@ -155,11 +160,11 @@ export default defineConfig({
     {
       format: "cjs",
       outDir: "dist-electron",
+      plugins: [banneretBrandPlugin(), pageWorldFunction()],
       dts: false,
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/preview-pick-preload.ts"],
-      plugins: [pageWorldFunction()],
       deps: {
         alwaysBundle: (id) => id === "@t3tools/shared/keybindingMatching",
       },
@@ -167,6 +172,7 @@ export default defineConfig({
     {
       format: "cjs",
       outDir: "dist-electron",
+      plugins: [banneretBrandPlugin()],
       dts: false,
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
@@ -176,6 +182,7 @@ export default defineConfig({
       // Sandboxed preloads must be self-contained, without shared runtime chunks.
       format: "cjs",
       outDir: "dist-electron",
+      plugins: [banneretBrandPlugin()],
       dts: false,
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
