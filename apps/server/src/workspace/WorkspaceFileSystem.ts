@@ -132,6 +132,16 @@ export class WorkspaceFileSystem extends Context.Service<
       | WorkspacePaths.WorkspacePathOutsideRootError
       | KnownWorkspaces.UnknownWorkspaceError
     >;
+    /** Banneret Hub: the write guard alone, for file-explorer operations. */
+    readonly resolveWritablePath: (input: {
+      readonly cwd: string;
+      readonly relativePath: string;
+    }) => Effect.Effect<
+      { readonly relativePath: string; readonly realTargetPath: string },
+      | WorkspaceFileSystemError
+      | WorkspacePaths.WorkspacePathOutsideRootError
+      | KnownWorkspaces.UnknownWorkspaceError
+    >;
   }
 >()("t3/workspace/WorkspaceFileSystem") {}
 
@@ -642,7 +652,12 @@ export const make = Effect.gen(function* () {
     return { relativePath: target.relativePath };
   });
 
-  return WorkspaceFileSystem.of({ getMetadata, readFile, writeFile });
+  const resolveWritablePath: WorkspaceFileSystem["Service"]["resolveWritablePath"] = (input) =>
+    knownWorkspaces
+      .assertContains(input.cwd)
+      .pipe(Effect.andThen(resolveWriteTarget({ ...input, contents: "" })));
+
+  return WorkspaceFileSystem.of({ getMetadata, readFile, writeFile, resolveWritablePath });
 });
 
 export const layer = Layer.effect(WorkspaceFileSystem, make);

@@ -215,6 +215,10 @@
       "types": "./src/relay/index.ts",
       "default": "./src/relay/index.ts"
     },
+    "./state/workspace-files": {
+      "types": "./src/state/workspaceFiles.ts",
+      "default": "./src/state/workspaceFiles.ts"
+    },
     "./state/auth": {
       "types": "./src/state/auth.ts",
       "default": "./src/state/auth.ts"

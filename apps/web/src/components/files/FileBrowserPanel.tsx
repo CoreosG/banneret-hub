@@ -46,6 +46,7 @@ import {
 import { buildFileTreePathUpdates, shouldRebuildFileTree } from "./fileTreePathReconciliation";
 import { loadFileAncestors } from "./loadFileAncestors";
 import { useDirectoryEntries } from "./useDirectoryEntries";
+import { useWorkspaceFileOperations } from "./useWorkspaceFileOperations";
 import { useProjectPathSearch } from "~/state/queries";
 import { isMacPlatform } from "~/lib/utils";
 import { type PreviewAction, subscribePreviewAction } from "../preview/previewActionBus";
@@ -203,6 +204,17 @@ export default function FileBrowserPanel({
   );
   const { entries, entryKinds, treePaths, directoryPaths, expandableDirectoryPaths } =
     buildTreeEntries(directoryEntries, pathSearch.entries, pathSearch.isPending, query);
+  const fileOps = useWorkspaceFileOperations({
+    environmentId,
+    cwd,
+    enabled: !hostFolder,
+    knownPaths: entryKinds,
+    reload: async (directories) => {
+      await Promise.all([...new Set(directories)].map((directory) => load(directory, true)));
+    },
+    tree: () => model,
+  });
+  const { flushPendingRename } = fileOps;
   const entryKindsRef = useRef(entryKinds);
   const previousTreePathsRef = useRef<readonly string[] | null>(null);
   const syncingSelectionRef = useRef(false);
@@ -250,11 +262,13 @@ export default function FileBrowserPanel({
             ...fileMenuItems,
             { id: "copy-mention", label: gt("Copy mention") },
             { id: "add-to-chat", label: gt("Add to chat") },
+            ...fileOps.menuItems(item.kind === "directory"),
           ],
           position,
           pointerIsFresh ? pointer.source : undefined,
         );
         if (clicked === null) return;
+        if (fileOps.runMenuAction(clicked, item.path, item.kind === "directory")) return;
         // Open-with submenu ids are absent from the top-level item list.
         const isFileMenuAction =
           fileMenuItems.some((entry) => entry.id === clicked) || clicked.startsWith("editor:");
@@ -312,7 +326,8 @@ export default function FileBrowserPanel({
         },
       },
     },
-    dragAndDrop: { canDrop: () => false },
+    dragAndDrop: hostFolder ? { canDrop: () => false } : fileOps.dragAndDrop,
+    renaming: hostFolder ? false : fileOps.renaming,
     density: "compact",
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: true,
@@ -492,7 +507,8 @@ export default function FileBrowserPanel({
     if (followedRevealRef.current !== null) {
       model.scrollToPath(followedRevealRef.current, { focus: false, offset: "center" });
     }
-  }, [ready, entryKinds, model, treePaths]);
+    flushPendingRename();
+  }, [ready, entryKinds, model, treePaths, flushPendingRename]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- expands every directory in the Pierre tree model while expand-all is on and no search is active
   useEffect(() => {
@@ -582,6 +598,8 @@ export default function FileBrowserPanel({
       // Capture dragstart before the tree selects the row so selection sees the drag flag.
       onDragStartCapture={(event) => dragMention.handleDragStart(event.nativeEvent)}
       onDragEnd={() => dragMention.handleDragEnd((path) => model.getItem(path)?.deselect())}
+      {...fileOps.dropHandlers}
+      data-banneret-drop-target={fileOps.dropDirectory === null ? undefined : "true"}
       onWheel={stopFollowingReveal}
       onPointerDown={stopFollowingReveal}
       onTouchStart={stopFollowingReveal}
@@ -705,6 +723,7 @@ export default function FileBrowserPanel({
           onPointerOver={titleClippedPierreTreeRow}
         />
       )}
+      {fileOps.dropIndicator}
     </div>
   );
 }

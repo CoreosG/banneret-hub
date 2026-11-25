@@ -195,6 +195,12 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectsSearchContents]: "workspace",
   [WS_METHODS.projectsSearchEntries]: "workspace",
   [WS_METHODS.projectsWriteFile]: "workspace",
+  // Banneret Hub file explorer operations.
+  "workspaceFiles.move": "workspace",
+  "workspaceFiles.delete": "workspace",
+  "workspaceFiles.makeDirectory": "workspace",
+  "workspaceFiles.createUploadUrl": "workspace",
+  "workspaceFiles.createDownloadUrl": "workspace",
   [WS_METHODS.projectsEnsureScratch]: "orchestration",
   [WS_METHODS.projectsCreateNew]: "orchestration",
   [WS_METHODS.projectsCreateFromThread]: "orchestration",
