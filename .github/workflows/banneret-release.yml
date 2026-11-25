@@ -17,6 +17,11 @@ on:
         description: "Version to release (empty: next from scripts/banneret/next-version.mjs)"
         required: false
         type: string
+      prerelease:
+        description: "Publish as a prerelease (installed apps and install scripts skip it)"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       ref:
@@ -236,6 +241,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.prepare.outputs.version }}
           REF: ${{ needs.prepare.outputs.ref }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -247,7 +253,7 @@ jobs:
           Builds are unsigned: on Windows choose **More info → Run anyway**; on macOS run
           \`xattr -dr com.apple.quarantine "/Applications/Banneret Hub.app"\` once.
           EOF
-          gh release create "v$VERSION" \
+          gh release create "v$VERSION" $PRERELEASE \
             --repo "$GITHUB_REPOSITORY" \
             --target "$REF" \
             --title "Banneret Hub $VERSION" \
