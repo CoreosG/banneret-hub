@@ -133,7 +133,8 @@ jobs:
       rust_target: x86_64-unknown-linux-gnu
       resource_key: linux-x64
       cli_archive: true
-      launch_check: true
+      # Upstream's check launches squashfs-root/t3code; our Linux executable is banneret-hub.
+      launch_check: false
       save_pnpm_store: false
 
   desktop_win_x64:
@@ -174,7 +175,8 @@ jobs:
       clerk_cli_oauth_client_id: ""
       relay_url: ""
       label: macOS arm64
-      runner: macos-15
+      # Xcode 26 is required by the Apple Speech helper.
+      runner: macos-26
       platform: mac
       target: dmg
       arch: arm64
