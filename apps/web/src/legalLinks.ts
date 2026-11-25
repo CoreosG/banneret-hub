@@ -1,1 +1,3 @@
-export const PRIVACY_POLICY_URL = "https://t3.codes/privacy-policy";
+// Banneret Hub: its own privacy notice; T3 Tools' policy does not cover this fork.
+export const PRIVACY_POLICY_URL =
+  "https://github.com/CoreosG/banneret-hub/blob/main/docs/banneret/privacy.md";

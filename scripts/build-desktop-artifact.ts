@@ -3972,7 +3972,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
       "Banneret Hub is an unofficial fork of the T3 Code source code (not affiliated with T3 Tools, Inc.): a desktop app for coding agents.",
     license: "MIT",
     homepage: "https://github.com/CoreosG/banneret-hub",
-    author: "T3 Tools",
+    author: "CoreosG",
     main: "apps/desktop/dist-electron/boot.cjs",
     build: yield* createBuildConfig(
       options.platform,
