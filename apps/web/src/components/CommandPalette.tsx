@@ -61,6 +61,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  CableIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -1542,6 +1543,16 @@ function OpenCommandPaletteDialog(props: {
       icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
       run: async () => {
         useRightPanelStore.getState().open(threadRef, "pull-requests");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:open-ports",
+      searchTerms: ["ports", "forward", "port forwarding", "localhost", "tunnel", "listening"],
+      title: gt("Show ports"),
+      icon: <CableIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore.getState().open(threadRef, "ports");
       },
     });
   }

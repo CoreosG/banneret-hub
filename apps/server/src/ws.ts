@@ -231,6 +231,7 @@ import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspaceFiles from "./workspace/WorkspaceFiles.ts";
+import * as ListeningPorts from "./preview/ListeningPorts.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -2043,6 +2044,7 @@ export const layerWsRpc = (
 
       const handlers = ServerWsRpcGroup.of({
         ...WorkspaceFiles.rpcHandlers,
+        ...ListeningPorts.rpcHandlers,
         [WS_METHODS.issuesList]: (input) => issues.list(input),
         [WS_METHODS.issuesDetail]: (input) => issues.detail(input),
         [WS_METHODS.issuesComments]: (input) => issues.comments(input),
