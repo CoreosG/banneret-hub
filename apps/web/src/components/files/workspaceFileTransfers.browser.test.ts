@@ -1,17 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { downloadName, saveThroughFilePicker } from "./workspaceFileTransfers";
 
 type PickerWindow = { showSaveFilePicker?: unknown };
 
-function installPicker(picker: unknown) {
+/** Installs a picker for the test; disposing removes it and any stubbed globals. */
+function installPicker(picker: unknown): Disposable {
   (window as PickerWindow).showSaveFilePicker = picker;
+  return {
+    [Symbol.dispose]() {
+      Reflect.deleteProperty(window, "showSaveFilePicker");
+      vi.unstubAllGlobals();
+    },
+  };
 }
-
-afterEach(() => {
-  Reflect.deleteProperty(window, "showSaveFilePicker");
-  vi.unstubAllGlobals();
-});
 
 describe("downloadName", () => {
   it("names a file after itself and a folder after itself with .zip", () => {
@@ -30,7 +32,7 @@ describe("saveThroughFilePicker", () => {
       close: () => void (closed = true),
     });
     const picker = vi.fn(async () => ({ createWritable: async () => writable }));
-    installPicker(picker);
+    using _picker = installPicker(picker);
     const fetchMock = vi.fn(async () => new Response("hello"));
     vi.stubGlobal("fetch", fetchMock);
     const resolveUrl = vi.fn(async () => "https://remote.example/api/workspace-files/download/t/a");
@@ -39,13 +41,17 @@ describe("saveThroughFilePicker", () => {
       "saved",
     );
     expect(picker).toHaveBeenCalledWith({ suggestedName: "src.zip" });
-    expect(fetchMock).toHaveBeenCalledWith("https://remote.example/api/workspace-files/download/t/a");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example/api/workspace-files/download/t/a",
+    );
     expect(chunks.join("")).toBe("hello");
     expect(closed).toBe(true);
   });
 
   it("does nothing when the picker is cancelled", async () => {
-    installPicker(vi.fn(async () => Promise.reject(new DOMException("cancelled", "AbortError"))));
+    using _picker = installPicker(
+      vi.fn(async () => Promise.reject(new DOMException("cancelled", "AbortError"))),
+    );
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const resolveUrl = vi.fn(async () => "unused");
@@ -62,7 +68,9 @@ describe("saveThroughFilePicker", () => {
     await expect(saveThroughFilePicker({ suggestedName: "a.txt", resolveUrl })).resolves.toBe(
       "unsupported",
     );
-    installPicker(vi.fn(async () => Promise.reject(new DOMException("no", "SecurityError"))));
+    using _picker = installPicker(
+      vi.fn(async () => Promise.reject(new DOMException("no", "SecurityError"))),
+    );
     await expect(saveThroughFilePicker({ suggestedName: "a.txt", resolveUrl })).resolves.toBe(
       "unsupported",
     );
@@ -72,8 +80,11 @@ describe("saveThroughFilePicker", () => {
   it("discards the partial file when the download fails", async () => {
     let aborted = false;
     const writable = new WritableStream<Uint8Array>({ abort: () => void (aborted = true) });
-    installPicker(vi.fn(async () => ({ createWritable: async () => writable })));
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("gone", { status: 404 })));
+    using _picker = installPicker(vi.fn(async () => ({ createWritable: async () => writable })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("gone", { status: 404 })),
+    );
 
     await expect(
       saveThroughFilePicker({ suggestedName: "a.txt", resolveUrl: async () => "x" }),

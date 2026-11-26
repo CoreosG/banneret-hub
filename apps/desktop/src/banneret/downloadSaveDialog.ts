@@ -72,7 +72,8 @@ function onWillDownload(
 
 /** Installs the handler once per session; later main windows share the default session. */
 export function installWorkspaceDownloadSaveDialog(session: Electron.Session): void {
-  if (sessionsWithHandler.has(session)) return;
+  // Test doubles and non-Electron sessions have no event emitter; nothing to hook there.
+  if (typeof session.on !== "function" || sessionsWithHandler.has(session)) return;
   sessionsWithHandler.add(session);
   session.on("will-download", onWillDownload);
 }

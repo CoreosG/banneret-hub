@@ -140,9 +140,9 @@ export function useWorkspaceFileOperations(options: {
     } catch (error) {
       toastManager.close(toastId);
       reportError("Upload failed", error);
-    } finally {
-      await options.reload([targetDirectory]);
     }
+    // The catch above swallows every error, so this runs after success and failure alike.
+    await options.reload([targetDirectory]);
   };
 
   const pickAndUpload = (targetDirectory: string) => {

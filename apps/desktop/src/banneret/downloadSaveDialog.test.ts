@@ -29,9 +29,9 @@ describe("isWorkspaceDownloadUrl", () => {
     expect(isWorkspaceDownloadUrl("http://localhost:5173/api/workspace-files/download")).toBe(
       false,
     );
-    expect(
-      isWorkspaceDownloadUrl("http://127.0.0.1:3773/api/workspace-files/upload/abc.sig"),
-    ).toBe(false);
+    expect(isWorkspaceDownloadUrl("http://127.0.0.1:3773/api/workspace-files/upload/abc.sig")).toBe(
+      false,
+    );
     expect(
       isWorkspaceDownloadUrl("http://127.0.0.1:3773/api/workspace-files/download/abc.sig"),
     ).toBe(false);

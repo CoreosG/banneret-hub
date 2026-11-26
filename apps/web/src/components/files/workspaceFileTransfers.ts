@@ -297,7 +297,10 @@ export async function downloadEntry(options: {
       cwd: options.cwd,
       relativePath: options.relativePath,
     });
-    return { url: absoluteUrl(options.environmentId, signed.relativeUrl), fileName: signed.fileName };
+    return {
+      url: absoluteUrl(options.environmentId, signed.relativeUrl),
+      fileName: signed.fileName,
+    };
   };
   const picked = await saveThroughFilePicker({
     suggestedName: downloadName(options.cwd, options.relativePath, options.isDirectory),
