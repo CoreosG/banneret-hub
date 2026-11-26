@@ -3,6 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   canForget,
+  cleanLogin,
+  connectedLine,
+  loginOrUnknown,
+  loginSuffix,
   canJoinAgain,
   countdown,
   enrolmentLine,
@@ -122,6 +126,7 @@ describe("enrolmentLine", () => {
     [{ state: "awaiting_approval" }, "warn", "Waiting for a founder to approve"],
     [{ state: "approved" }, "muted", "Finishing setup…"],
     [{ health: "healthy" }, "ok", "Connected as ada-example"],
+    [{ health: "healthy", me: { login: " ", role: "founder" } }, "ok", "Connected"],
     [{ health: "unreachable" }, "warn", "Cannot reach relay.example.com"],
     [{ health: "clock_wrong" }, "warn", "This machine's clock is wrong"],
     [{ health: "refused" }, "error", "The relay refused this machine"],
@@ -251,5 +256,34 @@ describe("helpers", () => {
         },
       ]),
     ).toEqual(["git@github.com:example-org/app.git"]);
+  });
+});
+
+describe("login copy", () => {
+  it("names the person and role", () => {
+    expect(connectedLine({ login: "ada-example", role: "founder" })).toBe(
+      "Connected as ada-example \u00b7 Founder",
+    );
+  });
+
+  it("drops an empty or whitespace login but keeps the role", () => {
+    expect(connectedLine({ login: "", role: "founder" })).toBe("Connected \u00b7 Founder");
+    expect(connectedLine({ login: "  \t", role: "staff" })).toBe("Connected \u00b7 Staff");
+  });
+
+  it("drops a missing role", () => {
+    expect(connectedLine({ login: "ada-example", role: "" })).toBe("Connected as ada-example");
+    expect(connectedLine({ login: "", role: "" })).toBe("Connected");
+    expect(connectedLine(undefined)).toBe("Connected");
+  });
+
+  it("never leaves a dangling separator for other people", () => {
+    expect(cleanLogin("  ada ")).toBe("ada");
+    expect(cleanLogin("   ")).toBe("");
+    expect(loginOrUnknown("")).toBe("Unknown");
+    expect(loginOrUnknown("ada")).toBe("ada");
+    expect(loginSuffix("from", "ada")).toBe(" \u00b7 from ada");
+    expect(loginSuffix("from", " ")).toBe("");
+    expect(loginSuffix("claimed by", undefined)).toBe("");
   });
 });

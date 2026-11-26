@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { canForget, forgetNotice } from "./enterprise.logic";
+import { canForget, cleanLogin, forgetNotice } from "./enterprise.logic";
 import { enrolmentRpc, storeEnrolmentView, useEnrolmentView } from "./enrolmentStore";
 import {
   loadEnvironmentWorkspaces,
@@ -108,8 +108,14 @@ export function MachinesPanel(props: { readonly onClose: () => void }) {
                     ) : null}
                   </p>
                   <p className="truncate text-muted-foreground text-xs">
-                    {machine.ownerLogin} · {machine.kind} · {machine.hostname} ·{" "}
-                    {machineStatus(machine)}
+                    {[
+                      cleanLogin(machine.ownerLogin),
+                      machine.kind,
+                      machine.hostname,
+                      machineStatus(machine),
+                    ]
+                      .filter((part) => part !== "")
+                      .join(" \u00b7 ")}
                   </p>
                 </div>
                 {machine.revocable && !machine.thisMachine ? (
