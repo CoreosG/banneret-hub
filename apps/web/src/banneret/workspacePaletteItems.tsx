@@ -1,5 +1,5 @@
-// Banneret Hub: "Switch workspace…" and "New workspace…" in the command palette.
-import { LayersIcon, PlusIcon } from "lucide-react";
+// Banneret Hub: "Switch workspace…", "New workspace…" and "Show/Hide tabs bar" in the command palette.
+import { LayersIcon, PanelTopIcon, PlusIcon } from "lucide-react";
 
 import {
   ADDON_ICON_CLASS,
@@ -7,6 +7,7 @@ import {
   type CommandPaletteActionItem,
   type CommandPaletteSubmenuItem,
 } from "../components/CommandPalette.logic";
+import { setTabsHidden, useTabsStore } from "./tabs/tabsStore";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
   openWorkspaceDialog,
@@ -19,6 +20,7 @@ export function useCommandPaletteWorkspaceItems(): Array<
   CommandPaletteActionItem | CommandPaletteSubmenuItem
 > {
   const workspaces = useWorkspaces();
+  const tabsHidden = useTabsStore((state) => state.hidden);
   const activeId = effectiveWorkspaceId(
     useWorkspacesStore((state) => state.activeId),
     workspaces,
@@ -50,6 +52,14 @@ export function useCommandPaletteWorkspaceItems(): Array<
           })),
         },
       ],
+    },
+    {
+      kind: "action",
+      value: "action:toggle-tabs-bar",
+      searchTerms: ["tabs", "tab bar", "open tabs", tabsHidden ? "show" : "hide"],
+      title: tabsHidden ? "Show tabs bar" : "Hide tabs bar",
+      icon: <PanelTopIcon className={ITEM_ICON_CLASS} />,
+      run: async () => setTabsHidden(!tabsHidden),
     },
     {
       kind: "action",

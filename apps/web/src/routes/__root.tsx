@@ -65,6 +65,7 @@ import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 import { PinnedPortForwardsRestorer } from "../components/ports/PinnedPortForwardsRestorer";
 import { PortsDialogHost } from "../components/ports/PortsDialog";
 import { WorkspacesHost } from "../banneret/WorkspacesHost";
+import { TabsFrame } from "../banneret/tabs/TabsFrame";
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
@@ -220,7 +221,7 @@ function RootRouteBranch() {
     <CommandPalette>
       {/* Setup starts with an empty workspace, so the Welcome page has no thread list. */}
       <AppSidebarLayout showSidebar={!isWelcome}>
-        <Outlet />
+        <TabsFrame />
       </AppSidebarLayout>
     </CommandPalette>
   );
