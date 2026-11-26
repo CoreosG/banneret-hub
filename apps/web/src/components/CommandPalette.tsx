@@ -264,6 +264,7 @@ import {
 } from "./CommandPalettePortForwardItems";
 import { useCommandPaletteShowPortsItem } from "./ports/showPortsCommand";
 import { useCommandPaletteWorkspaceItems } from "../banneret/workspacePaletteItems";
+import { useWorkspacePaletteThreads } from "../banneret/workspacePaletteThreads";
 import {
   CommandPaletteVirtualizedResults,
   scrollCommandPaletteRowIntoView,
@@ -980,7 +981,11 @@ function OpenCommandPaletteDialog(props: {
     now: searchNow,
     isSearchPending: isThreadSearchPending,
     isSearchFailed: isThreadSearchFailed,
-  } = useCommandPaletteThreadItems({ activeThread: activeThread ?? null, threadSearchQuery });
+    withOtherWorkspaces,
+  } = useWorkspacePaletteThreads(
+    useCommandPaletteThreadItems({ activeThread: activeThread ?? null, threadSearchQuery }),
+    threadSearchQuery,
+  );
   // Recent means used recently: written in or opened, whichever is later. The
   // open thread would always lead that list, so it is left out.
   const activeThreadValue = activeThread
@@ -2595,7 +2600,7 @@ function OpenCommandPaletteDialog(props: {
           },
         ];
 
-  let displayedGroups: CommandPaletteView["groups"] = filteredGroups;
+  let displayedGroups = withOtherWorkspaces(filteredGroups, !isLinkedThreadSearch);
   if (newProjectFlow !== null) {
     displayedGroups = [
       ...(newProjectMachineGroup ? [newProjectMachineGroup] : []),
