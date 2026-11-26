@@ -1,0 +1,84 @@
+# Banneret Hub: runs the fork-owned web browser tests (headless Chromium) when the web app or what it
+# builds on changes. Upstream's CI stays disabled in this repository, so this is the only check these
+# files get. Add new fork-owned browser tests to the list in the last step. Vitest treats the
+# arguments as path filters (substrings), not globs; --project browser keeps only *.browser.test files.
+name: Banneret web tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/web/**
+      - packages/contracts/**
+      - packages/client-runtime/**
+      - packages/shared/**
+      - pnpm-lock.yaml
+      - .github/workflows/banneret-web-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/web/**
+      - packages/contracts/**
+      - packages/client-runtime/**
+      - packages/shared/**
+      - pnpm-lock.yaml
+      - .github/workflows/banneret-web-tests.yml
+
+concurrency:
+  group: banneret-web-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web-browser-tests:
+    name: Web browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter @t3tools/web...
+          save-pnpm-store: "false"
+
+      - name: Resolve Playwright version
+        id: playwright_version
+        run: echo "version=$(node -p "require('./apps/web/node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: chromium_cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-shell-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright_version.outputs.version }}
+
+      - name: Install Chromium
+        if: steps.chromium_cache.outputs.cache-hit != 'true'
+        run: node apps/web/node_modules/playwright/cli.js install --only-shell --with-deps chromium
+
+      # A cache hit restores the browser but not the system libraries, so install them when missing.
+      - name: Install missing Chromium system dependencies
+        run: |
+          browser=$(find "$HOME/.cache/ms-playwright" -name chrome-headless-shell -type f -print -quit)
+          test -n "$browser"
+          if ldd "$browser" | grep '=> not found'; then
+            node apps/web/node_modules/playwright/cli.js install-deps chromium
+          fi
+
+      - name: Fork-owned browser tests
+        working-directory: apps/web
+        run: |
+          vp test run --project browser \
+            src/banneret/ \
+            src/components/ports/ \
+            src/components/CommandPalette.browser.test.tsx
