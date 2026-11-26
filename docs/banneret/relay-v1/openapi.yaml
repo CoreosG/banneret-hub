@@ -223,7 +223,19 @@ paths:
         Blocks, in this order: needs you, shipped since the last visit, working now, stuck, health. Each block has
         its own state; one broken source affects only its own block. A block holds at most 20 items; the needs-you
         block's `nextCursor` continues in `GET /needs`.
+
+        `lastVisitAt` is when the person last opened Today in an earlier visit, or null if they never have. The Hub
+        sends `visit=1` only when the person actually opens Today. Only a read with `visit=1` can move
+        `lastVisitAt`; a read without it (such as a refetch after `needs.changed`) never does. Visit reads less than
+        30 minutes after the previous visit read count as one visit and leave `lastVisitAt` as it was. A visit read
+        30 minutes or more after the previous one starts a new visit, and `lastVisitAt` becomes the time of the
+        previous visit's last read. Any other value of `visit` is refused with 400 `malformed`.
       parameters:
+        - name: visit
+          in: query
+          required: false
+          description: Send `1` only when the person opens Today. The only accepted value is `1`.
+          schema: { type: string, enum: ["1"] }
         - $ref: "#/components/parameters/Device"
         - $ref: "#/components/parameters/Counter"
         - $ref: "#/components/parameters/SentAt"
@@ -278,9 +290,10 @@ paths:
           1. an agent blocked on the caller: `thread_question`, `thread_approval`;
           2. something waiting on the caller's review or decision: `pull_request`, `promotion`, `founder_question`,
              `health`;
-          3. a mention: `mention`;
+          3. a mention, or an agent or persona writing to the caller: `mention`, `agent_message` (an agent's message
+             in the person's inbox), `persona_ask` (a persona asking the person something);
           4. a dispatcher suggestion: `suggestion`;
-          5. any kind not listed here.
+          5. any kind not listed here, including `other`, the explicit catch-all.
         Today's needs-you block uses the same order, so its `nextCursor` continues it here.
       parameters:
         - $ref: "#/components/parameters/Device"
@@ -776,6 +789,33 @@ components:
           type: array
           maxItems: 256
           items: { $ref: "#/components/schemas/ActivityFact" }
+        usage:
+          description: |
+            Optional. One entry per provider login on this machine and window. Only the machine owner's own logins
+            are reported. Feeds per-person usage.
+          type: array
+          maxItems: 32
+          items: { $ref: "#/components/schemas/UsageFact" }
+    UsageFact:
+      description: How much of one usage window a provider login has used. Closed; no tokens, costs, prompts, content or account identifiers.
+      type: object
+      additionalProperties: false
+      required: [provider, window, usedPercent, resetsAt]
+      properties:
+        provider:
+          description: Open set. Known values `claude` and `codex`.
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
+        window:
+          description: Open set. Known values `5h`, `weekly` and `monthly`.
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_]{0,31}$"
+        usedPercent: { type: number, minimum: 0, maximum: 100 }
+        resetsAt:
+          description: When the window resets (RFC 3339 UTC), or null when unknown.
+          oneOf:
+            - { $ref: "#/components/schemas/Timestamp" }
+            - { type: "null" }
     FactsResponse:
       type: object
       required: [acceptedAt, heartbeatSeconds, capabilitiesVersion]
@@ -807,7 +847,8 @@ components:
         kind:
           description: |
             Open set. Known values: `thread_question`, `thread_approval`, `pull_request`, `founder_question`,
-            `promotion`, `health`, `mention`, `suggestion`. New kinds may be added within v1, so this is not a closed
+            `promotion`, `health`, `mention`, `agent_message`, `persona_ask`, `suggestion`, `other` (class 5, the explicit
+            catch-all). New kinds may be added within v1, so this is not a closed
             enum; a client shows an unknown kind as a generic item and never fails on it.
           type: string
           pattern: "^[a-z][a-z0-9_]{0,63}$"

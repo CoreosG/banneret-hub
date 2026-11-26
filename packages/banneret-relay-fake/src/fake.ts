@@ -111,6 +111,16 @@ interface MachineFacts {
   readonly sandbox: { readonly enabled: boolean; readonly image: string | null };
 }
 
+interface UsageFact {
+  readonly provider: string;
+  readonly window: string;
+  readonly usedPercent: number;
+  readonly resetsAt: string | null;
+}
+
+/** A visit read this close to the previous one continues the same visit. */
+const VISIT_GAP_MS = 30 * 60 * 1000;
+
 interface ActivityFact {
   readonly sessionId: string;
   readonly threadId: string;
@@ -143,6 +153,7 @@ interface Machine {
   readonly enrolledAt: number;
   facts: MachineFacts;
   sessions: ReadonlyArray<ActivityFact>;
+  usage: ReadonlyArray<UsageFact>;
   lastHeardAt: number | null;
   /** The 256 highest counters accepted, ascending. */
   readonly counters: bigint[];
@@ -283,6 +294,9 @@ const NEEDS_CLASS: Readonly<Record<string, number>> = {
   founder_question: 2,
   health: 2,
   mention: 3,
+  agent_message: 3,
+  persona_ask: 3,
+  other: 5,
   suggestion: 4,
 };
 const UNKNOWN_KIND_CLASS = 5;
@@ -386,7 +400,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const machines = new Map<string, Machine>();
   const machinesByToken = new Map<string, Machine>();
   const needs = new Map<string, NeedsItem[]>();
-  const lastVisit = new Map<string, number>();
+  /** Per person: the reported last visit, and the time of the last `visit=1` read. */
+  const visits = new Map<string, { lastVisitAt: number | null; lastReadAt: number }>();
   const events: RelayEvent[] = [];
   const streams = new Set<Stream>();
   const eventClock = options.eventClock ?? (() => Date.now());
@@ -512,6 +527,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       enrolledAt: Date.now(),
       facts: pairing.machine,
       sessions: [],
+      usage: [],
       lastHeardAt: null,
       counters: [],
       revokedAt: null,
@@ -786,7 +802,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     notMeasured: [{ source, reason: "not_configured", since: iso(startedAt) }],
   });
 
-  const today = (caller: Caller) => {
+  const today = (caller: Caller, visit: boolean) => {
     const now = Date.now();
     const own = byUrgency(needs.get(caller.person.id) ?? []).map(needsView);
     const working = liveMachines().flatMap((machine) => {
@@ -810,11 +826,20 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         },
       ];
     });
-    const visited = lastVisit.get(caller.person.id);
-    lastVisit.set(caller.person.id, now);
+    let state = visits.get(caller.person.id);
+    if (visit) {
+      if (state === undefined) {
+        state = { lastVisitAt: null, lastReadAt: now };
+      } else if (now - state.lastReadAt >= VISIT_GAP_MS) {
+        state = { lastVisitAt: state.lastReadAt, lastReadAt: now };
+      } else {
+        state = { lastVisitAt: state.lastVisitAt, lastReadAt: now };
+      }
+      visits.set(caller.person.id, state);
+    }
     return {
       generatedAt: iso(now),
-      lastVisitAt: visited === undefined ? null : iso(visited),
+      lastVisitAt: state?.lastVisitAt == null ? null : iso(state.lastVisitAt),
       needsYou: { state: "ok", ...page(own, 0, TODAY_BLOCK_MAX), notMeasured: [] },
       shipped: notConfigured("work_tracker"),
       working: { state: "ok", items: working.slice(0, TODAY_BLOCK_MAX), notMeasured: [] },
@@ -1098,6 +1123,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const facts = parseJson(body, "FactsRequest") as {
         machine: MachineFacts;
         activity: ReadonlyArray<ActivityFact>;
+        usage?: ReadonlyArray<UsageFact>;
       };
       if (facts.machine.environmentId !== caller.machine.facts.environmentId) {
         throw new RelayError(
@@ -1110,6 +1136,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       caller.machine.facts = facts.machine;
       caller.machine.sessions = facts.activity;
+      caller.machine.usage = facts.usage ?? [];
       caller.machine.lastHeardAt = Date.now();
       sendJson(response, 200, "FactsResponse", {
         acceptedAt: iso(caller.machine.lastHeardAt),
@@ -1120,7 +1147,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     if (method === "GET" && route === "/today") {
-      sendJson(response, 200, "Today", today(caller));
+      const visit = query.get("visit");
+      if (visit !== null && visit !== "1") {
+        throw new RelayError("malformed", "visit accepts only the value 1.", { field: "visit" });
+      }
+      sendJson(response, 200, "Today", today(caller, visit === "1"));
       return;
     }
 
@@ -1199,6 +1230,35 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (request.method === "POST" && route === "/bundle") {
       publishBundle(String(input.bundleSha));
       reply({});
+      return;
+    }
+    if (request.method === "POST" && route === "/visits/read") {
+      const person = peopleByLogin.get(String(input.login));
+      const state = person === undefined ? undefined : visits.get(person.id);
+      reply({
+        lastVisitAt: state?.lastVisitAt == null ? null : iso(state.lastVisitAt),
+        lastReadAt: state === undefined ? null : iso(state.lastReadAt),
+      });
+      return;
+    }
+    if (request.method === "POST" && route === "/visits/age") {
+      const person = peopleByLogin.get(String(input.login));
+      const state = person === undefined ? undefined : visits.get(person.id);
+      if (person === undefined || state === undefined) {
+        throw new RelayError("not_found", "That person has no visit yet.");
+      }
+      const shift = Number(input.minutes) * 60_000;
+      visits.set(person.id, {
+        lastVisitAt: state.lastVisitAt === null ? null : state.lastVisitAt - shift,
+        lastReadAt: state.lastReadAt - shift,
+      });
+      reply({});
+      return;
+    }
+    if (request.method === "POST" && route === "/usage") {
+      const machine = machines.get(String(input.machineId));
+      if (!machine) throw new RelayError("not_found", "No such machine.");
+      reply({ usage: machine.usage });
       return;
     }
     if (request.method === "POST" && route === "/staff/remove") {

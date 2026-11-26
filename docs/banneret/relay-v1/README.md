@@ -27,7 +27,7 @@ All under `/relay/v1`.
 | `GET /machines` | The Team machines list, paged: every live machine for everyone, revoked ones for their owner and founders. |
 | `DELETE /machines/{machineId}` | Revoke a machine (its owner or a founder). |
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
-| `GET /today` | The five ordered Today blocks: needs you, shipped, working, stuck, health. |
+| `GET /today` | The five ordered Today blocks: needs you, shipped, working, stuck, health. `?visit=1` marks a real open (see below). |
 | `GET /needs` | Needs-you items, paged, most urgent first. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
 | `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
@@ -110,6 +110,9 @@ relay/v1
 <BODY>            the exact request body bytes; empty when there is none
 ```
 
+The query is part of TARGET, so it is signed: `GET /today?visit=1` and `GET /today` have different signatures, and a
+proxy cannot add or drop `visit=1`.
+
 TARGET is verified byte for byte. Proxies in front of the relay must not rewrite the path or query; a Tailscale
 Serve path mount must preserve the `/relay/v1/...` target as the Hub sent it.
 
@@ -163,10 +166,24 @@ goes through a different call.
   - `processRunning`, `startedAt`, `lastSeenAt` and `bundleSha`.
 
   Each heartbeat carries the full current set. A session missing from it has ended.
+- **Usage facts (optional `usage`):** one entry per provider login and window on this machine, each
+  `{provider, window, usedPercent, resetsAt}`. `provider` is an open string (known: `claude`, `codex`), `window` is an
+  open string (known: `5h`, `weekly`, `monthly`), `usedPercent` is a number from 0 to 100 and `resetsAt` is RFC 3339
+  UTC or null. No tokens, costs, prompts, content or account identifiers. This feeds per-person usage (P2-11). Only
+  the machine owner's own logins are reported. Like activity, each heartbeat carries the full current set.
 - **`projectKey`** is `sha256:` plus the lowercase hex SHA-256 of the repository identity `host/owner/name`. For
   example `github.com/example-org/example-app` is lowercased, with no scheme, credentials, port or `.git`. It is
   never the T3 project id and never a path. The relay hashes its configured repository list the same way to match
   projects. [Orchestrator]
+
+## Today and visits
+
+`GET /today` returns `lastVisitAt`: when the person last opened Today in an earlier visit, or null. The Hub sends
+`GET /today?visit=1` only when the person actually opens Today, and plain `GET /today` for background refetches
+(such as after `needs.changed`). Only a `visit=1` read can move `lastVisitAt`. Visit reads less than 30 minutes after
+the previous visit read count as one visit and leave it as it was; a visit read 30 minutes or more later starts a new
+visit, and `lastVisitAt` becomes the time of the previous visit's last read. The only accepted value of `visit` is
+`1`; any other is refused with 400 `malformed`.
 
 ## Errors
 
@@ -216,9 +233,9 @@ class. [Orchestrator]
 |---|---|---|
 | 1 | An agent is blocked on a question or approval from you | `thread_question`, `thread_approval` |
 | 2 | Something waits on your review or decision | `pull_request`, `promotion`, `founder_question`, `health` |
-| 3 | You were mentioned | `mention` |
+| 3 | You were mentioned, or an agent or persona wrote to you | `mention`, `agent_message`, `persona_ask` |
 | 4 | A dispatcher suggestion | `suggestion` |
-| 5 | Any kind not listed above | |
+| 5 | Any kind not listed above | `other` (the explicit catch-all), and any unknown kind |
 
 `kind` is an open set. A client shows an unknown kind as a generic item and never fails on it.
 
