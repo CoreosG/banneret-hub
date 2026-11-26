@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Banneret Hub: derives install.sh / install.ps1 release assets from upstream's scripts at build
-// time, so upstream's installer fixes flow in without merge conflicts. The installed command is
-// `banneret`; the runtime executable inside ~/.banneret/runtime/versions/<v>/ keeps upstream's name.
+// Banneret Hub: derives install.sh / install.ps1 from upstream's at release time. The command is
+// `banneret` (the runtime inside ~/.banneret/runtime/versions/<v>/ keeps `t3`), and every T3CODE_*
+// variable becomes BANNERET_*, so an inherited T3CODE_HOME=~/.t3 never selects official T3's home.
 // Usage: node scripts/banneret/make-install-scripts.mjs <output-dir>
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -17,6 +17,8 @@ const INSTALL_BASE = `https://github.com/${REPO}/releases/latest/download`;
 
 /** [from, to, minimum count]: a count of 0 found means upstream changed the script; fail loudly. */
 const shRules = [
+  ["T3CODE_", "BANNERET_", 15],
+  ["(default: ~/.t3)", "(default: ~/.banneret)", 1],
   [`repo="pingdotgg/t3code"`, `repo="${REPO}"`, 1],
   [`$HOME/.t3}`, `$HOME/.banneret}`, 1],
   ["https://t3.codes/install.sh", `${INSTALL_BASE}/install.sh`, 1],
@@ -28,6 +30,8 @@ const shRules = [
   ["Setting up the t3 command", "Setting up the banneret command", 1],
 ];
 const ps1Rules = [
+  ["T3CODE_", "BANNERET_", 15],
+  ["(default: ~\\.t3)", "(default: ~\\.banneret)", 1],
   [`$repo = "pingdotgg/t3code"`, `$repo = "${REPO}"`, 1],
   [`Join-Path $HOME ".t3"`, `Join-Path $HOME ".banneret"`, 1],
   ["https://t3.codes/install.ps1", `${INSTALL_BASE}/install.ps1`, 1],

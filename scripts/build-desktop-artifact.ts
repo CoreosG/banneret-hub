@@ -2908,7 +2908,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "Banneret Hub",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: ["banneret", "banneret-dev"],
         },
         {
           name: "Web site URL",
@@ -2961,7 +2961,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "Banneret Hub",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: ["banneret", "banneret-dev"],
         },
       ],
       desktop: {

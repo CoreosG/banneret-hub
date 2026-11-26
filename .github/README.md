@@ -7,13 +7,15 @@
 
 Banneret Hub is a personal build of T3 Code that installs **beside** official T3 Code without sharing anything with it:
 
-|                   | T3 Code                   | Banneret Hub                                                             |
-| ----------------- | ------------------------- | ------------------------------------------------------------------------ |
-| Data folder       | `~/.t3`                   | `~/.banneret`                                                            |
-| Command           | `t3`                      | `banneret`                                                               |
-| App id            | `com.t3tools.t3code`      | `com.coreosg.banneret-hub`                                               |
-| Updates from      | pingdotgg/t3code releases | [this repo's releases](https://github.com/CoreosG/banneret-hub/releases) |
-| Product analytics | on by default             | off                                                                      |
+|                    | T3 Code                   | Banneret Hub                                                             |
+| ------------------ | ------------------------- | ------------------------------------------------------------------------ |
+| Data folder        | `~/.t3` (`T3CODE_HOME`)   | `~/.banneret` (`BANNERET_HOME`)                                          |
+| Command            | `t3`                      | `banneret`                                                               |
+| App id             | `com.t3tools.t3code`      | `com.coreosg.banneret-hub`                                               |
+| App links          | `t3code://`               | `banneret://`                                                            |
+| Background service | `t3code.service`          | `banneret-hub.service`                                                   |
+| Updates from       | pingdotgg/t3code releases | [this repo's releases](https://github.com/CoreosG/banneret-hub/releases) |
+| Product analytics  | on by default             | off                                                                      |
 
 It follows upstream **stable** releases: each new `vX.Y.Z` tag is merged into `main`, and a Banneret Hub release is built from it.
 
