@@ -1,10 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off globalTimersInEffect:off globalJsonInEffect:off globalTimers:off globalFetch:off globalFetchInEffect:off - a real HTTP relay (the fake) behind a streaming forwarder.
-import * as NodeHttp from "node:http";
-
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { type FakeRelay, startFakeRelay } from "@t3tools/banneret-relay-fake";
+import type { FakeRelay } from "@t3tools/banneret-relay-fake";
 import { type BanneretFeedEvent, EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -16,72 +14,9 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import * as Enrolment from "./Enrolment.ts";
+import * as Facts from "./Facts.ts";
 import * as RelayFeed from "./RelayFeed.ts";
-
-interface Recorded {
-  readonly method: string;
-  readonly url: string;
-  readonly headers: NodeHttp.IncomingHttpHeaders;
-}
-
-/** Pipes every request to the fake as it streams (SSE included) and records it; can drop and come back. */
-interface Forwarder {
-  readonly origin: string;
-  readonly requests: Recorded[];
-  readonly close: () => Promise<void>;
-  readonly reopen: () => Promise<void>;
-}
-
-const startForwarder = async (target: string): Promise<Forwarder> => {
-  const targetUrl = new URL(target);
-  const requests: Recorded[] = [];
-  const server = NodeHttp.createServer((request, response) => {
-    requests.push({
-      method: request.method ?? "GET",
-      url: request.url ?? "/",
-      headers: request.headers,
-    });
-    const upstream = NodeHttp.request(
-      {
-        host: targetUrl.hostname,
-        port: targetUrl.port,
-        method: request.method,
-        path: request.url,
-        headers: request.headers,
-      },
-      (reply) => {
-        response.writeHead(reply.statusCode ?? 502, reply.headers);
-        reply.pipe(response);
-        response.on("close", () => reply.destroy());
-      },
-    );
-    upstream.on("error", () => {
-      if (!response.headersSent) response.writeHead(502);
-      response.end();
-    });
-    request.pipe(upstream);
-  });
-  const listen = (port: number) =>
-    new Promise<number>((resolve) => {
-      server.listen(port, "127.0.0.1", () => {
-        const address = server.address();
-        resolve(typeof address === "object" && address !== null ? address.port : 0);
-      });
-    });
-  const port = await listen(0);
-  return {
-    origin: `http://127.0.0.1:${port}`,
-    requests,
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
-      }),
-    reopen: async () => {
-      await listen(port);
-    },
-  };
-};
+import { type Forwarder, withFake } from "./relayHarness.testkit.ts";
 
 const ENVIRONMENT_ID = "env-feed-1";
 // The fake ages its event log by this clock only; the 24-hour reset moves it forward.
@@ -100,6 +35,15 @@ const feedLayer = (baseDir: string) =>
     Layer.provideMerge(
       Layer.mergeAll(
         ServerSecretStore.layer,
+        // Machine facts only; Facts.test.ts covers what the heartbeat reports.
+        Facts.layerFromInputs({
+          environmentId: ENVIRONMENT_ID,
+          workspaces: Effect.succeed([]),
+          projects: Effect.succeed([]),
+          threads: () => Effect.succeed([]),
+          providers: Effect.succeed([]),
+          policyFingerprint: Effect.succeed(null),
+        }),
         Layer.succeed(ServerEnvironmentIdentity, {
           getEnvironmentId: Effect.succeed(EnvironmentId.make(ENVIRONMENT_ID)),
         }),
@@ -118,26 +62,15 @@ const onFreshHub = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.flatMap((baseDir) => Effect.provide(effect, feedLayer(baseDir))),
   );
 
-const withFake = <A, E, R>(
+/** The fake behind the shared recording forwarder, with a movable event-log clock. */
+const withFakeClock = <A, E, R>(
   body: (fake: FakeRelay, relay: Forwarder, clock: { offsetMs: number }) => Effect.Effect<A, E, R>,
-) =>
-  Effect.acquireRelease(
-    Effect.promise(async () => {
-      const clock = { offsetMs: 0 };
-      const fake = await startFakeRelay({
-        port: 0,
-        autoApprove: false,
-        retryAfterMs: 20,
-        eventClock: () => FIXED_EPOCH_MS + clock.offsetMs,
-      });
-      const relay = await startForwarder(fake.url);
-      return { fake, relay, clock };
-    }),
-    ({ fake, relay }) => Effect.promise(() => Promise.all([relay.close(), fake.close()])),
-  ).pipe(
-    Effect.flatMap(({ fake, relay, clock }) => body(fake, relay, clock)),
-    Effect.scoped,
-  );
+) => {
+  const clock = { offsetMs: 0 };
+  return withFake((fake, relay) => body(fake, relay, clock), {
+    eventClock: () => FIXED_EPOCH_MS + clock.offsetMs,
+  });
+};
 
 /** The fake's test-only control surface. */
 const control = (fake: FakeRelay, path: string, body: unknown) =>
@@ -329,7 +262,7 @@ describe("BanneretRelayFeed", () => {
   it.live(
     "delivers relay events to a client, resumes with Last-Event-ID and refetches on reset",
     () =>
-      withFake((fake, relay, clock) =>
+      withFakeClock((fake, relay, clock) =>
         onFreshHub(
           Effect.gen(function* () {
             const client = yield* subscribe;
