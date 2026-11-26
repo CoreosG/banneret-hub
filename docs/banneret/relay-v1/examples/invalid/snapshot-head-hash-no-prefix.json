@@ -1,0 +1,11 @@
+{
+  "protocol": "1.1",
+  "generatedAt": "2026-11-26T10:00:05Z",
+  "files": {
+    "needs": "sha256:d3b610a194dbca175a262d74f8c6fd6ee60777b8c1c2388957c167feea952002",
+    "health": "sha256:29fde2e20ac7c3cdae317d1fa736473896ff4c84d113dffbe4ad944c4badcd4a",
+    "work": "sha256:ec39ac29ffab8c6b83d9b1e13781eaa498e1fab0543604b095b3cea8218d522c",
+    "machines": "0d2b73671d43f4eb50cba962effe340f63f9bc08d293ea6122e02b46762c43ef",
+    "repositories": "sha256:11f53fd9f34d38aaa23c65c289f916b99f3c89251ba834f4aa57973f8610f641"
+  }
+}

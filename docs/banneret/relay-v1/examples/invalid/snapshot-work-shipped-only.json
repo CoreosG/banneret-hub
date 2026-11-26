@@ -1,0 +1,36 @@
+{
+  "shipped": {
+    "state": "ok",
+    "items": [
+      {
+        "task": {
+          "id": "t_R2m8Xc",
+          "title": "Guild roster page",
+          "url": "https://github.com/example-org/example-app/pull/41"
+        },
+        "summary": "Guild roster page is live on the preview",
+        "mergedAt": "2026-11-26T07:00:00Z",
+        "live": "live"
+      }
+    ],
+    "notMeasured": []
+  },
+  "stuck": {
+    "state": "ok",
+    "items": [
+      {
+        "rule": "claim_quiet",
+        "since": "2026-11-26T03:00:00Z",
+        "task": {
+          "id": "t_P5n2Hd",
+          "title": "Profile blocks"
+        },
+        "owner": {
+          "id": "p_3Nc8vR",
+          "login": "bo-example"
+        }
+      }
+    ],
+    "notMeasured": []
+  }
+}

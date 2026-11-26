@@ -1,5 +1,5 @@
 {
-  "protocol": "1.0",
+  "protocol": "1.1",
   "displayName": "Example Company",
   "iconUrl": null,
   "enrolment": { "start": "/relay/v1/enroll/start", "browser": "/admin/hub/enroll" },
@@ -18,5 +18,6 @@
     { "role": "staff_directory", "kind": "github", "version": 1 },
     { "role": "knowledge", "kind": "markdown", "version": 1 },
     { "role": "health", "kind": "none" }
-  ]
+  ],
+  "snapshot": { "version": 1, "head": "/relay/v1/snapshot/head" }
 }

@@ -32,6 +32,12 @@ export type SchemaName =
   | "StaffRemovedEvent"
   | "CapabilitiesChangedEvent"
   | "ResetEvent"
+  | "SnapshotHead"
+  | "SnapshotNeeds"
+  | "HealthBlock"
+  | "SnapshotWork"
+  | "SnapshotMachines"
+  | "SnapshotRepositories"
   | "Id";
 
 export interface SpecValidator {
@@ -100,6 +106,13 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "event-staff-removed.json": "StaffRemovedEvent",
   "event-capabilities-changed.json": "CapabilitiesChangedEvent",
   "event-reset.json": "ResetEvent",
+  "snapshot-head.json": "SnapshotHead",
+  "snapshot-head-no-repositories.json": "SnapshotHead",
+  "snapshot-needs.json": "SnapshotNeeds",
+  "snapshot-health.json": "HealthBlock",
+  "snapshot-work.json": "SnapshotWork",
+  "snapshot-machines.json": "SnapshotMachines",
+  "snapshot-repositories.json": "SnapshotRepositories",
 };
 
 /** Invalid examples are refused facts, except the enrolment ones; the same rule as the Go contract test. */
@@ -110,7 +123,15 @@ export const invalidExampleSchema = (file: string): SchemaName =>
       ? "EnrolStartRequest"
       : file.startsWith("repositories-")
         ? "RepositoriesPage"
-        : "FactsRequest";
+        : file.startsWith("snapshot-head")
+          ? "SnapshotHead"
+          : file.startsWith("snapshot-machines")
+            ? "SnapshotMachines"
+            : file.startsWith("snapshot-repositories")
+              ? "SnapshotRepositories"
+              : file.startsWith("snapshot-work")
+                ? "SnapshotWork"
+                : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

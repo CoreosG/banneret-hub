@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "projectKey": "sha256:f874b75d32fb5213185b52937bc07958552247a69956a2579eb0d762f66d74b0",
+      "name": "example-org/example-app",
+      "url": "https://github.com/example-org/example-app"
+    },
+    {
+      "projectKey": "sha256:b35cf704650837b6f4a3c6ec5288e1543c83def2f360a367af3a4a482bceb528",
+      "name": "example-org/example-api"
+    }
+  ],
+  "truncated": false
+}

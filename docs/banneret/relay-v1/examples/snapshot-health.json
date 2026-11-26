@@ -1,0 +1,11 @@
+{
+  "state": "not_measured",
+  "items": [],
+  "notMeasured": [
+    {
+      "source": "health",
+      "reason": "not_configured",
+      "since": "2026-11-20T12:00:00Z"
+    }
+  ]
+}
