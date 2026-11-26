@@ -16,9 +16,17 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { ScrollArea } from "../ui/scroll-area";
+import {
+  countSelected,
+  isSelectableRow,
+  type SkippedMachines,
+  updateButtonLabel,
+  useUpdateSelection,
+} from "~/banneret/updateSelection";
 import type { RestartingMachine, UpdateEverythingRow } from "./updateEverything.logic";
 
 const isRunning = (status: string) =>
@@ -47,7 +55,9 @@ interface UpdateEverythingDialogProps {
   readonly providerCount: number;
   readonly rows: ReadonlyArray<UpdateEverythingRow>;
   readonly restarts: ReadonlyArray<RestartingMachine>;
-  readonly onConfirm: () => void;
+  /** Banneret: adds a checkbox per machine; `onConfirm` receives the unticked ones. */
+  readonly selectable?: boolean;
+  readonly onConfirm: (skipped: SkippedMachines) => void;
   /** Overrides the "Update N machines?" title, for an update-track switch. */
   readonly title?: string;
   readonly confirmLabel?: string;
@@ -99,6 +109,7 @@ function UpdateEverythingDialogContent({
   rows,
   restarts,
   onConfirm,
+  selectable = false,
   cancelRef,
   title,
   confirmLabel,
@@ -128,6 +139,8 @@ function UpdateEverythingDialogContent({
   const running = stopped + continuing;
   const restarting = new Set(restarts.map((machine) => machine.environmentId));
   const updating = rows.filter((row) => row.app !== null || row.providers.length > 0);
+  const { skipped: unticked, toggle } = useUpdateSelection();
+  const selectedCount = countSelected(updating, unticked);
   const skipped = rows.filter((row) => row.skipped !== null);
 
   return (
@@ -188,7 +201,14 @@ function UpdateEverythingDialogContent({
                 role="row"
                 className="col-span-full grid grid-cols-subgrid border-b border-border/50 py-1.5 last:border-b-0"
               >
-                <span role="cell" className="max-w-32 min-w-0">
+                <span role="cell" className="flex max-w-32 min-w-0 items-center gap-2">
+                  {selectable && row.environmentId !== null && isSelectableRow(row) ? (
+                    <Checkbox
+                      checked={!unticked.has(row.environmentId)}
+                      onCheckedChange={() => toggle(row.environmentId!)}
+                      aria-label={row.label}
+                    />
+                  ) : null}
                   <span className="sr-only">{row.label}</span>
                   <MiddleTruncate value={row.label} aria-hidden />
                 </span>
@@ -274,8 +294,13 @@ function UpdateEverythingDialogContent({
         <AlertDialogClose ref={cancelRef} render={<Button variant="outline" disabled={busy} />}>
           <T>Cancel</T>
         </AlertDialogClose>
-        <Button disabled={disabledReason !== null || busy} onClick={onConfirm}>
-          {confirmLabel ?? gt("Update", { $context: "verb, confirms the update" })}
+        <Button
+          disabled={disabledReason !== null || busy || (selectable && selectedCount === 0)}
+          onClick={() => onConfirm(unticked)}
+        >
+          {selectable
+            ? updateButtonLabel(selectedCount)
+            : (confirmLabel ?? gt("Update", { $context: "verb, confirms the update" }))}
         </Button>
       </AlertDialogFooter>
     </>

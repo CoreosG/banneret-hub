@@ -10,6 +10,7 @@ import { useEnvironments } from "~/state/environments";
 import { environmentIdsKey } from "~/state/environmentAtomList";
 import { environmentUpdateStatesAtom, serverEnvironment } from "~/state/server";
 import { environmentSessionStatesAtom } from "~/state/session";
+import { type SkippedMachines, withoutSkipped } from "~/banneret/updateSelection";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { getProviderUpdateRunOutcome } from "../ProviderUpdateLaunchNotification.logic";
 import { useProviderUpdates } from "../ProviderUpdatesAction";
@@ -72,11 +73,11 @@ export function useUpdateEverything(
     canMaintain: canUpdateServer(sessionStates[index]!),
     updateState: updateStates[index]!,
   }));
-  const { targets: servers, skipped } = channelSwitch
+  const { targets: allServers, skipped } = channelSwitch
     ? collectChannelSwitchTargets(machines, channelSwitch, resolve)
     : collectServerUpdateTargets(machines, targetVersion, resolve);
   // Track-only hosts save a setting and restart nothing, so they are neither listed nor counted.
-  const moving = servers.filter((server) => server.trackOnly !== true);
+  const moving = allServers.filter((server) => server.trackOnly !== true);
   const restarts = collectRestartingMachines(machines, moving, localUpdateVersion !== null);
   const providerUpdates = useProviderUpdates();
   // A track switch moves app and servers only; provider updates stay a separate choice.
@@ -104,24 +105,27 @@ export function useUpdateEverything(
   );
 
   return {
-    hasUpdates: servers.length > 0 || providers.machines.length > 0,
+    hasUpdates: allServers.length > 0 || providers.machines.length > 0,
     machines,
     ...view,
     restarts,
     run: async ({
       downloadLocal,
       installLocal,
+      unticked = new Set(),
     }: {
+      unticked?: SkippedMachines;
       downloadLocal?: (reportError: ReportLocalUpdateError) => Promise<boolean>;
       installLocal?: (reportError: ReportLocalUpdateError) => Promise<boolean>;
     }) => {
+      const servers = withoutSkipped(allServers, unticked);
       const localFailures: Array<string> = [];
       const reportLocalError: ReportLocalUpdateError = (title, description) => {
         localFailures.push(`${title}: ${description}`);
       };
       const startedAt = Date.now();
       const machinesById = new Map<UpdateRunMachine["environmentId"], UpdateRunMachine>();
-      for (const machine of providers.machines) {
+      for (const machine of withoutSkipped(providers.machines, unticked)) {
         machinesById.set(machine.environmentId, {
           environmentId: machine.environmentId,
           label: machine.label,
@@ -162,7 +166,7 @@ export function useUpdateEverything(
         const outcome = await runUpdateEverything({
           ...(downloadLocal ? { downloadLocal: () => downloadLocal(reportLocalError) } : {}),
           updateProviders: async () => {
-            const runs = await providers.updateAll({ quiet: true });
+            const runs = await providers.updateAll({ quiet: true, skipped: unticked });
             const outcomes = runs.map((run) => {
               const runOutcome = getProviderUpdateRunOutcome(run);
               if (runOutcome.status !== "updated") {
@@ -196,7 +200,7 @@ export function useUpdateEverything(
             );
             return outcomes;
           },
-          ...(providers.machines.length > 0
+          ...(withoutSkipped(providers.machines, unticked).length > 0
             ? {
                 stageServers: () =>
                   new Map(
