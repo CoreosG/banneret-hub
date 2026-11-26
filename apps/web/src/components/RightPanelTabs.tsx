@@ -620,7 +620,8 @@ function surfaceTitle(
     case "pull-requests":
       return resolve(msg("Linked items"));
     case "ports":
-      return resolve(msg("Ports"));
+      // oxlint-disable-next-line t3code/no-untranslated-copy -- Banneret fork label, English-only
+      return "Ports";
     case "issue":
       // A git host numbers its issues; a tracker with keys of its own, such as Linear, names them.
       return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;

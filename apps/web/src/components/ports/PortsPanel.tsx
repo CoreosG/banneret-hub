@@ -6,7 +6,6 @@ import {
   type EnvironmentId,
   type ListeningPortsResult,
 } from "@t3tools/contracts";
-import { useGT } from "gt-react";
 import { CableIcon, CopyIcon, GlobeIcon, PinIcon, PinOffIcon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
@@ -72,7 +71,6 @@ export default function PortsPanel(props: {
   readonly visible: boolean;
 }) {
   const { environmentId, visible } = props;
-  const gt = useGT();
   const environment = useEnvironment(environmentId);
   const forwards = usePortForwards();
   const canOperate = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
@@ -145,7 +143,7 @@ export default function PortsPanel(props: {
     try {
       return await forwardPort(environmentId, port);
     } catch (error) {
-      reportError(gt("Could not forward port {port}", { port }), error);
+      reportError(`Could not forward port ${port}`, error);
       return null;
     } finally {
       setBusyPort(null);
@@ -161,7 +159,7 @@ export default function PortsPanel(props: {
     }
     await readLocalApi()
       ?.shell.openExternal(url)
-      .catch((error: unknown) => reportError(gt("Unable to open in browser"), error));
+      .catch((error: unknown) => reportError("Unable to open in browser", error));
   };
 
   const togglePin = (port: number) => {
@@ -194,9 +192,9 @@ export default function PortsPanel(props: {
   };
 
   const status = !forwardable
-    ? gt("Forwarding needs the desktop app and permission to run terminals here.")
+    ? "Forwarding needs the desktop app and permission to run terminals here."
     : sameMachine
-      ? gt("This environment is this computer: its ports are already on localhost.")
+      ? "This environment is this computer: its ports are already on localhost."
       : null;
 
   return (
@@ -205,11 +203,11 @@ export default function PortsPanel(props: {
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 px-2"
         data-surface-subheader
       >
-        <IconAction label={gt("Refresh ports")} onClick={() => void refresh()}>
+        <IconAction label="Refresh ports" onClick={() => void refresh()}>
           <RefreshIcon refreshing={refreshing} />
         </IconAction>
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {gt("Ports on {environment}", { environment: environment?.label ?? environmentId })}
+          Ports on {environment?.label ?? environmentId}
         </span>
         {forwardable && !sameMachine ? (
           <form
@@ -223,13 +221,13 @@ export default function PortsPanel(props: {
               size="sm"
               inputMode="numeric"
               className="w-24"
-              placeholder={gt("Port")}
-              aria-label={gt("Port to forward")}
+              placeholder="Port"
+              aria-label="Port to forward"
               value={manualPort}
               onChange={(event) => setManualPort(event.target.value.replace(/\D/g, ""))}
             />
             <Button type="submit" size="xs" variant="outline" disabled={!manualPort}>
-              {gt("Forward")}
+              Forward
             </Button>
           </form>
         ) : null}
@@ -240,10 +238,10 @@ export default function PortsPanel(props: {
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-background text-left text-muted-foreground">
             <tr>
-              <th className="px-3 py-1.5 font-medium">{gt("Port")}</th>
-              <th className="px-2 py-1.5 font-medium">{gt("Label")}</th>
-              <th className="px-2 py-1.5 font-medium">{gt("Process")}</th>
-              <th className="px-2 py-1.5 font-medium">{gt("Forwarded to")}</th>
+              <th className="px-3 py-1.5 font-medium">Port</th>
+              <th className="px-2 py-1.5 font-medium">Label</th>
+              <th className="px-2 py-1.5 font-medium">Process</th>
+              <th className="px-2 py-1.5 font-medium">Forwarded to</th>
               <th className="px-2 py-1.5" />
             </tr>
           </thead>
@@ -262,7 +260,7 @@ export default function PortsPanel(props: {
                         <TooltipTrigger render={<span className="ml-1 text-muted-foreground" />}>
                           *
                         </TooltipTrigger>
-                        <TooltipPopup>{gt("Listening on all interfaces")}</TooltipPopup>
+                        <TooltipPopup>Listening on all interfaces</TooltipPopup>
                       </Tooltip>
                     ) : null}
                   </td>
@@ -272,7 +270,7 @@ export default function PortsPanel(props: {
                         size="sm"
                         autoFocus
                         defaultValue={label ?? ""}
-                        aria-label={gt("Label for port {port}", { port: row.port })}
+                        aria-label={`Label for port ${row.port}`}
                         onBlur={(event) => {
                           setLabels(writePortLabel(environmentId, row.port, event.target.value));
                           setEditingPort(null);
@@ -289,16 +287,14 @@ export default function PortsPanel(props: {
                         onClick={() => setEditingPort(row.port)}
                       >
                         {isServer
-                          ? gt("Banneret server")
-                          : (label ?? (
-                              <span className="text-muted-foreground/60">{gt("Add label")}</span>
-                            ))}
+                          ? "Banneret server"
+                          : (label ?? <span className="text-muted-foreground/60">Add label</span>)}
                       </button>
                     )}
                   </td>
                   <td className="max-w-40 truncate px-2 py-1 text-muted-foreground">
                     {stopped
-                      ? gt("not listening")
+                      ? "not listening"
                       : [row.processName, row.pid === null ? null : `(${row.pid})`]
                           .filter(Boolean)
                           .join(" ")}
@@ -313,7 +309,7 @@ export default function PortsPanel(props: {
                   <td className="whitespace-nowrap px-2 py-1 text-right">
                     {!isServer && (sameMachine || forwardable) ? (
                       <IconAction
-                        label={gt("Open in browser")}
+                        label="Open in browser"
                         disabled={busyPort === row.port}
                         onClick={() => void openInBrowser(row.port)}
                       >
@@ -322,11 +318,11 @@ export default function PortsPanel(props: {
                     ) : null}
                     {forward || sameMachine ? (
                       <IconAction
-                        label={gt("Copy address")}
+                        label="Copy address"
                         onClick={() =>
                           void writeTextToClipboard(
                             `localhost:${forward?.localPort ?? row.port}`,
-                          ).catch((error: unknown) => reportError(gt("Failed to copy"), error))
+                          ).catch((error: unknown) => reportError("Failed to copy", error))
                         }
                       >
                         <CopyIcon className="size-3.5" />
@@ -335,9 +331,7 @@ export default function PortsPanel(props: {
                     {!isServer && forwardable && !sameMachine ? (
                       <>
                         <IconAction
-                          label={
-                            isPinned(row.port) ? gt("Stop keeping forwarded") : gt("Keep forwarded")
-                          }
+                          label={isPinned(row.port) ? "Stop keeping forwarded" : "Keep forwarded"}
                           onClick={() => togglePin(row.port)}
                         >
                           {isPinned(row.port) ? (
@@ -347,7 +341,7 @@ export default function PortsPanel(props: {
                           )}
                         </IconAction>
                         <IconAction
-                          label={forward ? gt("Stop forwarding") : gt("Forward port")}
+                          label={forward ? "Stop forwarding" : "Forward port"}
                           disabled={busyPort === row.port}
                           onClick={() =>
                             forward
@@ -366,7 +360,7 @@ export default function PortsPanel(props: {
           </tbody>
         </table>
         {listing !== null && rows.length === 0 ? (
-          <p className="px-3 py-4 text-xs text-muted-foreground">{gt("No ports are listening.")}</p>
+          <p className="px-3 py-4 text-xs text-muted-foreground">No ports are listening.</p>
         ) : null}
       </div>
     </div>
