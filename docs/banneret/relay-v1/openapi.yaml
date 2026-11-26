@@ -507,7 +507,7 @@ paths:
           description: |
             The file. Its schema is the one its head key names: `needs` is SnapshotNeeds, `health` is HealthBlock,
             `work` is SnapshotWork, `machines` is SnapshotMachines, `repositories` is SnapshotRepositories, `board` is
-            SnapshotBoard, `feed` is FeedPage, `graveyard` is GraveyardPage. The head key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
+            SnapshotBoard, `map` is SnapshotMap, `feed` is FeedPage, `graveyard` is GraveyardPage. The head key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
           headers:
             ETag:
               schema: { type: string, pattern: '^"sha256:[0-9a-f]{64}"$' }
@@ -523,6 +523,7 @@ paths:
                   - { $ref: "#/components/schemas/SnapshotMachines" }
                   - { $ref: "#/components/schemas/SnapshotRepositories" }
                   - { $ref: "#/components/schemas/SnapshotBoard" }
+                  - { $ref: "#/components/schemas/SnapshotMap" }
                   - { $ref: "#/components/schemas/FeedPage" }
                   - { $ref: "#/components/schemas/GraveyardPage" }
         "401": { $ref: "#/components/responses/Error" }
@@ -1068,6 +1069,12 @@ components:
           type: string
           enum: [never_read, unreachable, auth_failed, permission_missing, rate_limited, stale_publication, malformed, not_configured, too_large]
         since: { $ref: "#/components/schemas/Timestamp" }
+        detail:
+          description: |
+            Added in 1.2, optional. One plain sentence with the specifics, for example which stage-plan rule failed.
+            Never a path or a secret.
+          type: string
+          maxLength: 240
     BlockState:
       type: string
       enum: [ok, partial, not_measured]
@@ -1207,6 +1214,9 @@ components:
             board:
               description: Added in 1.2. Present when the relay advertises the `board` section. A 1.1 Hub ignores it.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
+            map:
+              description: Added in 1.2. Present when the relay advertises the `map` section, that is, when a stage plan is configured. A 1.1 Hub ignores it.
+              allOf: [{ $ref: "#/components/schemas/FileRef" }]
             feed:
               description: Added in 1.2. Present when the relay advertises the `feed` section. The latest 100 entries.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
@@ -1334,6 +1344,81 @@ components:
       required: [state]
       properties:
         state: { description: "Open string; known: `passing`, `failing`, `pending`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+    SnapshotMap:
+      description: |
+        Added in 1.2. The build map, relay-wide: the stages of a stage plan (README, "Stage plan file") with each
+        item's status from the board vocabulary. The relay computes every status and counter; the Hub only draws
+        them. When the plan is configured but cannot be read or is invalid, `state` is `not_measured`, `notMeasured`
+        says why and `stages`, `items` and counters are empty, so a broken plan is never shown as an empty plan.
+        Closed, like a board card.
+      type: object
+      additionalProperties: false
+      required: [state, notMeasured, stages, items, counters]
+      properties:
+        state: { $ref: "#/components/schemas/BlockState" }
+        notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        stages:
+          description: In ascending `order`.
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/MapStage" }
+        items:
+          description: Grouped by stage in stage order, and in plan order within a stage.
+          type: array
+          maxItems: 2000
+          items: { $ref: "#/components/schemas/MapItem" }
+        counters: { $ref: "#/components/schemas/MapCounters" }
+    MapStage:
+      type: object
+      additionalProperties: false
+      required: [id, title, order]
+      properties:
+        id: { $ref: "#/components/schemas/MapId" }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        order: { type: integer, minimum: 0, maximum: 1000000 }
+    MapId:
+      description: A stable id from the stage plan.
+      type: string
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    MapItem:
+      type: object
+      additionalProperties: false
+      required: [id, stageId, title, status, statusWhy, restsOn]
+      properties:
+        id: { $ref: "#/components/schemas/MapId" }
+        stageId: { description: "A `stages[].id`.", allOf: [{ $ref: "#/components/schemas/MapId" }] }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        status:
+          description: |
+            The board's vocabulary: open string; known values `ruled_dead`, `checked`, `sent_back`, `needs_you`,
+            `built` and `planned`. An item with a `task` takes the task's computed status; an item without one is
+            `planned`. An item that rests on one that is `needs_you`, `sent_back` or `ruled_dead` shows `needs_you`
+            unless it already has a status that ranks higher.
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        statusWhy: { description: "One plain sentence. For a blocked item it names the blocker.", type: string, minLength: 1, maxLength: 240 }
+        task:
+          description: The board task behind the item. Absent when the item has no `task` in the plan, or the board does not hold it.
+          allOf: [{ $ref: "#/components/schemas/BoardTask" }]
+        restsOn:
+          description: Ids of the items this one rests on (item ids, not task ids).
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/MapId" }
+    MapCounters:
+      description: Every item counted once by its final status.
+      type: object
+      additionalProperties: false
+      required: [byStatus, byStage]
+      properties:
+        byStatus:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        byStage:
+          description: Keyed by stage id; every stage is present.
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: { type: integer, minimum: 0 }
     FeedPage:
       description: |
         Added in 1.2. The `feed` snapshot file and the response of `GET /feed`: newest first. The file holds the

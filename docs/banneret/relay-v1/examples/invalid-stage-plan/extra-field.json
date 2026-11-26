@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-26T09:00:00Z",
+  "stages": [
+    {
+      "id": "s1",
+      "title": "One",
+      "order": 1
+    }
+  ],
+  "items": [
+    {
+      "id": "a",
+      "stageId": "s1",
+      "title": "A",
+      "summary": "prose is not allowed"
+    }
+  ]
+}

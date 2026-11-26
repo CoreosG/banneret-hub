@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relay-v1.invalid/stage-plan.schema.json",
+  "title": "Stage plan",
+  "description": "The one machine-readable file a relay reads to build the map. Any company can produce it. The structure is checked here; the rules a schema cannot express (unique ids, restsOn and stageId references that exist, no cycles) are in README.md, \"Stage plan file\", and are applied by the relay.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "generatedAt", "stages", "items"],
+  "properties": {
+    "version": { "const": 1 },
+    "generatedAt": {
+      "description": "When the file was generated, RFC 3339 in UTC.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "source": {
+      "description": "Where the file was generated from, for example a revision of the plan's source. Plain text.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "stages": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/stage" }
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "description": "A stable string. It never changes when the title does.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "title": {
+      "description": "Plain text. No markup, no prose beyond a title.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "order"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/title" },
+        "order": {
+          "description": "Stages are shown in ascending order.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "stageId", "title"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "stageId": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/title" },
+        "restsOn": {
+          "description": "Ids of the items this one cannot finish without.",
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "task": {
+          "description": "The tracker issue behind the item, so the relay can join it to the board's computed status.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tracker", "scope", "key"],
+          "properties": {
+            "tracker": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+            "host": { "type": "string", "minLength": 1, "maxLength": 255 },
+            "scope": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "key": { "type": "string", "minLength": 1, "maxLength": 100 }
+          }
+        }
+      }
+    }
+  }
+}

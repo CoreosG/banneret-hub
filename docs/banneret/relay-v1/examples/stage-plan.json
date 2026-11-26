@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-26T09:00:00Z",
+  "source": "example-org/build-spec at 4f2a9c1",
+  "stages": [
+    { "id": "s2", "title": "Social", "order": 20 },
+    { "id": "s1", "title": "Foundations", "order": 10 }
+  ],
+  "items": [
+    {
+      "id": "sign-in",
+      "stageId": "s1",
+      "title": "Sign-in page",
+      "task": { "tracker": "github", "scope": "example-org/example-app", "key": "39" }
+    },
+    {
+      "id": "guild-invites",
+      "stageId": "s2",
+      "title": "Guild invites",
+      "restsOn": ["sign-in"],
+      "task": { "tracker": "github", "scope": "example-org/example-app", "key": "42" }
+    },
+    {
+      "id": "rate-limits",
+      "stageId": "s2",
+      "title": "Rate limits",
+      "restsOn": ["guild-invites"]
+    }
+  ]
+}

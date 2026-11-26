@@ -256,8 +256,8 @@ forever. They carry nothing those calls do not already return to the same caller
   when the relay serves `GET /repositories`, `repositories` to `sha256:<hex>`. The path of a file uses the bare hex.
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
-  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board`, `feed` and `graveyard` (added in
-  1.2) are `SnapshotBoard`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know, so
+  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board`, `map`, `feed` and `graveyard` (added
+  in 1.2) are `SnapshotBoard`, `SnapshotMap`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know, so
   a 1.1 Hub ignores them.
 - **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
   head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
@@ -293,6 +293,7 @@ What the files hold, and who sees what, is the same as the live calls:
 | machines | `GET /machines` for the caller | person (revoked machines for owner and founders; `revocable`) |
 | repositories | `GET /repositories` | nothing (relay-wide) |
 | board | none (snapshot only, added in 1.2) | nothing (relay-wide) |
+| map | none (snapshot only, added in 1.2) | nothing (relay-wide) |
 | feed | `GET /feed` (added in 1.2) | nothing (relay-wide) |
 | graveyard | `GET /graveyard` (added in 1.2) | nothing (relay-wide) |
 
@@ -353,6 +354,85 @@ runs from `lastSignalAt`, the latest heartbeat, push or comment:
 
 A match sets `lastSignalAt` to the receipt time, which returns a `stale` or `expired` lease to `active`. A fact that
 fails any of the three changes nothing. The `taskId` is an opaque id the Hub takes from the thread's linked issue.
+
+## Map and the stage plan
+
+Added in 1.2, all additive. A relay that has a stage plan advertises the section `{kind:"map", flags:["rests_on"]}` and
+names the `map` file in the snapshot head. A 1.1 Hub ignores both. A Hub does not read the map unless capabilities carry
+the section. Like the board, the map is snapshot-only: the relay computes it and the Hub draws it.
+
+**When it is advertised.**
+
+- No stage plan configured: the section and the head key are omitted. A tracker without a plan keeps its board.
+- Configured and valid: the section is present and `map.state` is `ok`.
+- Configured but unreadable or invalid: the section is present, `state` is `not_measured`, and `notMeasured` says why,
+  with `reason` `unreachable` (the file could not be read) or `malformed` (it broke a rule below) and a one-sentence
+  `detail` naming the rule. `stages` and `items` are empty. The Hub never shows a broken plan as an empty one.
+
+**The file.** `SnapshotMap` is `{state, notMeasured, stages[{id, title, order}], items[{id, stageId, title, status,
+statusWhy, task?{id, title, ref}, restsOn[itemId]}], counters{byStatus{<status>: n}, byStage{<stageId>: {<status>: n}}}}`.
+Objects are closed, like the board's.
+
+- `stages` are in ascending `order`, ties in plan order. `items` are grouped by stage in that order, and keep plan
+  order within a stage.
+- `task` is the board task the item's plan `task` resolves to: the board card whose `ref` has the same `tracker`,
+  `host` (both absent counts as equal), `scope` and `key`. It is absent when the plan gives the item no `task`, and
+  also when the board holds no such task.
+- `restsOn` lists **item** ids, copied from the plan.
+- `counters` count every item once by its final status. `byStage` has an entry for every stage, empty when the stage
+  has no items.
+
+**Status.** The vocabulary is the board's (see "Board and leases"): `ruled_dead`, `checked`, `sent_back`, `needs_you`,
+`built`, `planned`, and the same first-match order.
+
+1. An item with a `task` takes that task's computed status and `statusWhy` from the board card. An item without a
+   `task`, or whose task is not on the board, is `planned`.
+2. A rests-on item that ends up `needs_you`, `sent_back` or `ruled_dead` makes its dependant `needs_you`, with a
+   `statusWhy` that names the blocker, for example `It rests on "Profile blocks", which needs you.` This applies only
+   when the dependant's own status ranks below `needs_you` (`built` or `planned`): `ruled_dead`, `checked` and
+   `sent_back` keep their own status, as in the first-match order.
+3. The rule is applied dependencies first, so a blocked item blocks its own dependants in turn. When several
+   dependencies block, the first in `restsOn` order is named.
+
+## Stage plan file
+
+The relay never parses prose. It reads one machine-readable file, the **stage plan**, and builds the map from it. The
+format is public: any company can produce one. Banneret generates its own from its knowledge base (`docs/spec/stages.json`
+there, never edited by hand). `stage-plan.schema.json` (JSON Schema 2020-12) is the structure, and
+`examples/stage-plan.json` is an example. Where the relay finds the file is the relay's configuration: a repository path
+read through its knowledge adapter, or a local file.
+
+```json
+{
+  "version": 1,
+  "generatedAt": "2026-11-26T09:00:00Z",
+  "source": "example-org/build-spec at 4f2a9c1",
+  "stages": [{ "id": "s1", "title": "Foundations", "order": 10 }],
+  "items": [
+    {
+      "id": "sign-in",
+      "stageId": "s1",
+      "title": "Sign-in page",
+      "restsOn": [],
+      "task": { "tracker": "github", "scope": "example-org/example-app", "key": "39" }
+    }
+  ]
+}
+```
+
+- `version` is `1`. A relay refuses a version it does not know.
+- `generatedAt` is a timestamp. `source` is optional plain text saying where the file came from.
+- `stages[]` is `{id, title, order}`. `items[]` is `{id, stageId, title, restsOn?[itemId], task?{tracker, host?, scope,
+  key}}`.
+- Ids are stable strings (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`) that never change when a title does. Titles are plain
+  text. There are no prose fields beyond titles, and unknown fields are refused.
+- `task` names the tracker issue behind an item, with the fields of a board `ref` (without the url), so the relay can
+  join the item to the board's computed status. The plan carries no status of its own.
+
+**Validation.** Beyond the schema, the relay refuses a plan that breaks any of these: stage ids are unique, item ids are
+unique, every `stageId` names a stage, every `restsOn` entry names an item and not the item itself, and `restsOn` has no
+cycle. A plan that fails is not partly used: the map is `not_measured` with `reason` `malformed` and a `detail` naming
+the first failing rule. A file that cannot be read is `not_measured` with `reason` `unreachable`.
 
 ## Feed and graveyard
 
@@ -458,6 +538,9 @@ thread when the environment is its own, and otherwise says which machine holds i
   `graveyard` head keys, `GET /feed` and `GET /graveyard`, the `feed` section with flag `graveyard`; the task read
   (see "Task"): `GET /tasks/{taskId}` and the `task` section; and the `checked` rule (see "Checked") with the flag
   `checked` on the `board` section.
+  Also in 1.2 (additive): the map (see "Map and the stage plan"): the `map` head key and `SnapshotMap` file, the `map`
+  section with flag `rests_on`, advertised only when a stage plan is configured; the stage plan file format (see "Stage
+  plan file"); and an optional `detail` sentence on `NotMeasured`.
 - **1.1.** Banneret Hub 0.1.1211 shipped with 1.0, so from here on every additive change bumps the minor. 1.1 adds:
   - the `visit=1` flag on `GET /today`;
   - `usage` in facts;

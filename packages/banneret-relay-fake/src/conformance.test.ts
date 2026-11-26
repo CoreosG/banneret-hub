@@ -1639,6 +1639,279 @@ describe("feed, graveyard, tasks and checked", () => {
   });
 });
 
+describe("map and the stage plan", () => {
+  interface MapItem {
+    readonly id: string;
+    readonly stageId: string;
+    readonly status: string;
+    readonly statusWhy: string;
+    readonly task?: { readonly id: string };
+    readonly restsOn: ReadonlyArray<string>;
+  }
+  interface MapFile {
+    readonly state: string;
+    readonly notMeasured: ReadonlyArray<{ readonly reason: string; readonly detail?: string }>;
+    readonly stages: ReadonlyArray<{ readonly id: string; readonly order: number }>;
+    readonly items: ReadonlyArray<MapItem>;
+    readonly counters: {
+      readonly byStatus: Record<string, number>;
+      readonly byStage: Record<string, Record<string, number>>;
+    };
+  }
+  interface BoardFile {
+    readonly cards: ReadonlyArray<{
+      readonly task: {
+        readonly id: string;
+        readonly ref: { tracker: string; host?: string; scope: string; key: string };
+      };
+    }>;
+  }
+  const id = () => `t_${randomText(5)}`;
+  const base = { version: 1, generatedAt: "2026-11-26T09:00:00Z" };
+
+  const headFiles = async (machine: Enrolled) => {
+    await client.rebuildSnapshot(machine.login);
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    expect(head.status, JSON.stringify(head.body)).toBe(200);
+    return (head.body as { files: Record<string, string> }).files;
+  };
+  const readFile = async (machine: Enrolled, ref: string, schema: string) => {
+    const file = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
+    expect(file.status, JSON.stringify(file.body)).toBe(200);
+    expectSchema(schema, file.body);
+    return file.body;
+  };
+  const readMap = async (machine: Enrolled) => {
+    const ref = (await headFiles(machine)).map;
+    expect(ref, "the head names map").toBeDefined();
+    return (await readFile(machine, ref ?? "", "SnapshotMap")) as MapFile;
+  };
+  const mapSection = async (machine: Enrolled) => {
+    const reply = await call(machine, "GET", "/relay/v1/capabilities");
+    expectSchema("Capabilities", reply.body);
+    return (reply.body as { sections: Array<{ kind: string; flags: string[] }> }).sections.find(
+      (section) => section.kind === "map",
+    );
+  };
+  // Seeds the board, then reads each card's own ref back, so the plan joins on what the relay reports.
+  const seedBoard = async (machine: Enrolled, tasks: ReadonlyArray<Record<string, unknown>>) => {
+    await client.control("/board/seed", { tasks });
+    const files = await headFiles(machine);
+    const board = (await readFile(machine, files.board ?? "", "SnapshotBoard")) as BoardFile;
+    return (taskId: string) => {
+      const card = board.cards.find((candidate) => candidate.task.id === taskId);
+      expect(card, `board holds ${taskId}`).toBeDefined();
+      const ref = card?.task.ref ?? { tracker: "", scope: "", key: "" };
+      return {
+        tracker: ref.tracker,
+        ...(ref.host === undefined ? {} : { host: ref.host }),
+        scope: ref.scope,
+        key: ref.key,
+      };
+    };
+  };
+
+  afterAll(async () => {
+    await client.control("/map/seed", { plan: null });
+  });
+
+  it("does not advertise the map, or name a file, while no plan is configured", async () => {
+    const machine = await enrol();
+    await client.control("/map/seed", { plan: null });
+    expect(await mapSection(machine)).toBeUndefined();
+    expect((await headFiles(machine)).map).toBeUndefined();
+  });
+
+  it("builds the map from the plan, in stage order, and validates it", async () => {
+    const machine = await enrol();
+    const done = id();
+    const blocked = id();
+    const built = id();
+    const taskFor = await seedBoard(machine, [
+      { id: done, title: "Done task", status: "checked" },
+      { id: blocked, title: "Blocked task", status: "needs_you" },
+      { id: built, title: "Built task", status: "built" },
+    ]);
+    await client.control("/map/seed", {
+      ...base,
+      stages: [
+        { id: "late", title: "Later", order: 20 },
+        { id: "early", title: "First", order: 10 },
+      ],
+      items: [
+        { id: "i-late", stageId: "late", title: "Late item", restsOn: ["i-blocked"] },
+        { id: "i-done", stageId: "early", title: "Done item", task: taskFor(done) },
+        { id: "i-blocked", stageId: "early", title: "Blocked item", task: taskFor(blocked) },
+        {
+          id: "i-built",
+          stageId: "late",
+          title: "Built item",
+          task: taskFor(built),
+          restsOn: ["i-done"],
+        },
+      ],
+    });
+    const section = await mapSection(machine);
+    expect(section?.flags).toContain("rests_on");
+    const map = await readMap(machine);
+    expect(map.state).toBe("ok");
+    expect(map.notMeasured).toEqual([]);
+    expect(map.stages.map((stage) => stage.id)).toEqual(["early", "late"]);
+    expect(map.stages.map((stage) => stage.order)).toEqual([10, 20]);
+    // Grouped by stage in stage order.
+    expect(map.items.map((item) => item.stageId)).toEqual(["early", "early", "late", "late"]);
+    const item = (itemId: string) => map.items.find((candidate) => candidate.id === itemId);
+    expect(item("i-done")?.status).toBe("checked");
+    expect(item("i-done")?.task?.id).toBe(done);
+    expect(item("i-blocked")?.status).toBe("needs_you");
+    expect(item("i-built")?.status).toBe("built");
+    expect(item("i-built")?.restsOn).toEqual(["i-done"]);
+  });
+
+  it("makes an item that rests on a blocked one needs_you, and names the blocker", async () => {
+    const machine = await enrol();
+    const blocker = id();
+    const dead = id();
+    const taskFor = await seedBoard(machine, [
+      { id: blocker, title: "Profile blocks", status: "sent_back" },
+      { id: dead, title: "Old idea", status: "ruled_dead" },
+    ]);
+    await client.control("/map/seed", {
+      ...base,
+      stages: [{ id: "s", title: "Stage", order: 1 }],
+      items: [
+        { id: "blocker", stageId: "s", title: "Profile blocks", task: taskFor(blocker) },
+        { id: "dead", stageId: "s", title: "Old idea", task: taskFor(dead) },
+        { id: "child", stageId: "s", title: "Child", restsOn: ["blocker"] },
+        { id: "grandchild", stageId: "s", title: "Grandchild", restsOn: ["child"] },
+        { id: "orphan", stageId: "s", title: "Orphan", restsOn: ["dead"] },
+        { id: "free", stageId: "s", title: "Free" },
+      ],
+    });
+    const map = await readMap(machine);
+    const item = (itemId: string) => map.items.find((candidate) => candidate.id === itemId);
+    expect(item("blocker")?.status).toBe("sent_back");
+    expect(item("child")?.status).toBe("needs_you");
+    expect(item("child")?.statusWhy).toContain("Profile blocks");
+    // A blocked item blocks its own dependants in turn.
+    expect(item("grandchild")?.status).toBe("needs_you");
+    expect(item("grandchild")?.statusWhy).toContain("Child");
+    expect(item("orphan")?.status).toBe("needs_you");
+    expect(item("orphan")?.statusWhy).toContain("Old idea");
+    expect(item("free")?.status).toBe("planned");
+    expect(item("free")?.task).toBeUndefined();
+  });
+
+  it("keeps a higher status on a dependant, and counts every item once", async () => {
+    const machine = await enrol();
+    const dead = id();
+    const done = id();
+    const taskFor = await seedBoard(machine, [
+      { id: dead, title: "Dead", status: "ruled_dead" },
+      { id: done, title: "Done", status: "checked" },
+    ]);
+    await client.control("/map/seed", {
+      plan: {
+        ...base,
+        stages: [
+          { id: "a", title: "A", order: 1 },
+          { id: "b", title: "B", order: 2 },
+          { id: "c", title: "C, nothing in it", order: 3 },
+        ],
+        items: [
+          { id: "dead", stageId: "a", title: "Dead", task: taskFor(dead) },
+          { id: "done", stageId: "a", title: "Done", task: taskFor(done), restsOn: ["dead"] },
+          { id: "blocked", stageId: "b", title: "Blocked", restsOn: ["dead"] },
+          { id: "plain", stageId: "b", title: "Plain" },
+          { id: "set", stageId: "b", title: "Set by seed" },
+        ],
+      },
+      statuses: { set: "built" },
+    });
+    const map = await readMap(machine);
+    // checked outranks the propagation rule.
+    expect(map.items.find((item) => item.id === "done")?.status).toBe("checked");
+    expect(map.items.find((item) => item.id === "set")?.status).toBe("built");
+    expect(map.counters.byStatus).toEqual({
+      ruled_dead: 1,
+      checked: 1,
+      needs_you: 1,
+      planned: 1,
+      built: 1,
+    });
+    expect(map.counters.byStage).toEqual({
+      a: { ruled_dead: 1, checked: 1 },
+      b: { needs_you: 1, planned: 1, built: 1 },
+      c: {},
+    });
+  });
+
+  it("is not measured, with a reason, for a plan with a cycle", async () => {
+    const machine = await enrol();
+    await client.control("/map/seed", {
+      ...base,
+      stages: [{ id: "s", title: "Stage", order: 1 }],
+      items: [
+        { id: "a", stageId: "s", title: "A", restsOn: ["b"] },
+        { id: "b", stageId: "s", title: "B", restsOn: ["a"] },
+      ],
+    });
+    // The section stays advertised: the plan is configured, it just cannot be used.
+    expect(await mapSection(machine)).toBeDefined();
+    const map = await readMap(machine);
+    expect(map.state).toBe("not_measured");
+    expect(map.notMeasured[0]?.reason).toBe("malformed");
+    expect(map.notMeasured[0]?.detail).toMatch(/cycle/i);
+    expect(map.items).toEqual([]);
+    expect(map.stages).toEqual([]);
+  });
+
+  it.each([
+    ["an item whose rests-on names nothing", { restsOn: ["ghost"] }, /ghost/],
+    ["an item in a stage that does not exist", { stageId: "nowhere" }, /nowhere/],
+  ])("is not measured, with a reason, for %s", async (_name, patch, detail) => {
+    const machine = await enrol();
+    await client.control("/map/seed", {
+      ...base,
+      stages: [{ id: "s", title: "Stage", order: 1 }],
+      items: [{ id: "a", stageId: "s", title: "A", ...patch }],
+    });
+    const map = await readMap(machine);
+    expect(map.state).toBe("not_measured");
+    expect(map.notMeasured[0]?.reason).toBe("malformed");
+    expect(map.notMeasured[0]?.detail).toMatch(detail);
+  });
+
+  it("is not measured when the plan file cannot be read, and recovers with a valid one", async () => {
+    const machine = await enrol();
+    await client.control("/map/seed", { plan: { unreadable: true } });
+    const broken = await readMap(machine);
+    expect(broken.state).toBe("not_measured");
+    expect(broken.notMeasured[0]?.reason).toBe("unreachable");
+    await client.control("/map/seed", {
+      ...base,
+      stages: [{ id: "s", title: "Stage", order: 1 }],
+      items: [{ id: "a", stageId: "s", title: "A" }],
+    });
+    const fixed = await readMap(machine);
+    expect(fixed.state).toBe("ok");
+    expect(fixed.items.map((item) => item.id)).toEqual(["a"]);
+  });
+
+  it("stops advertising the map when the plan is removed", async () => {
+    const machine = await enrol();
+    await client.control("/map/seed", {
+      ...base,
+      stages: [{ id: "s", title: "Stage", order: 1 }],
+      items: [],
+    });
+    expect(await mapSection(machine)).toBeDefined();
+    await client.control("/map/seed", { plan: null });
+    expect(await mapSection(machine)).toBeUndefined();
+    expect((await headFiles(machine)).map).toBeUndefined();
+  });
+});
+
 describe("event retention", () => {
   // The 24-hour bound cannot be waited out; only the fake can shorten it.
   it.skipIf(external !== undefined)(

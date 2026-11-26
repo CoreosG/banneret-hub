@@ -1,0 +1,17 @@
+{
+  "state": "ok",
+  "notMeasured": [],
+  "stages": [{ "id": "s1", "title": "Foundations", "order": 10 }],
+  "items": [
+    {
+      "id": "sign-in",
+      "stageId": "s1",
+      "title": "Sign-in page",
+      "status": "planned",
+      "statusWhy": "Not started.",
+      "restsOn": [],
+      "priority": "high"
+    }
+  ],
+  "counters": { "byStatus": { "planned": 1 }, "byStage": { "s1": { "planned": 1 } } }
+}
