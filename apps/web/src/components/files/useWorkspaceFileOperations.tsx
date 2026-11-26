@@ -140,9 +140,9 @@ export function useWorkspaceFileOperations(options: {
     } catch (error) {
       toastManager.close(toastId);
       reportError("Upload failed", error);
-    } finally {
-      await options.reload([targetDirectory]);
     }
+    // The catch above swallows every error, so this runs after success and failure alike.
+    await options.reload([targetDirectory]);
   };
 
   const pickAndUpload = (targetDirectory: string) => {
@@ -302,7 +302,7 @@ export function useWorkspaceFileOperations(options: {
           options.tree().startRenaming(treePath);
           return true;
         case "banneret:download":
-          void downloadEntry({ environmentId, cwd, relativePath }).catch((error) =>
+          void downloadEntry({ environmentId, cwd, relativePath, isDirectory }).catch((error) =>
             reportError("Download failed", error),
           );
           return true;
