@@ -1390,6 +1390,197 @@ describe("board and leases", () => {
   });
 });
 
+describe("feed, graveyard, tasks and checked", () => {
+  interface FeedFile {
+    readonly entries: ReadonlyArray<{ readonly id: string; readonly summary: string }>;
+    readonly nextCursor: string | null;
+  }
+  interface GraveyardFile {
+    readonly entries: ReadonlyArray<{
+      readonly task: { readonly id: string };
+      readonly cause: string;
+    }>;
+    readonly nextCursor: string | null;
+  }
+  interface TaskReply {
+    readonly status: string;
+    readonly preview?: { readonly state: string; readonly url?: string };
+    readonly checked?: {
+      readonly by: { readonly login: string };
+      readonly valid: boolean;
+      readonly ignoredReason?: string;
+    };
+    readonly task: { readonly id: string };
+  }
+  const id = () => `t_${randomText(5)}`;
+
+  const readHeadFile = async (machine: Enrolled, kind: "feed" | "graveyard", schema: string) => {
+    await client.rebuildSnapshot(machine.login);
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    expect(head.status, JSON.stringify(head.body)).toBe(200);
+    const ref = (head.body as { files: Record<string, string> }).files[kind];
+    expect(ref, `the head names ${kind}`).toBeDefined();
+    const file = await call(machine, "GET", `/relay/v1/snapshot/files/${(ref ?? "").slice(7)}`);
+    expect(file.status, JSON.stringify(file.body)).toBe(200);
+    expectSchema(schema, file.body);
+    return file.body;
+  };
+  const readTask = async (machine: Enrolled, taskId: string) => {
+    const reply = await call(machine, "GET", `/relay/v1/tasks/${taskId}`);
+    return reply;
+  };
+  const seedTasks = (tasks: ReadonlyArray<Record<string, unknown>>) =>
+    client.control("/board/seed", { tasks });
+
+  it("advertises the feed and task sections and the checked flag", async () => {
+    const machine = await enrol();
+    const reply = await call(machine, "GET", "/relay/v1/capabilities");
+    expectSchema("Capabilities", reply.body);
+    const sections = (reply.body as { sections: Array<{ kind: string; flags: string[] }> })
+      .sections;
+    expect(sections.find((section) => section.kind === "feed")?.flags).toContain("graveyard");
+    expect(sections.some((section) => section.kind === "task")).toBe(true);
+    expect(sections.find((section) => section.kind === "board")?.flags).toContain("checked");
+  });
+
+  it("puts the feed in the head, newest first, and validates it", async () => {
+    const machine = await enrol();
+    await client.control("/feed/seed", { count: 3 });
+    const feed = (await readHeadFile(machine, "feed", "FeedPage")) as FeedFile;
+    expect(feed.entries).toHaveLength(3);
+    expect(feed.nextCursor).toBeNull();
+    const times = feed.entries.map((entry) => (entry as unknown as { at: string }).at);
+    expect(times).toEqual(times.toSorted().toReversed());
+  });
+
+  it("holds the latest 100 feed entries in the head and pages the rest", async () => {
+    const machine = await enrol();
+    await client.control("/feed/seed", { count: 120 });
+    const feed = (await readHeadFile(machine, "feed", "FeedPage")) as FeedFile;
+    expect(feed.entries).toHaveLength(100);
+    expect(feed.nextCursor).not.toBeNull();
+    const next = await call(
+      machine,
+      "GET",
+      `/relay/v1/feed?cursor=${encodeURIComponent(feed.nextCursor ?? "")}`,
+    );
+    expect(next.status, JSON.stringify(next.body)).toBe(200);
+    expectSchema("FeedPage", next.body);
+    const second = next.body as FeedFile;
+    expect(second.entries).toHaveLength(20);
+    expect(second.nextCursor).toBeNull();
+    const seen = new Set([...feed.entries, ...second.entries].map((entry) => entry.id));
+    expect(seen.size).toBe(120);
+    const small = await call(machine, "GET", "/relay/v1/feed?limit=7");
+    expectSchema("FeedPage", small.body);
+    expect((small.body as FeedFile).entries).toHaveLength(7);
+    expect((small.body as FeedFile).nextCursor).not.toBeNull();
+    const bad = await call(machine, "GET", "/relay/v1/feed?cursor=nonsense");
+    expectError(bad, 400, "malformed");
+    const unsigned = await client.send(machine.key, "GET", "/relay/v1/feed", { unsigned: true });
+    expect(unsigned.status).toBe(401);
+  });
+
+  it("shows the cause of a graveyard entry, in the head and in the paging call", async () => {
+    const machine = await enrol();
+    const cause = `superseded by #${randomText(2)}`;
+    await client.control("/graveyard/seed", { cause, count: 120 });
+    const graveyard = (await readHeadFile(machine, "graveyard", "GraveyardPage")) as GraveyardFile;
+    expect(graveyard.entries).toHaveLength(100);
+    expect(graveyard.entries.every((entry) => entry.cause === cause)).toBe(true);
+    expect(graveyard.nextCursor).not.toBeNull();
+    const next = await call(
+      machine,
+      "GET",
+      `/relay/v1/graveyard?cursor=${encodeURIComponent(graveyard.nextCursor ?? "")}`,
+    );
+    expect(next.status, JSON.stringify(next.body)).toBe(200);
+    expectSchema("GraveyardPage", next.body);
+    const second = next.body as GraveyardFile;
+    expect(second.entries).toHaveLength(20);
+    expect(second.entries[0]?.cause).toBe(cause);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("reads one task with the board card fields, and answers 404 for an unknown or malformed id", async () => {
+    const machine = await enrol();
+    const known = id();
+    await seedTasks([
+      {
+        id: known,
+        title: "Known task",
+        preview: { state: "ready", url: "https://preview.example.com/known" },
+      },
+    ]);
+    const reply = await readTask(machine, known);
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    expectSchema("TaskRead", reply.body);
+    const task = reply.body as TaskReply;
+    expect(task.task.id).toBe(known);
+    expect(task.status).toBe("planned");
+    expect(task.preview?.state).toBe("ready");
+    expect(task.checked).toBeUndefined();
+    expectError(await readTask(machine, id()), 404, "not_found");
+    expectError(await readTask(machine, "not%20an%20id"), 404, "not_found");
+    expectError(await readTask(machine, "x".repeat(65)), 404, "not_found");
+    const unsigned = await client.send(machine.key, "GET", `/relay/v1/tasks/${known}`, {
+      unsigned: true,
+    });
+    expect(unsigned.status).toBe(401);
+  });
+
+  describe("checked", () => {
+    const checkedFor = async (by: string, reviewer: string) => {
+      const machine = await enrol();
+      const task = id();
+      await seedTasks([{ id: task, title: "Built task" }]);
+      await client.control("/checked/seed", { taskId: task, by, reviewer });
+      const reply = await readTask(machine, task);
+      expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+      expectSchema("TaskRead", reply.body);
+      await client.rebuildSnapshot(machine.login);
+      const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+      const ref = (head.body as { files: Record<string, string> }).files.board ?? "";
+      const board = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
+      expectSchema("SnapshotBoard", board.body);
+      const card = (
+        board.body as { cards: Array<{ task: { id: string }; status: string }> }
+      ).cards.find((candidate) => candidate.task.id === task);
+      return { task: reply.body as TaskReply, boardStatus: card?.status };
+    };
+
+    it("is valid when a sign-off role holder checks and someone else reviewed", async () => {
+      const checker = await enrol({ role: "founder" });
+      const reviewer = await enrol({ role: "limited_staff" });
+      const { task, boardStatus } = await checkedFor(checker.login, reviewer.login);
+      expect(task.checked?.valid).toBe(true);
+      expect(task.checked?.by.login).toBe(checker.login);
+      expect(task.checked?.ignoredReason).toBeUndefined();
+      expect(task.status).toBe("checked");
+      expect(boardStatus).toBe("checked");
+    });
+
+    it("is invalid, with the reason, when the reviewer is the checker", async () => {
+      const checker = await enrol({ role: "founder" });
+      const { task, boardStatus } = await checkedFor(checker.login, checker.login);
+      expect(task.checked?.valid).toBe(false);
+      expect(task.checked?.ignoredReason).toMatch(/review/i);
+      expect(task.status).not.toBe("checked");
+      expect(boardStatus).not.toBe("checked");
+    });
+
+    it("is invalid, with the reason, when the checker lacks the sign-off role", async () => {
+      const checker = await enrol({ role: "limited_staff" });
+      const reviewer = await enrol({ role: "founder" });
+      const { task, boardStatus } = await checkedFor(checker.login, reviewer.login);
+      expect(task.checked?.valid).toBe(false);
+      expect(task.checked?.ignoredReason).toMatch(/sign-off role/);
+      expect(task.status).not.toBe("checked");
+      expect(boardStatus).not.toBe("checked");
+    });
+  });
+});
+
 describe("event retention", () => {
   // The 24-hour bound cannot be waited out; only the fake can shorten it.
   it.skipIf(external !== undefined)(

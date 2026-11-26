@@ -39,6 +39,9 @@ export type SchemaName =
   | "SnapshotMachines"
   | "SnapshotRepositories"
   | "SnapshotBoard"
+  | "FeedPage"
+  | "GraveyardPage"
+  | "TaskRead"
   | "Id";
 
 export interface SpecValidator {
@@ -115,6 +118,10 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "snapshot-machines.json": "SnapshotMachines",
   "snapshot-repositories.json": "SnapshotRepositories",
   "snapshot-board.json": "SnapshotBoard",
+  "snapshot-feed.json": "FeedPage",
+  "snapshot-graveyard.json": "GraveyardPage",
+  "task.json": "TaskRead",
+  "task-checked-ignored.json": "TaskRead",
 };
 
 /** Invalid examples are refused facts, except the enrolment ones; the same rule as the Go contract test. */
@@ -135,7 +142,13 @@ export const invalidExampleSchema = (file: string): SchemaName =>
                 ? "SnapshotWork"
                 : file.startsWith("snapshot-board")
                   ? "SnapshotBoard"
-                  : "FactsRequest";
+                  : file.startsWith("snapshot-feed")
+                    ? "FeedPage"
+                    : file.startsWith("snapshot-graveyard")
+                      ? "GraveyardPage"
+                      : file.startsWith("task-")
+                        ? "TaskRead"
+                        : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

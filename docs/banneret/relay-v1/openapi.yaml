@@ -22,6 +22,8 @@ tags:
   - name: facts
   - name: needs
   - name: repositories
+  - name: board
+  - name: feed
   - name: events
   - name: snapshot
 paths:
@@ -314,6 +316,91 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /feed:
+    get:
+      tags: [feed]
+      operationId: listFeed
+      summary: Older feed entries, newest first.
+      description: |
+        Added in 1.2. Served by a relay that advertises the `feed` section. The snapshot `feed` file holds the latest
+        100 entries; this call pages through the same list from where the file stops, using the file's `nextCursor`.
+        Entries are derived from tracker and relay events, never written by a client. A cursor the relay did not issue
+        is 400 `malformed`.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of feed entries.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedPage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /graveyard:
+    get:
+      tags: [feed]
+      operationId: listGraveyard
+      summary: Older graveyard entries, newest ruling first.
+      description: |
+        Added in 1.2. Served by a relay that advertises the `feed` section with the flag `graveyard`. The snapshot
+        `graveyard` file holds the latest 100 entries; this call continues from the file's `nextCursor`.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of graveyard entries.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraveyardPage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /tasks/{taskId}:
+    get:
+      tags: [board]
+      operationId: readTask
+      summary: One task, with its preview and its checked sign-off.
+      description: |
+        Added in 1.2. Served by a relay that advertises the `task` section. Returns the board card for the task plus
+        `preview` and `checked` when they exist. The Hub uses it when the task is not in the `board` or `map` file
+        it holds. A `taskId` that is malformed (not an `Id`) or unknown answers 404 `not_found`; this call never
+        answers 400.
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: The task's id. Not validated as an `Id` up front; a malformed value is 404 `not_found`.
+          schema: { type: string }
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskRead" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /events:
     get:
       tags: [events]
@@ -420,7 +507,7 @@ paths:
           description: |
             The file. Its schema is the one its head key names: `needs` is SnapshotNeeds, `health` is HealthBlock,
             `work` is SnapshotWork, `machines` is SnapshotMachines, `repositories` is SnapshotRepositories, `board` is
-            SnapshotBoard. The head key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
+            SnapshotBoard, `feed` is FeedPage, `graveyard` is GraveyardPage. The head key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
           headers:
             ETag:
               schema: { type: string, pattern: '^"sha256:[0-9a-f]{64}"$' }
@@ -436,6 +523,8 @@ paths:
                   - { $ref: "#/components/schemas/SnapshotMachines" }
                   - { $ref: "#/components/schemas/SnapshotRepositories" }
                   - { $ref: "#/components/schemas/SnapshotBoard" }
+                  - { $ref: "#/components/schemas/FeedPage" }
+                  - { $ref: "#/components/schemas/GraveyardPage" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -1118,6 +1207,12 @@ components:
             board:
               description: Added in 1.2. Present when the relay advertises the `board` section. A 1.1 Hub ignores it.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
+            feed:
+              description: Added in 1.2. Present when the relay advertises the `feed` section. The latest 100 entries.
+              allOf: [{ $ref: "#/components/schemas/FileRef" }]
+            graveyard:
+              description: Added in 1.2. Present when the `feed` section carries the flag `graveyard`. The latest 100 entries.
+              allOf: [{ $ref: "#/components/schemas/FileRef" }]
     SnapshotNeeds:
       description: |
         The caller's needs-you block, the same as `Today.needsYou`: the 20 most urgent items in the needs order.
@@ -1239,6 +1334,109 @@ components:
       required: [state]
       properties:
         state: { description: "Open string; known: `passing`, `failing`, `pending`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+    FeedPage:
+      description: |
+        Added in 1.2. The `feed` snapshot file and the response of `GET /feed`: newest first. The file holds the
+        latest 100 entries and its `nextCursor` continues in `GET /feed?cursor=`. Entries are derived by the relay;
+        a client never writes one. `nextCursor` is null on the last page.
+      type: object
+      additionalProperties: false
+      required: [entries, nextCursor]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/FeedEntry" }
+        nextCursor: { type: [string, "null"] }
+    FeedEntry:
+      description: "Closed, like a board card; an unknown field is a defect in the relay."
+      type: object
+      additionalProperties: false
+      required: [id, type, at, importance, summary]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        type:
+          description: |
+            Open string. Known values: `taken`, `released`, `lease_expired`, `pr_opened`, `pr_merged`, `built`,
+            `checked`, `sent_back`, `ruled_dead`, `comment`.
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        at: { $ref: "#/components/schemas/Timestamp" }
+        author:
+          description: Who did it, when a person did. Absent for something the relay noticed by itself.
+          allOf: [{ $ref: "#/components/schemas/PersonRef" }]
+        importance:
+          description: "Open string. Known values: `high`, `normal`, `low`. A client sorts nothing by it; it only styles."
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        summary: { description: "One plain sentence.", type: string, minLength: 1, maxLength: 240 }
+        link: { description: "Where to read more, on the tracker.", type: string, format: uri }
+        task: { $ref: "#/components/schemas/BoardTask" }
+        status:
+          description: The task's status when the entry was made; the vocabulary of the board card.
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+    GraveyardPage:
+      description: |
+        Added in 1.2. The `graveyard` snapshot file and the response of `GET /graveyard`: tasks ruled dead, newest
+        ruling first. The file holds the latest 100 and its `nextCursor` continues in `GET /graveyard?cursor=`.
+      type: object
+      additionalProperties: false
+      required: [entries, nextCursor]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/GraveyardEntry" }
+        nextCursor: { type: [string, "null"] }
+    GraveyardEntry:
+      type: object
+      additionalProperties: false
+      required: [task, cause, ruledAt]
+      properties:
+        task: { $ref: "#/components/schemas/BoardTask" }
+        cause: { description: "Why it was ruled dead, in the ruler's words, such as `superseded by #12`.", type: string, minLength: 1, maxLength: 500 }
+        ruledAt: { $ref: "#/components/schemas/Timestamp" }
+        by: { $ref: "#/components/schemas/PersonRef" }
+        link: { type: string, format: uri }
+    TaskRead:
+      description: |
+        Added in 1.2. The response of `GET /tasks/{taskId}`: every field of a board card, plus `preview` and `checked`
+        when they exist. Closed.
+      type: object
+      additionalProperties: false
+      required: [task, column, status, statusWhy, restsOn]
+      properties:
+        task: { $ref: "#/components/schemas/BoardTask" }
+        column: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+        status: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+        statusWhy: { type: string, minLength: 1, maxLength: 240 }
+        lease: { $ref: "#/components/schemas/BoardLease" }
+        pr: { $ref: "#/components/schemas/BoardPr" }
+        checks: { $ref: "#/components/schemas/BoardChecks" }
+        restsOn:
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/Id" }
+        preview: { $ref: "#/components/schemas/TaskPreview" }
+        checked: { $ref: "#/components/schemas/TaskChecked" }
+    TaskPreview:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: { description: "Open string; known: `building`, `ready`, `failed`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+        url: { description: "Present when the preview can be opened.", type: string, format: uri }
+    TaskChecked:
+      description: |
+        The sign-off record of a task that has a `checked` label. `valid` is true only when the rule in README,
+        "Checked", holds. When it is false, `ignoredReason` says why in one plain sentence and the card's status is not
+        `checked`.
+      type: object
+      additionalProperties: false
+      required: [by, at, valid]
+      properties:
+        by: { description: "Who added the label.", allOf: [{ $ref: "#/components/schemas/PersonRef" }] }
+        at: { description: "When the label was added.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+        valid: { type: boolean }
+        ignoredReason: { type: string, minLength: 1, maxLength: 240 }
     SnapshotMachines:
       description: |
         The caller's full `GET /machines` list in the same order, with the same visibility and `revocable` for the

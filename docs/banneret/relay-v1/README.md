@@ -256,8 +256,9 @@ forever. They carry nothing those calls do not already return to the same caller
   when the relay serves `GET /repositories`, `repositories` to `sha256:<hex>`. The path of a file uses the bare hex.
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
-  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board` (added in 1.2) is
-  `SnapshotBoard`. A client ignores keys under `files` it does not know, so a 1.1 Hub ignores `board`.
+  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board`, `feed` and `graveyard` (added in
+  1.2) are `SnapshotBoard`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know, so
+  a 1.1 Hub ignores them.
 - **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
   head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
   fetch its files.
@@ -292,6 +293,8 @@ What the files hold, and who sees what, is the same as the live calls:
 | machines | `GET /machines` for the caller | person (revoked machines for owner and founders; `revocable`) |
 | repositories | `GET /repositories` | nothing (relay-wide) |
 | board | none (snapshot only, added in 1.2) | nothing (relay-wide) |
+| feed | `GET /feed` (added in 1.2) | nothing (relay-wide) |
+| graveyard | `GET /graveyard` (added in 1.2) | nothing (relay-wide) |
 
 "No titles" means no title, text or path that a Hub reported (a heartbeat never carries them). The tracker titles that
 `GET /needs` and `GET /today` already return to staff stay in the needs and work files.
@@ -299,6 +302,7 @@ What the files hold, and who sees what, is the same as the live calls:
 ## Board and leases
 
 Added in 1.2, all additive. A relay that serves the board advertises the section `{kind:"board", flags:["leases"]}`
+(plus the flag `checked` when it applies the sign-off rule below)
 and names the `board` file in the snapshot head. A 1.1 Hub ignores the head key and the section. A Hub does not
 read the board unless capabilities carry the section. The board is snapshot-only: the relay computes it, the Hub
 draws it. Writes (take, release, hand-off) are not part of this contract.
@@ -321,14 +325,13 @@ first matching row:
 | Mark | `status` | Word | First match wins |
 |---|---|---|---|
 | † | `ruled_dead` | ruled dead | Issue closed as "not planned" |
-| ● | `checked` | checked | `checked` label that passes the sign-off rule (below) |
+| ● | `checked` | checked | `checked` label that passes the sign-off rule (see "Checked") |
 | ✕ | `sent_back` | sent back | Issue reopened after its PR merged; review "changes requested"; PR closed unmerged |
 | ◆ | `needs_you` | needs you or blocked | `needs:<person>` or `blocked` label; failing required checks; lease conflict; a rests-on task that is `needs_you`, `sent_back` or `ruled_dead` |
 | ◐ | `built` | built, unchecked | Linked PR merged, or issue closed as completed |
 | ○ | `planned` | planned | Open, none of the above |
 
-"Checked" requires that the person who reviewed and the person who checked are different people. The relay applies
-that rule and ignores a `checked` label that fails it.
+The rule for "checked" is under "Checked", below.
 
 **Lease state.** `state` is an open string; known values `active`, `stale`, `expired`, `paused`, `conflict`. Time
 runs from `lastSignalAt`, the latest heartbeat, push or comment:
@@ -343,6 +346,59 @@ runs from `lastSignalAt`, the latest heartbeat, push or comment:
 when the activity carries one, otherwise by `branch` and `projectKey`. A match sets `lastSignalAt` to the receipt
 time, which returns a `stale` or `expired` lease to `active`. A fact that matches no held task changes nothing.
 The `taskId` is an opaque id the Hub takes from the thread's linked issue.
+
+## Feed and graveyard
+
+Added in 1.2, all additive. A relay that serves them advertises the section `{kind:"feed", flags:["graveyard"]}` and
+names the `feed` (and, with the flag, the `graveyard`) file in the snapshot head. A Hub does not read either file
+unless capabilities carry the section.
+
+- **The files.** Both are `{entries[], nextCursor}`: `FeedPage` and `GraveyardPage`. Each holds the latest 100
+  entries, newest first. `nextCursor` is null when nothing is older.
+- **Paging.** `GET /feed?cursor=` and `GET /graveyard?cursor=` are signed and cursor-paged like `GET /needs`
+  (`cursor`, `limit` 1 to 100, 400 `malformed` for a cursor the relay did not issue). The file's `nextCursor`
+  continues in the call. A cursor is opaque, and a page can shift when new entries arrive.
+- **Derived only.** The relay builds entries from tracker and relay events. A client cannot write one; written
+  entries (comments, announcements) wait for a later minor version.
+- **Feed entry.** `{id, type, at, author?{id, login}, importance, summary, link?, task?{id, title, ref}, status?}`.
+  Objects are closed. `type` is an open string; known values `taken`, `released`, `lease_expired`, `pr_opened`,
+  `pr_merged`, `built`, `checked`, `sent_back`, `ruled_dead`, `comment`. `importance` is an open string; known
+  values `high`, `normal`, `low`. `status` is the task's status when the entry was made, in the board vocabulary.
+  `author` is absent for something the relay noticed itself. `summary` is one plain sentence.
+- **Graveyard entry.** `{task{id, title, ref}, cause, ruledAt, by?{id, login}, link?}`. `cause` is always present:
+  the Hub shows it, so a task never sits in the graveyard without a reason.
+
+## Task
+
+Added in 1.2. A relay that serves it advertises the section `{kind:"task", flags:[]}`. `GET /tasks/{taskId}` is
+signed and returns one board card (every field of `BoardCard`) plus two optional fields:
+
+- `preview?{state, url?}`: `state` is an open string, known values `building`, `ready`, `failed`; `url` is present
+  when the preview can be opened.
+- `checked?{by{id, login}, at, valid, ignoredReason?}`: the sign-off record, present when the task has a `checked`
+  label. See "Checked".
+
+A `taskId` that is malformed (not an `Id`) or unknown answers 404 `not_found`, never 400, like `DELETE
+/machines/{machineId}`. The Hub reads the card from the `board` or `map` file when it holds the task and calls this
+only for the rest.
+
+## Checked
+
+"Checked" means a person with the **sign-off role** confirms the item after CI passed and review approved. (Banneret's
+preset gives the sign-off role to founders; another company may map it differently, and the relay decides.) The sign-off
+lives in the `checked` label on the tracker issue; the relay keeps no store of its own. It counts only when the tracker's
+event log shows **all** of:
+
+1. a holder of the sign-off role added the `checked` label;
+2. the linked pull request had already merged;
+3. its checks were green;
+4. a review was approved by someone **other than the person who added the label**.
+
+If any of these fails, the relay ignores the label: `checked.valid` is false, `checked.ignoredReason` says why in one
+plain sentence (for example "The person who checked it also approved the review." or "ada-example does not hold the
+sign-off role."), and the card's `status` is not `checked`. A relay that applies the rule advertises the flag `checked`
+on the `board` section. A Hub draws a valid check as the checked mark with who and when, and an invalid one as the
+built mark with the reason.
 
 ## Events
 
@@ -385,6 +441,10 @@ thread when the environment is its own, and otherwise says which machine holds i
 - **1.2.** Adds the board and leases (see "Board and leases"): the `board` head key and `SnapshotBoard` file, the
   `board` section kind with flag `leases`, and the facts-as-heartbeat rule. A 1.1 Hub ignores unknown head keys and
   section kinds, so nothing breaks. A client reads the board only when capabilities carry the `board` section.
+  Also in 1.2 (additive): the feed and graveyard (see "Feed and graveyard"): the `feed` and
+  `graveyard` head keys, `GET /feed` and `GET /graveyard`, the `feed` section with flag `graveyard`; the task read
+  (see "Task"): `GET /tasks/{taskId}` and the `task` section; and the `checked` rule (see "Checked") with the flag
+  `checked` on the `board` section.
 - **1.1.** Banneret Hub 0.1.1211 shipped with 1.0, so from here on every additive change bumps the minor. 1.1 adds:
   - the `visit=1` flag on `GET /today`;
   - `usage` in facts;

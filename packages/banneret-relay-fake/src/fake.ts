@@ -190,12 +190,48 @@ interface SnapshotHeadRecord {
 }
 
 /** A seeded board task. The lease clock is `lastSignalAt`; state is computed from it on every read. */
+interface PersonView {
+  readonly id: string;
+  readonly login: string;
+}
+
+/** The sign-off record of a seeded task (README, Checked). Validity is decided when it is seeded. */
+interface CheckedRecord {
+  readonly by: PersonView;
+  readonly at: number;
+  readonly valid: boolean;
+  readonly ignoredReason?: string;
+}
+
+interface FeedRecord {
+  readonly id: string;
+  readonly type: string;
+  readonly at: number;
+  readonly author: PersonView | null;
+  readonly importance: string;
+  readonly summary: string;
+  readonly taskId: string | null;
+  readonly status: string | null;
+}
+
+interface GraveyardRecord {
+  readonly taskId: string;
+  readonly title: string;
+  readonly cause: string;
+  readonly ruledAt: number;
+  readonly by: PersonView | null;
+}
+
 interface BoardTask {
   readonly id: string;
   readonly title: string;
-  readonly column: string;
-  readonly status: string;
-  readonly holder: { readonly id: string; readonly login: string } | null;
+  column: string;
+  status: string;
+  holder: { readonly id: string; readonly login: string } | null;
+  pr: { readonly number: number; readonly state: string } | null;
+  checks: string | null;
+  preview: { readonly state: string; readonly url?: string } | null;
+  checked: CheckedRecord | null;
   readonly forcedLeaseState: "paused" | "conflict" | null;
   readonly branch: string | null;
   readonly projectKey: string | null;
@@ -468,6 +504,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const snapshotHeads = new Map<string, SnapshotHeadRecord[]>();
   /** Board tasks in seeding order. Relay-wide. */
   let boardTasks: BoardTask[] = [];
+  /** Derived entries, newest first. Relay-wide. */
+  let feedRecords: FeedRecord[] = [];
+  let graveyardRecords: GraveyardRecord[] = [];
   const holderIds = new Map<string, string>();
   let capabilitiesRevision = 1;
   const capabilitiesVersion = () => `c-${capabilitiesRevision}`;
@@ -929,55 +968,142 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return age >= LEASE_EXPIRES_MS ? "expired" : age >= LEASE_STALE_MS ? "stale" : "active";
   };
 
+  const personRefFor = (login: string): PersonView => {
+    const known = peopleByLogin.get(login);
+    const id =
+      known?.id ??
+      holderIds.get(login) ??
+      (() => {
+        const created = randomId("p");
+        holderIds.set(login, created);
+        return created;
+      })();
+    return { id, login };
+  };
+
+  const taskRefView = (task: { readonly id: string; readonly title: string }, index: number) => ({
+    id: task.id,
+    title: task.title,
+    ref: {
+      tracker: "github",
+      scope: "example-org/example-app",
+      key: String(index + 1),
+      url: `https://github.com/example-org/example-app/issues/${index + 1}`,
+    },
+  });
+
+  const cardView = (task: BoardTask, index: number, now: number) => {
+    const lease =
+      task.holder === null
+        ? undefined
+        : {
+            holder: task.holder,
+            state: leaseState(task, now),
+            since: iso(task.since),
+            lastSignalAt: iso(task.lastSignalAt),
+            staleAt: iso(task.lastSignalAt + LEASE_STALE_MS),
+            expiresAt: iso(task.lastSignalAt + LEASE_EXPIRES_MS),
+          };
+    // A held task that is not active is in Stuck, never Free; a held task never sits in Free.
+    const held = lease !== undefined;
+    const column =
+      held && lease.state !== "active" && lease.state !== "paused"
+        ? "stuck"
+        : held && task.column === "free"
+          ? "taken"
+          : task.column;
+    const status = held && lease.state === "conflict" ? "needs_you" : task.status;
+    const statusWhy =
+      held && lease.state === "conflict"
+        ? "Two people claim this task."
+        : held && (lease.state === "stale" || lease.state === "expired")
+          ? `${task.holder?.login ?? "The holder"} has been quiet, so the claim is ${lease.state}.`
+          : (STATUS_WHY[status] ?? STATUS_WHY.planned ?? "");
+    return {
+      task: taskRefView(task, index),
+      column,
+      status,
+      statusWhy,
+      ...(lease === undefined ? {} : { lease }),
+      ...(task.pr === null
+        ? {}
+        : {
+            pr: {
+              number: task.pr.number,
+              url: `https://github.com/example-org/example-app/pull/${task.pr.number}`,
+              state: task.pr.state,
+            },
+          }),
+      ...(task.checks === null ? {} : { checks: { state: task.checks } }),
+      restsOn: task.restsOn,
+    };
+  };
+
   const boardView = () => {
     const now = Date.now();
-    const cards = boardTasks.map((task, index) => {
-      const lease =
-        task.holder === null
-          ? undefined
-          : {
-              holder: task.holder,
-              state: leaseState(task, now),
-              since: iso(task.since),
-              lastSignalAt: iso(task.lastSignalAt),
-              staleAt: iso(task.lastSignalAt + LEASE_STALE_MS),
-              expiresAt: iso(task.lastSignalAt + LEASE_EXPIRES_MS),
-            };
-      // A held task that is not active is in Stuck, never Free; a held task never sits in Free.
-      const held = lease !== undefined;
-      const column =
-        held && lease.state !== "active" && lease.state !== "paused"
-          ? "stuck"
-          : held && task.column === "free"
-            ? "taken"
-            : task.column;
-      const status = held && lease.state === "conflict" ? "needs_you" : task.status;
-      const statusWhy =
-        held && lease.state === "conflict"
-          ? "Two people claim this task."
-          : held && (lease.state === "stale" || lease.state === "expired")
-            ? `${task.holder?.login ?? "The holder"} has been quiet, so the claim is ${lease.state}.`
-            : (STATUS_WHY[status] ?? STATUS_WHY.planned ?? "");
-      return {
-        task: {
-          id: task.id,
-          title: task.title,
-          ref: {
-            tracker: "github",
-            scope: "example-org/example-app",
-            key: String(index + 1),
-            url: `https://github.com/example-org/example-app/issues/${index + 1}`,
-          },
-        },
-        column,
-        status,
-        statusWhy,
-        ...(lease === undefined ? {} : { lease }),
-        restsOn: task.restsOn,
-      };
-    });
+    const cards = boardTasks.map((task, index) => cardView(task, index, now));
     return { state: "ok", notMeasured: [], columns: BOARD_COLUMNS, cards };
   };
+
+  // README, Task: the card plus the preview and the sign-off record.
+  const taskView = (task: BoardTask, index: number) => ({
+    ...cardView(task, index, Date.now()),
+    ...(task.preview === null ? {} : { preview: task.preview }),
+    ...(task.checked === null
+      ? {}
+      : {
+          checked: {
+            by: task.checked.by,
+            at: iso(task.checked.at),
+            valid: task.checked.valid,
+            ...(task.checked.ignoredReason === undefined
+              ? {}
+              : { ignoredReason: task.checked.ignoredReason }),
+          },
+        }),
+  });
+
+  // README, Feed and graveyard. Entries are stored newest first and paged by offset, like the other lists.
+  const feedEntryView = (record: FeedRecord) => {
+    const index = boardTasks.findIndex((candidate) => candidate.id === record.taskId);
+    const task = index < 0 ? undefined : boardTasks[index];
+    return {
+      id: record.id,
+      type: record.type,
+      at: iso(record.at),
+      ...(record.author === null ? {} : { author: record.author }),
+      importance: record.importance,
+      summary: record.summary,
+      ...(task === undefined
+        ? {}
+        : {
+            link: taskRefView(task, index).ref.url,
+            task: taskRefView(task, index),
+          }),
+      ...(record.status === null ? {} : { status: record.status }),
+    };
+  };
+  const graveyardEntryView = (record: GraveyardRecord) => {
+    const index = boardTasks.findIndex((candidate) => candidate.id === record.taskId);
+    const task = taskRefView({ id: record.taskId, title: record.title }, index < 0 ? 99 : index);
+    return {
+      task,
+      cause: record.cause,
+      ruledAt: iso(record.ruledAt),
+      ...(record.by === null ? {} : { by: record.by }),
+      link: task.ref.url,
+    };
+  };
+  const SNAPSHOT_FEED_MAX = 100;
+  const feedFile = () => ({
+    entries: feedRecords.slice(0, SNAPSHOT_FEED_MAX).map(feedEntryView),
+    nextCursor: feedRecords.length > SNAPSHOT_FEED_MAX ? encodeCursor(SNAPSHOT_FEED_MAX) : null,
+  });
+  const graveyardFile = () => ({
+    entries: graveyardRecords.slice(0, SNAPSHOT_FEED_MAX).map(graveyardEntryView),
+    nextCursor:
+      graveyardRecords.length > SNAPSHOT_FEED_MAX ? encodeCursor(SNAPSHOT_FEED_MAX) : null,
+  });
 
   // Snapshot (README, Snapshot). A head is rebuilt on every change and on every read, so a served head is always
   // current. Files are content-addressed and shared, but a read checks the caller's own retained heads.
@@ -1005,6 +1131,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         },
       ],
       ["board", "SnapshotBoard", boardView()],
+      ["feed", "FeedPage", feedFile()],
+      ["graveyard", "GraveyardPage", graveyardFile()],
     ];
     const refs: Record<string, string> = {};
     for (const [kind, schema, value] of entries) {
@@ -1269,7 +1397,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { id: "today", kind: "today", version: 1, flags: [] },
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
             { id: "machines", kind: "machines", version: 1, flags: ["revoke"] },
-            { id: "board", kind: "board", version: 1, flags: ["leases"] },
+            { id: "board", kind: "board", version: 1, flags: ["leases", "checked"] },
+            { id: "feed", kind: "feed", version: 1, flags: ["graveyard"] },
+            { id: "task", kind: "task", version: 1, flags: [] },
           ],
           mcpTools: [
             {
@@ -1442,6 +1572,37 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       return;
     }
 
+    if (method === "GET" && (route === "/feed" || route === "/graveyard")) {
+      const { offset, limit } = pageParams(query);
+      const records = route === "/feed" ? feedRecords : graveyardRecords;
+      const slice = records.slice(offset, offset + limit);
+      const next = offset + limit < records.length ? encodeCursor(offset + limit) : null;
+      if (route === "/feed") {
+        sendJson(response, 200, "FeedPage", {
+          entries: (slice as FeedRecord[]).map(feedEntryView),
+          nextCursor: next,
+        });
+      } else {
+        sendJson(response, 200, "GraveyardPage", {
+          entries: (slice as GraveyardRecord[]).map(graveyardEntryView),
+          nextCursor: next,
+        });
+      }
+      return;
+    }
+
+    const taskPath = /^\/tasks\/([^/]+)$/.exec(route);
+    if (method === "GET" && taskPath?.[1]) {
+      const taskId = taskPath[1];
+      const index = ID_PATTERN.test(taskId)
+        ? boardTasks.findIndex((candidate) => candidate.id === taskId)
+        : -1;
+      const found = index < 0 ? undefined : boardTasks[index];
+      if (found === undefined) throw new RelayError("not_found", "No such task.");
+      sendJson(response, 200, "TaskRead", taskView(found, index));
+      return;
+    }
+
     if (method === "GET" && route === "/events") {
       openStream(request, response, caller);
       return;
@@ -1610,6 +1771,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           column: String(raw.column ?? "free"),
           status: String(raw.status ?? "planned"),
           holder: login === null || holderId === null ? null : { id: holderId, login },
+          pr: null,
+          checks: null,
+          preview:
+            typeof raw.preview === "object" && raw.preview !== null
+              ? (raw.preview as { state: string; url?: string })
+              : null,
+          checked: null,
           forcedLeaseState: forced ? (raw.leaseState as "paused" | "conflict") : null,
           branch: raw.branch === undefined ? null : String(raw.branch),
           projectKey: raw.projectKey === undefined ? null : String(raw.projectKey),
@@ -1620,6 +1788,82 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       });
       refreshAllHeads();
       reply({ tasks: boardTasks.length });
+      return;
+    }
+    if (request.method === "POST" && route === "/feed/seed") {
+      const count = input.count === undefined ? 3 : Number(input.count);
+      if (!Number.isInteger(count) || count < 0 || count > 1000)
+        throw new RelayError("malformed", "count must be a whole number from 0 to 1000.");
+      const taskId = input.taskId === undefined ? null : String(input.taskId);
+      const task = taskId === null ? undefined : boardTasks.find((c) => c.id === taskId);
+      if (taskId !== null && task === undefined) throw new RelayError("not_found", "No such task.");
+      const now = Date.now();
+      feedRecords = Array.from({ length: count }, (_, index) => ({
+        id: randomId("f"),
+        type: String(input.type ?? "built"),
+        // Newest first, one minute apart.
+        at: now - index * 60_000,
+        author: input.by === undefined ? null : personRefFor(String(input.by)),
+        importance: String(input.importance ?? "normal"),
+        summary: `Feed entry ${index + 1} of ${count}.`,
+        taskId,
+        status: task?.status ?? null,
+      }));
+      refreshAllHeads();
+      reply({ entries: feedRecords.length });
+      return;
+    }
+    if (request.method === "POST" && route === "/graveyard/seed") {
+      const cause = typeof input.cause === "string" ? input.cause : "";
+      if (cause.length < 1 || cause.length > 500)
+        throw new RelayError("malformed", "cause must be 1 to 500 characters.");
+      const count = input.count === undefined ? 1 : Number(input.count);
+      if (!Number.isInteger(count) || count < 0 || count > 1000)
+        throw new RelayError("malformed", "count must be a whole number from 0 to 1000.");
+      const taskId = input.taskId === undefined ? null : String(input.taskId);
+      const task = taskId === null ? undefined : boardTasks.find((c) => c.id === taskId);
+      if (taskId !== null && task === undefined) throw new RelayError("not_found", "No such task.");
+      const now = Date.now();
+      graveyardRecords = Array.from({ length: count }, (_, index) => ({
+        taskId: task?.id ?? randomId("t"),
+        title: task?.title ?? `Ruled dead task ${index + 1}`,
+        cause,
+        ruledAt: now - index * 60_000,
+        by: input.by === undefined ? null : personRefFor(String(input.by)),
+      }));
+      refreshAllHeads();
+      reply({ entries: graveyardRecords.length });
+      return;
+    }
+    if (request.method === "POST" && route === "/checked/seed") {
+      const task = boardTasks.find((candidate) => candidate.id === String(input.taskId));
+      if (task === undefined) throw new RelayError("not_found", "No such task.");
+      const by = String(input.by ?? "");
+      const reviewer = String(input.reviewer ?? "");
+      if (by === "" || reviewer === "")
+        throw new RelayError("malformed", "by and reviewer are logins.");
+      // README, Checked: the checker holds the sign-off role (founders here), and the reviewer is someone else.
+      // The merged pull request and the green checks are fixed by the seed, so only these two can fail.
+      const holdsRole = peopleByLogin.get(by)?.role === "founder";
+      const ignoredReason = !holdsRole
+        ? `${by} does not hold the sign-off role.`
+        : by === reviewer
+          ? "The person who checked it also approved the review."
+          : undefined;
+      const valid = ignoredReason === undefined;
+      task.holder = null;
+      task.pr = { number: 100 + boardTasks.indexOf(task), state: "merged" };
+      task.checks = "passing";
+      task.status = valid ? "checked" : "built";
+      task.column = valid ? "shipped" : "validating";
+      task.checked = {
+        by: personRefFor(by),
+        at: Date.now(),
+        valid,
+        ...(ignoredReason === undefined ? {} : { ignoredReason }),
+      };
+      refreshAllHeads();
+      reply({ valid });
       return;
     }
     if (request.method === "POST" && route === "/lease/age") {
