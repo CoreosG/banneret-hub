@@ -93,7 +93,7 @@ function SidebarHarness() {
   const groups = useSidebarProjectGroups();
   return (
     <>
-      <WorkspaceSwitcher ariaLabel="Switch workspace" onBackdrop={false}>
+      <WorkspaceSwitcher homeLabel="T3 Code home" onBackdrop={false}>
         <span>Brand</span>
       </WorkspaceSwitcher>
       <ul aria-label="Sidebar projects">

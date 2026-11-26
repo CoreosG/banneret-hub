@@ -20,9 +20,11 @@ import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ChatWorkflowsRouteImport } from './routes/_chat.workflows'
 import { Route as ChatUsageRouteImport } from './routes/_chat.usage'
+import { Route as ChatTodayRouteImport } from './routes/_chat.today'
 import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
+import { Route as ChatNeedsRouteImport } from './routes/_chat.needs'
 import { Route as ChatIssuesRouteImport } from './routes/_chat.issues'
 import { Route as ThreadsEnvironmentIdThreadIdRouteImport } from './routes/threads.$environmentId.$threadId'
 import { Route as ChatSettingsWorktreesRouteImport } from './routes/_chat.settings.worktrees'
@@ -110,6 +112,11 @@ const ChatUsageRoute = ChatUsageRouteImport.update({
   path: '/usage',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatTodayRoute = ChatTodayRouteImport.update({
+  id: '/today',
+  path: '/today',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatSettingsRoute = ChatSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -123,6 +130,11 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
 const ChatNewRoute = ChatNewRouteImport.update({
   id: '/new',
   path: '/new',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatNeedsRoute = ChatNeedsRouteImport.update({
+  id: '/needs',
+  path: '/needs',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatIssuesRoute = ChatIssuesRouteImport.update({
@@ -304,9 +316,11 @@ export interface FileRoutesByFullPath {
   '/pair': typeof PairRoute
   '/welcome': typeof WelcomeRoute
   '/issues': typeof ChatIssuesRoute
+  '/needs': typeof ChatNeedsRoute
   '/new': typeof ChatNewRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
+  '/today': typeof ChatTodayRoute
   '/usage': typeof ChatUsageRoute
   '/workflows': typeof ChatWorkflowsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
@@ -350,9 +364,11 @@ export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/welcome': typeof WelcomeRoute
   '/issues': typeof ChatIssuesRoute
+  '/needs': typeof ChatNeedsRoute
   '/new': typeof ChatNewRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
+  '/today': typeof ChatTodayRoute
   '/usage': typeof ChatUsageRoute
   '/workflows': typeof ChatWorkflowsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
@@ -399,9 +415,11 @@ export interface FileRoutesById {
   '/pair': typeof PairRoute
   '/welcome': typeof WelcomeRoute
   '/_chat/issues': typeof ChatIssuesRoute
+  '/_chat/needs': typeof ChatNeedsRoute
   '/_chat/new': typeof ChatNewRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/settings': typeof ChatSettingsRouteWithChildren
+  '/_chat/today': typeof ChatTodayRoute
   '/_chat/usage': typeof ChatUsageRoute
   '/_chat/workflows': typeof ChatWorkflowsRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
@@ -449,9 +467,11 @@ export interface FileRouteTypes {
     | '/pair'
     | '/welcome'
     | '/issues'
+    | '/needs'
     | '/new'
     | '/pull-requests'
     | '/settings'
+    | '/today'
     | '/usage'
     | '/workflows'
     | '/projects/$projectKey'
@@ -495,9 +515,11 @@ export interface FileRouteTypes {
     | '/pair'
     | '/welcome'
     | '/issues'
+    | '/needs'
     | '/new'
     | '/pull-requests'
     | '/settings'
+    | '/today'
     | '/usage'
     | '/workflows'
     | '/projects/$projectKey'
@@ -543,9 +565,11 @@ export interface FileRouteTypes {
     | '/pair'
     | '/welcome'
     | '/_chat/issues'
+    | '/_chat/needs'
     | '/_chat/new'
     | '/_chat/pull-requests'
     | '/_chat/settings'
+    | '/_chat/today'
     | '/_chat/usage'
     | '/_chat/workflows'
     | '/projects/$projectKey'
@@ -674,6 +698,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatUsageRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/today': {
+      id: '/_chat/today'
+      path: '/today'
+      fullPath: '/today'
+      preLoaderRoute: typeof ChatTodayRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/settings': {
       id: '/_chat/settings'
       path: '/settings'
@@ -693,6 +724,13 @@ declare module '@tanstack/react-router' {
       path: '/new'
       fullPath: '/new'
       preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/needs': {
+      id: '/_chat/needs'
+      path: '/needs'
+      fullPath: '/needs'
+      preLoaderRoute: typeof ChatNeedsRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/issues': {
@@ -988,9 +1026,11 @@ const ChatSettingsRouteWithChildren = ChatSettingsRoute._addFileChildren(
 
 interface ChatRouteChildren {
   ChatIssuesRoute: typeof ChatIssuesRoute
+  ChatNeedsRoute: typeof ChatNeedsRoute
   ChatNewRoute: typeof ChatNewRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatSettingsRoute: typeof ChatSettingsRouteWithChildren
+  ChatTodayRoute: typeof ChatTodayRoute
   ChatUsageRoute: typeof ChatUsageRoute
   ChatWorkflowsRoute: typeof ChatWorkflowsRoute
   ChatIndexRoute: typeof ChatIndexRoute
@@ -1001,9 +1041,11 @@ interface ChatRouteChildren {
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatIssuesRoute: ChatIssuesRoute,
+  ChatNeedsRoute: ChatNeedsRoute,
   ChatNewRoute: ChatNewRoute,
   ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatSettingsRoute: ChatSettingsRouteWithChildren,
+  ChatTodayRoute: ChatTodayRoute,
   ChatUsageRoute: ChatUsageRoute,
   ChatWorkflowsRoute: ChatWorkflowsRoute,
   ChatIndexRoute: ChatIndexRoute,

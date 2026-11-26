@@ -70,6 +70,13 @@ const startForwarder = async (target: string): Promise<Forwarder> => {
           headers: request.headers,
         },
         (reply) => {
+          // An event stream passes through as it arrives; it never ends on its own.
+          if (String(reply.headers["content-type"] ?? "").startsWith("text/event-stream")) {
+            response.writeHead(reply.statusCode ?? 502, reply.headers);
+            reply.pipe(response);
+            response.on("close", () => reply.destroy());
+            return;
+          }
           const replyChunks: Buffer[] = [];
           reply.on("data", (chunk: Buffer) => replyChunks.push(chunk));
           reply.on("end", () => {

@@ -10,6 +10,13 @@ import {
   AuthOrchestrationReadScope,
   EnvironmentAuthorizationError,
 } from "./auth.ts";
+import {
+  BANNERET_RELAY_FEED_RPCS,
+  BANNERET_RELAY_FEED_RPC_AGGREGATES,
+  BANNERET_RELAY_FEED_RPC_SCOPES,
+} from "./banneretRelayFeed.ts";
+
+export * from "./banneretRelayFeed.ts";
 
 export const BANNERET_RELAY_WS_METHODS = {
   probe: "banneretRelay.probe",
@@ -178,6 +185,7 @@ export const BANNERET_RELAY_RPCS = [
   WsBanneretRelayMachinesRpc,
   WsBanneretRelayRevokeMachineRpc,
   WsBanneretRelayMatchProjectsRpc,
+  ...BANNERET_RELAY_FEED_RPCS,
 ] as const;
 
 /** Spread into `CLIENT_GUARDED_RPC_SCOPES`. Probing dials an address the user typed. */
@@ -190,6 +198,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.machines]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.revokeMachine]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.matchProjects]: AuthOrchestrationOperateScope,
+  ...BANNERET_RELAY_FEED_RPC_SCOPES,
 } as const;
 
 /** Spread into the server's `RPC_AGGREGATES`. */
@@ -202,6 +211,7 @@ export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.machines]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.revokeMachine]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.matchProjects]: "banneret-relay",
+  ...BANNERET_RELAY_FEED_RPC_AGGREGATES,
 } as const;
 
 export type BanneretRelayAddress =
