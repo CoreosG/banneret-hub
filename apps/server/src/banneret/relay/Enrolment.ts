@@ -3,6 +3,24 @@
 // The persisted state is one of six values (see the state table in the PR that added this file);
 // health is run-time only. Writes go secrets first, then the state file; removals go state file
 // first, then secrets, and start-up deletes secrets that no state matches.
+//
+// Token re-issue (relay v1, README "Enrolment" step 6): until a token is used, every poll of an
+// approved pairing returns a fresh token and the one before it stops working. So `approved` keeps
+// `pairingId` (the key is the machine key and stays anyway) until the first signed call succeeds;
+// `configured` drops it.
+//
+// | From                         | Event                                              | To                               |
+// |------------------------------|----------------------------------------------------|----------------------------------|
+// | requested, awaiting_approval | poll `approved` with a token                       | approved (token written, then state) |
+// | requested, awaiting_approval | poll `approved` without a token                    | none, `token_lost`               |
+// | requested, awaiting_approval | poll reply lost, or crash before `approved` saved  | unchanged; the next poll brings a fresh token |
+// | approved                     | signed setup calls succeed                         | configured (pairing data dropped) |
+// | approved                     | 401 `unauthenticated`, then poll `approved` + token | approved, fresh token written; retry after backoff |
+// | approved                     | 401 `unauthenticated`, then poll `approved`, no token | approved, health `refused`; retry after backoff |
+// | approved                     | 401 `unauthenticated`, then poll `refused`/`expired`/404/other | none, as from requested |
+// | approved                     | 401 `unauthenticated`, then 429/503/network        | approved; back off               |
+// | approved                     | any other 401                                      | approved, health `refused`; back off |
+// | approved, configured         | 401 `token_revoked`                                | revoked                          |
 import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 
@@ -80,6 +98,8 @@ const Persisted = Schema.Union([
     state: Schema.Literal("approved"),
     relayOrigin: Schema.String,
     displayName: Schema.String,
+    /** Kept until the first signed call succeeds, to poll for a re-issued token. */
+    pairingId: Schema.String,
     machineId: Schema.String,
     label: Schema.String,
     kind: BanneretMachineKind,
@@ -110,6 +130,7 @@ type Persisted = typeof Persisted.Type;
 type PendingState = Extract<Persisted, { state: "requested" | "awaiting_approval" }>;
 type Enrolled = Extract<Persisted, { state: "approved" | "configured" }>;
 type Configured = Extract<Persisted, { state: "configured" }>;
+type Approved = Extract<Persisted, { state: "approved" }>;
 
 const PersistedJson = Schema.fromJsonString(Persisted);
 const decodePersisted = Schema.decodeUnknownEffect(PersistedJson);
@@ -665,10 +686,39 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const error = outcome.failure;
     if (error.code === "token_revoked") {
       yield* whileStill(from, toRevoked(from, error.details));
-    } else {
+    } else if (!(from.state === "approved" && error.code === "unauthenticated")) {
+      // While approved, `unauthenticated` asks for a re-issued token first (finishSetup).
       yield* updateHealth(error);
     }
     return yield* error;
+  });
+
+  const pollPairing = (relayOrigin: string, pairingId: string, key: MachineKey) =>
+    Effect.flatMap(nowMs(), (now) =>
+      relayFetch({
+        origin: relayOrigin,
+        method: "POST",
+        target: "/relay/v1/enroll/poll",
+        body: { pairingId },
+        signer: { kind: "enrolment", key },
+        nowMs: now,
+      }).pipe(Effect.flatMap((reply) => decodeReply(PollReply, reply))),
+    ).pipe(Effect.result);
+
+  /** A failed poll: 404 and other refusals end in none; 429, 503 and network errors back off. */
+  const pollFailed = Effect.fn("BanneretEnrolment.pollFailed")(function* (
+    from: PendingState | Approved,
+    error: RelayCallError,
+  ) {
+    if (error.status === 404) {
+      yield* whileStill(from, toNone("not_found"));
+      return 0;
+    }
+    if (error.retryable || error.status === 0) {
+      return error.retryAfterMs === undefined ? nextBackoff() : clampDelay(error.retryAfterMs);
+    }
+    yield* whileStill(from, toNone("refused", error.message));
+    return 0;
   });
 
   // One driver fiber. It acts only in requested, awaiting_approval, approved and configured, so an
@@ -681,28 +731,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       yield* whileStill(from, toNone("key_lost"));
       return 0;
     }
-    const outcome = yield* Effect.flatMap(nowMs(), (now) =>
-      relayFetch({
-        origin: from.relayOrigin,
-        method: "POST",
-        target: "/relay/v1/enroll/poll",
-        body: { pairingId: from.pairingId },
-        signer: { kind: "enrolment", key: key.value },
-        nowMs: now,
-      }).pipe(Effect.flatMap((reply) => decodeReply(PollReply, reply))),
-    ).pipe(Effect.result);
-    if (Result.isFailure(outcome)) {
-      const error = outcome.failure;
-      if (error.status === 404) {
-        yield* whileStill(from, toNone("not_found"));
-        return 0;
-      }
-      if (error.retryable || error.status === 0) {
-        return error.retryAfterMs === undefined ? nextBackoff() : clampDelay(error.retryAfterMs);
-      }
-      yield* whileStill(from, toNone("refused", error.message));
-      return 0;
-    }
+    const outcome = yield* pollPairing(from.relayOrigin, from.pairingId, key.value);
+    if (Result.isFailure(outcome)) return yield* pollFailed(from, outcome.failure);
     backoffMs = 0;
     const reply = outcome.success;
     const delay = clampDelay(reply.retryAfterMs);
@@ -731,6 +761,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
               state: "approved",
               relayOrigin: from.relayOrigin,
               displayName: from.displayName,
+              pairingId: from.pairingId,
               machineId,
               label: from.label,
               kind: from.kind,
@@ -770,9 +801,46 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     return undefined;
   });
 
-  const finishSetup = Effect.fn("BanneretEnrolment.finishSetup")(function* (
-    from: Extract<Persisted, { state: "approved" }>,
+  /**
+   * Approved, and the token was refused as `unauthenticated` before any call made with it succeeded:
+   * the reply that carried the latest token was lost, or a later poll replaced it. Poll the pairing
+   * again and store the fresh token; the next step retries setup with it.
+   */
+  const reissue = Effect.fn("BanneretEnrolment.reissue")(function* (
+    from: Approved,
+    refusal: RelayCallError,
   ) {
+    const key = yield* loadKey;
+    if (Option.isNone(key)) {
+      yield* whileStill(from, toNone("key_lost"));
+      return 0;
+    }
+    const outcome = yield* pollPairing(from.relayOrigin, from.pairingId, key.value);
+    if (Result.isFailure(outcome)) return yield* pollFailed(from, outcome.failure);
+    const reply = outcome.success;
+    switch (reply.state) {
+      case "approved": {
+        const { token } = reply;
+        if (token === undefined || reply.machineId !== from.machineId) {
+          // The relay saw this machine's token used, so it is not lost: some other refusal.
+          yield* updateHealth(refusal);
+          return nextBackoff();
+        }
+        yield* whileStill(from, setSecret(TOKEN_SECRET, Buffer.from(token, "utf8")));
+        return nextBackoff();
+      }
+      case "refused":
+      case "expired":
+        yield* whileStill(from, toNone(reply.reason ?? reply.state));
+        return 0;
+      case "pending":
+      case "awaiting_approval":
+        yield* whileStill(from, toNone("token_lost"));
+        return 0;
+    }
+  });
+
+  const finishSetup = Effect.fn("BanneretEnrolment.finishSetup")(function* (from: Approved) {
     const outcome = yield* Effect.gen(function* () {
       const capabilities = yield* signedCall(from, "GET", "/relay/v1/capabilities");
       etag = capabilities.etag;
@@ -782,6 +850,9 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     }).pipe(Effect.result);
     if (Result.isFailure(outcome)) {
       if (outcome.failure.code === "token_revoked") return 0;
+      if (outcome.failure.status === 401 && outcome.failure.code === "unauthenticated") {
+        return yield* reissue(from, outcome.failure);
+      }
       // signedCall records transport failures; an answer that arrived without `me` lands here.
       yield* updateHealth(outcome.failure);
       return nextBackoff();

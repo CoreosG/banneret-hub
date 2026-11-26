@@ -97,14 +97,17 @@ paths:
     post:
       tags: [enrolment]
       operationId: pollEnrolment
-      summary: Read the state of a pairing; on approval, receive the device token once.
+      summary: Read the state of a pairing; on approval, receive a fresh device token until one is used.
       description: |
         Refused and expired pairings are reported here as a 200 `state` with a `reason`. Error responses mean only
         a malformed request (400), a missing, malformed or failing signature (401), an unknown pairing id
         (404 `not_found`), a body over 1 MiB (413), rate limiting (429) or an unavailable relay (503).
         No `Authorization` and no `X-Banneret-Device` header. Signed with the pairing's key, counter `0`. Poll no
-        sooner than `retryAfterMs`. The token is returned on the first poll after approval and never again; a later
-        poll of the same pairing answers `approved` without `token`. A Hub that lost the token enrols again.
+        sooner than `retryAfterMs`. After approval, every poll returns a fresh `token` until a token is used, meaning
+        the relay authenticates a signed call made with it. Each fresh token replaces the one before it: only the
+        latest one works, and an older one is refused with 401 `unauthenticated`. After the first call the relay
+        authenticates, a poll of the same pairing answers `approved` without `token`. Hub rule: a token refused with
+        401 `unauthenticated` before any call made with it has succeeded means poll again for a fresh one.
       security: []
       parameters:
         - $ref: "#/components/parameters/Counter"
@@ -817,7 +820,10 @@ components:
         retryAfterMs: { type: integer, minimum: 0 }
         machineId: { $ref: "#/components/schemas/Id" }
         token:
-          description: The device token, on the first poll after approval only.
+          description: |
+            The device token. Once `approved`, every poll returns a fresh one until a token is used (the relay
+            authenticates a signed call made with it); each fresh token replaces the one before it, so only the
+            latest one works. After that first authenticated call, polls omit it.
           type: string
           minLength: 32
           maxLength: 256

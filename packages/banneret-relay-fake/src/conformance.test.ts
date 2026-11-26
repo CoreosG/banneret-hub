@@ -247,18 +247,71 @@ describe("capabilities with a failing token", () => {
 });
 
 describe("enrolment", () => {
-  it("goes pending, approved, then hands out the token exactly once", async () => {
+  /** A pairing approved for a new founder, not yet polled. */
+  const approvedPairing = async () => {
+    const started = await startPairing();
+    await confirm(started, { login: newLogin(), role: "founder" });
+    return started;
+  };
+
+  const capabilitiesWith = (started: Started, machineId: string, token: string) =>
+    client.send(started.key, "GET", "/relay/v1/capabilities", { token, device: machineId });
+
+  it("goes pending, then approved with a machine id and a token", async () => {
     const started = await startPairing();
     expect(started.confirmCode).toMatch(/^[A-Z2-7]{8}$/);
     expect((await poll(started)).state).toBe("pending");
     await confirm(started, { login: newLogin(), role: "founder" });
+    const approved = await poll(started);
+    expect(approved.state).toBe("approved");
+    expect(approved.machineId).toBeDefined();
+    expect(approved.token).toBeDefined();
+  });
+
+  it("returns a fresh token on each poll after approval until one is used", async () => {
+    const started = await approvedPairing();
     const first = await poll(started);
-    expect(first.state).toBe("approved");
-    expect(first.token).toBeDefined();
     const second = await poll(started);
     expect(second.state).toBe("approved");
     expect(second.machineId).toBe(first.machineId);
-    expect(second.token).toBeUndefined();
+    expect(first.token).toBeDefined();
+    expect(second.token).toBeDefined();
+    expect(second.token).not.toBe(first.token);
+  });
+
+  it("accepts only the latest re-issued token", async () => {
+    const started = await approvedPairing();
+    const first = await poll(started);
+    const second = await poll(started);
+    const machineId = second.machineId!;
+    expectError(await capabilitiesWith(started, machineId, first.token!), 401, "unauthenticated");
+    expect((await capabilitiesWith(started, machineId, second.token!)).status).toBe(200);
+  });
+
+  it("stops returning a token after the first authenticated call", async () => {
+    const started = await approvedPairing();
+    const approved = await poll(started);
+    expect((await capabilitiesWith(started, approved.machineId!, approved.token!)).status).toBe(
+      200,
+    );
+    const after = await poll(started);
+    expect(after.state).toBe("approved");
+    expect(after.machineId).toBe(approved.machineId);
+    expect(after.token).toBeUndefined();
+    // The used token keeps working.
+    expect((await capabilitiesWith(started, approved.machineId!, approved.token!)).status).toBe(
+      200,
+    );
+  });
+
+  it("refuses an older token as unauthenticated once a newer one was used", async () => {
+    const started = await approvedPairing();
+    const older = await poll(started);
+    const latest = await poll(started);
+    const machineId = latest.machineId!;
+    expect((await capabilitiesWith(started, machineId, latest.token!)).status).toBe(200);
+    expectError(await capabilitiesWith(started, machineId, older.token!), 401, "unauthenticated");
+    expect((await poll(started)).token).toBeUndefined();
   });
 
   it("holds a person new to the relay in awaiting_approval for 7 days until a founder approves", async () => {
