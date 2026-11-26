@@ -1023,6 +1023,20 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     },
   });
 
+  // No board card: the task comes from the plan ref. The id is derived from the ref, so it is stable and opaque.
+  // The fake cannot read an issue, so the title is the plan item's title.
+  const refOnlyTask = (ref: NonNullable<StagePlan["items"][number]["task"]>, title: string) => ({
+    id: `ref_${sha256Hex(Buffer.from(JSON.stringify([ref.tracker, ref.host ?? null, ref.scope, ref.key]))).slice(0, 24)}`,
+    title,
+    ref: {
+      tracker: ref.tracker,
+      ...(ref.host === undefined ? {} : { host: ref.host }),
+      scope: ref.scope,
+      key: ref.key,
+      url: `https://${ref.host ?? "github.com"}/${ref.scope}/issues/${ref.key}`,
+    },
+  });
+
   const cardView = (task: BoardTask, index: number, now: number) => {
     const lease =
       task.holder === null
@@ -1175,7 +1189,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           title: item.title,
           status,
           statusWhy,
-          ...(card === undefined ? {} : { task: card.ref }),
+          // README, Map: an item with a plan `task` always carries `task`, card or no card.
+          ...(item.task === undefined
+            ? {}
+            : { task: card?.ref ?? refOnlyTask(item.task, item.title) }),
           restsOn: [...(item.restsOn ?? [])],
         };
       });
