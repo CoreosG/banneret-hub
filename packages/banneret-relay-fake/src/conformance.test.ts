@@ -1242,7 +1242,11 @@ describe("board and leases", () => {
     readonly task: { readonly id: string };
     readonly column: string;
     readonly status: string;
-    readonly lease?: { readonly holder: { readonly login: string }; readonly state: string };
+    readonly lease?: {
+      readonly holder: { readonly login: string };
+      readonly state: string;
+      readonly lastSignalAt: string;
+    };
   }
   interface Board {
     readonly columns: ReadonlyArray<{ readonly id: string; readonly title: string }>;
@@ -1344,7 +1348,7 @@ describe("board and leases", () => {
   it("returns the lease to active when a fact carries the taskId", async () => {
     const machine = await enrol();
     const task = id();
-    await seed([{ id: task, title: "Held task", column: "taken", holder: "bo-example" }]);
+    await seed([{ id: task, title: "Held task", column: "taken", holder: machine.login }]);
     await client.control("/lease/age", { taskId: task, hours: 25 });
     await expect
       .poll(async () => (await cardFor(machine, task))?.lease?.state, POLL)
@@ -1375,7 +1379,7 @@ describe("board and leases", () => {
         id: task,
         title: "Held task",
         column: "taken",
-        holder: "bo-example",
+        holder: machine.login,
         branch: first.branch,
         projectKey: first.projectKey,
       },
@@ -1387,6 +1391,51 @@ describe("board and leases", () => {
     await expect
       .poll(async () => (await cardFor(machine, task))?.lease?.state, POLL)
       .toBe("active");
+  });
+
+  it("ignores a fact from a machine whose owner is not the lease holder", async () => {
+    const holder = await enrol();
+    const coworker = await enrol();
+    const task = id();
+    await seed([{ id: task, title: "Held task", column: "taken", holder: holder.login }]);
+    await client.control("/lease/age", { taskId: task, hours: 8 });
+    await expect
+      .poll(async () => (await cardFor(coworker, task))?.lease?.state, POLL)
+      .toBe("stale");
+    const before = (await cardFor(coworker, task))?.lease;
+    const body = factsFor(coworker) as unknown as { activity: Array<Record<string, unknown>> };
+    const first = body.activity[0];
+    if (first === undefined) throw new Error("facts example has no activity");
+    first.taskId = task;
+    const sent = await call(coworker, "POST", "/relay/v1/facts", body);
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    await client.rebuildSnapshot(coworker.login);
+    const after = await cardFor(coworker, task);
+    expect(after?.lease?.state).toBe("stale");
+    expect(after?.lease?.lastSignalAt).toBe(before?.lastSignalAt);
+  });
+
+  it("ignores a fact from a stopped session", async () => {
+    const machine = await enrol();
+    const task = id();
+    await seed([{ id: task, title: "Held task", column: "taken", holder: machine.login }]);
+    await client.control("/lease/age", { taskId: task, hours: 8 });
+    await expect.poll(async () => (await cardFor(machine, task))?.lease?.state, POLL).toBe("stale");
+    const before = (await cardFor(machine, task))?.lease;
+    const body = factsFor(machine) as unknown as { activity: Array<Record<string, unknown>> };
+    const first = body.activity[0];
+    if (first === undefined) throw new Error("facts example has no activity");
+    first.taskId = task;
+    first.state = "stopped";
+    first.stopReason = "killed";
+    first.processRunning = false;
+    delete first.waiting;
+    const sent = await call(machine, "POST", "/relay/v1/facts", body);
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    await client.rebuildSnapshot(machine.login);
+    const after = await cardFor(machine, task);
+    expect(after?.lease?.state).toBe("stale");
+    expect(after?.lease?.lastSignalAt).toBe(before?.lastSignalAt);
   });
 });
 
@@ -1406,7 +1455,7 @@ describe("feed, graveyard, tasks and checked", () => {
     readonly status: string;
     readonly preview?: { readonly state: string; readonly url?: string };
     readonly checked?: {
-      readonly by: { readonly login: string };
+      readonly by: { readonly id: string; readonly login: string };
       readonly valid: boolean;
       readonly ignoredReason?: string;
     };
@@ -1530,11 +1579,19 @@ describe("feed, graveyard, tasks and checked", () => {
   });
 
   describe("checked", () => {
-    const checkedFor = async (by: string, reviewer: string) => {
+    const personIdOf = async (machine: Enrolled): Promise<string> => {
+      const reply = await call(machine, "GET", "/relay/v1/capabilities");
+      return (reply.body as { me: { id: string } }).me.id;
+    };
+    const checkedFor = async (by: Enrolled, reviewer: Enrolled) => {
       const machine = await enrol();
       const task = id();
       await seedTasks([{ id: task, title: "Built task" }]);
-      await client.control("/checked/seed", { taskId: task, by, reviewer });
+      await client.control("/checked/seed", {
+        taskId: task,
+        by: await personIdOf(by),
+        reviewer: await personIdOf(reviewer),
+      });
       const reply = await readTask(machine, task);
       expect(reply.status, JSON.stringify(reply.body)).toBe(200);
       expectSchema("TaskRead", reply.body);
@@ -1552,9 +1609,10 @@ describe("feed, graveyard, tasks and checked", () => {
     it("is valid when a sign-off role holder checks and someone else reviewed", async () => {
       const checker = await enrol({ role: "founder" });
       const reviewer = await enrol({ role: "limited_staff" });
-      const { task, boardStatus } = await checkedFor(checker.login, reviewer.login);
+      const { task, boardStatus } = await checkedFor(checker, reviewer);
       expect(task.checked?.valid).toBe(true);
       expect(task.checked?.by.login).toBe(checker.login);
+      expect(task.checked?.by.id).toBe(await personIdOf(checker));
       expect(task.checked?.ignoredReason).toBeUndefined();
       expect(task.status).toBe("checked");
       expect(boardStatus).toBe("checked");
@@ -1562,7 +1620,7 @@ describe("feed, graveyard, tasks and checked", () => {
 
     it("is invalid, with the reason, when the reviewer is the checker", async () => {
       const checker = await enrol({ role: "founder" });
-      const { task, boardStatus } = await checkedFor(checker.login, checker.login);
+      const { task, boardStatus } = await checkedFor(checker, checker);
       expect(task.checked?.valid).toBe(false);
       expect(task.checked?.ignoredReason).toMatch(/review/i);
       expect(task.status).not.toBe("checked");
@@ -1572,7 +1630,7 @@ describe("feed, graveyard, tasks and checked", () => {
     it("is invalid, with the reason, when the checker lacks the sign-off role", async () => {
       const checker = await enrol({ role: "limited_staff" });
       const reviewer = await enrol({ role: "founder" });
-      const { task, boardStatus } = await checkedFor(checker.login, reviewer.login);
+      const { task, boardStatus } = await checkedFor(checker, reviewer);
       expect(task.checked?.valid).toBe(false);
       expect(task.checked?.ignoredReason).toMatch(/sign-off role/);
       expect(task.status).not.toBe("checked");
