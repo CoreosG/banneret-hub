@@ -10,6 +10,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
+  type BanneretFeedBoardRead,
   type BanneretFeedState,
   type BanneretFeedNeedsItem,
   type BanneretFeedNeedsRead,
@@ -93,6 +94,8 @@ export interface EnvironmentFeed {
   readonly needsNextCursor: string | null;
   readonly needsFetchedAt: string | null;
   readonly needsProblem: FeedProblem | null;
+  /** The board from the relay's snapshot; null when the relay offers none or it is not read yet. */
+  readonly board: BanneretFeedBoardRead | null;
   /** A read that failed without any answer from this environment. */
   readonly unreachable: boolean;
 }
@@ -111,6 +114,7 @@ const EMPTY_FEED: EnvironmentFeed = {
   needsNextCursor: null,
   needsFetchedAt: null,
   needsProblem: null,
+  board: null,
   unreachable: false,
 };
 
@@ -203,6 +207,7 @@ function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
     sectionsKnown: state.sectionsKnown,
     sections: state.sections,
     needsCount: state.needsCount,
+    board: state.board,
   });
   const seen = seenRevisions.get(environmentId);
   seenRevisions.set(environmentId, state.revision);

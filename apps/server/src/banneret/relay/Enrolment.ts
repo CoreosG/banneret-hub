@@ -40,6 +40,7 @@ import * as Workspaces from "../Workspaces.ts";
 import { BanneretFacts, factsRequestBody, protocolCarriesUsage } from "./Facts.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
 import { RelayCallError, type RelayReply, relayFetch } from "./RelayClient.ts";
+import { type BoardTaskEntry, taskIdForLinks } from "./Snapshot.ts";
 import {
   type MachineKey,
   RelayCounter,
@@ -159,7 +160,10 @@ const RepositoriesReply = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 });
 
-const FactsReply = Schema.Struct({ capabilitiesVersion: Schema.String });
+const FactsReply = Schema.Struct({
+  capabilitiesVersion: Schema.String,
+  snapshotEtag: Schema.optional(Schema.String),
+});
 
 const decodeEnrolledCapabilities = Schema.decodeUnknownOption(EnrolledCapabilities);
 const decodeFactsReply = Schema.decodeUnknownOption(FactsReply);
@@ -268,7 +272,14 @@ interface EnrolmentService {
   /** An effect that completes at the next change of the view or the files, or driver step. */
   readonly nextChange: Effect.Effect<Effect.Effect<void>>;
   /** RelayFeed seam: a signed GET, only while configured. */
-  readonly signedGet: (target: string) => Effect.Effect<RelayReply, RelayCallError>;
+  readonly signedGet: (
+    target: string,
+    options?: { readonly ifNoneMatch?: string; readonly maxResponseBytes?: number },
+  ) => Effect.Effect<RelayReply, RelayCallError>;
+  /** RelayFeed seam: the last heartbeat's `snapshotEtag` (unquoted), the hint to reread the head. */
+  readonly snapshotEtag: Effect.Effect<string | undefined>;
+  /** RelayFeed seam: the board's tasks, so a heartbeat can name a thread's linked task. */
+  readonly setBoardTasks: (tasks: ReadonlyArray<BoardTaskEntry>) => Effect.Effect<void>;
   /** RelayFeed seam: the signed headers for one GET of the event stream, only while configured. */
   readonly signStream: (
     target: string,
@@ -309,6 +320,8 @@ export class BanneretEnrolment extends Context.Reference<EnrolmentService>(
       matchProjects: () => notRunning,
       nextChange: Effect.succeed(Effect.never),
       signedGet: () => notConfigured,
+      snapshotEtag: Effect.undefined,
+      setBoardTasks: () => Effect.void,
       signStream: () => notConfigured,
     }),
   },
@@ -356,6 +369,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   // The relay's protocol from its last enrolled capabilities read; unknown after a restart until
   // the first heartbeat's refetch, so a 1.0 relay never gets a field it would refuse.
   let relayProtocol: string | undefined;
+  let snapshotEtag: string | undefined;
+  let boardTasks: ReadonlyArray<BoardTaskEntry> = [];
   let backoffMs = 0;
   let lastMarkSaveMs = 0;
   // The counter saved by the previous run; signed calls wait until the clock has passed it.
@@ -614,6 +629,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     target: string,
     ifNoneMatch?: string,
     body?: unknown,
+    maxResponseBytes?: number,
   ) {
     const credentials = yield* loadCredentials;
     yield* awaitClock.pipe(Effect.tapError(updateHealth));
@@ -626,6 +642,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           nowMs: now,
           ...(ifNoneMatch === undefined ? {} : { ifNoneMatch }),
           ...(body === undefined ? {} : { body }),
+          ...(maxResponseBytes === undefined ? {} : { maxResponseBytes }),
           signer: {
             kind: "device",
             key: credentials.key,
@@ -846,7 +863,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   // only (Facts.ts). Its outcome is the machine's health; 401 token_revoked moves to revoked in
   // signedCall. A failed send only reschedules, so nothing waits on it.
   const heartbeat = Effect.fn("BanneretEnrolment.heartbeat")(function* (from: Configured) {
-    const collected = yield* facts.collect(from.relayOrigin);
+    const tasks = boardTasks;
+    const collected = yield* facts.collect(from.relayOrigin, (links) =>
+      taskIdForLinks(tasks, links),
+    );
     const body = factsRequestBody(
       machineFacts(environmentId, from.label, from.kind ?? "desktop"),
       collected,
@@ -864,10 +884,9 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       return options.healthIntervalMs;
     }
     backoffMs = 0;
-    const version = Option.map(
-      decodeFactsReply(outcome.success.body),
-      (reply) => reply.capabilitiesVersion,
-    );
+    const reply = decodeFactsReply(outcome.success.body);
+    snapshotEtag = Option.getOrUndefined(reply)?.snapshotEtag;
+    const version = Option.map(reply, (decoded) => decoded.capabilitiesVersion);
     if (Option.isSome(version) && `"${version.value}"` !== etag) {
       yield* refreshCapabilities(from).pipe(Effect.ignore);
     } else {
@@ -1243,7 +1262,15 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     revokeMachine,
     matchProjects: matchRepositories,
     nextChange: Effect.sync(() => Deferred.await(changeSignal)),
-    signedGet: (target) => Effect.flatMap(configuredNow, (from) => signedCall(from, "GET", target)),
+    signedGet: (target, options = {}) =>
+      Effect.flatMap(configuredNow, (from) =>
+        signedCall(from, "GET", target, options.ifNoneMatch, undefined, options.maxResponseBytes),
+      ),
+    snapshotEtag: Effect.sync(() => snapshotEtag),
+    setBoardTasks: (tasks) =>
+      Effect.sync(() => {
+        boardTasks = tasks;
+      }),
     signStream,
   };
   return service;

@@ -1,7 +1,8 @@
-// Banneret Hub: the company rows above the thread list (Today, and Needs you with its count), shown
-// only for an Enterprise workspace this machine has joined, and only for sections the relay offers.
+// Banneret Hub: the company rows above the thread list (Today, Needs you with its count, and the
+// Board), shown only for an Enterprise workspace this machine has joined, and only for sections the
+// relay offers.
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { InboxIcon, SunIcon } from "lucide-react";
+import { InboxIcon, SquareKanbanIcon, SunIcon } from "lucide-react";
 
 import {
   SidebarGroup,
@@ -22,8 +23,9 @@ export function EnterpriseSidebarRows() {
   const { feed, workspace } = enterprise;
   const showToday = offersSection(feed, "today");
   const showNeeds = offersSection(feed, "needs");
-  if (!showToday && !showNeeds) return null;
-  const go = (to: "/today" | "/needs") => {
+  const showBoard = offersSection(feed, "board");
+  if (!showToday && !showNeeds && !showBoard) return null;
+  const go = (to: "/today" | "/needs" | "/board") => {
     if (isMobile) setOpenMobile(false);
     void navigate({ to });
   };
@@ -58,6 +60,14 @@ export function EnterpriseSidebarRows() {
                   </span>
                 )}
               </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
+        {showBoard ? (
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={pathname === "/board"} onClick={() => go("/board")}>
+              <SquareKanbanIcon />
+              <span>Board</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         ) : null}

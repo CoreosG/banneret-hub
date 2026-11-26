@@ -1,0 +1,296 @@
+// @effect-diagnostics nodeBuiltinImport:off - node:crypto digest is synchronous.
+// Banneret Hub: the relay's snapshot (relay-v1 "Snapshot"): a head naming content-addressed files.
+// The head is read with If-None-Match; a file is fetched only when its hash is new, checked against
+// that hash, and kept in memory while the current head names it. A file that answers 404 has aged
+// out, so the head is read again once. Files are reshaped field by field: relay strings stay data.
+import * as NodeCrypto from "node:crypto";
+
+import type {
+  BanneretBoard,
+  BanneretBoardCard,
+  BanneretBoardLease,
+  BanneretFeedNotMeasured,
+} from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+
+import { RelayCallError, type RelayReply } from "./RelayClient.ts";
+
+const SNAPSHOT_HEAD = "/relay/v1/snapshot/head";
+/** A full 1000-card board can pass the 1 MiB cap other answers keep. */
+const SNAPSHOT_FILE_MAX_BYTES = 8 * 1024 * 1024;
+
+const FILE_REF = /^sha256:([0-9a-f]{64})$/;
+const ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+export type SnapshotGet = (
+  target: string,
+  options: { readonly ifNoneMatch?: string; readonly maxResponseBytes?: number },
+) => Effect.Effect<RelayReply, RelayCallError>;
+
+type Fields = Readonly<Record<string, unknown>>;
+const fields = (value: unknown): Fields | undefined =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Fields)
+    : undefined;
+const text = (value: unknown, max: number): string | undefined =>
+  typeof value === "string" ? value.slice(0, max) : undefined;
+const list = (value: unknown, max: number): ReadonlyArray<unknown> =>
+  Array.isArray(value) ? value.slice(0, max) : [];
+const defined = <T>(items: ReadonlyArray<T | undefined>): Array<T> =>
+  items.filter((item): item is T => item !== undefined);
+
+/** `"sha256:<hex>"` or `sha256:<hex>` → `sha256:<hex>`, so a header ETag compares with a facts hint. */
+export const unquoteEtag = (etag: string | undefined): string | undefined =>
+  etag?.replace(/^W\//, "").replace(/^"(.*)"$/, "$1");
+
+const badFile = (message: string) =>
+  new RelayCallError({ status: 200, code: "bad_response", message, retryable: true });
+
+export interface SnapshotRead {
+  /** The head's ETag, unquoted. */
+  readonly etag: string | undefined;
+  /** Hash of each wanted file the head names. */
+  readonly refs: Readonly<Record<string, string>>;
+  /** Parsed body of each wanted file the head names. */
+  readonly files: Readonly<Record<string, unknown>>;
+}
+
+/** One reader per joined relay key; a new key starts with an empty cache. */
+export function makeSnapshotReader(get: SnapshotGet) {
+  let etag: string | undefined;
+  let refs: Record<string, string> = {};
+  let cache = new Map<string, unknown>();
+
+  const readHead = Effect.fn("BanneretSnapshot.head")(function* (conditional: boolean) {
+    const reply = yield* get(
+      SNAPSHOT_HEAD,
+      conditional && etag !== undefined ? { ifNoneMatch: `"${etag}"` } : {},
+    );
+    if (reply.status === 304) return;
+    const files = fields(fields(reply.body)?.files);
+    if (files === undefined) return yield* badFile("The relay's snapshot head had no files.");
+    const next: Record<string, string> = {};
+    for (const [key, value] of Object.entries(files)) {
+      const hex = typeof value === "string" ? FILE_REF.exec(value)?.[1] : undefined;
+      if (hex !== undefined) next[key] = hex;
+    }
+    refs = next;
+    etag = unquoteEtag(reply.etag);
+  });
+
+  const readFile = Effect.fn("BanneretSnapshot.file")(function* (hex: string) {
+    const cached = cache.get(hex);
+    if (cached !== undefined) return cached;
+    const reply = yield* get(`/relay/v1/snapshot/files/${hex}`, {
+      maxResponseBytes: SNAPSHOT_FILE_MAX_BYTES,
+    });
+    const digest = NodeCrypto.createHash("sha256").update(reply.bytes).digest("hex");
+    if (digest !== hex) return yield* badFile("A snapshot file did not match its hash.");
+    cache.set(hex, reply.body);
+    return reply.body;
+  });
+
+  const readWanted = Effect.fn("BanneretSnapshot.files")(function* (wanted: ReadonlyArray<string>) {
+    const files: Record<string, unknown> = {};
+    for (const key of wanted) {
+      const hex = refs[key];
+      if (hex !== undefined) files[key] = yield* readFile(hex);
+    }
+    return files;
+  });
+
+  /** Reads the head and the wanted files it names; fails with the relay's error. */
+  const read = Effect.fn("BanneretSnapshot.read")(function* (wanted: ReadonlyArray<string>) {
+    yield* readHead(true);
+    const files = yield* readWanted(wanted).pipe(
+      // A 404 file has aged out of retention: the head moved on. Read it again, once.
+      Effect.catchIf(
+        (error) => error.status === 404,
+        () => Effect.andThen(readHead(false), readWanted(wanted)),
+      ),
+    );
+    const named = new Set(Object.values(refs));
+    cache = new Map([...cache].filter(([hex]) => named.has(hex)));
+    const wantedRefs: Record<string, string> = {};
+    for (const key of wanted) {
+      const hex = refs[key];
+      if (hex !== undefined) wantedRefs[key] = hex;
+    }
+    return { etag, refs: wantedRefs, files } satisfies SnapshotRead;
+  });
+
+  return {
+    read,
+    /** The current head's ETag, unquoted; undefined before the first head. */
+    currentEtag: () => etag,
+  };
+}
+
+const notMeasured = (value: unknown): BanneretFeedNotMeasured | undefined => {
+  const source = fields(value);
+  const sourceName = text(source?.source, 64);
+  const reason = text(source?.reason, 64);
+  const since = text(source?.since, 64);
+  return sourceName === undefined || reason === undefined || since === undefined
+    ? undefined
+    : { source: sourceName, reason, since };
+};
+
+const lease = (value: unknown): BanneretBoardLease | undefined => {
+  const source = fields(value);
+  const login = text(fields(source?.holder)?.login, 64);
+  const state = text(source?.state, 32);
+  const since = text(source?.since, 64);
+  const lastSignalAt = text(source?.lastSignalAt, 64);
+  const staleAt = text(source?.staleAt, 64);
+  const expiresAt = text(source?.expiresAt, 64);
+  if (
+    login === undefined ||
+    state === undefined ||
+    since === undefined ||
+    lastSignalAt === undefined ||
+    staleAt === undefined ||
+    expiresAt === undefined
+  ) {
+    return undefined;
+  }
+  return { holder: { login }, state, since, lastSignalAt, staleAt, expiresAt };
+};
+
+const card = (value: unknown): BanneretBoardCard | undefined => {
+  const source = fields(value);
+  const task = fields(source?.task);
+  const ref = fields(task?.ref);
+  const id = text(task?.id, 64);
+  const title = text(task?.title, 300);
+  const tracker = text(ref?.tracker, 32);
+  const scope = text(ref?.scope, 200);
+  const key = text(ref?.key, 100);
+  const url = text(ref?.url, 2048);
+  const column = text(source?.column, 32);
+  const status = text(source?.status, 32);
+  const statusWhy = text(source?.statusWhy, 240);
+  if (
+    id === undefined ||
+    title === undefined ||
+    tracker === undefined ||
+    scope === undefined ||
+    key === undefined ||
+    url === undefined ||
+    column === undefined ||
+    status === undefined ||
+    statusWhy === undefined
+  ) {
+    return undefined;
+  }
+  const host = text(ref?.host, 255);
+  const held = lease(source?.lease);
+  const pr = fields(source?.pr);
+  const prNumber = pr?.number;
+  const prUrl = text(pr?.url, 2048);
+  const prState = text(pr?.state, 32);
+  const checks = text(fields(source?.checks)?.state, 32);
+  return {
+    task: { id, title, ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) } },
+    column,
+    status,
+    statusWhy,
+    ...(held === undefined ? {} : { lease: held }),
+    ...(typeof prNumber === "number" &&
+    Number.isInteger(prNumber) &&
+    prUrl !== undefined &&
+    prState !== undefined
+      ? { pr: { number: prNumber, url: prUrl, state: prState } }
+      : {}),
+    ...(checks === undefined ? {} : { checks: { state: checks } }),
+    restsOn: defined(list(source?.restsOn, 100).map((entry) => text(entry, 64))),
+  };
+};
+
+/** The `board` file (SnapshotBoard); undefined when it is not one. */
+export function reshapeBoard(body: unknown): BanneretBoard | undefined {
+  const source = fields(body);
+  if (source === undefined || !Array.isArray(source.cards) || !Array.isArray(source.columns)) {
+    return undefined;
+  }
+  return {
+    state: text(source.state, 32) ?? "not_measured",
+    notMeasured: defined(list(source.notMeasured, 32).map(notMeasured)),
+    columns: defined(
+      list(source.columns, 16).map((value) => {
+        const column = fields(value);
+        const id = text(column?.id, 32);
+        const title = text(column?.title, 40);
+        return id === undefined || title === undefined ? undefined : { id, title };
+      }),
+    ),
+    cards: defined(list(source.cards, 1000).map(card)),
+  };
+}
+
+/** Live means an agent session is working or waiting; idle, stopped and unheard ones are not. */
+const LIVE_WORK = new Set(["working", "waiting"]);
+
+/** Task ids with a live session in the `work` file (SnapshotWork), for the "agent at work" ring. */
+export function liveTaskIds(body: unknown): Array<string> {
+  const ids = new Set<string>();
+  for (const value of list(fields(fields(body)?.working)?.items, 100)) {
+    const item = fields(value);
+    const id = text(fields(item?.task)?.id, 64);
+    const state = text(item?.state, 32);
+    const live =
+      state === undefined
+        ? typeof item?.sessions === "number" && item.sessions > 0
+        : LIVE_WORK.has(state);
+    if (id !== undefined && live) ids.add(id);
+  }
+  return [...ids].toSorted();
+}
+
+export interface BoardTaskEntry {
+  readonly id: string;
+  readonly tracker: string;
+  readonly host: string | undefined;
+  readonly scope: string;
+  readonly key: string;
+}
+
+export interface IssueLinkKey {
+  readonly tracker: string;
+  readonly host: string;
+  readonly scope: string;
+  readonly key: string;
+}
+
+export const boardTaskIndex = (board: BanneretBoard): ReadonlyArray<BoardTaskEntry> =>
+  board.cards.map((entry) => ({
+    id: entry.task.id,
+    tracker: entry.task.ref.tracker,
+    host: entry.task.ref.host,
+    scope: entry.task.ref.scope,
+    key: entry.task.ref.key,
+  }));
+
+const same = (left: string, right: string) =>
+  left.trim().toLowerCase() === right.trim().toLowerCase();
+
+/**
+ * The board task id of the first linked issue that is on the board, compared as upstream's
+ * `threadIssueKeyOf` does. A card without a host matches on tracker, scope and key.
+ */
+export function taskIdForLinks(
+  index: ReadonlyArray<BoardTaskEntry>,
+  links: ReadonlyArray<IssueLinkKey>,
+): string | undefined {
+  for (const link of links) {
+    const match = index.find(
+      (entry) =>
+        entry.tracker === link.tracker &&
+        (entry.host === undefined || same(entry.host, link.host)) &&
+        same(entry.scope, link.scope) &&
+        entry.key.trim() === link.key.trim(),
+    );
+    if (match !== undefined && ID.test(match.id)) return match.id;
+  }
+  return undefined;
+}

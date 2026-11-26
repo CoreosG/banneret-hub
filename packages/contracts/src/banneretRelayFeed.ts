@@ -128,6 +128,64 @@ export type BanneretFeedTodayRead = typeof BanneretFeedTodayRead.Type;
 export const BanneretFeedNeedsRead = read(BanneretFeedNeedsPage);
 export type BanneretFeedNeedsRead = typeof BanneretFeedNeedsRead.Type;
 
+/** Where a board task lives in its tracker (relay-v1 `BoardTaskRef`). */
+export const BanneretBoardTaskRef = Schema.Struct({
+  tracker: Schema.String,
+  host: Schema.optional(Schema.String),
+  scope: Schema.String,
+  key: Schema.String,
+  url: Schema.String,
+});
+
+/** `state` is open: `active`, `stale`, `expired`, `paused`, `conflict` are known. */
+export const BanneretBoardLease = Schema.Struct({
+  holder: BanneretFeedPerson,
+  state: Schema.String,
+  since: Schema.String,
+  lastSignalAt: Schema.String,
+  staleAt: Schema.String,
+  expiresAt: Schema.String,
+});
+export type BanneretBoardLease = typeof BanneretBoardLease.Type;
+
+/** One task on the board. `column` and `status` are open strings the relay computed. */
+export const BanneretBoardCard = Schema.Struct({
+  task: Schema.Struct({ id: Schema.String, title: Schema.String, ref: BanneretBoardTaskRef }),
+  column: Schema.String,
+  status: Schema.String,
+  statusWhy: Schema.String,
+  lease: Schema.optional(BanneretBoardLease),
+  pr: Schema.optional(
+    Schema.Struct({ number: Schema.Number, url: Schema.String, state: Schema.String }),
+  ),
+  checks: Schema.optional(Schema.Struct({ state: Schema.String })),
+  restsOn: Schema.Array(Schema.String),
+});
+export type BanneretBoardCard = typeof BanneretBoardCard.Type;
+
+/** The relay's snapshot `board` file, reshaped field by field. */
+export const BanneretBoard = Schema.Struct({
+  state: Schema.String,
+  notMeasured: Schema.Array(BanneretFeedNotMeasured),
+  columns: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
+  cards: Schema.Array(BanneretBoardCard),
+});
+export type BanneretBoard = typeof BanneretBoard.Type;
+
+/**
+ * The board as last read from the relay's snapshot, kept with its age when the relay is away.
+ * `atWork` are task ids with a live agent session in the snapshot `work` file (the ring);
+ * `leases` is the board section's `leases` flag.
+ */
+export const BanneretFeedBoardRead = Schema.Struct({
+  value: Schema.NullOr(BanneretBoard),
+  fetchedAt: Schema.NullOr(Schema.String),
+  atWork: Schema.Array(Schema.String),
+  leases: Schema.Boolean,
+  problem: Schema.optional(Schema.Struct({ message: Schema.String, since: Schema.String })),
+});
+export type BanneretFeedBoardRead = typeof BanneretFeedBoardRead.Type;
+
 /**
  * The live feed: the whole state each time, so a client that only keeps the latest value misses
  * nothing. `revision` moves whenever Today or Needs you may have changed (`needs.changed`,
@@ -145,6 +203,8 @@ export const BanneretFeedState = Schema.Struct({
   /** The open needs-you count from the last `needs.changed`, if one arrived. */
   needsCount: Schema.NullOr(Schema.Number),
   revision: Schema.Number,
+  /** Null while the relay advertises no board section, or before it was looked at. */
+  board: Schema.NullOr(BanneretFeedBoardRead),
 });
 export type BanneretFeedState = typeof BanneretFeedState.Type;
 

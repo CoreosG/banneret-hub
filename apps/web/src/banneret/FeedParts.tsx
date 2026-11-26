@@ -21,7 +21,7 @@ import { deepLinkTarget, needsKindLabel, notMeasuredReason } from "./relayFeed.l
 import { loginSuffix } from "./enterprise.logic";
 
 // Reads the minute tick because the compiler caches a render-time Date.now().
-function useNowMs(): number {
+export function useNowMs(): number {
   return Date.parse(`${useNowMinute()}:00.000Z`);
 }
 

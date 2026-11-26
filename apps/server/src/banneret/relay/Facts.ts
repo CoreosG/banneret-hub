@@ -29,6 +29,7 @@ import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import * as Workspaces from "../Workspaces.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
 import { rfc3339 } from "./RelaySigning.ts";
+import type { IssueLinkKey } from "./Snapshot.ts";
 
 const MAX_ACTIVITY = 256;
 const MAX_USAGE = 32;
@@ -47,6 +48,7 @@ export interface ActivityFact {
   readonly threadId: string;
   readonly projectKey: string;
   readonly branch?: string;
+  readonly taskId?: string;
   readonly provider: "claude" | "codex";
   readonly providerVersion?: string;
   readonly model?: string;
@@ -84,6 +86,7 @@ export type FactsThread = Pick<
   | "providerInstanceId"
   | "modelSelection"
   | "branch"
+  | "issues"
   | "lineage"
   | "status"
   | "activityRunStatus"
@@ -123,11 +126,17 @@ export interface FactsInputs {
 
 const readError = (cause: unknown) => new FactsReadError({ cause });
 
+/** The board task id for a thread's linked issues, or undefined when none is on the board. */
+export type TaskIdFor = (links: ReadonlyArray<IssueLinkKey>) => string | undefined;
+
 export class BanneretFacts extends Context.Service<
   BanneretFacts,
   {
     /** Never fails: a failed read reports the last activity it read, not an empty set. */
-    readonly collect: (relayOrigin: string) => Effect.Effect<FactsCollection>;
+    readonly collect: (
+      relayOrigin: string,
+      taskIdFor?: TaskIdFor,
+    ) => Effect.Effect<FactsCollection>;
   }
 >()("t3/banneret/relay/Facts/BanneretFacts") {}
 
@@ -228,6 +237,7 @@ export function buildActivity(input: {
   readonly projects: ReadonlyMap<string, string>;
   readonly providers: ReadonlyArray<FactsProvider>;
   readonly sessions: Map<string, string>;
+  readonly taskIdFor?: TaskIdFor | undefined;
 }): ActivityFact[] {
   const byInstance = new Map(input.providers.map((provider) => [provider.instanceId, provider]));
   const candidates = input.threads
@@ -260,11 +270,14 @@ export function buildActivity(input: {
     const branch = thread.branch ?? "";
     const model = thread.modelSelection.model;
     const version = instance?.version ?? "";
+    // The relay falls back to branch and projectKey when no linked issue is on its board.
+    const taskId = input.taskIdFor?.(thread.issues ?? []);
     facts.push({
       sessionId,
       threadId: thread.id,
       projectKey,
       ...(BRANCH.test(branch) ? { branch } : {}),
+      ...(taskId !== undefined && ID.test(taskId) ? { taskId } : {}),
       provider,
       ...(PROVIDER_VERSION.test(version) ? { providerVersion: version } : {}),
       ...(MODEL.test(model) ? { model } : {}),
@@ -419,7 +432,10 @@ const makeFromInputs = (inputs: FactsInputs) =>
   Effect.sync(() => {
     const sessions = new Map<string, string>();
     let lastActivity: ReadonlyArray<ActivityFact> = [];
-    const readActivity = Effect.fn("BanneretFacts.activity")(function* (relayOrigin: string) {
+    const readActivity = Effect.fn("BanneretFacts.activity")(function* (
+      relayOrigin: string,
+      taskIdFor: TaskIdFor | undefined,
+    ) {
       const projects = enterpriseProjects({
         workspaces: yield* inputs.workspaces,
         projects: yield* inputs.projects,
@@ -432,11 +448,14 @@ const makeFromInputs = (inputs: FactsInputs) =>
       }
       const threads = yield* inputs.threads(new Set(projects.keys()));
       const providers = yield* inputs.providers;
-      return buildActivity({ threads, projects, providers, sessions });
+      return buildActivity({ threads, projects, providers, sessions, taskIdFor });
     });
 
-    const collect = Effect.fn("BanneretFacts.collect")(function* (relayOrigin: string) {
-      const activity = yield* readActivity(relayOrigin).pipe(
+    const collect = Effect.fn("BanneretFacts.collect")(function* (
+      relayOrigin: string,
+      taskIdFor?: TaskIdFor,
+    ) {
+      const activity = yield* readActivity(relayOrigin, taskIdFor).pipe(
         Effect.tap((read) => Effect.sync(() => (lastActivity = read))),
         Effect.catchCause((cause) =>
           Effect.logWarning("Banneret facts: activity read failed", cause).pipe(

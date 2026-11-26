@@ -1,11 +1,13 @@
 // @effect-diagnostics globalFetch:off globalFetchInEffect:off - the relay's event stream is one long-lived fetch; redirects, connect and idle time are capped here.
-// Banneret Hub: Today, Needs you and the relay's event stream for an enrolled environment. One
-// event stream per environment, open only while the enrolment is `configured`; an environment that
-// has not joined makes no relay call. Relay answers are reshaped field by field (relay strings stay
-// plain data), and the last good answer is kept so a screen is never blank while the relay is away.
+// Banneret Hub: Today, Needs you, the board and the relay's event stream for an enrolled environment.
+// One event stream per environment, open only while the enrolment is `configured`; an environment
+// that has not joined makes no relay call. Relay answers are reshaped field by field (relay strings
+// stay plain data), and the last good answer is kept so a screen is never blank while the relay is
+// away. The board comes from the snapshot (Snapshot.ts), read only when capabilities advertise both.
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
   type BanneretEnrolmentView,
+  type BanneretFeedBoardRead,
   type BanneretFeedDeepLink,
   type BanneretFeedState,
   type BanneretFeedNeedsItem,
@@ -30,6 +32,13 @@ import * as Stream from "effect/Stream";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import { BanneretEnrolment } from "./Enrolment.ts";
 import { RelayCallError, type RelayReply } from "./RelayClient.ts";
+import {
+  boardTaskIndex,
+  liveTaskIds,
+  makeSnapshotReader,
+  reshapeBoard,
+  unquoteEtag,
+} from "./Snapshot.ts";
 
 export interface RelayFeedOptions {
   /** First reconnect delay; it doubles up to `maxRetryMs`. */
@@ -40,6 +49,8 @@ export interface RelayFeedOptions {
   readonly connectMs: number;
   /** How often machine labels for deep links may be reread. */
   readonly machinesRefreshMs: number;
+  /** How often the snapshot head is reread without a hint from the heartbeat. */
+  readonly snapshotPollMs: number;
 }
 
 const DEFAULT_OPTIONS: RelayFeedOptions = {
@@ -48,6 +59,7 @@ const DEFAULT_OPTIONS: RelayFeedOptions = {
   idleMs: 75_000,
   connectMs: 10_000,
   machinesRefreshMs: 60_000,
+  snapshotPollMs: 60_000,
 };
 
 interface FeedService {
@@ -65,6 +77,7 @@ const NOT_JOINED_SNAPSHOT: BanneretFeedState = {
   sections: [],
   needsCount: null,
   revision: 0,
+  board: null,
 };
 
 /** A reference, so a server built without the feed layer answers as an environment that never joined. */
@@ -259,6 +272,16 @@ const linkedEnvironments = (body: unknown): Set<string> => {
 const sectionKinds = (body: unknown): ReadonlyArray<string> =>
   defined(list(fields(body)?.sections, 64).map((section) => text(fields(section)?.kind, 32)));
 
+/** The flags of the first section of `kind`, or null when the relay does not advertise one. */
+const sectionFlags = (body: unknown, kind: string): ReadonlyArray<string> | null => {
+  const section = list(fields(body)?.sections, 64)
+    .map(fields)
+    .find((candidate) => candidate?.kind === kind);
+  return section === undefined
+    ? null
+    : defined(list(section.flags, 32).map((flag) => text(flag, 64)));
+};
+
 /** `visit=1` is a 1.1 addition; a 1.0 relay may refuse it (relay-v1 changelog). */
 export const protocolSupportsVisit = (protocol: string | undefined): boolean => {
   const match = /^([0-9]{1,4})\.([0-9]{1,6})$/.exec(protocol ?? "");
@@ -359,6 +382,15 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   let needsFirst: { readonly value: BanneretFeedNeedsPage; readonly fetchedAt: string } | null =
     null;
   let problem: { readonly message: string; readonly since: string } | null = null;
+  // The board: its section's flags (null when not advertised), whether capabilities carry the
+  // snapshot, the last read and what it was built from, and the hint last seen in a heartbeat.
+  let boardFlags: ReadonlyArray<string> | null = null;
+  let snapshotOffered = false;
+  let board: BanneretFeedBoardRead | null = null;
+  let boardSignature = "";
+  let lastHint: string | undefined;
+  let snapshotWake: Queue.Queue<void> | undefined;
+  let snapshotReader: ReturnType<typeof makeSnapshotReader> | undefined;
   let labels = new Map<string, string>();
   let labelsReadAt = Number.NEGATIVE_INFINITY;
 
@@ -379,6 +411,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     sections,
     needsCount,
     revision,
+    board,
   });
   const publishSnapshot = Effect.suspend(() => PubSub.publish(changes, snapshot()));
   /** Today or Needs you may have changed: clients refetch. */
@@ -517,6 +550,9 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           sections = sectionKinds(reply.body);
           sectionsKnown = true;
           protocol = text(fields(reply.body)?.protocol, 16);
+          boardFlags = sectionFlags(reply.body, "board");
+          snapshotOffered = fields(reply.body)?.snapshot !== undefined;
+          wakeSnapshot();
           return publishSnapshot;
         }),
       ),
@@ -541,6 +577,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       case "needs.changed": {
         const count = data?.count;
         if (typeof count === "number" && Number.isInteger(count) && count >= 0) needsCount = count;
+        wakeSnapshot();
         yield* bump;
         return;
       }
@@ -554,6 +591,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         // The relay cannot replay what this server missed: refetch everything.
         needsCount = null;
         yield* refreshSections(key);
+        wakeSnapshot();
         yield* bump;
         return;
       default:
@@ -644,6 +682,101 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     );
   });
 
+  const wakeSnapshot = () => {
+    if (snapshotWake !== undefined) Queue.offerUnsafe(snapshotWake, undefined);
+  };
+
+  const setBoard = Effect.fn("BanneretRelayFeed.setBoard")(function* (
+    next: BanneretFeedBoardRead | null,
+  ) {
+    board = next;
+    yield* enrolment.setBoardTasks(next?.value == null ? [] : boardTaskIndex(next.value));
+    yield* publishSnapshot;
+  });
+
+  const boardProblem = Effect.fn("BanneretRelayFeed.boardProblem")(function* (
+    message: string,
+    leases: boolean,
+  ) {
+    if (board?.problem?.message === message && board.leases === leases) return;
+    const at = yield* nowIso;
+    board = {
+      ...(board ?? { value: null, fetchedAt: null, atWork: [] }),
+      leases,
+      problem: { message, since: board?.problem?.since ?? at },
+    };
+    yield* publishSnapshot;
+  });
+
+  /**
+   * Rereads the snapshot head (and any changed file) when the relay advertises the board section
+   * and the snapshot. Publishes only when the board, the ring or a problem changed.
+   */
+  const refreshBoard = Effect.fn("BanneretRelayFeed.refreshBoard")(function* (
+    key: string,
+    reader: ReturnType<typeof makeSnapshotReader>,
+  ) {
+    const current = joined;
+    if (!stillJoined(key) || current === null || !sectionsKnown) return;
+    if (boardFlags === null) {
+      boardSignature = "";
+      if (board !== null) yield* setBoard(null);
+      return;
+    }
+    const leases = boardFlags.includes("leases");
+    const notPublished = `${current.displayName} does not publish its board yet.`;
+    if (!snapshotOffered) return yield* boardProblem(notPublished, leases);
+    const outcome = yield* reader.read(["board", "work"]).pipe(Effect.result);
+    if (!stillJoined(key)) return;
+    if (Result.isFailure(outcome)) {
+      if (outcome.failure.code === "not_configured") return;
+      return yield* boardProblem(problemMessage(outcome.failure, current.displayName), leases);
+    }
+    const { refs, files } = outcome.success;
+    if (refs.board === undefined) return yield* boardProblem(notPublished, leases);
+    const value = reshapeBoard(files.board);
+    if (value === undefined) {
+      return yield* boardProblem(problemMessage(badResponse(200), current.displayName), leases);
+    }
+    const atWork = files.work === undefined ? [] : liveTaskIds(files.work);
+    const fetchedAt = yield* nowIso;
+    // The work file changes on every heartbeat; only the ring it yields counts.
+    const signature = `${refs.board} ${atWork.join(",")} ${leases}`;
+    if (signature === boardSignature && board !== null && board.problem === undefined) {
+      // Unchanged: keep the newer age for the next publish without sending the board again.
+      board = { ...board, fetchedAt };
+      return;
+    }
+    boardSignature = signature;
+    yield* setBoard({ value, fetchedAt, atWork, leases });
+  });
+
+  /** One snapshot reader per joined key: reads on a wake (hint, event, capabilities) or a poll. */
+  const watchSnapshot = Effect.fn("BanneretRelayFeed.watchSnapshot")(function* (
+    key: string,
+    wake: Queue.Queue<void>,
+  ) {
+    const reader = makeSnapshotReader((target, request) => enrolment.signedGet(target, request));
+    snapshotReader = reader;
+    for (;;) {
+      yield* refreshBoard(key, reader);
+      yield* Queue.take(wake).pipe(
+        Effect.timeoutOrElse({
+          duration: Duration.millis(options.snapshotPollMs),
+          orElse: () => Effect.void,
+        }),
+      );
+    }
+  });
+
+  /** A new `snapshotEtag` in a heartbeat answer: reread the head unless it is already current. */
+  const noticeHint = Effect.gen(function* () {
+    const hint = unquoteEtag(yield* enrolment.snapshotEtag);
+    if (hint === undefined || hint === lastHint) return;
+    lastHint = hint;
+    if (hint !== snapshotReader?.currentEtag()) wakeSnapshot();
+  });
+
   /** Keeps the stream open for one joined key until the key changes (this fiber is interrupted). */
   const follow = Effect.fn("BanneretRelayFeed.follow")(function* (key: string) {
     let delay = 0;
@@ -676,12 +809,23 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   const layerScope = yield* Effect.scope;
   const adoptLock = yield* Semaphore.make(1);
   let follower: Fiber.Fiber<never, never> | undefined;
+  let snapshotFiber: Fiber.Fiber<never, never> | undefined;
   const adopt = (next: Joined | null) =>
     adoptLock.withPermits(1)(
       Effect.gen(function* () {
         if (next?.key === joined?.key) return;
         if (follower !== undefined) yield* Fiber.interrupt(follower);
+        if (snapshotFiber !== undefined) yield* Fiber.interrupt(snapshotFiber);
         follower = undefined;
+        snapshotFiber = undefined;
+        snapshotWake = undefined;
+        snapshotReader = undefined;
+        boardFlags = null;
+        snapshotOffered = false;
+        board = null;
+        boardSignature = "";
+        lastHint = undefined;
+        yield* enrolment.setBoardTasks([]);
         joined = next;
         lastEventId = undefined;
         live = false;
@@ -698,6 +842,12 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         if (next !== null) {
           if (next.label !== undefined) labels.set(environmentId, next.label);
           follower = yield* Effect.forkIn(follow(next.key) as Effect.Effect<never>, layerScope);
+          const wake = yield* Queue.sliding<void>(1);
+          snapshotWake = wake;
+          snapshotFiber = yield* Effect.forkIn(
+            watchSnapshot(next.key, wake) as Effect.Effect<never>,
+            layerScope,
+          );
         }
         yield* publishSnapshot;
       }),
@@ -709,6 +859,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       Effect.gen(function* () {
         const changed = yield* enrolment.nextChange;
         yield* adopt(joinedOf(yield* enrolment.status));
+        yield* noticeHint;
         yield* changed;
       }),
     ),
