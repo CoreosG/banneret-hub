@@ -54,6 +54,7 @@ import {
   WsWorkspaceFilesMoveRpc,
 } from "./workspaceFiles.ts";
 import { WsBanneretPortsListRpc } from "./banneretPorts.ts";
+import { WsBanneretWorkspacesListRpc, WsBanneretWorkspacesPutRpc } from "./banneretWorkspaces.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -2651,6 +2652,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkspaceFilesCreateUploadUrlRpc,
   WsWorkspaceFilesCreateDownloadUrlRpc,
   WsBanneretPortsListRpc,
+  WsBanneretWorkspacesListRpc,
+  WsBanneretWorkspacesPutRpc,
   WsProjectsMutateRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,

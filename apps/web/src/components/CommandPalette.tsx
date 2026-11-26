@@ -263,6 +263,7 @@ import {
   useCommandPalettePortForwardItem,
 } from "./CommandPalettePortForwardItems";
 import { useCommandPaletteShowPortsItem } from "./ports/showPortsCommand";
+import { useCommandPaletteWorkspaceItems } from "../banneret/workspacePaletteItems";
 import {
   CommandPaletteVirtualizedResults,
   scrollCommandPaletteRowIntoView,
@@ -735,6 +736,7 @@ function OpenCommandPaletteDialog(props: {
       ? scopeThreadRef(activeDraftThread.environmentId, activeDraftThread.threadId)
       : null;
   const showPortsItem = useCommandPaletteShowPortsItem({ panelRef: previewPanelThreadRef });
+  const workspaceItems = useCommandPaletteWorkspaceItems();
   const activeThreadPreviewOpen = useRightPanelStore(
     (state) => selectActiveRightPanel(state.byThreadKey, previewPanelThreadRef) === "preview",
   );
@@ -1549,6 +1551,7 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (showPortsItem) actionItems.push(showPortsItem);
+  actionItems.push(...workspaceItems);
 
   if (activeThread !== null && canShareActiveThreadWithGuest) {
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
