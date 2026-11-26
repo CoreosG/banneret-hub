@@ -1,4 +1,4 @@
-// Banneret Hub: Today, Needs you, the board, the feed and one task from the company relay
+// Banneret Hub: Today, Needs you, the board, the map, the feed and one task from the company relay
 // (docs/banneret/relay-v1). The server makes every relay call and reshapes the answers into the
 // views below; clients never see the token or key. Relay failures are data, not errors, so a screen
 // always has the last good answer and its age to show.
@@ -48,6 +48,8 @@ export const BanneretFeedNotMeasured = Schema.Struct({
   source: Schema.String,
   reason: Schema.String,
   since: Schema.String,
+  /** One plain sentence naming the rule that failed, when the relay gives one. */
+  detail: Schema.optional(Schema.String),
 });
 export type BanneretFeedNotMeasured = typeof BanneretFeedNotMeasured.Type;
 
@@ -239,6 +241,59 @@ export const BanneretGraveyardPage = Schema.Struct({
 });
 export type BanneretGraveyardPage = typeof BanneretGraveyardPage.Type;
 
+/** A stage of the build plan, drawn in ascending `order`. */
+export const BanneretMapStage = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  order: Schema.Number,
+});
+export type BanneretMapStage = typeof BanneretMapStage.Type;
+
+/**
+ * One item of the build plan. `status` is the board's open vocabulary; `task` is the board task the
+ * item resolves to, absent when it has none. `restsOn` lists item ids.
+ */
+export const BanneretMapItem = Schema.Struct({
+  id: Schema.String,
+  stageId: Schema.String,
+  title: Schema.String,
+  status: Schema.String,
+  statusWhy: Schema.String,
+  task: Schema.optional(BanneretBoardTask),
+  restsOn: Schema.Array(Schema.String),
+});
+export type BanneretMapItem = typeof BanneretMapItem.Type;
+
+const StatusCounts = Schema.Record(Schema.String, Schema.Number);
+
+/** The relay's snapshot `map` file (SnapshotMap), reshaped field by field. */
+export const BanneretMap = Schema.Struct({
+  state: Schema.String,
+  notMeasured: Schema.Array(BanneretFeedNotMeasured),
+  stages: Schema.Array(BanneretMapStage),
+  items: Schema.Array(BanneretMapItem),
+  counters: Schema.Struct({
+    byStatus: StatusCounts,
+    byStage: Schema.Record(Schema.String, StatusCounts),
+  }),
+});
+export type BanneretMap = typeof BanneretMap.Type;
+
+/**
+ * The map as last read from the relay's snapshot, kept with its age when the relay is away.
+ * `atWork` are task ids with a live agent session in the `work` file (the ring); `restsOn` is the
+ * map section's flag of that name; `checked` says the relay applies the sign-off rule.
+ */
+export const BanneretFeedMapRead = Schema.Struct({
+  value: Schema.NullOr(BanneretMap),
+  fetchedAt: Schema.NullOr(Schema.String),
+  atWork: Schema.Array(Schema.String),
+  restsOn: Schema.Boolean,
+  checked: Schema.Boolean,
+  problem: Schema.optional(Schema.Struct({ message: Schema.String, since: Schema.String })),
+});
+export type BanneretFeedMapRead = typeof BanneretFeedMapRead.Type;
+
 /** A snapshot file as last read, kept with its age when the relay is away. */
 const snapshotRead = <S extends Schema.Top>(value: S) =>
   Schema.Struct({
@@ -314,6 +369,8 @@ export const BanneretFeedState = Schema.Struct({
   revision: Schema.Number,
   /** Null while the relay advertises no board section, or before it was looked at. */
   board: Schema.NullOr(BanneretFeedBoardRead),
+  /** Null while the relay advertises no map section, or before it was looked at. */
+  map: Schema.NullOr(BanneretFeedMapRead),
   /** Null while the relay advertises no feed section, or before it was looked at. */
   feed: Schema.NullOr(BanneretFeedEntriesRead),
   /** Null while the feed section lacks the `graveyard` flag, or before it was looked at. */
