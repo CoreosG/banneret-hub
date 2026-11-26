@@ -89,8 +89,8 @@ describe("installWorkspaceDownloadSaveDialog", () => {
   it("hooks only the session it is given, once", () => {
     const main = fakeSession();
     const preview = fakeSession();
-    installWorkspaceDownloadSaveDialog(main.session, fakeHost(undefined).host);
-    installWorkspaceDownloadSaveDialog(main.session, fakeHost(undefined).host);
+    installWorkspaceDownloadSaveDialog(main.session as never, fakeHost(undefined).host);
+    installWorkspaceDownloadSaveDialog(main.session as never, fakeHost(undefined).host);
     expect(main.listeners.map(({ event }) => event)).toEqual(["will-download"]);
     expect(preview.listeners).toEqual([]);
   });
