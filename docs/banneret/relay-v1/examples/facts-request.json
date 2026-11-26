@@ -15,6 +15,7 @@
       "threadId": "th_01JDX3K9",
       "projectKey": "sha256:f874b75d32fb5213185b52937bc07958552247a69956a2579eb0d762f66d74b0",
       "branch": "work/42-guild-invites",
+      "taskId": "t_K9w3Ls",
       "provider": "claude",
       "providerVersion": "2.1.0",
       "model": "claude-opus-5-5[1m]",
