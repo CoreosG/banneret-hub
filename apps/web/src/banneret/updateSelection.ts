@@ -31,3 +31,19 @@ export function useUpdateSelection() {
     });
   return { skipped, toggle };
 }
+
+/**
+ * The Banneret Hub column: "1.2.17 → 1.2.19" for a machine that updates, "Up to date" for one that
+ * only updates providers, null (the kind label alone) when the versions are unknown or equal, as on a
+ * track switch. `target` is the dialog's version: this app's, else the first server's.
+ */
+export function hubVersionLabel(
+  row: UpdateEverythingRow,
+  current: string | undefined,
+  target: string | null,
+): string | null {
+  if (row.app === null) return row.skipped === null ? "Up to date" : null;
+  if (row.app === "desktop-app" || target === null) return null;
+  if (current === undefined) return `→ ${target}`;
+  return current === target ? null : `${current} → ${target}`;
+}

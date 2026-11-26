@@ -27,6 +27,7 @@ import {
   updateButtonLabel,
   useUpdateSelection,
 } from "~/banneret/updateSelection";
+import { UpdateHubVersion } from "~/banneret/UpdateHubVersion";
 import type { RestartingMachine, UpdateEverythingRow } from "./updateEverything.logic";
 
 const isRunning = (status: string) =>
@@ -149,7 +150,7 @@ function UpdateEverythingDialogContent({
         <AlertDialogTitle>
           {title ??
             gt("{count, plural, one {Update {count} machine?} other {Update {count} machines?}}", {
-              count: updating.length,
+              count: selectable ? selectedCount : updating.length,
             })}
         </AlertDialogTitle>
         <AlertDialogDescription>
@@ -201,7 +202,7 @@ function UpdateEverythingDialogContent({
                 role="row"
                 className="col-span-full grid grid-cols-subgrid border-b border-border/50 py-1.5 last:border-b-0"
               >
-                <span role="cell" className="flex max-w-32 min-w-0 items-center gap-2">
+                <span role="cell" className="flex min-w-0 items-center gap-2">
                   {selectable && row.environmentId !== null && isSelectableRow(row) ? (
                     <Checkbox
                       checked={!unticked.has(row.environmentId)}
@@ -213,7 +214,9 @@ function UpdateEverythingDialogContent({
                   <MiddleTruncate value={row.label} aria-hidden />
                 </span>
                 <span role="cell">
-                  {row.app !== null ? m(APP_LABELS[row.app]) : null}
+                  <UpdateHubVersion row={row} version={version}>
+                    {row.app !== null ? m(APP_LABELS[row.app]) : null}
+                  </UpdateHubVersion>
                   {row.app === null && row.skipped !== null ? (
                     <span className="text-muted-foreground">
                       <T>Skipped</T>

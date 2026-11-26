@@ -336,6 +336,63 @@ describe("Enterprise Today and Needs you", () => {
     expect(router.state.location.pathname).toBe("/local/th_1");
   });
 
+  it("shows a shipped row's repo and pull request once, and names a stuck row's missing subject", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const { emit, server } = setup();
+    const title = "feat(relay): stuck items carry ordered rules";
+    server.today = {
+      joined: true,
+      fetchedAt: "2026-11-26T10:00:00.000Z",
+      value: {
+        ...TODAY,
+        shipped: {
+          ...block,
+          items: [
+            {
+              task: { title, url: "https://github.com/example-org/example-app/pull/38" },
+              summary: title,
+              mergedAt: "2026-11-26T09:47:00.000Z",
+              live: "no_deploy",
+            },
+          ],
+        },
+        stuck: {
+          ...block,
+          items: [
+            { rules: ["checks_queued"], since: "2026-11-11T03:00:00.000Z" },
+            {
+              rules: ["claim_quiet"],
+              since: "2026-11-26T03:00:00.000Z",
+              task: { title: " ", url: "https://github.com/example-org/example-app/issues/12" },
+            },
+          ],
+        },
+      },
+    };
+    const router = createFeedRouter("/today");
+    await using _screen = await render(<RouterProvider router={router} />, { router: false });
+    await emit(snapshot(["today", "needs"]));
+
+    await expect.element(page.getByText(title)).toBeVisible();
+    const shipped = page.getByText(title).element().closest("li")!;
+    // The subtitle is repo · #PR · merged · age; the title is not repeated in it.
+    expect(shipped.textContent?.split(title).length).toBe(2);
+    expect(shipped.textContent).toContain("example-app \u00b7 #38 \u00b7 merged \u00b7 ");
+    expect(shipped.querySelector("a")?.getAttribute("href")).toBe(
+      "https://github.com/example-org/example-app/pull/38",
+    );
+
+    // A stuck item with no task never renders without a subject.
+    await expect
+      .element(page.getByText("Checks are waiting to run: no task or pull request named"))
+      .toBeVisible();
+    // A task with a blank title falls back to its number and repository.
+    await expect
+      .element(page.getByText("No activity on a claimed task: #12 in example-app"))
+      .toBeVisible();
+  });
+
   it("keeps showing the last-known data with its age when the relay is away", async () => {
     using stack = new DisposableStack();
     await prepareScreen(stack);

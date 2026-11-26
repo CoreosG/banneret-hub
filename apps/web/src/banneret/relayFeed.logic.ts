@@ -50,6 +50,42 @@ const stuckRuleLabel = (rule: string) => STUCK_RULES[rule] ?? "Stuck";
 export const stuckRulesLabel = (rules: ReadonlyArray<string>) =>
   rules.length === 0 ? "Stuck" : rules.map(stuckRuleLabel).join(" \u00b7 ");
 
+/** The repository name and number in a tracker link (a pull request or an issue), or null. */
+function linkRef(url: string | undefined): { repo: string; number: string } | null {
+  const href = safeLinkOut(url);
+  if (href === null) return null;
+  const parts = new URL(href).pathname.split("/").filter((part) => part !== "" && part !== "-");
+  const at = parts.findLastIndex((part) => /^\d+$/.test(part));
+  const repo = at >= 2 ? parts[at - 2] : undefined;
+  return repo === undefined ? null : { repo, number: parts[at]! };
+}
+
+/** "banneret-hub · #41", the shipped row's subtitle head; null when the link names neither. */
+export function shippedRefLabel(url: string | undefined): string | null {
+  const ref = linkRef(url);
+  return ref === null ? null : `${ref.repo} \u00b7 #${ref.number}`;
+}
+
+export type StuckSubject =
+  | { readonly kind: "task"; readonly title: string; readonly url: string | undefined }
+  | { readonly kind: "none" };
+
+/**
+ * What a stuck row is about: the task's title, else its number and repository from its link. The
+ * relay's stuck item names nothing else (no pull request, repository or job), so an item with no
+ * usable `task` has no subject and the row says so.
+ */
+export function stuckSubject(
+  task: { title: string; url?: string | undefined } | undefined,
+): StuckSubject {
+  if (task === undefined) return { kind: "none" };
+  if (task.title.trim() !== "") return { kind: "task", title: task.title, url: task.url };
+  const ref = linkRef(task.url);
+  return ref === null
+    ? { kind: "none" }
+    : { kind: "task", title: `#${ref.number} in ${ref.repo}`, url: task.url };
+}
+
 const HEALTH_STATES: Readonly<Record<string, string>> = {
   good: "healthy",
   warning: "warning",
