@@ -25,6 +25,7 @@ type ErrorCode =
   | "too_large"
   | "unauthenticated"
   | "token_revoked"
+  | "bad_signature"
   | "signature_invalid"
   | "clock_skew"
   | "counter_reused"
@@ -55,6 +56,8 @@ export interface FakeRelayOptions {
   readonly retryAfterMs?: number;
   /** Interval of the SSE comment line; the spec says 25 seconds. */
   readonly sseCommentMs?: number;
+  /** The clock that ages the event log for the 24-hour resume bound. Tests move it to prove the reset. */
+  readonly eventClock?: () => number;
   /** Prints refused requests and invalid responses. */
   readonly log?: (line: string) => void;
 }
@@ -111,12 +114,14 @@ interface Machine {
   facts: MachineFacts;
   sessions: ReadonlyArray<ActivityFact>;
   lastHeardAt: number | null;
-  /** The last 256 counters accepted, in acceptance order. */
+  /** The 256 highest counters accepted, ascending. */
   readonly counters: bigint[];
-  revoked: boolean;
+  revokedAt: number | null;
 }
 
 interface NeedsItem {
+  /** Recording order: the tie-break within a class and createdAt. Not sent. */
+  readonly seq: number;
   readonly id: string;
   readonly kind: string;
   readonly title: string;
@@ -126,6 +131,7 @@ interface NeedsItem {
 
 interface RelayEvent {
   readonly id: number;
+  readonly at: number;
   readonly type: string;
   readonly data: unknown;
   /** Null: every person. */
@@ -155,6 +161,7 @@ const STATUS: Record<ErrorCode, number> = {
   too_large: 413,
   unauthenticated: 401,
   token_revoked: 401,
+  bad_signature: 401,
   signature_invalid: 401,
   clock_skew: 401,
   counter_reused: 401,
@@ -174,10 +181,11 @@ const WRONG_CODES_BEFORE_EXPIRY = 5;
 const NOT_HEARD_FROM_MS = 90 * 1000;
 const HEARTBEAT_SECONDS = 30;
 const EVENT_LOG_SIZE = 1000;
+const EVENT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const TODAY_BLOCK_MAX = 20;
-const U64_MAX = 18446744073709551615n;
+const COUNTER_MAX = 9223372036854775807n;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const COUNTER_PATTERN = /^(0|[1-9][0-9]{0,19})$/;
+const COUNTER_PATTERN = /^(0|[1-9][0-9]{0,18})$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]{86}==$/;
 const COUNTER_WINDOW = 256;
 // The Timestamp schema: RFC 3339 in UTC, ending in Z.
@@ -229,6 +237,28 @@ const pageParams = (query: URLSearchParams) => {
   }
   return { offset: cursor === null ? 0 : decodeCursor(cursor), limit };
 };
+
+// GET /needs order: the class of the kind (README "Needs you"), then oldest first, then recording order.
+const NEEDS_CLASS: Readonly<Record<string, number>> = {
+  thread_question: 1,
+  thread_approval: 1,
+  pull_request: 2,
+  promotion: 2,
+  founder_question: 2,
+  health: 2,
+  mention: 3,
+  suggestion: 4,
+};
+const UNKNOWN_KIND_CLASS = 5;
+const needsClass = (kind: string) => NEEDS_CLASS[kind] ?? UNKNOWN_KIND_CLASS;
+const byUrgency = (items: ReadonlyArray<NeedsItem>) =>
+  items.toSorted(
+    (a, b) =>
+      needsClass(a.kind) - needsClass(b.kind) ||
+      a.createdAt.localeCompare(b.createdAt) ||
+      a.seq - b.seq,
+  );
+const needsView = ({ seq: _seq, ...item }: NeedsItem) => item;
 
 const page = <T>(items: ReadonlyArray<T>, offset: number, limit: number) => ({
   items: items.slice(offset, offset + limit),
@@ -319,7 +349,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const lastVisit = new Map<string, number>();
   const events: RelayEvent[] = [];
   const streams = new Set<Stream>();
+  const eventClock = options.eventClock ?? (() => Date.now());
   let nextEventId = 1;
+  let nextNeedsSeq = 1;
   let capabilitiesRevision = 1;
   const capabilitiesVersion = () => `c-${capabilitiesRevision}`;
 
@@ -348,12 +380,23 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     );
   };
 
+  // Resume reaches back over the smaller of the last 1000 events and the retention window (24 hours).
+  const pruneEvents = () => {
+    const oldestKept = eventClock() - EVENT_RETENTION_MS;
+    while (
+      events.length > EVENT_LOG_SIZE ||
+      (events[0] !== undefined && events[0].at < oldestKept)
+    ) {
+      events.shift();
+    }
+  };
+
   const emit = (type: string, schema: SchemaName, data: unknown, personId: string | null) => {
     const problem = spec.check(schema, data);
     if (problem !== null) throw new Error(`fake relay built an invalid ${type} event: ${problem}`);
-    const event: RelayEvent = { id: nextEventId++, type, data, personId };
+    const event: RelayEvent = { id: nextEventId++, at: eventClock(), type, data, personId };
     events.push(event);
-    if (events.length > EVENT_LOG_SIZE) events.shift();
+    pruneEvents();
     for (const stream of streams) {
       if (personId === null || stream.personId === personId) writeEvent(stream, event);
     }
@@ -362,7 +405,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const sendOnly = (stream: Stream, type: string, schema: SchemaName, data: unknown) => {
     const problem = spec.check(schema, data);
     if (problem !== null) throw new Error(`fake relay built an invalid ${type} event: ${problem}`);
-    writeEvent(stream, { id: nextEventId++, type, data, personId: stream.personId });
+    writeEvent(stream, {
+      id: nextEventId++,
+      at: eventClock(),
+      type,
+      data,
+      personId: stream.personId,
+    });
   };
 
   const closeStreams = (match: (stream: Stream) => boolean) => {
@@ -375,7 +424,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
 
   const revokeMachine = (machine: Machine) => {
-    machine.revoked = true;
+    machine.revokedAt = Date.now();
     closeStreams((stream) => stream.machineId === machine.id);
   };
 
@@ -401,7 +450,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const finishApproval = (pairing: Pairing, person: Person) => {
     // One live machine per environment. The same owner enrolling again replaces the old machine.
     for (const machine of machines.values()) {
-      if (machine.revoked || machine.facts.environmentId !== pairing.machine.environmentId)
+      if (
+        machine.revokedAt !== null ||
+        machine.facts.environmentId !== pairing.machine.environmentId
+      )
         continue;
       if (machine.personId !== person.id) {
         pairing.state = "refused";
@@ -421,7 +473,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       sessions: [],
       lastHeardAt: null,
       counters: [],
-      revoked: false,
+      revokedAt: null,
     };
     machines.set(machine.id, machine);
     machinesByToken.set(machine.tokenHash, machine);
@@ -509,8 +561,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const sentAt = headerValue(request, "X-Banneret-Sent-At");
     const signature = headerValue(request, "X-Banneret-Signature");
     const missing = (header: string) =>
-      new RelayError("unauthenticated", `${header} is missing or malformed.`, { header });
-    if (counter === undefined || !COUNTER_PATTERN.test(counter) || BigInt(counter) > U64_MAX) {
+      new RelayError("bad_signature", `${header} is missing or malformed.`, { header });
+    if (counter === undefined || !COUNTER_PATTERN.test(counter) || BigInt(counter) > COUNTER_MAX) {
       throw missing("X-Banneret-Counter");
     }
     if (sentAt === undefined || !SENT_AT_PATTERN.test(sentAt) || Number.isNaN(Date.parse(sentAt))) {
@@ -567,7 +619,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
     const signed = signingHeaders(request);
     if (signed.counter !== "0") {
-      throw new RelayError("unauthenticated", "Enrolment calls use counter 0.", {
+      throw new RelayError("bad_signature", "Enrolment calls use counter 0.", {
         header: "X-Banneret-Counter",
       });
     }
@@ -589,7 +641,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
     const machine = machinesByToken.get(hashToken(match[1]));
     if (!machine) throw new RelayError("unauthenticated", "Unknown device token.");
-    if (machine.revoked)
+    if (machine.revokedAt !== null)
       throw new RelayError("token_revoked", "This machine was revoked; enrol again.");
     const device = headerValue(request, "X-Banneret-Device");
     if (device === undefined || !ID_PATTERN.test(device) || device !== machine.id) {
@@ -603,13 +655,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
     const signed = signingHeaders(request);
     checkSignature(request, signed, machine.publicKey, device, body);
-    // Refused: a counter among the last 256 accepted, or below the lowest of them.
+    // The window holds the 256 highest counters accepted. Refused: a repeat, or, once the window is full, a
+    // counter below its lowest (the 256th highest). Anything else is accepted.
     const counter = BigInt(signed.counter);
-    const lowest = machine.counters.reduce<bigint | null>(
-      (low, value) => (low === null || value < low ? value : low),
-      null,
-    );
-    if (machine.counters.includes(counter) || (lowest !== null && counter < lowest)) {
+    const lowest = machine.counters[0];
+    const full = machine.counters.length >= COUNTER_WINDOW;
+    if (machine.counters.includes(counter) || (full && lowest !== undefined && counter < lowest)) {
       throw new RelayError("counter_reused", "This request was already received.", {
         header: "X-Banneret-Counter",
       });
@@ -626,7 +677,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         "The caller's network identity is not the machine owner's.",
       );
     }
-    machine.counters.push(counter);
+    const at = machine.counters.findIndex((value) => value > counter);
+    machine.counters.splice(at === -1 ? machine.counters.length : at, 0, counter);
     if (machine.counters.length > COUNTER_WINDOW) machine.counters.shift();
     return { machine, person };
   };
@@ -640,6 +692,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const machineView = (machine: Machine, caller: Caller) => {
     const owner = people.get(machine.personId);
+    const revoked = machine.revokedAt !== null;
     return {
       id: machine.id,
       environmentId: machine.facts.environmentId,
@@ -655,20 +708,36 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       enrolledAt: iso(machine.enrolledAt),
       lastHeardAt: machine.lastHeardAt === null ? null : iso(machine.lastHeardAt),
       connected:
-        machine.lastHeardAt !== null && Date.now() - machine.lastHeardAt <= NOT_HEARD_FROM_MS,
-      revocable: machine.personId === caller.person.id || caller.person.role === "founder",
+        !revoked &&
+        machine.lastHeardAt !== null &&
+        Date.now() - machine.lastHeardAt <= NOT_HEARD_FROM_MS,
+      revocable:
+        !revoked && (machine.personId === caller.person.id || caller.person.role === "founder"),
+      ...(machine.revokedAt === null ? {} : { revokedAt: iso(machine.revokedAt) }),
     };
   };
 
   const liveMachines = () =>
     [...machines.values()]
-      .filter((machine) => !machine.revoked)
+      .filter((machine) => machine.revokedAt === null)
       .toSorted(
         (a, b) =>
           (b.lastHeardAt ?? -1) - (a.lastHeardAt ?? -1) ||
           b.enrolledAt - a.enrolledAt ||
           a.id.localeCompare(b.id),
       );
+
+  // Every enrolled person sees every live machine; revoked ones only their owner and founders, after the live ones.
+  const visibleMachines = (caller: Caller) => [
+    ...liveMachines(),
+    ...[...machines.values()]
+      .filter(
+        (machine) =>
+          machine.revokedAt !== null &&
+          (machine.personId === caller.person.id || caller.person.role === "founder"),
+      )
+      .toSorted((a, b) => (b.revokedAt ?? 0) - (a.revokedAt ?? 0) || a.id.localeCompare(b.id)),
+  ];
 
   const notConfigured = (source: string) => ({
     state: "not_measured",
@@ -678,7 +747,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const today = (caller: Caller) => {
     const now = Date.now();
-    const own = needs.get(caller.person.id) ?? [];
+    const own = byUrgency(needs.get(caller.person.id) ?? []).map(needsView);
     const working = liveMachines().flatMap((machine) => {
       const person = people.get(machine.personId);
       const live = machine.sessions.filter((session) => session.state !== "stopped");
@@ -721,6 +790,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const at = iso(Date.now());
     for (let index = 0; index < count; index += 1) {
       const item: NeedsItem = {
+        seq: nextNeedsSeq++,
         id: randomId("n"),
         kind,
         title: `Seeded item ${list.length + 1}`,
@@ -730,7 +800,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           : {}),
       };
       list.push(item);
-      if (kind === "mention") emit("mention", "MentionEvent", { at, item }, machine.personId);
+      if (kind === "mention") {
+        emit("mention", "MentionEvent", { at, item: needsView(item) }, machine.personId);
+      }
     }
     emit("needs.changed", "NeedsChangedEvent", { at, count: list.length }, machine.personId);
   };
@@ -754,7 +826,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (!person || person.removed) throw new RelayError("not_found", "No such person.");
     person.removed = true;
     for (const machine of machines.values())
-      if (machine.personId === person.id) revokeMachine(machine);
+      if (machine.personId === person.id && machine.revokedAt === null) revokeMachine(machine);
     closeStreams((stream) => stream.personId === person.id);
     emit("staff.removed", "StaffRemovedEvent", { at: iso(Date.now()), personId: person.id }, null);
   };
@@ -801,8 +873,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     });
     response.write(": connected\n\n");
     const stream: Stream = { personId: caller.person.id, machineId: caller.machine.id, response };
+    // Without Last-Event-ID the stream is live only. With one, replay what is still within reach (the last
+    // 1000 events and the retention window); beyond that, or for an unknown id, send one reset.
     const lastEventId = headerValue(request, "Last-Event-ID");
     if (lastEventId !== undefined) {
+      pruneEvents();
       const oldest = events[0]?.id ?? nextEventId;
       const last = /^[0-9]{1,15}$/.test(lastEventId) ? Number(lastEventId) : Number.NaN;
       if (last >= oldest - 1 && last < nextEventId) {
@@ -812,14 +887,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           }
         }
       } else {
-        // Cannot resume: tell this client to refetch both.
-        const at = iso(Date.now());
-        const count = (needs.get(caller.person.id) ?? []).length;
-        sendOnly(stream, "needs.changed", "NeedsChangedEvent", { at, count });
-        sendOnly(stream, "capabilities.changed", "CapabilitiesChangedEvent", {
-          at,
-          capabilitiesVersion: capabilitiesVersion(),
-        });
+        sendOnly(stream, "reset", "ResetEvent", { at: iso(Date.now()) });
       }
     }
     streams.add(stream);
@@ -849,7 +917,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       // Only a call without Authorization gets the public document; a failing token is refused.
       if (headerValue(request, "Authorization") === undefined) {
         sendJson(response, 200, "Capabilities", publicCapabilities(), {
-          etag: capabilitiesVersion(),
+          etag: `"${capabilitiesVersion()}"`,
         });
         return;
       }
@@ -885,7 +953,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { role: "health", kind: "none" },
           ],
         },
-        { etag: capabilitiesVersion() },
+        { etag: `"${capabilitiesVersion()}"` },
       );
       return;
     }
@@ -954,7 +1022,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
     if (method === "GET" && route === "/machines") {
       const { offset, limit } = pageParams(query);
-      const all = liveMachines().map((machine) => machineView(machine, caller));
+      const all = visibleMachines(caller).map((machine) => machineView(machine, caller));
       sendJson(response, 200, "MachinesPage", page(all, offset, limit));
       return;
     }
@@ -963,7 +1031,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (method === "DELETE" && machinePath?.[1]) {
       const target = ID_PATTERN.test(machinePath[1]) ? machines.get(machinePath[1]) : undefined;
       if (!target) throw new RelayError("not_found", "No such machine.");
-      if (!target.revoked) {
+      if (target.revokedAt === null) {
         if (target.personId !== caller.person.id && caller.person.role !== "founder") {
           throw new RelayError("forbidden", "Only the machine's owner or a founder may revoke it.");
         }
@@ -981,8 +1049,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       };
       if (facts.machine.environmentId !== caller.machine.facts.environmentId) {
         throw new RelayError(
-          "malformed",
-          "machine.environmentId is not the enrolled environment.",
+          "forbidden",
+          "machine.environmentId is not this machine's environment.",
           {
             field: "machine.environmentId",
           },
@@ -1006,7 +1074,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
     if (method === "GET" && route === "/needs") {
       const { offset, limit } = pageParams(query);
-      sendJson(response, 200, "NeedsPage", page(needs.get(caller.person.id) ?? [], offset, limit));
+      const ordered = byUrgency(needs.get(caller.person.id) ?? []).map(needsView);
+      sendJson(response, 200, "NeedsPage", page(ordered, offset, limit));
       return;
     }
 

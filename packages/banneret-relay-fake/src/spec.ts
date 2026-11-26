@@ -30,6 +30,7 @@ export type SchemaName =
   | "BundleChangedEvent"
   | "StaffRemovedEvent"
   | "CapabilitiesChangedEvent"
+  | "ResetEvent"
   | "Id";
 
 export interface SpecValidator {
@@ -96,6 +97,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "event-bundle-changed.json": "BundleChangedEvent",
   "event-staff-removed.json": "StaffRemovedEvent",
   "event-capabilities-changed.json": "CapabilitiesChangedEvent",
+  "event-reset.json": "ResetEvent",
 };
 
 /** Invalid examples are refused facts, except the enrolment ones; the same rule as the Go contract test. */

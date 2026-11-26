@@ -23,6 +23,7 @@ export interface SendOptions {
   /** Sign these bytes instead of the request: proves the relay checks what it received. */
   readonly signOverride?: Partial<{ method: string; target: string; body: Uint8Array }>;
   readonly unsigned?: boolean;
+  /** Sent as given, after the signing headers: a test can replace one of them with a malformed value. */
   readonly headers?: Record<string, string>;
 }
 
@@ -78,7 +79,7 @@ export class RelayClient {
       (options.body === undefined
         ? new Uint8Array()
         : Buffer.from(JSON.stringify(options.body), "utf8"));
-    const headers: Record<string, string> = { ...options.headers };
+    const headers: Record<string, string> = {};
     if (bytes.length > 0) headers["content-type"] = "application/json";
     if (!options.unsigned) {
       const counter = options.counter ?? (options.token === undefined ? "0" : this.nextCounter());
@@ -97,6 +98,7 @@ export class RelayClient {
     }
     if (options.token !== undefined) headers.Authorization = `Bearer ${options.token}`;
     if (options.device !== undefined) headers["X-Banneret-Device"] = options.device;
+    Object.assign(headers, options.headers);
     return fetch(`${this.origin}${target}`, {
       method,
       headers,
