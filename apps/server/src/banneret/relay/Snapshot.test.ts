@@ -990,6 +990,36 @@ describe("BanneretRelayFeed map from the snapshot", () => {
     ),
   );
 
+  it.live("shows the map when a plan appears after joining, and drops it when the plan goes", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const events = yield* subscribe;
+        yield* control(fake, "/board/seed", MAP_BOARD);
+        yield* join(fake, relay);
+        const before = yield* events.next(
+          (event) => event.sectionsKnown && (event.board?.value?.cards.length ?? 0) === 2,
+          "the board",
+        );
+        expect(before.sections).not.toContain("map");
+        expect(before.map).toBeNull();
+
+        yield* control(fake, "/map/seed", MAP_PLAN);
+        const shown = yield* events.next(
+          (event) => (event.map?.value?.items.length ?? 0) === 3,
+          "the map after capabilities.changed",
+        );
+        expect(shown.sections).toContain("map");
+
+        yield* control(fake, "/map/seed", { plan: null });
+        const gone = yield* events.next(
+          (event) => event.map === null && !event.sections.includes("map"),
+          "the map gone",
+        );
+        expect(gone.board?.value?.cards).toHaveLength(2);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
   it.live("never fetches the map file while capabilities carry no map section", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {
