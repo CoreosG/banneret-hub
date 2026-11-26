@@ -90,6 +90,49 @@ export function filterProjectsForWorkspace<TProject extends Project>(
 }
 
 /**
+ * The threads the active workspace lists: those of its projects and scratch threads. A thread whose
+ * project has not loaded yet stays, so a new thread never flickers out of the list.
+ */
+export function filterThreadsForWorkspace<
+  TThread extends { readonly environmentId: EnvironmentId; readonly projectId: string },
+>(
+  threads: ReadonlyArray<TThread>,
+  projects: ReadonlyArray<Project>,
+  workspaces: ReadonlyArray<BanneretWorkspace>,
+  activeId: ActiveWorkspaceId,
+): ReadonlyArray<TThread> {
+  if (workspaces.length === 0) return threads;
+  const active = effectiveWorkspaceId(activeId, workspaces);
+  const hidden = new Set(
+    projects
+      .filter(
+        (project) => !project.isScratch && workspaceIdForProject(project, workspaces) !== active,
+      )
+      .map((project) => `${project.environmentId}:${project.id}`),
+  );
+  if (hidden.size === 0) return threads;
+  return threads.filter((thread) => !hidden.has(`${thread.environmentId}:${thread.projectId}`));
+}
+
+/**
+ * The `environmentId:projectId` keys a sidebar scope covers. Upstream's "All projects" (null) means
+ * every project; with workspaces it means the active workspace's projects.
+ */
+export function workspaceScopeProjectKeys(
+  scopedProjectKeys: ReadonlySet<string> | null,
+  projects: ReadonlyArray<Project>,
+  workspaces: ReadonlyArray<BanneretWorkspace>,
+  activeId: ActiveWorkspaceId,
+): ReadonlySet<string> | null {
+  if (scopedProjectKeys !== null || workspaces.length === 0) return scopedProjectKeys;
+  return new Set(
+    filterProjectsForWorkspace(projects, workspaces, activeId).map(
+      (project) => `${project.environmentId}:${project.id}`,
+    ),
+  );
+}
+
+/**
  * Sets one workspace's projects and takes those projects out of any other workspace, so a project
  * belongs to at most one. Returns only the records that changed, stamped `now`.
  */
@@ -119,8 +162,8 @@ export function deleteWorkspace(workspace: BanneretWorkspace, now: string): Bann
 }
 
 /**
- * Where opening a thread takes the switcher: the workspace of the thread's project, or no switch
- * for a thread without a project (every workspace shows those).
+ * Where opening a thread or draft takes the switcher: the workspace of its project, or no switch
+ * for a scratch thread (every workspace shows those).
  */
 export function autoSwitchTarget(input: {
   readonly project: Project;

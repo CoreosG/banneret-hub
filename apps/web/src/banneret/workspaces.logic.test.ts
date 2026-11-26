@@ -12,6 +12,8 @@ import {
   autoSwitchTarget,
   deleteWorkspace,
   filterProjectsForWorkspace,
+  filterThreadsForWorkspace,
+  workspaceScopeProjectKeys,
   projectIdentityKeys,
   resolveWorkspaces,
   staleOnEnvironment,
@@ -69,6 +71,54 @@ describe("resolveWorkspaces", () => {
       ["repo:x"],
       ["repo:y"],
     ]);
+  });
+});
+
+describe("filterThreadsForWorkspace", () => {
+  const alpha = project("alpha");
+  const beta = project("beta");
+  const scratch = project("scratch", { scratch: true });
+  const thread = (id: string, projectId: string) => ({
+    id,
+    environmentId: EnvironmentId.make("local"),
+    projectId,
+  });
+  const threads = [
+    thread("a", "alpha"),
+    thread("b", "beta"),
+    thread("s", "scratch"),
+    thread("n", "not-loaded-yet"),
+  ];
+  const client = workspace({ projectKeys: [workspaceProjectKey(beta)] });
+
+  it("lists only the active workspace's threads, plus scratch and not-yet-loaded ones", () => {
+    const ids = (activeId: string | null) =>
+      filterThreadsForWorkspace(threads, [alpha, beta, scratch], [client], activeId).map(
+        (entry) => entry.id,
+      );
+    expect(ids(null)).toEqual(["a", "s", "n"]);
+    expect(ids("w1")).toEqual(["b", "s", "n"]);
+  });
+
+  it("leaves the list untouched without workspaces", () => {
+    expect(filterThreadsForWorkspace(threads, [alpha, beta], [], null)).toBe(threads);
+  });
+});
+
+describe("workspaceScopeProjectKeys", () => {
+  const alpha = project("alpha");
+  const beta = project("beta");
+  const client = workspace({ projectKeys: [workspaceProjectKey(beta)] });
+
+  it("narrows All projects to the active workspace and keeps a chosen scope", () => {
+    const keys = (scope: ReadonlySet<string> | null, activeId: string | null) => {
+      const result = workspaceScopeProjectKeys(scope, [alpha, beta], [client], activeId);
+      return result === null ? null : [...result];
+    };
+    expect(keys(null, null)).toEqual(["local:alpha"]);
+    expect(keys(null, "w1")).toEqual(["local:beta"]);
+    expect(keys(new Set(["local:beta"]), null)).toEqual(["local:beta"]);
+    expect(workspaceScopeProjectKeys(null, [alpha, beta], [], null)).toBeNull();
   });
 });
 
