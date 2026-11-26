@@ -71,6 +71,10 @@ function readActive(): ActiveWorkspaceId {
 export type WorkspaceDialogState =
   | { readonly kind: "create" }
   | { readonly kind: "manage"; readonly workspaceId: string | null }
+  /** The Enterprise setup wizard, optionally for a relay already known (Join again). */
+  | { readonly kind: "enterprise"; readonly origin?: string }
+  | { readonly kind: "machines" }
+  | { readonly kind: "leave" }
   | null;
 
 interface WorkspacesState {

@@ -1,12 +1,10 @@
-// Banneret Hub: create, rename, delete a workspace and choose its projects. Projects are listed once
-// per repository across every connected environment, the key a workspace stores.
+// Banneret Hub: create, rename, delete a workspace and choose its projects; the same dialog hosts
+// the Enterprise wizard, the Machines list and Leave.
 import type { BanneretWorkspace } from "@t3tools/contracts";
-import { useMessages } from "gt-react";
 import { useId, useState } from "react";
 
 import { randomUUID } from "~/lib/utils";
 import { Button } from "../components/ui/button";
-import { Checkbox } from "../components/ui/checkbox";
 import {
   Dialog,
   DialogDescription,
@@ -18,19 +16,17 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { EnterpriseWizard } from "./EnterpriseWizard";
+import { LeavePanel, MachinesPanel } from "./MachinesDialog";
+import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
+import { deleteWorkspace } from "./workspaces.logic";
 import {
-  buildSidebarProjectSnapshots,
-  type SidebarProjectSnapshot,
-} from "../sidebarProjectGrouping";
-import { useProjects } from "../state/entities";
-import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
-import {
-  assignProjects,
-  deleteWorkspace,
-  projectIdentityKeys,
-  workspaceIdForProject,
-  workspaceProjectKey,
-} from "./workspaces.logic";
+  ownerOfGroup,
+  ProjectChecklist,
+  usePickableProjectGroups,
+  WorkspaceKindChoice,
+  workspaceWithProjects,
+} from "./WorkspaceProjectPicker";
 import {
   openWorkspaceDialog,
   saveWorkspaces,
@@ -41,38 +37,8 @@ import {
 } from "./workspacesStore";
 
 const MAX_NAME_LENGTH = 60;
-// Keyed by repository, whatever the sidebar's grouping, so one row is exactly what a workspace stores.
-const REPOSITORY_GROUPING = {
-  sidebarProjectGroupingMode: "repository",
-  sidebarProjectGroupingOverrides: {},
-} as const;
-
-function usePickableProjectGroups(): SidebarProjectSnapshot[] {
-  const projects = useProjects();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const environments = useEnvironmentIdentities();
-  const resolve = useMessages();
-  const labels = new Map(environments.map((entry) => [entry.environmentId, entry.label] as const));
-  return buildSidebarProjectSnapshots(
-    {
-      projects,
-      groupScratchProjects: true,
-      settings: REPOSITORY_GROUPING,
-      primaryEnvironmentId,
-      resolveEnvironmentLabel: (environmentId) => labels.get(environmentId) ?? null,
-    },
-    resolve,
-  )
-    .filter((group) => !group.isScratch)
-    .toSorted((a, b) => a.displayName.localeCompare(b.displayName));
-}
-
-const groupKeys = (group: SidebarProjectSnapshot) => [
-  ...new Set(group.memberProjects.map(workspaceProjectKey)),
-];
-
 function WorkspaceEditor(props: {
-  readonly dialog: Exclude<WorkspaceDialogState, null>;
+  readonly dialog: Extract<WorkspaceDialogState, { kind: "create" | "manage" }>;
   readonly onClose: () => void;
 }) {
   const id = useId();
@@ -85,10 +51,7 @@ function WorkspaceEditor(props: {
     props.dialog.kind === "manage"
       ? (workspaces.find((workspace) => workspace.id === selectedId) ?? null)
       : null;
-  const ownerOf = (group: SidebarProjectSnapshot) =>
-    group.memberProjects
-      .map((member) => workspaceIdForProject(member, workspaces))
-      .find((owner) => owner !== null) ?? null;
+  const ownerOf = (group: SidebarProjectSnapshot) => ownerOfGroup(group, workspaces);
   const initialSelection = (workspace: BanneretWorkspace | null) =>
     new Set(
       workspace === null
@@ -140,20 +103,12 @@ function WorkspaceEditor(props: {
       projectKeys: [],
       updatedAt: now,
     };
-    // Keys of projects on environments that are not connected now stay as they were. Every key a
-    // listed project matches by counts as known, so an old path key is dropped when it is unchecked.
-    const identityKeys = (group: SidebarProjectSnapshot) =>
-      group.memberProjects.flatMap(projectIdentityKeys);
-    const known = new Set(groups.flatMap(identityKeys));
-    const kept = workspace.projectKeys.filter((key) => !known.has(key));
-    const pickedGroups = groups.filter((group) => selection.has(group.projectKey));
-    const picked = pickedGroups.flatMap((group) => groupKeys(group));
     void saveWorkspaces(
-      assignProjects({
+      workspaceWithProjects({
         workspaces,
         workspace: { ...workspace, name: trimmedName },
-        projectKeys: [...kept, ...picked],
-        claimedKeys: pickedGroups.flatMap(identityKeys),
+        groups,
+        selection,
         now,
       }),
     );
@@ -184,6 +139,7 @@ function WorkspaceEditor(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
+          {editing === null ? <WorkspaceKindChoice kind="solo" /> : null}
           {editing !== null && workspaces.length > 1 ? (
             <div className="flex flex-wrap gap-1.5" role="group" aria-label="Workspaces">
               {workspaces.map((workspace) => (
@@ -213,49 +169,20 @@ function WorkspaceEditor(props: {
           </div>
           <div className="flex flex-col gap-1.5">
             <span className="font-medium text-sm">Projects</span>
-            {groups.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
-                No projects on your connected environments yet.
-              </p>
-            ) : (
-              <div className="max-h-72 overflow-y-auto rounded-md border">
-                {groups.map((group) => {
-                  const owner = ownerOf(group);
-                  const ownerName =
-                    owner !== null && owner !== editing?.id
-                      ? workspaces.find((workspace) => workspace.id === owner)?.name
-                      : undefined;
-                  return (
-                    <label
-                      key={group.projectKey}
-                      className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-sm not-last:border-b"
-                    >
-                      <Checkbox
-                        checked={selection.has(group.projectKey)}
-                        onCheckedChange={(checked) =>
-                          setSelection((previous) => {
-                            const next = new Set(previous);
-                            if (checked) next.add(group.projectKey);
-                            else next.delete(group.projectKey);
-                            return next;
-                          })
-                        }
-                      />
-                      <span className="min-w-0 flex-1 truncate">{group.displayName}</span>
-                      {ownerName !== undefined ? (
-                        <span className="shrink-0 text-muted-foreground text-xs">
-                          Moves from {ownerName}
-                        </span>
-                      ) : group.remoteEnvironmentLabels.length > 0 ? (
-                        <span className="shrink-0 truncate text-muted-foreground text-xs">
-                          {group.remoteEnvironmentLabels.join(", ")}
-                        </span>
-                      ) : null}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+            <ProjectChecklist
+              groups={groups}
+              workspaces={workspaces}
+              editingId={editing?.id ?? null}
+              selection={selection}
+              onToggle={(projectKey, checked) =>
+                setSelection((previous) => {
+                  const next = new Set(previous);
+                  if (checked) next.add(projectKey);
+                  else next.delete(projectKey);
+                  return next;
+                })
+              }
+            />
           </div>
         </div>
       </DialogPanel>
@@ -281,6 +208,28 @@ function WorkspaceEditor(props: {
   );
 }
 
+function dialogBody(dialog: Exclude<WorkspaceDialogState, null>, close: () => void) {
+  switch (dialog.kind) {
+    case "create":
+    case "manage":
+      return (
+        <WorkspaceEditor
+          key={dialog.kind === "manage" ? `manage:${dialog.workspaceId}` : "create"}
+          dialog={dialog}
+          onClose={close}
+        />
+      );
+    case "enterprise":
+      return (
+        <EnterpriseWizard key={dialog.origin ?? ""} initialOrigin={dialog.origin} onClose={close} />
+      );
+    case "machines":
+      return <MachinesPanel onClose={close} />;
+    case "leave":
+      return <LeavePanel onClose={close} />;
+  }
+}
+
 export function WorkspaceDialog() {
   const dialog = useWorkspacesStore((state) => state.dialog);
   const close = () => openWorkspaceDialog(null);
@@ -292,13 +241,7 @@ export function WorkspaceDialog() {
       }}
     >
       <DialogPopup className="sm:max-w-lg">
-        {dialog !== null ? (
-          <WorkspaceEditor
-            key={dialog.kind === "manage" ? `manage:${dialog.workspaceId}` : "create"}
-            dialog={dialog}
-            onClose={close}
-          />
-        ) : null}
+        {dialog !== null ? dialogBody(dialog, close) : null}
       </DialogPopup>
     </Dialog>
   );

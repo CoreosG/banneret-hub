@@ -56,6 +56,7 @@ export * from "./project.ts";
 export * from "./workspaceFiles.ts";
 export * from "./banneretPorts.ts";
 export * from "./banneretWorkspaces.ts";
+export * from "./banneretRelay.ts";
 export * from "./workspaceFolders.ts";
 export * from "./filesystem.ts";
 export * from "./agentSessions.ts";

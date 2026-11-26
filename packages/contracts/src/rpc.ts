@@ -55,6 +55,7 @@ import {
 } from "./workspaceFiles.ts";
 import { WsBanneretPortsListRpc } from "./banneretPorts.ts";
 import { WsBanneretWorkspacesListRpc, WsBanneretWorkspacesPutRpc } from "./banneretWorkspaces.ts";
+import { BANNERET_RELAY_RPCS } from "./banneretRelay.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -2654,6 +2655,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsBanneretPortsListRpc,
   WsBanneretWorkspacesListRpc,
   WsBanneretWorkspacesPutRpc,
+  ...BANNERET_RELAY_RPCS,
   WsProjectsMutateRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,

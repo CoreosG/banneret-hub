@@ -3,7 +3,8 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
 
-import { useConnectedEnvironmentIds } from "../state/environments";
+import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
+import { ENROLMENT_POLL_MS, refreshEnrolment } from "./enrolmentStore";
 import { useRouteProject } from "./useRouteProject";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 import { autoSwitchTarget } from "./workspaces.logic";
@@ -70,8 +71,29 @@ function useWorkspaceAutoSwitch() {
   }, [routeKey, decision]);
 }
 
+/**
+ * Reads this machine's enrolment: every 2 s while the wizard is open, every 30 s otherwise, and
+ * only while a workspace belongs to a relay. `status` is local; it never reaches the relay.
+ */
+function useEnrolmentPolling() {
+  const environmentId = usePrimaryEnvironmentId();
+  const wizardOpen = useWorkspacesStore((state) => state.dialog?.kind === "enterprise");
+  const hasEnterprise = useWorkspaces().some((workspace) => workspace.relay !== undefined);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's enrolment, which changes on the relay's schedule
+  useEffect(() => {
+    if (environmentId === null || (!wizardOpen && !hasEnterprise)) return;
+    void refreshEnrolment(environmentId);
+    const timer = setInterval(
+      () => void refreshEnrolment(environmentId),
+      wizardOpen ? ENROLMENT_POLL_MS.wizard : ENROLMENT_POLL_MS.idle,
+    );
+    return () => clearInterval(timer);
+  }, [environmentId, wizardOpen, hasEnterprise]);
+}
+
 export function WorkspacesHost() {
   useWorkspaceSync();
+  useEnrolmentPolling();
   useWorkspaceAutoSwitch();
   return <WorkspaceDialog />;
 }
