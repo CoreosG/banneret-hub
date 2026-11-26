@@ -7,6 +7,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { type FakeRelay, type PersonInput, startFakeRelay } from "@t3tools/banneret-relay-fake";
 import { type BanneretEnrolmentView, EnvironmentId } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -241,6 +242,9 @@ const stateFileText = Effect.gen(function* () {
     .readFileString(path.join(config.stateDir, "banneret", "enrolment.json"))
     .pipe(Effect.orElseSucceed(() => ""));
 });
+
+const crashOf = (exit: Exit.Exit<unknown, unknown>) =>
+  Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : "";
 
 const pairingId = Effect.map(stateFileText, (text) => JSON.parse(text).pairingId as string);
 
@@ -713,6 +717,226 @@ describe("BanneretEnrolment", () => {
           expect(view.state).toBe("configured");
           expect(yield* requestsDuring(relay)).toEqual([]);
         }).pipe(Effect.provide(hubLayer(baseDir)));
+      }),
+    ),
+  );
+
+  it.live.each([
+    ["an answer without me", 200, "{}", "invalid_reply", "cancel"],
+    ["a relay that is down", 503, "", "unreachable", "forget"],
+    [
+      "a 401 that is not token_revoked",
+      401,
+      JSON.stringify({ error: { code: "unknown_device", message: "No.", retryable: false } }),
+      "refused",
+      "forget",
+    ],
+    [
+      "a 403",
+      403,
+      JSON.stringify({ error: { code: "forbidden", message: "No.", retryable: false } }),
+      "forbidden",
+      "cancel",
+    ],
+  ] as const)("approved with %s shows its health and can be left", ([, code, body, health, exit]) =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const enrolment = yield* Enrolment.BanneretEnrolment;
+        // Only signed setup calls: the anonymous probe inside start still reaches the fake.
+        relay.intercept = (request) =>
+          request.url.startsWith("/relay/v1/capabilities") &&
+          request.headers["x-banneret-device"] !== undefined
+            ? { status: code, body }
+            : undefined;
+        const view = yield* start(relay.origin);
+        fake.approve(view.confirmCode!, ADA);
+        const stuck = yield* waitFor(
+          status,
+          (current) => current.state === "approved" && current.health === health,
+        );
+        expect(stuck.machineId).toBeDefined();
+        const left = exit === "cancel" ? yield* enrolment.cancel : yield* enrolment.leave("forget");
+        expect(left).toEqual({ state: "none", reason: "forgotten" });
+        yield* noSecretsLeft;
+        relay.intercept = undefined;
+        expect(yield* requestsDuring(relay)).toEqual([]);
+      }).pipe(onFreshHub()),
+    ),
+  );
+
+  it.live("approved stays out of signed RPCs and finishes once the relay answers", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const enrolment = yield* Enrolment.BanneretEnrolment;
+        let release = false;
+        relay.intercept = (request) =>
+          !release &&
+          request.url.startsWith("/relay/v1/capabilities") &&
+          request.headers["x-banneret-device"] !== undefined
+            ? { status: 503 }
+            : undefined;
+        const view = yield* start(relay.origin);
+        fake.approve(view.confirmCode!, ADA);
+        yield* waitForState("approved");
+        const machinesCall = yield* Effect.exit(enrolment.machines(undefined));
+        expect(JSON.stringify(machinesCall)).toContain("has not joined");
+        release = true;
+        yield* waitForState("configured");
+      }).pipe(onFreshHub()),
+    ),
+  );
+
+  it.live.each([
+    ["0", (polls: number) => expect(polls).toBeLessThanOrEqual(30)],
+    ["99999999999", (polls: number) => expect(polls).toBeGreaterThanOrEqual(2)],
+  ] as const)("clamps Retry-After %s to the poll floor and the backoff cap", ([after, check]) =>
+    withFake((_fake, relay) =>
+      Effect.gen(function* () {
+        relay.intercept = (request) =>
+          request.url === "/relay/v1/enroll/poll"
+            ? {
+                status: 503,
+                headers: { "retry-after": after },
+                body: JSON.stringify({
+                  error: { code: "unavailable", message: "Busy.", retryable: true },
+                }),
+              }
+            : undefined;
+        yield* start(relay.origin);
+        const seen = yield* requestsDuring(relay, 600);
+        // pollFloorMs 20 allows 30 polls in 600 ms; maxBackoffMs 100 forces at least a few.
+        check(seen.filter((request) => request.url === "/relay/v1/enroll/poll").length);
+        expect((yield* status).state).toBe("requested");
+      }).pipe(onFreshHub()),
+    ),
+  );
+
+  it.live.each([
+    ["in the query", (url: string, code: string) => `${url}&code=${code}`],
+    ["in lower case", (url: string, code: string) => `${url}&c=${code.toLowerCase()}`],
+    [
+      "percent-encoded",
+      (url: string, code: string) => `${url}&c=%${code.charCodeAt(0).toString(16)}${code.slice(1)}`,
+    ],
+  ] as const)("refuses a sign-in link that carries the code %s", ([, carry]) =>
+    withFake((_fake, relay) =>
+      Effect.gen(function* () {
+        relay.rewrite = (request, body) => {
+          if (request.url !== "/relay/v1/enroll/start") return body;
+          const reply = JSON.parse(body);
+          return JSON.stringify({
+            ...reply,
+            browserUrl: carry(reply.browserUrl, reply.confirmCode),
+          });
+        };
+        const refused = yield* Effect.exit(start(relay.origin));
+        expect(JSON.stringify(refused)).toContain("put the code in its sign-in link");
+        expect(yield* status).toEqual({ state: "none" });
+        yield* noSecretsLeft;
+      }).pipe(onFreshHub()),
+    ),
+  );
+
+  it.live("a failed join again after a 401 keeps the working key, token and state", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const baseDir = yield* makeBaseDir;
+        let crashAt: string | undefined;
+        const beforeWrite = (step: string) =>
+          Effect.suspend(() =>
+            step === crashAt ? Effect.die(new Error(`crash at ${step}`)) : Effect.void,
+          );
+        const hub = hubLayer(baseDir, { beforeWrite });
+        const refuseSigned = (request: Recorded) =>
+          request.url.startsWith("/relay/v1/capabilities") &&
+          request.headers["x-banneret-device"] !== undefined
+            ? {
+                status: 401,
+                body: JSON.stringify({
+                  error: { code: "unknown_device", message: "No.", retryable: false },
+                }),
+              }
+            : undefined;
+        const allSecrets = Effect.gen(function* () {
+          const secrets = yield* ServerSecretStore.ServerSecretStore;
+          return {
+            ...(yield* secretsOnDisk),
+            next: Option.getOrUndefined(yield* secrets.get(Enrolment.NEXT_KEY_SECRET)),
+          };
+        });
+
+        const working = yield* Effect.gen(function* () {
+          yield* join(fake, relay);
+          relay.intercept = refuseSigned;
+          yield* waitFor(status, (view) => view.health === "refused");
+          return yield* allSecrets;
+        }).pipe(Effect.provide(hub));
+        expect(working.next).toBeUndefined();
+
+        // Each provide below is a restart, and health is run-time: wait for the 401 again.
+        const refusedAgain = waitFor(status, (view) => view.health === "refused");
+        const unchanged = Effect.gen(function* () {
+          const view = yield* status;
+          expect(view.state).toBe("configured");
+          expect(yield* allSecrets).toEqual(working);
+        });
+
+        // enroll/start fails.
+        relay.intercept = (request) =>
+          request.url === "/relay/v1/enroll/start" ? { status: 503 } : refuseSigned(request);
+        yield* Effect.gen(function* () {
+          yield* refusedAgain;
+          const failed = yield* Effect.exit(start(relay.origin));
+          expect(JSON.stringify(failed)).toContain("unavailable");
+          yield* unchanged;
+        }).pipe(Effect.provide(hub));
+
+        // The relay's sign-in page is on another origin.
+        relay.intercept = refuseSigned;
+        relay.rewrite = (request, body) =>
+          request.url === "/relay/v1/enroll/start"
+            ? JSON.stringify({ ...JSON.parse(body), browserUrl: "https://phish.example/enroll" })
+            : body;
+        yield* Effect.gen(function* () {
+          yield* refusedAgain;
+          const failed = yield* Effect.exit(start(relay.origin));
+          expect(JSON.stringify(failed)).toContain("another address");
+          yield* unchanged;
+        }).pipe(Effect.provide(hub));
+        relay.rewrite = undefined;
+
+        // A crash just before `requested` is saved, then a restart.
+        crashAt = "state:requested";
+        const crashed = yield* Effect.gen(function* () {
+          yield* refusedAgain;
+          return yield* Effect.exit(start(relay.origin));
+        }).pipe(Effect.provide(hub));
+        expect(crashOf(crashed)).toContain("crash at state:requested");
+        crashAt = undefined;
+        yield* unchanged.pipe(Effect.provide(hub));
+
+        // A crash after `requested` is saved but before the new key replaced the old one: the
+        // restart promotes the new key and the join completes.
+        crashAt = `set:${Enrolment.KEY_SECRET}`;
+        const requested = yield* Effect.gen(function* () {
+          yield* refusedAgain;
+          return yield* Effect.exit(start(relay.origin));
+        }).pipe(Effect.provide(hub));
+        expect(crashOf(requested)).toContain(`crash at set:${Enrolment.KEY_SECRET}`);
+        crashAt = undefined;
+        relay.intercept = undefined;
+        yield* Effect.gen(function* () {
+          const resumed = yield* status;
+          expect(resumed.state).toBe("requested");
+          const secrets = yield* allSecrets;
+          expect(secrets.next).toBeUndefined();
+          expect(secrets.token).toBeUndefined();
+          expect(Buffer.from(secrets.key!).equals(Buffer.from(working.key!))).toBe(false);
+          fake.approve(resumed.confirmCode!, ADA);
+          const configured = yield* waitForState("configured");
+          yield* waitFor(status, (view) => view.health === "healthy");
+          expect(configured.machineId).not.toBe(undefined);
+        }).pipe(Effect.provide(hub));
       }),
     ),
   );

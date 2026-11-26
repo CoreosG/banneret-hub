@@ -43,6 +43,8 @@ import { type MachineKey, RelayCounter, keyFromSeed, waitBeforeSigning } from ".
 
 export const KEY_SECRET = "banneret-relay-key";
 export const TOKEN_SECRET = "banneret-relay-token";
+/** A new pairing's key while the old enrolment's key must survive until `requested` is saved. */
+export const NEXT_KEY_SECRET = "banneret-relay-key-next";
 
 const Me = Schema.Struct({ id: Schema.String, login: Schema.String, role: Schema.String });
 
@@ -461,6 +463,11 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     backoffMs = Math.min(options.maxBackoffMs, backoffMs === 0 ? 2000 : backoffMs * 2);
     return backoffMs;
   };
+  // A relay's delay is advice: 0 would spin and a huge value overflows the timer.
+  const clampDelay = (ms: number) =>
+    Number.isNaN(ms)
+      ? options.pollFloorMs
+      : Math.min(options.maxBackoffMs, Math.max(options.pollFloorMs, ms));
 
   // Start-up makes the files agree with one state of the table.
   const loaded = yield* fs.readFileString(stateFile).pipe(
@@ -470,8 +477,15 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   current = loaded;
   yield* locked(
     Effect.gen(function* () {
-      const hasKey = Option.isSome(yield* readSecret(KEY_SECRET));
+      let hasKey = Option.isSome(yield* readSecret(KEY_SECRET));
       const hasToken = Option.isSome(yield* readSecret(TOKEN_SECRET));
+      const nextKey = yield* readSecret(NEXT_KEY_SECRET);
+      // A join again saved `requested` but stopped before its key replaced the old one.
+      if (isPending(current) && Option.isSome(nextKey)) {
+        yield* setSecret(KEY_SECRET, nextKey.value);
+        hasKey = true;
+      }
+      if (Option.isSome(nextKey)) yield* removeSecret(NEXT_KEY_SECRET);
       switch (current.state) {
         case "none":
         case "revoked":
@@ -540,13 +554,14 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   const updateHealth = Effect.fn("BanneretEnrolment.updateHealth")(function* (
     error: RelayCallError | null,
   ) {
-    if (current.state !== "configured") return;
+    if (!isEnrolled(current)) return;
     if (error === null) {
       health = "healthy";
       unreachableSince = undefined;
       return;
     }
     if (error.code === "clock_wrong" || error.code === "clock_skew") health = "clock_wrong";
+    else if (error.code === "bad_response") health = "invalid_reply";
     else if (error.status === 0 || error.retryable || error.code === "redirect") {
       if (health !== "unreachable") unreachableSince = yield* nowIso;
       health = "unreachable";
@@ -590,7 +605,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     );
     yield* saveCounterMark;
     if (Result.isSuccess(outcome)) {
-      yield* updateHealth(null);
+      // While approved, finishSetup decides: an answer without `me` is not healthy.
+      if (from.state === "configured") yield* updateHealth(null);
       return outcome.success;
     }
     const error = outcome.failure;
@@ -605,7 +621,9 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   // One driver fiber. It acts only in requested, awaiting_approval, approved and configured, so an
   // environment with no enrolment makes no relay call.
   const pollOnce = Effect.fn("BanneretEnrolment.poll")(function* (from: PendingState) {
-    const key = yield* loadKey;
+    // A join again saves `requested` before its key replaces the old one; the new key wins.
+    const next = yield* readSecret(NEXT_KEY_SECRET);
+    const key = Option.isSome(next) ? Option.some(keyFromSeed(next.value)) : yield* loadKey;
     if (Option.isNone(key)) {
       yield* whileStill(from, toNone("key_lost"));
       return 0;
@@ -626,13 +644,15 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         yield* whileStill(from, toNone("not_found"));
         return 0;
       }
-      if (error.retryable || error.status === 0) return error.retryAfterMs ?? nextBackoff();
+      if (error.retryable || error.status === 0) {
+        return error.retryAfterMs === undefined ? nextBackoff() : clampDelay(error.retryAfterMs);
+      }
       yield* whileStill(from, toNone("refused", error.message));
       return 0;
     }
     backoffMs = 0;
     const reply = outcome.success;
-    const delay = Math.max(reply.retryAfterMs, options.pollFloorMs);
+    const delay = clampDelay(reply.retryAfterMs);
     switch (reply.state) {
       case "pending":
         return delay;
@@ -707,7 +727,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       return { me, replacedLabel };
     }).pipe(Effect.result);
     if (Result.isFailure(outcome)) {
-      return outcome.failure.code === "token_revoked" ? 0 : nextBackoff();
+      if (outcome.failure.code === "token_revoked") return 0;
+      // signedCall records transport failures; an answer that arrived without `me` lands here.
+      yield* updateHealth(outcome.failure);
+      return nextBackoff();
     }
     backoffMs = 0;
     const { me, replacedLabel } = outcome.success;
@@ -792,20 +815,22 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     ),
   );
 
+  // The wake signal is taken before the step, so a wake during the step is not lost.
   yield* Effect.forkScoped(
     Effect.forever(
-      step.pipe(
-        Effect.tap(() => notify),
-        Effect.flatMap((delay) =>
-          Effect.suspend(() =>
+      Effect.suspend(() => {
+        const signal = wakeSignal;
+        return step.pipe(
+          Effect.tap(() => notify),
+          Effect.flatMap((delay) =>
             delay === "idle"
-              ? Deferred.await(wakeSignal)
-              : Deferred.await(wakeSignal).pipe(
+              ? Deferred.await(signal)
+              : Deferred.await(signal).pipe(
                   Effect.timeoutOrElse({ duration: delay, orElse: () => Effect.void }),
                 ),
           ),
-        ),
-      ),
+        );
+      }),
     ),
   );
 
@@ -838,6 +863,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           displayName: state.displayName,
           machineId: state.machineId,
           label: state.label,
+          ...(health === undefined ? {} : { health }),
+          ...(unreachableSince === undefined ? {} : { unreachableSince }),
         };
       case "configured":
         return {
@@ -918,9 +945,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           return yield* fail("This machine is already joining or joined to a company.");
         }
         const relay = yield* probeRelay(input.origin);
+        // Nothing is written until the relay has answered: a failed join again keeps the old key,
+        // token and state.
         const seed = NodeCrypto.randomBytes(32);
         const key: MachineKey = keyFromSeed(seed);
-        yield* setSecret(KEY_SECRET, seed);
         const started = yield* Effect.flatMap(nowMs(), (now) =>
           relayFetch({
             origin: relay.origin,
@@ -933,30 +961,23 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
             signer: { kind: "enrolment", key },
             nowMs: now,
           }).pipe(Effect.flatMap((reply) => decodeReply(StartReply, reply))),
-        ).pipe(Effect.result);
-        const abandon = (error: BanneretRelayError) =>
-          (before.state === "configured" ? Effect.void : removeSecret(KEY_SECRET)).pipe(
-            Effect.andThen(Effect.fail(error)),
-          );
-        if (Result.isFailure(started)) {
-          return yield* abandon(plainFailure(started.failure, relay.origin));
+        ).pipe(Effect.mapError((error) => plainFailure(error, relay.origin)));
+        if (originOf(started.browserUrl) !== relay.origin) {
+          return yield* fail("The relay's sign-in page is on another address, so joining stopped.");
         }
-        const pairing = started.success;
-        if (originOf(pairing.browserUrl) !== relay.origin) {
-          return yield* abandon(
-            new BanneretRelayError({
-              message: "The relay's sign-in page is on another address, so joining stopped.",
-            }),
-          );
+        if (urlCarries(started.browserUrl, started.confirmCode)) {
+          return yield* fail("The relay put the code in its sign-in link, so joining stopped.");
         }
+        const replacing = before.state === "configured";
+        yield* setSecret(replacing ? NEXT_KEY_SECRET : KEY_SECRET, seed);
         yield* persist({
           state: "requested",
           relayOrigin: relay.origin,
           displayName: relay.displayName,
-          pairingId: pairing.pairingId,
-          confirmCode: pairing.confirmCode,
-          browserUrl: pairing.browserUrl,
-          expiresAt: pairing.expiresAt,
+          pairingId: started.pairingId,
+          confirmCode: started.confirmCode,
+          browserUrl: started.browserUrl,
+          expiresAt: started.expiresAt,
           label,
           kind: input.kind,
           startedAt: yield* nowIso,
@@ -964,7 +985,11 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         health = undefined;
         unreachableSince = undefined;
         backoffMs = 0;
-        if (before.state === "configured") yield* removeSecret(TOKEN_SECRET);
+        if (replacing) {
+          yield* setSecret(KEY_SECRET, seed);
+          yield* removeSecret(NEXT_KEY_SECRET);
+          yield* removeSecret(TOKEN_SECRET);
+        }
         return view();
       }),
     ).pipe(Effect.tap(() => wake));
@@ -972,6 +997,11 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
 
   const cancel = locked(
     Effect.gen(function* () {
+      if (current.state === "approved") {
+        // The relay already approved this machine, so it stays listed until a founder removes it.
+        yield* toNone("forgotten");
+        return view();
+      }
       if (!isPending(current)) return yield* fail("There is no request to cancel.");
       yield* toNone("cancelled");
       return view();
@@ -983,7 +1013,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
 
   const leave = Effect.fn("BanneretEnrolment.leave")(function* (mode: "revoke" | "forget") {
     const from = current;
-    if (from.state !== "configured") return yield* fail("This machine has not joined a company.");
+    // While approved only forget is offered: setup never finished, so there may be no relay to tell.
+    if (!isEnrolled(from) || (from.state === "approved" && mode !== "forget")) {
+      return yield* fail("This machine has not joined a company.");
+    }
     if (mode === "forget") {
       if (health === "healthy" || health === undefined) {
         return yield* fail("Forgetting is offered only while the relay cannot be reached.");
@@ -1004,8 +1037,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     }
     yield* locked(
       Effect.gen(function* () {
-        if (current.state === "configured" && current.machineId !== from.machineId) return;
-        if (current.state !== "configured" && current.state !== "revoked") return;
+        if (isEnrolled(current) && current.machineId !== from.machineId) return;
+        if (!isEnrolled(current) && current.state !== "revoked") return;
         yield* toNone(mode === "revoke" ? "left" : "forgotten");
         yield* tombstoneWorkspace(from.relayOrigin);
       }),
@@ -1107,6 +1140,18 @@ function originOf(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Whether `url` carries `code`, also once percent-decoded and ignoring case. */
+function urlCarries(url: string, code: string): boolean {
+  const needle = code.toUpperCase();
+  let decoded = url;
+  try {
+    decoded = decodeURIComponent(url);
+  } catch {
+    // A malformed escape: the raw text is still checked.
+  }
+  return url.toUpperCase().includes(needle) || decoded.toUpperCase().includes(needle);
 }
 
 function isPending(state: Persisted): state is PendingState {
