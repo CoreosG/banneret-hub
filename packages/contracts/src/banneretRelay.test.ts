@@ -18,7 +18,10 @@ describe("parseBanneretRelayAddress", () => {
     ["http://relay.example.com", "The relay must use https."],
     ["http://10.0.0.5", "The relay must use https."],
     ["ftp://relay.example.com", "The relay must use https."],
-    ["https://ada:secret@relay.example.com", "The address must not contain a user name or password."],
+    [
+      "https://ada:secret@relay.example.com",
+      "The address must not contain a user name or password.",
+    ],
     ["https://relay.example.com/relay/v1", "Enter only the relay's address, without a path."],
     ["https://relay.example.com/?x=1", "Enter only the relay's address, without a path."],
     ["https://relay.example.com/#top", "Enter only the relay's address, without a path."],

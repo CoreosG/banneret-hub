@@ -328,11 +328,14 @@ describe("BanneretEnrolment", () => {
             expect(logText).not.toContain(requested.confirmCode!);
             expect(logText).not.toContain(token!);
           }).pipe(
-            Effect.provide(hubLayer(baseDir)),
             Effect.provide(
-              Logger.layer([Logger.make((entry) => logs.push(entry))], {
-                mergeWithExisting: false,
-              }),
+              hubLayer(baseDir).pipe(
+                Layer.provideMerge(
+                  Logger.layer([Logger.make((entry) => logs.push(entry))], {
+                    mergeWithExisting: false,
+                  }),
+                ),
+              ),
             ),
           );
         }),
@@ -696,8 +699,11 @@ describe("BanneretEnrolment", () => {
           saved.counterMark = String(BigInt(Date.parse(joined.lastOkAt!) + 10 * 60_000) * 1000n);
           yield* fs.writeFileString(file, JSON.stringify(saved));
         }).pipe(
-          Effect.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
-          Effect.provide(NodeServices.layer),
+          Effect.provide(
+            ServerConfig.layerTest(process.cwd(), baseDir).pipe(
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
         );
         yield* Effect.gen(function* () {
           relay.requests.length = 0;

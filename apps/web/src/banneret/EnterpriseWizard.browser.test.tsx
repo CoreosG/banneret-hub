@@ -94,7 +94,7 @@ function setup(displayName = "Example Company") {
     label: "Ada laptop",
     confirmCode: "ABCD2345",
     browserUrl: `${ORIGIN}/enroll?pairing=pr_1`,
-    expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    expiresAt: "2099-01-01T00:10:00.000Z",
   };
   const spies = {
     status: vi
