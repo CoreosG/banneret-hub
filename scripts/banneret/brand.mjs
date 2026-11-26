@@ -1,7 +1,7 @@
-// Build-time identity rewrite, so upstream files stay unedited: "T3 Code" becomes "Banneret Hub",
-// official T3CODE_* / T3_* variables become BANNERET_* ones, the t3code:// app-link scheme becomes
-// banneret://, and (`cli: true`) the `t3` command `banneret`. Source and tests keep upstream's values.
-// Catalogs are keyed by a hash of the English source, so changed entries are re-keyed too.
+// Build-time identity rewrite, so upstream files stay unedited: product name, T3CODE_* / T3_*
+// variables, the t3code:// scheme and (`cli: true`) the `t3` command and server process title.
+// Source and tests keep upstream's values. Catalogs are keyed by a hash of the English source,
+// so changed entries are re-keyed too.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -95,6 +95,28 @@ const CLI_RULES = [
   // Prose: "Another t3 at", "so t3 did not", "(t3 service protect)", "Installed t3 ${version}".
   [/(?<=[A-Za-z0-9:,] |\()(?<!npx |-g )t3(?= [a-zA-Z(]| \$\{|\\?`)(?! checkpoint)/g, CLI_NAME],
 ];
+
+/**
+ * The server entry names its process `banneret`, so `ps` and Activity Monitor stop listing a `t3`
+ * process (Linux also takes it as the thread name; Windows as the console title). The runtime
+ * executable keeps upstream's `t3` file name. Anchored on upstream's first line of entrypoint code.
+ */
+const SERVER_ENTRY = /(?:^|[\\/])apps[\\/]server[\\/]src[\\/]bin\.ts$/;
+const SERVER_ENTRY_ANCHOR = /^([ \t]*)process\.stdout\.on\("error", ignoreOutputError\);$/m;
+
+export function titleServerEntry(code, file) {
+  if (!SERVER_ENTRY.test(file)) return code;
+  if (!SERVER_ENTRY_ANCHOR.test(code)) {
+    throw new Error(
+      `Banneret brand: ${file} no longer has the line the process title goes before; ` +
+        "update SERVER_ENTRY_ANCHOR in scripts/banneret/brand.mjs.",
+    );
+  }
+  return code.replace(
+    SERVER_ENTRY_ANCHOR,
+    `$1process.title = "${CLI_NAME}";\n$1process.stdout.on("error", ignoreOutputError);`,
+  );
+}
 
 export function rebrandText(text, { cli = false } = {}) {
   let result = text.replace(NAME_PATTERN, BRAND_NAME).replace(ENV_PATTERN, (n) => ENV_RENAMES[n]);
@@ -223,7 +245,8 @@ export function banneretBrandPlugin({ vite = false, cli = false } = {}) {
     transform(code, id) {
       const file = id.split("?")[0];
       if (!SOURCE_PATTERN.test(file) || file.includes("node_modules")) return null;
-      const rebranded = rebrandText(code, { cli });
+      const text = rebrandText(code, { cli });
+      const rebranded = cli ? titleServerEntry(text, file) : text;
       return rebranded === code ? null : { code: rebranded, map: null };
     },
   };

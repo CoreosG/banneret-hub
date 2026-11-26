@@ -43,7 +43,8 @@ vi.mock(import("../localApi"), async (original) => ({
 }));
 
 const LOCAL = EnvironmentId.make("local");
-const ORIGIN = "https://relay.example.com";
+// A Tailscale relay on a non-default port, as the live relay runs.
+const ORIGIN = "https://relay-host.tail0000.ts.net:10000";
 const WORKSPACE_ID = "ent-0123456789abcdef";
 const HOSTILE = '<img src=x onerror="window.__pwned=1">';
 
@@ -97,7 +98,7 @@ function setup(displayName = "Example Company") {
     displayName,
     label: "Ada laptop",
     confirmCode: "ABCD2345",
-    browserUrl: `${ORIGIN}/enroll?pairing=pr_1`,
+    browserUrl: `${ORIGIN}/admin/hub/enroll/pr_1`,
     expiresAt: "2099-01-01T00:10:00.000Z",
   };
   const spies = {
@@ -219,9 +220,9 @@ describe("EnterpriseWizard", () => {
     await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
     await userEvent.click(page.getByRole("menuitem", { name: "New workspace…" }));
     await userEvent.click(page.getByRole("button", { name: "Enterprise" }));
-    await userEvent.fill(page.getByLabelText("Relay address"), "relay.example.com");
+    await userEvent.fill(page.getByLabelText("Relay address"), "relay-host.tail0000.ts.net:10000");
     await userEvent.click(page.getByRole("button", { name: "Continue" }));
-    expect(server.spies.probe).toHaveBeenCalledWith(LOCAL, "relay.example.com");
+    expect(server.spies.probe).toHaveBeenCalledWith(LOCAL, "relay-host.tail0000.ts.net:10000");
 
     await userEvent.fill(page.getByLabelText("Name for this machine"), "Ada laptop");
     await userEvent.click(page.getByRole("button", { name: "Server" }));
@@ -233,7 +234,10 @@ describe("EnterpriseWizard", () => {
     });
 
     await expect.element(page.getByLabelText("Confirm code")).toHaveTextContent("ABCD2345");
-    expect(state.openExternal).toHaveBeenCalledWith(server.pending.browserUrl);
+    // The relay's own URL, verbatim: its origin check compares the exact host and port.
+    expect(state.openExternal.mock.calls[0]?.[0]).toBe(
+      "https://relay-host.tail0000.ts.net:10000/admin/hub/enroll/pr_1",
+    );
     for (const [url] of state.openExternal.mock.calls) expect(url).not.toContain("ABCD2345");
     await userEvent.click(page.getByRole("button", { name: "Open sign-in page" }));
     expect(state.openExternal).toHaveBeenCalledTimes(2);
@@ -385,7 +389,9 @@ describe("EnterpriseWizard", () => {
       );
 
     await server.setView({ ...approved, health: "unreachable" });
-    await expect.element(page.getByText(/^Cannot reach relay\.example\.com/)).toBeVisible();
+    await expect
+      .element(page.getByText(/^Cannot reach relay-host\.tail0000\.ts\.net:10000/))
+      .toBeVisible();
     await userEvent.click(page.getByRole("button", { name: "Cancel" }));
     expect(server.spies.cancel).toHaveBeenCalledWith(LOCAL);
     await expect.element(page.getByLabelText("Relay address")).toBeVisible();

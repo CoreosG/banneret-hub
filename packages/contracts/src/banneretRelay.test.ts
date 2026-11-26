@@ -7,6 +7,8 @@ describe("parseBanneretRelayAddress", () => {
     ["relay.example.com", "https://relay.example.com"],
     ["https://relay.example.com/", "https://relay.example.com"],
     ["https://Relay.Example.com:8443", "https://relay.example.com:8443"],
+    ["relay-host.tail0000.ts.net:10000", "https://relay-host.tail0000.ts.net:10000"],
+    [" https://relay-host.tail0000.ts.net:10000/ ", "https://relay-host.tail0000.ts.net:10000"],
     ["http://127.0.0.1:41234", "http://127.0.0.1:41234"],
     ["http://127.0.0.1", "http://127.0.0.1"],
     ["http://127.1.2.3:8080", "http://127.1.2.3:8080"],

@@ -104,8 +104,36 @@ const errorFields = (body: unknown) => {
   };
 };
 
+/**
+ * Signed calls go only to the relay API: a bare origin and a `/relay/v1/` target with no `//`,
+ * `.` or `..` segment, backslash or fragment. The relay refuses signing headers on any other path
+ * (its browser pages), so a signed call there could only ever fail, and a token must not leave.
+ */
+export function isRelayApiCall(origin: string, target: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (parsed.origin !== origin || !target.startsWith("/relay/v1/")) return false;
+  const path = target.split("?", 1)[0]!;
+  return !target.includes("#") && !/\/\/|\\|(^|\/)\.\.?(\/|$)/.test(path);
+}
+
+export const notRelayApiError = () =>
+  new RelayCallError({
+    status: 0,
+    code: "not_relay_api",
+    message: "Banneret Hub signs only relay API calls under /relay/v1.",
+    retryable: false,
+  });
+
 /** One relay call: no redirects, 10 s, a 1 MiB response at most unless the caller allows more. */
 export const relayFetch = Effect.fn("BanneretRelay.fetch")(function* (request: RelayRequest) {
+  if (request.signer !== undefined && !isRelayApiCall(request.origin, request.target)) {
+    return yield* notRelayApiError();
+  }
   const bodyBytes = request.body === undefined ? new Uint8Array() : jsonBytes(request.body);
   const headers: Record<string, string> = { Accept: "application/json" };
   if (request.body !== undefined) headers["Content-Type"] = "application/json";

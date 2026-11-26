@@ -7,6 +7,8 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
+import { BRAND_NAME } from "./brand.mjs";
+
 const repoRoot = NodePath.resolve(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
   "../..",
@@ -28,6 +30,21 @@ const shRules = [
   [`pwd)/t3"`, `pwd)/banneret"`, 1],
   ["command -v t3 ", "command -v banneret ", 1],
   ["Setting up the t3 command", "Setting up the banneret command", 1],
+  // What the installer prints: the product name and the command to run.
+  ["T3 Code", BRAND_NAME, 6],
+  ["t3 install: ", "banneret install: ", 1],
+  ["there is no t3 CLI", "there is no banneret CLI", 1],
+  ["https://t3.codes/download", `https://github.com/${REPO}/releases`, 1],
+  [`"t3 \${version}`, `"banneret \${version}`, 3],
+  ["another t3 is already at", "another banneret is already at", 1],
+  [
+    "Another t3 at %s runs first, so run %s%s/t3%s",
+    "Another banneret at %s runs first, so run %s%s/banneret%s",
+    1,
+  ],
+  ["Run %st3%s", "Run %sbanneret%s", 1],
+  ["%st3 up%s", "%sbanneret up%s", 1],
+  ["run %st3%s", "run %sbanneret%s", 2],
 ];
 const ps1Rules = [
   ["T3CODE_", "BANNERET_", 15],
@@ -40,6 +57,12 @@ const ps1Rules = [
   ["Run ${bold}t3$reset", "Run ${bold}banneret$reset", 2],
   ["${bold}t3 up$reset", "${bold}banneret up$reset", 1],
   ["Setting up the t3 command", "Setting up the banneret command", 1],
+  // What the installer prints: the product name and the command to run.
+  ["T3 Code", BRAND_NAME, 6],
+  ["t3 install: ", "banneret install: ", 1],
+  [`"t3 $version`, `"banneret $version`, 2],
+  ["another t3 is already at", "another banneret is already at", 1],
+  ["Another t3 at", "Another banneret at", 1],
 ];
 
 function transform(file, rules) {

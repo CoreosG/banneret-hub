@@ -23,6 +23,7 @@ import {
   forgetNotice,
   healthLine,
   isValidMachineLabel,
+  joinAgainNotice,
   lastResultMessage,
   letterAvatar,
   machineLabelFrom,
@@ -481,9 +482,8 @@ export function EnterpriseWizard(props: {
   const step = joiningAgain && view?.state === "revoked" ? "address" : wizardStep(view);
   const initialOrigin =
     props.initialOrigin ?? (step === "address" ? (view?.relayOrigin ?? lastOrigin) : undefined);
-  const notice = canJoinAgain(view)
-    ? "The relay refused this machine. Join again to replace it."
-    : lastResultMessage(view);
+  const notice =
+    view !== null && canJoinAgain(view) ? joinAgainNotice(view) : lastResultMessage(view);
 
   return (
     <>

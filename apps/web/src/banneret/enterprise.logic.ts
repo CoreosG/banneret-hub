@@ -63,11 +63,23 @@ export function lastResultMessage(view: BanneretEnrolmentView | null): string | 
       return "This Hub lost its machine key. Join again.";
     case "left":
       return "You left the company. This machine is no longer joined.";
+    case "unknown_machine":
+      return view.message ?? unknownMachineText(undefined);
     case "forgotten":
       return "This machine was forgotten here. A founder must still remove it on the relay.";
     default:
       return view.message ?? "Joining did not finish. Try again.";
   }
+}
+
+const unknownMachineText = (displayName: string | undefined) =>
+  `${displayName ?? "The company"} no longer knows this machine (the relay may have been reset). Join again.`;
+
+/** Why the wizard offers to join again, for a configured machine the relay refused. */
+export function joinAgainNotice(view: BanneretEnrolmentView): string {
+  return view.health === "unknown_machine"
+    ? unknownMachineText(view.displayName)
+    : "The relay refused this machine. Join again to replace it.";
 }
 
 export function revokedMessage(view: BanneretEnrolmentView): string {
@@ -128,6 +140,8 @@ export function healthLine(view: BanneretEnrolmentView): EnrolmentLine {
       return { tone: "warn", text: "This machine's clock is wrong" };
     case "refused":
       return { tone: "error", text: "The relay refused this machine" };
+    case "unknown_machine":
+      return { tone: "error", text: unknownMachineText(view.displayName) };
     case "forbidden":
       return { tone: "error", text: "The relay does not allow this machine" };
     case "invalid_reply":
@@ -148,7 +162,9 @@ export function canForget(view: BanneretEnrolmentView | null): boolean {
 
 /** A machine the relay refused (401) may join again, replacing its key and token. */
 export function canJoinAgain(view: BanneretEnrolmentView | null): boolean {
-  return view?.state === "configured" && view.health === "refused";
+  return (
+    view?.state === "configured" && (view.health === "refused" || view.health === "unknown_machine")
+  );
 }
 
 /** Why Leave may not reach the relay, and what forgetting here means; null while healthy. */
@@ -159,6 +175,8 @@ export function forgetNotice(view: BanneretEnrolmentView | null): string | null 
   switch (view?.health) {
     case "refused":
       return `The relay refused this machine, so it cannot confirm that it left. ${then}`;
+    case "unknown_machine":
+      return `${view.displayName ?? "The company"} no longer knows this machine (the relay may have been reset), so it cannot confirm that it left. ${then}`;
     case "forbidden":
       return `The relay does not allow this machine to remove itself. ${then}`;
     case "clock_wrong":
