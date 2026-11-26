@@ -520,7 +520,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       return existing;
     }
     const person: Person = {
-      id: randomId("p"),
+      // A lease seeded for this login before it enrolled already carries an id; keep it.
+      id: holderIds.get(input.login) ?? randomId("p"),
       login: input.login,
       role: input.role ?? "limited_staff",
       networkIdentity: input.networkIdentity ?? null,
