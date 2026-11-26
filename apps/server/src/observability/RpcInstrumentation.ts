@@ -202,6 +202,8 @@ const RPC_AGGREGATES = {
   "workspaceFiles.createUploadUrl": "workspace",
   "workspaceFiles.createDownloadUrl": "workspace",
   "banneretPorts.list": "preview",
+  "banneretWorkspaces.list": "orchestration",
+  "banneretWorkspaces.put": "orchestration",
   [WS_METHODS.projectsEnsureScratch]: "orchestration",
   [WS_METHODS.projectsCreateNew]: "orchestration",
   [WS_METHODS.projectsCreateFromThread]: "orchestration",

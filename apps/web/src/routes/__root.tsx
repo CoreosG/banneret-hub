@@ -64,6 +64,7 @@ import { isChunkLoadError } from "../lib/chunkReloadGuard";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 import { PinnedPortForwardsRestorer } from "../components/ports/PinnedPortForwardsRestorer";
 import { PortsDialogHost } from "../components/ports/PortsDialog";
+import { WorkspacesHost } from "../banneret/WorkspacesHost";
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
@@ -209,6 +210,7 @@ function RootRouteBranch() {
       <ConnectDeviceApprovalCoordinator />
       <PinnedPortForwardsRestorer />
       <PortsDialogHost />
+      <WorkspacesHost />
       <AddProjectToMachineDialogHost />
       <UseInAnotherAppDialogHost />
       {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
