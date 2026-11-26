@@ -101,6 +101,15 @@ jobs:
       - name: Check Banneret identity
         run: node scripts/banneret/check-identity.mjs
 
+      # Diffs two trees only, so a depth-1 fetch of the upstream tag is enough.
+      - name: Check Banneret hook budget
+        run: |
+          set -euo pipefail
+          tag="$(cat scripts/banneret/UPSTREAM_TAG)"
+          git fetch --no-tags --depth=1 https://github.com/pingdotgg/t3code.git \
+            "+refs/tags/$tag:refs/upstream-tags/$tag"
+          node scripts/banneret/hook-budget.mjs
+
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.prepare.outputs.version }}"
 

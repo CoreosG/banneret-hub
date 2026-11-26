@@ -1,8 +1,10 @@
 name: Banneret sync
 
 # Daily: merges the newest upstream T3 Code stable tag (vX.Y.Z) into main.
-# - Clean merge (conflicts only in our brand assets are auto-resolved): push main, then release.
-# - Real conflicts or a failed identity check: open a PR from sync/<tag> for a human (or agent).
+# - Clean merge (conflicts only in our brand assets or the generated route tree are auto-resolved):
+#   regenerate apps/web/src/routeTree.gen.ts, push main, then release.
+# - Real conflicts, or a failed install, route generation, identity check or hook budget: open a PR
+#   from sync/<tag> for a human (or agent).
 #
 # Needs the SYNC_TOKEN secret: a fine-grained token for this repo with Contents, Pull requests
 # and Workflows read/write. GITHUB_TOKEN cannot push upstream's .github/workflows changes.
@@ -71,6 +73,14 @@ jobs:
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 
+      # The route tree generator needs the web app's dependencies. Installed from main here so the
+      # store is cached; the merge step reinstalls in case upstream changed the lockfile.
+      - name: Setup dependencies
+        if: steps.tag.outputs.tag != ''
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/web
+
       - name: Merge
         id: merge
         if: steps.tag.outputs.tag != ''
@@ -99,7 +109,9 @@ jobs:
                 echo '```sh'
                 echo "git fetch origin $branch && git merge origin/$branch"
                 echo "echo $TAG > scripts/banneret/UPSTREAM_TAG"
+                echo "node scripts/banneret/generate-route-tree.mjs"
                 echo "node scripts/banneret/check-identity.mjs"
+                echo "node scripts/banneret/hook-budget.mjs"
                 echo '```'
                 echo "Then run the **Banneret release** workflow."
                 echo
@@ -109,26 +121,54 @@ jobs:
             fi
           }
 
-          if ! git merge --no-ff --no-edit -m "chore: sync upstream T3 Code $TAG" "refs/upstream-tags/$TAG"; then
+          if ! git merge --no-ff --no-edit --no-verify -m "chore: sync upstream T3 Code $TAG" "refs/upstream-tags/$TAG"; then
             conflicted="$(git diff --name-only --diff-filter=U)"
-            # Our icons overwrite upstream's at the same paths; keep ours, everything else needs a human.
-            unresolved="$(printf '%s\n' "$conflicted" | grep -vE '^(assets/(prod|nightly|dev)/|apps/web/public/.*\.(png|ico)$)' || true)"
+            # Our icons overwrite upstream's at the same paths; keep ours. The route tree is regenerated
+            # below. Everything else needs a human.
+            unresolved="$(printf '%s\n' "$conflicted" | grep -vE '^(assets/(prod|nightly|dev)/|apps/web/public/.*\.(png|ico)$|apps/web/src/routeTree\.gen\.ts$)' || true)"
             if [[ -n "$unresolved" ]]; then
               open_pr "merge conflicts." "Conflicted files:"$'\n'"$(printf -- '- `%s`\n' $conflicted)"
               exit 0
             fi
             printf '%s\n' "$conflicted" | xargs -r git checkout --ours --
             printf '%s\n' "$conflicted" | xargs -r git add --
-            git commit --no-edit
+            git commit --no-edit --no-verify
           fi
 
           echo "$TAG" > scripts/banneret/UPSTREAM_TAG
           git add scripts/banneret/UPSTREAM_TAG
-          git commit --amend --no-edit
+
+          # The committed route tree must match the merged routes, also after a clean merge.
+          if ! vp install --filter=@t3tools/web > install.log 2>&1; then
+            tail -n 50 install.log
+            open_pr "dependencies failed to install after the merge." "$(tail -n 50 install.log)"
+            exit 0
+          fi
+          if ! node scripts/banneret/generate-route-tree.mjs > routes.log 2>&1; then
+            cat routes.log
+            open_pr "the route tree could not be regenerated." "$(tail -n 50 routes.log)"
+            exit 0
+          fi
+          # The generator also fixes createFileRoute paths in route files; those need a human.
+          if ! git diff --quiet -- . ':!apps/web/src/routeTree.gen.ts' ':!scripts/banneret/UPSTREAM_TAG'; then
+            git diff --stat
+            open_pr "regenerating the route tree changed route files." "$(git diff --stat)"
+            exit 0
+          fi
+          git add apps/web/src/routeTree.gen.ts
+          # --no-verify: the install may enable repo hooks that a web-only install cannot run.
+          git commit --amend --no-edit --no-verify
 
           if ! node scripts/banneret/check-identity.mjs > identity.log 2>&1; then
             cat identity.log
             open_pr "upstream added official T3 Code identity that Banneret must rename." "$(cat identity.log)"
+            exit 0
+          fi
+
+          if ! node scripts/banneret/hook-budget.mjs > hook-budget.log 2>&1; then
+            cat hook-budget.log
+            open_pr "our changes to upstream files grew past the hook budget." \
+              "$(printf '```\n%s\n```' "$(tail -n 60 hook-budget.log)")"
             exit 0
           fi
 
