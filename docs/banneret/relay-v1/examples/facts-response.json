@@ -1,1 +1,2 @@
-{ "acceptedAt": "2026-11-26T10:00:01Z", "heartbeatSeconds": 30, "capabilitiesVersion": "c-7f3a" }
+{ "acceptedAt": "2026-11-26T10:00:01Z", "heartbeatSeconds": 30, "capabilitiesVersion": "c-7f3a",
+  "snapshotEtag": "sha256:04b3b53fd028e9b7278b11de594d178c4f3b34e970a2a6ed8533ed40162f4be6" }

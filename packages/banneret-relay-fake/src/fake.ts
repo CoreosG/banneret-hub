@@ -176,6 +176,17 @@ interface RepositoryItem {
   readonly url: string;
 }
 
+/** One head a person has had. `files` maps a kind (needs, health, ...) to `sha256:<hex>`. */
+interface SnapshotHeadRecord {
+  readonly files: Readonly<Record<string, string>>;
+  /** The exact bytes served; its hash is the ETag. */
+  readonly body: Buffer;
+  /** `sha256:<hex>` of `body`, unquoted. */
+  readonly etag: string;
+  /** When a newer head replaced this one; null while it is the current head. */
+  replacedAt: number | null;
+}
+
 interface RelayEvent {
   readonly id: number;
   readonly at: number;
@@ -235,6 +246,14 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const COUNTER_PATTERN = /^(0|[1-9][0-9]{0,18})$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]{86}==$/;
 const COUNTER_WINDOW = 256;
+const PROTOCOL = "1.1";
+// Snapshot retention (README, Snapshot): a file stays readable while one of the person's last 16 heads names it, or
+// a head replaced less than 10 minutes ago does.
+const SNAPSHOT_KEEP_HEADS = 16;
+const SNAPSHOT_KEEP_MS = 10 * 60 * 1000;
+const SNAPSHOT_MACHINES_MAX = 500;
+const SNAPSHOT_REPOSITORIES_MAX = 1000;
+const SNAPSHOT_HASH_PATTERN = /^[0-9a-f]{64}$/;
 // The Timestamp schema: RFC 3339 in UTC, ending in Z.
 const SENT_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 
@@ -245,6 +264,7 @@ const randomId = (prefix: string) =>
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 const confirmCode = () =>
   Array.from(NodeCrypto.randomBytes(8), (byte) => BASE32[byte % 32]).join("");
+const sha256Hex = (bytes: Buffer) => NodeCrypto.createHash("sha256").update(bytes).digest("hex");
 const hashToken = (token: string) => NodeCrypto.createHash("sha256").update(token).digest("hex");
 const iso = (ms: number) =>
   new Date(Math.floor(ms / 1000) * 1000).toISOString().replace(".000Z", "Z");
@@ -408,6 +428,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   let nextEventId = 1;
   let nextNeedsSeq = 1;
   const repositories: RepositoryItem[] = [];
+  /** Snapshot files, stored once by the hash of their bytes. Holding a file grants nothing: reads check the heads. */
+  const snapshotFiles = new Map<string, Buffer>();
+  /** Per person, oldest head first. The last one is current. */
+  const snapshotHeads = new Map<string, SnapshotHeadRecord[]>();
   let capabilitiesRevision = 1;
   const capabilitiesVersion = () => `c-${capabilitiesRevision}`;
 
@@ -482,6 +506,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const revokeMachine = (machine: Machine) => {
     machine.revokedAt = Date.now();
     closeStreams((stream) => stream.machineId === machine.id);
+    refreshAllHeads();
   };
 
   const isOpen = (pairing: Pairing) =>
@@ -534,6 +559,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     };
     machines.set(machine.id, machine);
     machinesByToken.set(machine.tokenHash, machine);
+    refreshAllHeads();
     pairing.state = "approved";
     pairing.machineId = machine.id;
     pairing.token = token;
@@ -741,13 +767,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
 
   const publicCapabilities = () => ({
-    protocol: "1.0",
+    protocol: PROTOCOL,
     displayName: options.displayName ?? "Example Company",
     iconUrl: null,
     enrolment: { start: "/relay/v1/enroll/start", browser: "/enroll" },
   });
 
-  const machineView = (machine: Machine, caller: Caller) => {
+  const machineView = (machine: Machine, viewer: Person) => {
     const owner = people.get(machine.personId);
     const revoked = machine.revokedAt !== null;
     return {
@@ -768,8 +794,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         !revoked &&
         machine.lastHeardAt !== null &&
         Date.now() - machine.lastHeardAt <= NOT_HEARD_FROM_MS,
-      revocable:
-        !revoked && (machine.personId === caller.person.id || caller.person.role === "founder"),
+      revocable: !revoked && (machine.personId === viewer.id || viewer.role === "founder"),
       ...(machine.revokedAt === null ? {} : { revokedAt: iso(machine.revokedAt) }),
     };
   };
@@ -785,13 +810,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       );
 
   // Every enrolled person sees every live machine; revoked ones only their owner and founders, after the live ones.
-  const visibleMachines = (caller: Caller) => [
+  const visibleMachines = (viewer: Person) => [
     ...liveMachines(),
     ...[...machines.values()]
       .filter(
         (machine) =>
           machine.revokedAt !== null &&
-          (machine.personId === caller.person.id || caller.person.role === "founder"),
+          (machine.personId === viewer.id || viewer.role === "founder"),
       )
       .toSorted((a, b) => (b.revokedAt ?? 0) - (a.revokedAt ?? 0) || a.id.localeCompare(b.id)),
   ];
@@ -802,18 +827,19 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     notMeasured: [{ source, reason: "not_configured", since: iso(startedAt) }],
   });
 
-  const today = (caller: Caller, visit: boolean) => {
+  // The needs-you, working, stuck and health blocks of Today for one person. Reads no visit state.
+  const todayBlocks = (person: Person) => {
     const now = Date.now();
-    const own = byUrgency(needs.get(caller.person.id) ?? []).map(needsView);
+    const own = byUrgency(needs.get(person.id) ?? []).map(needsView);
     const working = liveMachines().flatMap((machine) => {
-      const person = people.get(machine.personId);
+      const owner = people.get(machine.personId);
       const live = machine.sessions.filter((session) => session.state !== "stopped");
       const first = live[0];
-      if (!person || !first) return [];
+      if (!owner || !first) return [];
       const heard = machine.lastHeardAt !== null && now - machine.lastHeardAt <= NOT_HEARD_FROM_MS;
       return [
         {
-          person: { id: person.id, login: person.login },
+          person: { id: owner.id, login: owner.login },
           ...(first.branch === undefined ? {} : { branch: first.branch }),
           sessions: live.length,
           state: heard ? first.state : "not_heard_from",
@@ -826,6 +852,17 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         },
       ];
     });
+    return {
+      needsYou: { state: "ok", ...page(own, 0, TODAY_BLOCK_MAX), notMeasured: [] },
+      working: { state: "ok", items: working.slice(0, TODAY_BLOCK_MAX), notMeasured: [] },
+      stuck: notConfigured("work_tracker"),
+      health: notConfigured("health"),
+    };
+  };
+
+  const today = (caller: Caller, visit: boolean) => {
+    const now = Date.now();
+    const blocks = todayBlocks(caller.person);
     let state = visits.get(caller.person.id);
     if (visit) {
       if (state === undefined) {
@@ -840,13 +877,132 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return {
       generatedAt: iso(now),
       lastVisitAt: state?.lastVisitAt == null ? null : iso(state.lastVisitAt),
-      needsYou: { state: "ok", ...page(own, 0, TODAY_BLOCK_MAX), notMeasured: [] },
+      needsYou: blocks.needsYou,
       shipped: notConfigured("work_tracker"),
-      working: { state: "ok", items: working.slice(0, TODAY_BLOCK_MAX), notMeasured: [] },
-      stuck: notConfigured("work_tracker"),
-      health: notConfigured("health"),
+      working: blocks.working,
+      stuck: blocks.stuck,
+      health: blocks.health,
     };
   };
+
+  // Snapshot (README, Snapshot). A head is rebuilt on every change and on every read, so a served head is always
+  // current. Files are content-addressed and shared, but a read checks the caller's own retained heads.
+  const buildSnapshotFiles = (person: Person): Record<string, string> => {
+    const blocks = todayBlocks(person);
+    const machineList = visibleMachines(person).map((machine) => machineView(machine, person));
+    const entries: ReadonlyArray<readonly [string, SchemaName, unknown]> = [
+      ["needs", "SnapshotNeeds", blocks.needsYou],
+      ["health", "HealthBlock", blocks.health],
+      ["work", "SnapshotWork", { working: blocks.working, stuck: blocks.stuck }],
+      [
+        "machines",
+        "SnapshotMachines",
+        {
+          items: machineList.slice(0, SNAPSHOT_MACHINES_MAX),
+          truncated: machineList.length > SNAPSHOT_MACHINES_MAX,
+        },
+      ],
+      [
+        "repositories",
+        "SnapshotRepositories",
+        {
+          items: repositories.slice(0, SNAPSHOT_REPOSITORIES_MAX),
+          truncated: repositories.length > SNAPSHOT_REPOSITORIES_MAX,
+        },
+      ],
+    ];
+    const refs: Record<string, string> = {};
+    for (const [kind, schema, value] of entries) {
+      const problem = spec.check(schema, value);
+      if (problem !== null)
+        throw new Error(`fake relay built an invalid snapshot ${kind}: ${problem}`);
+      const bytes = Buffer.from(JSON.stringify(value), "utf8");
+      const hex = sha256Hex(bytes);
+      // Stored before any head names it.
+      snapshotFiles.set(hex, bytes);
+      refs[kind] = `sha256:${hex}`;
+    }
+    return refs;
+  };
+
+  // Heads that still count for retention, and the removal of files nobody's retained heads name any more.
+  const pruneSnapshots = () => {
+    const now = Date.now();
+    const named = new Set<string>();
+    for (const [personId, heads] of snapshotHeads) {
+      const person = people.get(personId);
+      if (!person || person.removed) {
+        snapshotHeads.delete(personId);
+        continue;
+      }
+      const kept = heads.filter(
+        (head, index) =>
+          index >= heads.length - SNAPSHOT_KEEP_HEADS ||
+          head.replacedAt === null ||
+          now - head.replacedAt < SNAPSHOT_KEEP_MS,
+      );
+      snapshotHeads.set(personId, kept);
+      for (const head of kept) for (const ref of Object.values(head.files)) named.add(ref.slice(7));
+    }
+    for (const hex of snapshotFiles.keys()) if (!named.has(hex)) snapshotFiles.delete(hex);
+  };
+
+  const refreshHead = (person: Person): SnapshotHeadRecord => {
+    const refs = buildSnapshotFiles(person);
+    const heads = snapshotHeads.get(person.id) ?? [];
+    const current = heads.at(-1);
+    if (
+      current !== undefined &&
+      Object.keys(refs).length === Object.keys(current.files).length &&
+      Object.entries(refs).every(([kind, ref]) => current.files[kind] === ref)
+    ) {
+      pruneSnapshots();
+      return current;
+    }
+    const now = Date.now();
+    const head = {
+      protocol: PROTOCOL,
+      generatedAt: iso(now),
+      files: refs,
+    };
+    const problem = spec.check("SnapshotHead", head);
+    if (problem !== null) throw new Error(`fake relay built an invalid snapshot head: ${problem}`);
+    const body = Buffer.from(JSON.stringify(head), "utf8");
+    if (current !== undefined) current.replacedAt = now;
+    const record: SnapshotHeadRecord = {
+      files: refs,
+      body,
+      etag: `sha256:${sha256Hex(body)}`,
+      replacedAt: null,
+    };
+    snapshotHeads.set(person.id, [...heads, record]);
+    pruneSnapshots();
+    return record;
+  };
+
+  // Rebuilds the head of every person who has one: any change to facts, needs, machines or repositories can move
+  // a head, and the work and machines files are relay-wide.
+  const refreshAllHeads = () => {
+    for (const personId of snapshotHeads.keys()) {
+      const person = people.get(personId);
+      if (person && !person.removed) refreshHead(person);
+    }
+    pruneSnapshots();
+  };
+
+  // A file is readable only while one of the caller's retained heads names it.
+  const readableSnapshotFile = (person: Person, hex: string): Buffer | undefined => {
+    pruneSnapshots();
+    const ref = `sha256:${hex}`;
+    const named = (snapshotHeads.get(person.id) ?? []).some((head) =>
+      Object.values(head.files).includes(ref),
+    );
+    return named ? snapshotFiles.get(hex) : undefined;
+  };
+
+  // `If-None-Match`: one or more comma-separated tags; any equal to the current tag matches.
+  const matchesEtag = (header: string | undefined, etag: string) =>
+    header !== undefined && header.split(",").some((tag) => tag.trim() === etag);
 
   const seedNeeds = (machineId: string, count: number, kind = "thread_question") => {
     const machine = machines.get(machineId);
@@ -870,6 +1026,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         emit("mention", "MentionEvent", { at, item: needsView(item) }, machine.personId);
       }
     }
+    refreshAllHeads();
     emit("needs.changed", "NeedsChangedEvent", { at, count: list.length }, machine.personId);
   };
 
@@ -882,6 +1039,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         url: `https://github.com/${name}`,
       });
     }
+    refreshAllHeads();
   };
 
   const bumpCapabilities = () => {
@@ -902,6 +1060,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const person = peopleByLogin.get(login);
     if (!person || person.removed) throw new RelayError("not_found", "No such person.");
     person.removed = true;
+    snapshotHeads.delete(person.id);
     for (const machine of machines.values())
       if (machine.personId === person.id && machine.revokedAt === null) revokeMachine(machine);
     closeStreams((stream) => stream.personId === person.id);
@@ -1029,6 +1188,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { role: "knowledge", kind: "none" },
             { role: "health", kind: "none" },
           ],
+          snapshot: { version: 1, head: `${PREFIX}/snapshot/head` },
         },
         { etag: `"${capabilitiesVersion()}"` },
       );
@@ -1099,7 +1259,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
     if (method === "GET" && route === "/machines") {
       const { offset, limit } = pageParams(query);
-      const all = visibleMachines(caller).map((machine) => machineView(machine, caller));
+      const all = visibleMachines(caller.person).map((machine) =>
+        machineView(machine, caller.person),
+      );
       sendJson(response, 200, "MachinesPage", page(all, offset, limit));
       return;
     }
@@ -1138,10 +1300,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       caller.machine.sessions = facts.activity;
       caller.machine.usage = facts.usage ?? [];
       caller.machine.lastHeardAt = Date.now();
+      refreshAllHeads();
+      const head = snapshotHeads.get(caller.person.id)?.at(-1);
       sendJson(response, 200, "FactsResponse", {
         acceptedAt: iso(caller.machine.lastHeardAt),
         heartbeatSeconds: HEARTBEAT_SECONDS,
         capabilitiesVersion: capabilitiesVersion(),
+        ...(head === undefined ? {} : { snapshotEtag: head.etag }),
       });
       return;
     }
@@ -1170,6 +1335,36 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
     if (method === "GET" && route === "/events") {
       openStream(request, response, caller);
+      return;
+    }
+
+    if (method === "GET" && route === "/snapshot/head") {
+      const head = refreshHead(caller.person);
+      const headers = { etag: `"${head.etag}"`, "cache-control": "private, no-cache" };
+      if (matchesEtag(headerValue(request, "If-None-Match"), headers.etag)) {
+        response.writeHead(304, headers);
+        response.end();
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json", ...headers });
+      response.end(head.body);
+      return;
+    }
+
+    const snapshotFile = /^\/snapshot\/files\/([^/]*)$/.exec(route);
+    if (method === "GET" && snapshotFile) {
+      const hex = snapshotFile[1] ?? "";
+      // Malformed, unknown, expired and someone else's hash all answer the same 404, never 400.
+      const bytes = SNAPSHOT_HASH_PATTERN.test(hex)
+        ? readableSnapshotFile(caller.person, hex)
+        : undefined;
+      if (bytes === undefined) throw new RelayError("not_found", "No such snapshot file.");
+      response.writeHead(200, {
+        "content-type": "application/json",
+        etag: `"sha256:${hex}"`,
+        "cache-control": "private, max-age=31536000, immutable",
+      });
+      response.end(bytes);
       return;
     }
 
@@ -1259,6 +1454,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const machine = machines.get(String(input.machineId));
       if (!machine) throw new RelayError("not_found", "No such machine.");
       reply({ usage: machine.usage });
+      return;
+    }
+    if (request.method === "POST" && route === "/snapshot/age") {
+      const person = peopleByLogin.get(String(input.login));
+      const heads = person === undefined ? undefined : snapshotHeads.get(person.id);
+      if (heads === undefined)
+        throw new RelayError("not_found", "That person has no snapshot head.");
+      const shift = Number(input.minutes) * 60_000;
+      for (const head of heads) {
+        if (head.replacedAt !== null) head.replacedAt -= shift;
+      }
+      reply({ heads: heads.length });
       return;
     }
     if (request.method === "POST" && route === "/staff/remove") {

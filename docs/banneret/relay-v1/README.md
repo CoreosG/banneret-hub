@@ -31,6 +31,8 @@ All under `/relay/v1`.
 | `GET /needs` | Needs-you items, paged, most urgent first. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
 | `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
+| `GET /snapshot/head` | The caller's current snapshot head: the SHA-256 of each snapshot file. Added in 1.1. |
+| `GET /snapshot/files/{sha256}` | One immutable snapshot file, by hash. Added in 1.1. |
 
 ## Enrolment
 
@@ -241,6 +243,58 @@ class. [Orchestrator]
 
 Error `code` is an open set too. A client treats an unknown error code by its HTTP status.
 
+## Snapshot
+
+Added in 1.1. `GET /snapshot/head` and `GET /snapshot/files/{sha256}` give the same facts as `GET /needs`,
+`GET /today` (working, stuck, health), `GET /machines` and `GET /repositories`, packed as files a client can cache
+forever. They carry nothing those calls do not already return to the same caller.
+
+- **Per person.** The head belongs to the caller's person. Every machine of one person gets the same head. Files are
+  stored once by hash, so two people with identical bytes share one stored file. A file is readable only while one
+  of the caller's retained heads names it. Knowing a hash grants nothing.
+- **Shape.** The head is `{protocol, generatedAt, files}`. `files` maps `needs`, `health`, `work`, `machines` and,
+  when the relay serves `GET /repositories`, `repositories` to `sha256:<hex>`. The path of a file uses the bare hex.
+  The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
+  `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
+  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`. A client ignores keys under `files`
+  it does not know.
+- **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
+  head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
+  fetch its files.
+- **Caching.** The head carries `ETag: "sha256:<hex>"` (the hash of its exact bytes) and
+  `Cache-Control: private, no-cache`; `If-None-Match` with a matching tag gets 304 with no body. `generatedAt`
+  changes only with the head, which is why 304 can fire. A file is `private, max-age=31536000, immutable`.
+- **404 for everything else.** A malformed, unknown, expired or someone else's hash all get the same 404
+  `not_found`, never 400. On 404 the client refetches the head once.
+- **Retention.** A file stays readable while it is named by one of the caller's last 16 heads, or by a head that was
+  replaced less than 10 minutes ago. After that it answers 404, and the client refetches the head.
+- **Freshness.** A served head is current. The relay re-checks time-dependent facts (a machine is connected only
+  while heard within 90 seconds) at least every 30 seconds, and answers 503 rather than serve a stale head. A broken
+  source shows in the file's `state` and `notMeasured`, as on Today.
+- **Change notice.** The facts response carries `snapshotEtag`, the head's `ETag` unquoted, absent until the person
+  has a head. A Hub refetches the head with `If-None-Match` when that value changes, and after `needs.changed`,
+  `capabilities.changed` or `reset`. Rebuilds may be debounced, so a heartbeat's own response can carry the
+  previous value; the next one carries the new one. There is no `snapshot.changed` event: working items change on
+  every heartbeat, so one event per head change would push `needs.changed` and `mention` out of the replay window
+  of `GET /events`.
+- **Discovery.** An enrolled caller's capabilities carry `snapshot {version, head}` when the relay serves snapshots.
+- **Not a visit.** Reading a snapshot never moves `lastVisitAt`. Shipped stays on `GET /today?visit=1`.
+- **Removal.** A person removed from staff, or a revoked machine, is refused as on every other call. A removed
+  person's heads are dropped at once.
+
+What the files hold, and who sees what, is the same as the live calls:
+
+| File | Same content as | Varies by |
+|---|---|---|
+| needs | `Today.needsYou` for the caller | person |
+| health | `Today.health` for the caller | role |
+| work | `Today.working` and `Today.stuck` for the caller | role, in practice |
+| machines | `GET /machines` for the caller | person (revoked machines for owner and founders; `revocable`) |
+| repositories | `GET /repositories` | nothing (relay-wide) |
+
+"No titles" means no title, text or path that a Hub reported (a heartbeat never carries them). The tracker titles that
+`GET /needs` and `GET /today` already return to staff stay in the needs and work files.
+
 ## Events
 
 `GET /events` without `Last-Event-ID` is live only: it starts with the next event. With `Last-Event-ID` the relay
@@ -276,6 +330,20 @@ thread when the environment is its own, and otherwise says which machine holds i
   enums, so a validating client accepts new values. Request bodies stay closed: a new request
   field is a new minor that the relay accepts as optional.
 - A breaking change is `/relay/v2`.
+
+### Changelog
+
+- **1.1.** Banneret Hub 0.1.1211 shipped with 1.0, so from here on every additive change bumps the minor. 1.1 adds:
+  - the `visit=1` flag on `GET /today`;
+  - `usage` in facts;
+  - the needs-you kinds `agent_message`, `persona_ask` and `other`;
+  - the snapshot endpoints (`GET /snapshot/head`, `GET /snapshot/files/{sha256}`), `snapshot` in capabilities and
+    `snapshotEtag` in the facts response.
+
+  A client treats all of these as optional when it talks to a 1.0 relay: it does not send `visit=1` or `usage`
+  unless the relay's `protocol` is 1.1 or later, it does not call the snapshot endpoints unless capabilities carry
+  `snapshot`, and it ignores a missing `snapshotEtag`.
+- **1.0.** The first release.
 
 ## Ids and time
 

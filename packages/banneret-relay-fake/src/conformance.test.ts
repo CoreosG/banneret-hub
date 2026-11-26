@@ -968,6 +968,271 @@ describe("machine visibility", () => {
   });
 });
 
+describe("snapshot", () => {
+  const SNAPSHOT_SCHEMAS: Record<string, string> = {
+    needs: "SnapshotNeeds",
+    health: "HealthBlock",
+    work: "SnapshotWork",
+    machines: "SnapshotMachines",
+    repositories: "SnapshotRepositories",
+  };
+  const sha256 = (bytes: Buffer) => NodeCrypto.createHash("sha256").update(bytes).digest("hex");
+  const bare = (ref: string) => ref.slice("sha256:".length);
+
+  interface RawReply {
+    readonly status: number;
+    readonly headers: Headers;
+    readonly bytes: Buffer;
+  }
+  // The exact response bytes: a file's name is the hash of them.
+  const callBytes = async (
+    machine: Enrolled,
+    target: string,
+    headers?: Record<string, string>,
+  ): Promise<RawReply> => {
+    const response = await client.raw(machine.key, "GET", target, {
+      token: machine.token,
+      device: machine.machineId,
+      ...(headers === undefined ? {} : { headers }),
+    });
+    return {
+      status: response.status,
+      headers: response.headers,
+      bytes: Buffer.from(await response.arrayBuffer()),
+    };
+  };
+  const json = (reply: RawReply): unknown => JSON.parse(reply.bytes.toString("utf8"));
+
+  interface Head {
+    readonly protocol: string;
+    readonly generatedAt: string;
+    readonly files: Record<string, string>;
+  }
+  const readHead = async (machine: Enrolled, headers?: Record<string, string>) => {
+    const reply = await callBytes(machine, "/relay/v1/snapshot/head", headers);
+    expect(reply.status, reply.bytes.toString("utf8")).toBe(200);
+    const head = json(reply) as Head;
+    expectSchema("SnapshotHead", head);
+    return { reply, head };
+  };
+  const readFile = (machine: Enrolled, hash: string) =>
+    callBytes(machine, `/relay/v1/snapshot/files/${hash}`);
+  const expectNotFound = (reply: RawReply) => {
+    expectError(
+      { status: reply.status, headers: reply.headers, body: json(reply) },
+      404,
+      "not_found",
+    );
+  };
+  // A relay may debounce its rebuilds, so a change shows within seconds, not at once.
+  const POLL = { timeout: 20_000, interval: 100 };
+  const needsRefAfterSeed = async (machine: Enrolled, previous: string) => {
+    await client.control("/needs", { machineId: machine.machineId, count: 1 });
+    await expect
+      .poll(async () => (await readHead(machine)).head.files.needs ?? previous, POLL)
+      .not.toBe(previous);
+    return (await readHead(machine)).head.files.needs ?? previous;
+  };
+
+  it("advertises the snapshot to an enrolled caller, and not to anyone else", async () => {
+    const machine = await enrol();
+    const reply = await call(machine, "GET", "/relay/v1/capabilities");
+    expect(reply.status).toBe(200);
+    expectSchema("Capabilities", reply.body);
+    const body = reply.body as {
+      protocol: string;
+      snapshot?: { version: number; head: string };
+    };
+    expect(body.protocol).toMatch(/^1\.[1-9][0-9]*$/);
+    expect(body.snapshot?.version).toBeGreaterThanOrEqual(1);
+    expect(body.snapshot?.head).toBe("/relay/v1/snapshot/head");
+    const anonymous = await client.send(generateMachineKey(), "GET", "/relay/v1/capabilities", {
+      unsigned: true,
+    });
+    expect((anonymous.body as { snapshot?: unknown }).snapshot).toBeUndefined();
+  });
+
+  it("lists files in the head, and each file fetches with a matching sha256", async () => {
+    const machine = await enrol();
+    await client.control("/repositories", { count: 2 });
+    await client.control("/needs", { machineId: machine.machineId, count: 2 });
+    const { reply, head } = await readHead(machine);
+    expect(reply.headers.get("etag")).toBe(`"sha256:${sha256(reply.bytes)}"`);
+    expect(reply.headers.get("cache-control")).toBe("private, no-cache");
+    for (const kind of ["needs", "health", "work", "machines"]) {
+      expect(head.files[kind], kind).toMatch(/^sha256:[0-9a-f]{64}$/);
+    }
+    const fetched: Record<string, unknown> = {};
+    for (const [kind, ref] of Object.entries(head.files)) {
+      const schema = SNAPSHOT_SCHEMAS[kind];
+      if (schema === undefined) continue;
+      const file = await readFile(machine, bare(ref));
+      expect(file.status, `${kind}: ${file.bytes.toString("utf8")}`).toBe(200);
+      expect(sha256(file.bytes), kind).toBe(bare(ref));
+      expect(file.headers.get("etag")).toBe(`"${ref}"`);
+      expect(file.headers.get("cache-control")).toBe("private, max-age=31536000, immutable");
+      fetched[kind] = json(file);
+      expectSchema(schema, fetched[kind]);
+    }
+    // The same facts as the live calls, to the same caller.
+    const live = await call(machine, "GET", "/relay/v1/today");
+    expect(fetched.needs).toEqual((live.body as { needsYou: unknown }).needsYou);
+    expect(Object.keys(fetched.work as object).toSorted()).toEqual(["stuck", "working"]);
+    const listed = (await listMachines(machine)).map((item) => item.id);
+    expect(
+      (fetched.machines as { items: Array<{ id: string }> }).items.map((item) => item.id),
+    ).toEqual(listed);
+    if (head.files.repositories !== undefined) {
+      const repositories = fetched.repositories as { items: unknown[]; truncated: boolean };
+      expect(repositories.items.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("answers 304 to If-None-Match with the current ETag, and 200 to any other", async () => {
+    const machine = await enrol();
+    const { reply } = await readHead(machine);
+    const etag = reply.headers.get("etag") ?? "";
+    expect(etag).toMatch(/^"sha256:[0-9a-f]{64}"$/);
+    const same = await callBytes(machine, "/relay/v1/snapshot/head", { "If-None-Match": etag });
+    expect(same.status).toBe(304);
+    expect(same.bytes.length).toBe(0);
+    expect(same.headers.get("etag")).toBe(etag);
+    expect(same.headers.get("cache-control")).toBe("private, no-cache");
+    const listed = await callBytes(machine, "/relay/v1/snapshot/head", {
+      "If-None-Match": `"sha256:${"0".repeat(64)}", ${etag}`,
+    });
+    expect(listed.status).toBe(304);
+    const other = await callBytes(machine, "/relay/v1/snapshot/head", {
+      "If-None-Match": `"sha256:${"0".repeat(64)}"`,
+    });
+    expect(other.status).toBe(200);
+    expect(sha256(other.bytes)).toBe(etag.slice('"sha256:'.length, -1));
+  });
+
+  it("refuses an unauthenticated read of the head and of a file", async () => {
+    const machine = await enrol();
+    const head = await client.send(machine.key, "GET", "/relay/v1/snapshot/head", {
+      device: machine.machineId,
+      counter: client.nextCounter(),
+    });
+    expectError(head, 401, "unauthenticated");
+    const file = await client.send(
+      machine.key,
+      "GET",
+      `/relay/v1/snapshot/files/${"0".repeat(64)}`,
+      {
+        device: machine.machineId,
+        counter: client.nextCounter(),
+      },
+    );
+    expectError(file, 401, "unauthenticated");
+  });
+
+  it("answers 404 to another caller's hash, even when the bytes would be identical", async () => {
+    const owner = await enrol();
+    const other = await enrol();
+    const stranger = await enrol();
+    await client.control("/needs", { machineId: owner.machineId, count: 1 });
+    const { head } = await readHead(owner);
+    const ownersNeeds = bare(head.files.needs ?? "");
+    const ownersHealth = bare(head.files.health ?? "");
+    expect((await readFile(owner, ownersNeeds)).status).toBe(200);
+    // `other` has a head of its own, which does not name the owner's needs file.
+    await readHead(other);
+    expectNotFound(await readFile(other, ownersNeeds));
+    // `stranger` never read a head. The owner's health file may hold the very bytes `stranger` would get, and
+    // it is still refused: sharing storage never grants access.
+    expectNotFound(await readFile(stranger, ownersNeeds));
+    expectNotFound(await readFile(stranger, ownersHealth));
+  });
+
+  it.each([
+    ["an unknown hash", "0".repeat(64)],
+    ["an uppercase hash", "ABCDEF0123456789".repeat(4)],
+    ["a 63 character hash", "a".repeat(63)],
+    ["a 65 character hash", "a".repeat(65)],
+    ["a hash that is not hex", "z".repeat(64)],
+    ["a hash with the sha256: prefix", `sha256:${"a".repeat(64)}`],
+    ["a short word", "head"],
+  ])("answers 404 not_found, never 400, to %s", async (_label, hash) => {
+    const machine = await enrol();
+    await readHead(machine);
+    expectNotFound(await readFile(machine, hash));
+  });
+
+  it("answers 404 to the uppercase form of a real hash", async () => {
+    const machine = await enrol();
+    const { head } = await readHead(machine);
+    const hash = bare(head.files.needs ?? "");
+    expect((await readFile(machine, hash)).status).toBe(200);
+    expectNotFound(await readFile(machine, hash.toUpperCase()));
+  });
+
+  // Retention is the last 16 heads, or any head replaced less than 10 minutes ago. A person with 16 heads or
+  // fewer therefore never loses a file, so crossing the bound takes 19 heads (the first read and 18 changes).
+  it("keeps older heads' files for 10 minutes after replacement, then only the last 16 heads", async () => {
+    const machine = await enrol();
+    const refs = [(await readHead(machine)).head.files.needs ?? ""];
+    for (let index = 0; index < 18; index += 1) {
+      refs.push(await needsRefAfterSeed(machine, refs.at(-1) ?? ""));
+    }
+    expect(new Set(refs).size).toBe(refs.length);
+    // Just replaced: every file is still readable, including those of heads beyond the last 16.
+    for (const ref of refs) expect((await readFile(machine, bare(ref))).status, ref).toBe(200);
+    await client.control("/snapshot/age", { login: machine.login, minutes: 9 });
+    for (const ref of refs) expect((await readFile(machine, bare(ref))).status, ref).toBe(200);
+    await client.control("/snapshot/age", { login: machine.login, minutes: 2 });
+    // 19 heads with a different needs file each: the last 16 are refs 3 to 18, and the current head never expires.
+    for (const ref of refs.slice(0, 3)) expectNotFound(await readFile(machine, bare(ref)));
+    for (const ref of refs.slice(3)) {
+      expect((await readFile(machine, bare(ref))).status, ref).toBe(200);
+    }
+  });
+
+  it("carries the head's ETag in the facts response as snapshotEtag", async () => {
+    const machine = await enrol();
+    await readHead(machine);
+    await expect
+      .poll(async () => {
+        const facts = await call(machine, "POST", "/relay/v1/facts", factsFor(machine));
+        expect(facts.status, JSON.stringify(facts.body)).toBe(200);
+        expectSchema("FactsResponse", facts.body);
+        const etag = (facts.body as { snapshotEtag?: string }).snapshotEtag;
+        const head = await callBytes(machine, "/relay/v1/snapshot/head");
+        return etag !== undefined && head.headers.get("etag") === `"${etag}"`;
+      }, POLL)
+      .toBe(true);
+  });
+
+  it("never moves lastVisitAt, and never counts as a visit", async () => {
+    const machine = await enrol();
+    const visitState = async () =>
+      (await client.control("/visits/read", { login: machine.login })) as {
+        lastVisitAt: string | null;
+        lastReadAt: string | null;
+      };
+    const readAll = async () => {
+      const { reply, head } = await readHead(machine);
+      for (const ref of Object.values(head.files)) {
+        expect((await readFile(machine, bare(ref))).status).toBe(200);
+      }
+      const etag = reply.headers.get("etag") ?? "";
+      expect(
+        (await callBytes(machine, "/relay/v1/snapshot/head", { "If-None-Match": etag })).status,
+      ).toBe(304);
+    };
+    expect(await visitState()).toEqual({ lastVisitAt: null, lastReadAt: null });
+    await readAll();
+    expect(await visitState()).toEqual({ lastVisitAt: null, lastReadAt: null });
+    const visit = await call(machine, "GET", "/relay/v1/today?visit=1");
+    expect(visit.status).toBe(200);
+    await client.control("/visits/age", { login: machine.login, minutes: 45 });
+    const aged = await visitState();
+    await readAll();
+    expect(await visitState()).toEqual(aged);
+  });
+});
+
 describe("event retention", () => {
   // The 24-hour bound cannot be waited out; only the fake can shorten it.
   it.skipIf(external !== undefined)(

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Relay protocol v1
-  version: "1.0"
+  version: "1.1"
   summary: The calls a Banneret Hub server makes to a central relay.
   description: |
     Every call starts from a Banneret Hub server. The relay never dials a machine and cannot run anything on one.
@@ -23,6 +23,7 @@ tags:
   - name: needs
   - name: repositories
   - name: events
+  - name: snapshot
 paths:
   /capabilities:
     get:
@@ -353,6 +354,92 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /snapshot/head:
+    get:
+      tags: [snapshot]
+      operationId: getSnapshotHead
+      summary: The caller's current snapshot head.
+      description: |
+        Added in protocol 1.1. The head names the caller's current snapshot files by SHA-256. It is per person:
+        every machine of one person gets the same head. It is current when served. The relay re-checks
+        time-dependent facts (a machine counts as connected only while heard within 90 seconds; a thread need
+        counts only on a machine heard within 90 seconds) at least every 30 seconds. When it cannot produce a
+        current head, it answers 503, never a stale one. `If-None-Match` with the current `ETag` gets 304 with no
+        body. Reading the head is never a Today visit.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - name: If-None-Match
+          in: header
+          required: false
+          description: One or more entity tags, comma-separated. Any tag equal to the current `ETag` gets 304.
+          schema: { type: string, maxLength: 1024 }
+      responses:
+        "200":
+          description: The current head.
+          headers:
+            ETag:
+              description: Strong tag `"sha256:<hex>"` of the exact head body. Changes only when the head changes.
+              schema: { type: string, pattern: '^"sha256:[0-9a-f]{64}"$' }
+            Cache-Control:
+              schema: { type: string, const: "private, no-cache" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SnapshotHead" }
+        "304":
+          description: Unchanged. No body. Carries the same `ETag` and `Cache-Control`.
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /snapshot/files/{sha256}:
+    get:
+      tags: [snapshot]
+      operationId: getSnapshotFile
+      summary: One immutable snapshot file.
+      description: |
+        Added in protocol 1.1. `sha256` is the lowercase hex of the file's SHA-256, which is the value in the head
+        without its `sha256:` prefix. The body's SHA-256 always equals it, and a client may check this. A file is
+        served only while one of the caller's retained heads names it (see README, Snapshot). A malformed, unknown,
+        expired or someone else's hash all get the same 404 `not_found`, never 400. On 404 the client refetches the
+        head once.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - name: sha256
+          in: path
+          required: true
+          schema: { type: string }
+          description: Expected `^[0-9a-f]{64}$`. Anything else answers 404, not 400.
+      responses:
+        "200":
+          description: |
+            The file. Its schema is the one its head key names: `needs` is SnapshotNeeds, `health` is HealthBlock,
+            `work` is SnapshotWork, `machines` is SnapshotMachines, `repositories` is SnapshotRepositories. The head
+            key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
+          headers:
+            ETag:
+              schema: { type: string, pattern: '^"sha256:[0-9a-f]{64}"$' }
+            Cache-Control:
+              schema: { type: string, const: "private, max-age=31536000, immutable" }
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - { $ref: "#/components/schemas/SnapshotNeeds" }
+                  - { $ref: "#/components/schemas/HealthBlock" }
+                  - { $ref: "#/components/schemas/SnapshotWork" }
+                  - { $ref: "#/components/schemas/SnapshotMachines" }
+                  - { $ref: "#/components/schemas/SnapshotRepositories" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     deviceToken:
@@ -515,6 +602,13 @@ components:
           type: array
           maxItems: 16
           items: { $ref: "#/components/schemas/Adapter" }
+        snapshot:
+          description: Added in 1.1. Present only for an authenticated caller on a relay that serves snapshots.
+          type: object
+          required: [version, head]
+          properties:
+            version: { type: integer, minimum: 1 }
+            head: { type: string, const: /relay/v1/snapshot/head }
     Section:
       type: object
       required: [id, kind, version, flags]
@@ -826,6 +920,13 @@ components:
           description: Refetch capabilities when this changes. Unquoted; the capabilities `ETag` is this value in double quotes.
           type: string
           maxLength: 128
+        snapshotEtag:
+          description: |
+            Added in 1.1. The caller's current snapshot head `ETag`, unquoted. Refetch the head when it changes.
+            Absent until the person has a head. Rebuilds are debounced, so a heartbeat's own response may still
+            carry the previous value; the next heartbeat carries the new one.
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
     DeepLink:
       description: Where the item opens in a Hub. Present only when the item belongs to a thread on a known machine.
       type: object
@@ -893,16 +994,7 @@ components:
       properties:
         generatedAt: { $ref: "#/components/schemas/Timestamp" }
         lastVisitAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
-        needsYou:
-          type: object
-          required: [state, items, nextCursor, notMeasured]
-          properties:
-            state: { $ref: "#/components/schemas/BlockState" }
-            items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/NeedsItem" } }
-            nextCursor:
-              description: Continue with `GET /needs?cursor=`.
-              type: [string, "null"]
-            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        needsYou: { $ref: "#/components/schemas/NeedsBlock" }
         shipped:
           type: object
           required: [state, items, notMeasured]
@@ -920,64 +1012,139 @@ components:
                   mergedAt: { $ref: "#/components/schemas/Timestamp" }
                   live: { type: string, enum: [live, not_live_yet, deploy_failed, no_deploy] }
             notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
-        working:
+        working: { $ref: "#/components/schemas/WorkingBlock" }
+        stuck: { $ref: "#/components/schemas/StuckBlock" }
+        health: { $ref: "#/components/schemas/HealthBlock" }
+    NeedsBlock:
+      description: The needs-you block, as in Today.
+      type: object
+      required: [state, items, nextCursor, notMeasured]
+      properties:
+        state: { $ref: "#/components/schemas/BlockState" }
+        items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/NeedsItem" } }
+        nextCursor:
+          description: Continue with `GET /needs?cursor=`.
+          type: [string, "null"]
+        notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+    WorkingBlock:
+      description: The working-now block, as in Today.
+      type: object
+      required: [state, items, notMeasured]
+      properties:
+        state: { $ref: "#/components/schemas/BlockState" }
+        items:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [person, lastActivityAt]
+            properties:
+              person: { $ref: "#/components/schemas/PersonRef" }
+              task: { $ref: "#/components/schemas/TaskRef" }
+              branch: { type: string }
+              sessions: { type: integer, minimum: 0 }
+              state: { type: string, enum: [working, waiting, idle, stopped, not_heard_from] }
+              lastActivityAt: { $ref: "#/components/schemas/Timestamp" }
+              deepLink: { $ref: "#/components/schemas/DeepLink" }
+        notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+    StuckBlock:
+      description: The stuck block, as in Today.
+      type: object
+      required: [state, items, notMeasured]
+      properties:
+        state: { $ref: "#/components/schemas/BlockState" }
+        items:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [rule, since]
+            properties:
+              rule:
+                type: string
+                enum: [claim_quiet, check_failed, unreviewed, checks_queued, dev_red, deploy_failed, watched_job_down]
+              since: { $ref: "#/components/schemas/Timestamp" }
+              task: { $ref: "#/components/schemas/TaskRef" }
+              owner: { $ref: "#/components/schemas/PersonRef" }
+              deepLink: { $ref: "#/components/schemas/DeepLink" }
+        notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+    HealthBlock:
+      description: The health block, as in Today. It is also the snapshot `health` file.
+      type: object
+      required: [state, items, notMeasured]
+      properties:
+        state: { $ref: "#/components/schemas/BlockState" }
+        items:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [id, label, state, observedAt]
+            properties:
+              id: { $ref: "#/components/schemas/Id" }
+              label: { type: string, maxLength: 120 }
+              state: { type: string, enum: [good, warning, bad, not_measured] }
+              summary: { type: string, maxLength: 300 }
+              observedAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
+        notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+    FileRef:
+      type: string
+      pattern: "^sha256:[0-9a-f]{64}$"
+    SnapshotHead:
+      description: |
+        Added in 1.1. Response, so open. Clients ignore keys they do not know, including new keys under `files`. A
+        new file kind is an additive v1 change.
+      type: object
+      required: [protocol, generatedAt, files]
+      properties:
+        protocol: { type: string, pattern: "^1\\.(0|[1-9][0-9]*)$" }
+        generatedAt:
+          description: |
+            When this head was built, which is when its file set last changed. It is not the read time (the `Date`
+            header gives that). The head stays current until it changes (see the path description).
+          allOf: [{ $ref: "#/components/schemas/Timestamp" }]
+        files:
           type: object
-          required: [state, items, notMeasured]
+          required: [needs, health, work, machines]
           properties:
-            state: { $ref: "#/components/schemas/BlockState" }
-            items:
-              type: array
-              maxItems: 20
-              items:
-                type: object
-                required: [person, lastActivityAt]
-                properties:
-                  person: { $ref: "#/components/schemas/PersonRef" }
-                  task: { $ref: "#/components/schemas/TaskRef" }
-                  branch: { type: string }
-                  sessions: { type: integer, minimum: 0 }
-                  state: { type: string, enum: [working, waiting, idle, stopped, not_heard_from] }
-                  lastActivityAt: { $ref: "#/components/schemas/Timestamp" }
-                  deepLink: { $ref: "#/components/schemas/DeepLink" }
-            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
-        stuck:
-          type: object
-          required: [state, items, notMeasured]
-          properties:
-            state: { $ref: "#/components/schemas/BlockState" }
-            items:
-              type: array
-              maxItems: 20
-              items:
-                type: object
-                required: [rule, since]
-                properties:
-                  rule:
-                    type: string
-                    enum: [claim_quiet, check_failed, unreviewed, checks_queued, dev_red, deploy_failed, watched_job_down]
-                  since: { $ref: "#/components/schemas/Timestamp" }
-                  task: { $ref: "#/components/schemas/TaskRef" }
-                  owner: { $ref: "#/components/schemas/PersonRef" }
-                  deepLink: { $ref: "#/components/schemas/DeepLink" }
-            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
-        health:
-          type: object
-          required: [state, items, notMeasured]
-          properties:
-            state: { $ref: "#/components/schemas/BlockState" }
-            items:
-              type: array
-              maxItems: 20
-              items:
-                type: object
-                required: [id, label, state, observedAt]
-                properties:
-                  id: { $ref: "#/components/schemas/Id" }
-                  label: { type: string, maxLength: 120 }
-                  state: { type: string, enum: [good, warning, bad, not_measured] }
-                  summary: { type: string, maxLength: 300 }
-                  observedAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
-            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+            needs: { $ref: "#/components/schemas/FileRef" }
+            health: { $ref: "#/components/schemas/FileRef" }
+            work: { $ref: "#/components/schemas/FileRef" }
+            machines: { $ref: "#/components/schemas/FileRef" }
+            repositories:
+              description: Present when the relay serves `GET /repositories`.
+              allOf: [{ $ref: "#/components/schemas/FileRef" }]
+    SnapshotNeeds:
+      description: |
+        The caller's needs-you block, the same as `Today.needsYou`: the 20 most urgent items in the needs order.
+        `nextCursor` continues in `GET /needs`. `state` and `notMeasured` say when a source could not be read, so a
+        partial list is never shown as complete.
+      allOf: [{ $ref: "#/components/schemas/NeedsBlock" }]
+    SnapshotWork:
+      description: |
+        Working now and stuck, the same blocks as Today. Shipped is left out: it is relative to the person's last
+        visit, and a snapshot read is never a visit.
+      type: object
+      required: [working, stuck]
+      properties:
+        working: { $ref: "#/components/schemas/WorkingBlock" }
+        stuck: { $ref: "#/components/schemas/StuckBlock" }
+    SnapshotMachines:
+      description: |
+        The caller's full `GET /machines` list in the same order, with the same visibility and `revocable` for the
+        caller. `truncated` is true when the list was cut at `maxItems`; the client then pages `GET /machines`.
+      type: object
+      required: [items, truncated]
+      properties:
+        items: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/Machine" } }
+        truncated: { type: boolean }
+    SnapshotRepositories:
+      description: The full `GET /repositories` list in the same order. `truncated` works as for machines.
+      type: object
+      required: [items, truncated]
+      properties:
+        items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Repository" } }
+        truncated: { type: boolean }
     NeedsChangedEvent:
       type: object
       required: [at, count]

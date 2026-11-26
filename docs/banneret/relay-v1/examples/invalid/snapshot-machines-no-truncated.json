@@ -1,0 +1,64 @@
+{
+  "items": [
+    {
+      "id": "m_4fT9wQ",
+      "environmentId": "env_9d8c7b6a-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+      "ownerId": "p_7Hq2xK",
+      "ownerLogin": "ada-example",
+      "label": "Ada server",
+      "kind": "server",
+      "hostname": "dev-host-1",
+      "os": "Ubuntu 24.04",
+      "hubVersion": "0.4.2",
+      "policyFingerprint": "sha256:823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+      "sandbox": {
+        "enabled": true,
+        "image": "ghcr.io/example-org/agent-sandbox@sha256:b29814cf5792e684cd75d6a7fce7a67a11887e312f87ca2ac2496d81f365ff72"
+      },
+      "enrolledAt": "2026-11-20T12:00:00Z",
+      "lastHeardAt": "2026-11-26T10:00:01Z",
+      "connected": true,
+      "revocable": true
+    },
+    {
+      "id": "m_8kD2pZ",
+      "environmentId": "env_2b7c9e1f-5a6d-4c3b-9e8f-0a1b2c3d4e5f",
+      "ownerId": "p_3Nc8vR",
+      "ownerLogin": "bo-example",
+      "label": "Bo laptop",
+      "kind": "laptop",
+      "hostname": "bo-laptop",
+      "os": "Windows 11",
+      "hubVersion": "0.4.1",
+      "policyFingerprint": null,
+      "sandbox": {
+        "enabled": false,
+        "image": null
+      },
+      "enrolledAt": "2026-11-22T08:30:00Z",
+      "lastHeardAt": null,
+      "connected": false
+    },
+    {
+      "id": "m_2Rv6tN",
+      "environmentId": "env_6c5d4e3f-2a1b-4c9d-8e7f-6a5b4c3d2e1f",
+      "ownerId": "p_7Hq2xK",
+      "ownerLogin": "ada-example",
+      "label": "Ada old laptop",
+      "kind": "laptop",
+      "hostname": "ada-laptop",
+      "os": "macOS 15.1",
+      "hubVersion": "0.4.0",
+      "policyFingerprint": null,
+      "sandbox": {
+        "enabled": false,
+        "image": null
+      },
+      "enrolledAt": "2026-11-10T09:00:00Z",
+      "lastHeardAt": "2026-11-24T17:45:30Z",
+      "connected": false,
+      "revocable": false,
+      "revokedAt": "2026-11-24T18:00:00Z"
+    }
+  ]
+}

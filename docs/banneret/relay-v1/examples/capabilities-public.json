@@ -1,5 +1,5 @@
 {
-  "protocol": "1.0",
+  "protocol": "1.1",
   "displayName": "Example Company",
   "iconUrl": "https://relay.example.test/admin/hub/icon.png",
   "enrolment": { "start": "/relay/v1/enroll/start", "browser": "/admin/hub/enroll" }
