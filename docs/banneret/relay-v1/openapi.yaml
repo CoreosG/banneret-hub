@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Relay protocol v1
-  version: "1.2"
+  version: "1"
   summary: The calls a Banneret Hub server makes to a central relay.
   description: |
     Every call starts from a Banneret Hub server. The relay never dials a machine and cannot run anything on one.
-    Conventions (auth, signing, errors, paging, versioning, ids) are in README.md next to this file; the schema
+    Conventions (auth, signing, errors, paging, ids) are in README.md next to this file; the schema
     descriptions below repeat the binding parts.
   license:
     name: MIT
@@ -33,8 +33,8 @@ paths:
       operationId: getCapabilities
       summary: What this relay offers.
       description: |
-        Without an `Authorization` header the relay answers 200 with only `protocol`, `displayName`, `iconUrl` and
-        `enrolment`. With a valid signed device token it adds `sections`, `mcpTools`, `adapters` and `me`. A call
+        Without an `Authorization` header the relay answers 200 with only `displayName`, `iconUrl` and `enrolment`.
+        With a valid signed device token it adds `sections`, `mcpTools`, `adapters` and `me`. A call
         that sends a token which fails (revoked, unknown, badly signed) is refused with 401 and its code, such as
         `token_revoked`; it never falls back to the public document. Nothing in this document is a secret. A client renders only the sections
         listed here and ignores section kinds it does not know.
@@ -322,7 +322,7 @@ paths:
       operationId: listFeed
       summary: Older feed entries, newest first.
       description: |
-        Added in 1.2. Served by a relay that advertises the `feed` section. The snapshot `feed` file holds the latest
+        Served by a relay that advertises the `feed` section. The snapshot `feed` file holds the latest
         100 entries; this call pages through the same list from where the file stops, using the file's `nextCursor`.
         Entries are derived from tracker and relay events, never written by a client. A cursor the relay did not issue
         is 400 `malformed`.
@@ -350,7 +350,7 @@ paths:
       operationId: listGraveyard
       summary: Older graveyard entries, newest ruling first.
       description: |
-        Added in 1.2. Served by a relay that advertises the `feed` section with the flag `graveyard`. The snapshot
+        Served by a relay that advertises the `feed` section with the flag `graveyard`. The snapshot
         `graveyard` file holds the latest 100 entries; this call continues from the file's `nextCursor`.
       parameters:
         - $ref: "#/components/parameters/Device"
@@ -376,7 +376,7 @@ paths:
       operationId: readTask
       summary: One task, with its preview and its checked sign-off.
       description: |
-        Added in 1.2. Served by a relay that advertises the `task` section. Returns the board card for the task plus
+        Served by a relay that advertises the `task` section. Returns the board card for the task plus
         `preview` and `checked` when they exist. The Hub uses it when the task is not in the `board` or `map` file
         it holds. A `taskId` that is malformed (not an `Id`) or unknown answers 404 `not_found`; this call never
         answers 400.
@@ -447,7 +447,7 @@ paths:
       operationId: getSnapshotHead
       summary: The caller's current snapshot head.
       description: |
-        Added in protocol 1.1. The head names the caller's current snapshot files by SHA-256. It is per person:
+        The head names the caller's current snapshot files by SHA-256. It is per person:
         every machine of one person gets the same head. It is current when served. The relay re-checks
         time-dependent facts (a machine counts as connected only while heard within 90 seconds; a thread need
         counts only on a machine heard within 90 seconds) at least every 30 seconds. When it cannot produce a
@@ -487,7 +487,7 @@ paths:
       operationId: getSnapshotFile
       summary: One immutable snapshot file.
       description: |
-        Added in protocol 1.1. `sha256` is the lowercase hex of the file's SHA-256, which is the value in the head
+        `sha256` is the lowercase hex of the file's SHA-256, which is the value in the head
         without its `sha256:` prefix. The body's SHA-256 always equals it, and a client may check this. A file is
         served only while one of the caller's retained heads names it (see README, Snapshot). A malformed, unknown,
         expired or someone else's hash all get the same 404 `not_found`, never 400. On 404 the client refetches the
@@ -624,8 +624,8 @@ components:
       pattern: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
     Role:
       description: |
-        Open set. Known values: `founder`, `limited_staff`. New roles may be added within v1, so this is not a
-        closed enum; clients treat an unknown role as `limited_staff` and never fail on it.
+        Open set. Known values: `founder`, `limited_staff`. Not a closed enum:
+        clients treat an unknown role as `limited_staff` and never fail on it.
       type: string
       pattern: "^[a-z][a-z0-9_]{0,31}$"
     Error:
@@ -641,7 +641,7 @@ components:
                 Open set. Known values: `malformed`, `too_large`, `unauthenticated`, `token_revoked`,
                 `bad_signature`, `signature_invalid`, `clock_skew`, `counter_reused`, `forbidden`,
                 `network_identity_mismatch`, `not_found`, `rate_limited`, `capacity`, `unavailable`, `internal`.
-                New codes may be added within v1, so this is not a closed enum; a client treats an unknown code by its
+                Not a closed enum: a client treats an unknown code by its
                 HTTP status and never fails on it.
               type: string
               pattern: "^[a-z][a-z0-9_]{0,31}$"
@@ -652,12 +652,8 @@ components:
               description: Optional machine-readable detail, such as the refused field name. Never secrets.
     Capabilities:
       type: object
-      required: [protocol, displayName, iconUrl, enrolment]
+      required: [displayName, iconUrl, enrolment]
       properties:
-        protocol:
-          description: Protocol version, `1.<minor>`. The minor grows with each additive change.
-          type: string
-          pattern: "^1\\.(0|[1-9][0-9]*)$"
         displayName: { type: string, minLength: 1, maxLength: 80, description: "The company's name, for \"Join <name>\"." }
         iconUrl: { type: [string, "null"], format: uri, maxLength: 2048 }
         enrolment:
@@ -694,7 +690,7 @@ components:
           maxItems: 16
           items: { $ref: "#/components/schemas/Adapter" }
         snapshot:
-          description: Added in 1.1. Present only for an authenticated caller on a relay that serves snapshots.
+          description: Present only for an authenticated caller on a relay that serves snapshots.
           type: object
           required: [version, head]
           properties:
@@ -708,7 +704,7 @@ components:
         kind:
           description: |
             One of the fixed section types: today, needs, machines, health, board, map, feed, task, channel, team,
-            knowledge. New kinds may be added within v1; clients ignore kinds they do not know.
+            knowledge. Clients ignore kinds they do not know.
           type: string
           pattern: "^[a-z][a-z0-9_]{0,31}$"
         version: { type: integer, minimum: 1 }
@@ -1013,7 +1009,7 @@ components:
           maxLength: 128
         snapshotEtag:
           description: |
-            Added in 1.1. The caller's current snapshot head `ETag`, unquoted. Refetch the head when it changes.
+            The caller's current snapshot head `ETag`, unquoted. Refetch the head when it changes.
             Absent until the person has a head. Rebuilds are debounced, so a heartbeat's own response may still
             carry the previous value; the next heartbeat carries the new one.
           type: string
@@ -1040,8 +1036,8 @@ components:
           description: |
             Open set. Known values: `thread_question`, `thread_approval`, `pull_request`, `founder_question`,
             `promotion`, `health`, `mention`, `agent_message`, `persona_ask`, `suggestion`, `other` (class 5, the explicit
-            catch-all). New kinds may be added within v1, so this is not a closed
-            enum; a client shows an unknown kind as a generic item and never fails on it.
+            catch-all). Not a closed enum:
+            a client shows an unknown kind as a generic item and never fails on it.
           type: string
           pattern: "^[a-z][a-z0-9_]{0,63}$"
         title: { type: string, maxLength: 300 }
@@ -1071,7 +1067,7 @@ components:
         since: { $ref: "#/components/schemas/Timestamp" }
         detail:
           description: |
-            Added in 1.2, optional. One plain sentence with the specifics, for example which stage-plan rule failed.
+            Optional. One plain sentence with the specifics, for example which stage-plan rule failed.
             Never a path or a secret.
           type: string
           maxLength: 240
@@ -1189,12 +1185,10 @@ components:
       pattern: "^sha256:[0-9a-f]{64}$"
     SnapshotHead:
       description: |
-        Added in 1.1. Response, so open. Clients ignore keys they do not know, including new keys under `files`. A
-        new file kind is an additive v1 change.
+        Response, so open. Clients ignore keys they do not know, including keys under `files`.
       type: object
-      required: [protocol, generatedAt, files]
+      required: [generatedAt, files]
       properties:
-        protocol: { type: string, pattern: "^1\\.(0|[1-9][0-9]*)$" }
         generatedAt:
           description: |
             When this head was built, which is when its file set last changed. It is not the read time (the `Date`
@@ -1212,16 +1206,16 @@ components:
               description: Present when the relay serves `GET /repositories`.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
             board:
-              description: Added in 1.2. Present when the relay advertises the `board` section. A 1.1 Hub ignores it.
+              description: Present when the relay advertises the `board` section.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
             map:
-              description: Added in 1.2. Present when the relay advertises the `map` section, that is, when a stage plan is configured. A 1.1 Hub ignores it.
+              description: Present when the relay advertises the `map` section, that is, when a stage plan is configured.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
             feed:
-              description: Added in 1.2. Present when the relay advertises the `feed` section. The latest 100 entries.
+              description: Present when the relay advertises the `feed` section. The latest 100 entries.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
             graveyard:
-              description: Added in 1.2. Present when the `feed` section carries the flag `graveyard`. The latest 100 entries.
+              description: Present when the `feed` section carries the flag `graveyard`. The latest 100 entries.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
     SnapshotNeeds:
       description: |
@@ -1240,7 +1234,7 @@ components:
         stuck: { $ref: "#/components/schemas/StuckBlock" }
     SnapshotBoard:
       description: |
-        Added in 1.2. The task board with leases, relay-wide. The relay computes every status, column and lease
+        The task board with leases, relay-wide. The relay computes every status, column and lease
         state; the Hub only draws them. `state` and `notMeasured` say when a source (for example the claims) could not
         be read, so a partial board is never shown as complete. A card with no `lease` is Free. The "agent at work"
         ring is not here: the Hub derives it from the `work` file, joined by task id.
@@ -1346,7 +1340,7 @@ components:
         state: { description: "Open string; known: `passing`, `failing`, `pending`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
     SnapshotMap:
       description: |
-        Added in 1.2. The build map, relay-wide: the stages of a stage plan (README, "Stage plan file") with each
+        The build map, relay-wide: the stages of a stage plan (README, "Stage plan file") with each
         item's status from the board vocabulary. The relay computes every status and counter; the Hub only draws
         them. When the plan is configured but cannot be read or is invalid, `state` is `not_measured`, `notMeasured`
         says why and `stages`, `items` and counters are empty, so a broken plan is never shown as an empty plan.
@@ -1421,7 +1415,7 @@ components:
             additionalProperties: { type: integer, minimum: 0 }
     FeedPage:
       description: |
-        Added in 1.2. The `feed` snapshot file and the response of `GET /feed`: newest first. The file holds the
+        The `feed` snapshot file and the response of `GET /feed`: newest first. The file holds the
         latest 100 entries and its `nextCursor` continues in `GET /feed?cursor=`. Entries are derived by the relay;
         a client never writes one. `nextCursor` is null on the last page.
       type: object
@@ -1460,7 +1454,7 @@ components:
           allOf: [{ $ref: "#/components/schemas/OpenToken" }]
     GraveyardPage:
       description: |
-        Added in 1.2. The `graveyard` snapshot file and the response of `GET /graveyard`: tasks ruled dead, newest
+        The `graveyard` snapshot file and the response of `GET /graveyard`: tasks ruled dead, newest
         ruling first. The file holds the latest 100 and its `nextCursor` continues in `GET /graveyard?cursor=`.
       type: object
       additionalProperties: false
@@ -1483,7 +1477,7 @@ components:
         link: { type: string, format: uri }
     TaskRead:
       description: |
-        Added in 1.2. The response of `GET /tasks/{taskId}`: every field of a board card, plus `preview` and `checked`
+        The response of `GET /tasks/{taskId}`: every field of a board card, plus `preview` and `checked`
         when they exist. Closed.
       type: object
       additionalProperties: false

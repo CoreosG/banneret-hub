@@ -64,7 +64,6 @@ const projects = [project("alpha"), project("beta"), project("gamma")];
 function setup() {
   useWorkspacesStore.setState({
     byEnvironment: {},
-    supported: new Set(),
     local: [],
     activeId: null,
     dialog: null,
@@ -275,14 +274,14 @@ describe("loadEnvironmentWorkspaces", () => {
     updatedAt: "2026-11-26T10:00:00.000Z",
   };
 
-  it("treats an environment that cannot answer as having no workspaces and never writes to it", async () => {
+  it("counts an environment that cannot answer as loaded and keeps its last copy", async () => {
     setup();
     vi.mocked(workspacesRpc.list).mockResolvedValue(null);
-    useWorkspacesStore.setState({ local: [workspace] });
     await loadEnvironmentWorkspaces(LOCAL);
-    const state = useWorkspacesStore.getState();
-    expect(state.byEnvironment[LOCAL]).toEqual([]);
-    expect(state.supported.has(LOCAL)).toBe(false);
+    expect(useWorkspacesStore.getState().byEnvironment[LOCAL]).toEqual([]);
+    useWorkspacesStore.setState({ byEnvironment: { [LOCAL]: [workspace] } });
+    await loadEnvironmentWorkspaces(LOCAL);
+    expect(useWorkspacesStore.getState().byEnvironment[LOCAL]).toEqual([workspace]);
     expect(workspacesRpc.put).not.toHaveBeenCalled();
   });
 

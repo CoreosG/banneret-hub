@@ -159,7 +159,6 @@ const state = (sections: string[], board: BanneretFeedBoardRead | null): Bannere
 function setup() {
   useWorkspacesStore.setState({
     byEnvironment: {},
-    supported: new Set(),
     local: [enterprise],
     activeId: WORKSPACE_ID,
     dialog: null,

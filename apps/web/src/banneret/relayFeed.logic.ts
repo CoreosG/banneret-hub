@@ -1,5 +1,5 @@
 // Banneret Hub: plain words for the relay's Today and Needs you values. Every set the relay sends is
-// open (relay-v1 "Versioning"), so each mapping has a generic fallback and never fails.
+// open (relay-v1 "Open sets"), so each mapping has a generic fallback and never fails.
 import type { BanneretFeedDeepLink } from "@t3tools/contracts";
 
 const NEEDS_KINDS: Readonly<Record<string, string>> = {

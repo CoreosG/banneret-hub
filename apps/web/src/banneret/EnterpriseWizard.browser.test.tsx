@@ -77,7 +77,6 @@ const projects = [
 function setup(displayName = "Example Company") {
   useWorkspacesStore.setState({
     byEnvironment: {},
-    supported: new Set(),
     local: [],
     activeId: null,
     dialog: null,
@@ -107,7 +106,7 @@ function setup(displayName = "Example Company") {
       .mockImplementation(async () => ({ ok: true, value: view })),
     probe: vi.spyOn(enrolmentRpc, "probe").mockImplementation(async () => ({
       ok: true,
-      value: { origin: ORIGIN, displayName, protocol: "1.0" },
+      value: { origin: ORIGIN, displayName },
     })),
     start: vi.spyOn(enrolmentRpc, "start").mockImplementation(async () => {
       view = pending;

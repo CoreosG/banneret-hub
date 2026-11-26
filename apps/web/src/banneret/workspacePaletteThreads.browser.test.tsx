@@ -67,7 +67,6 @@ function setup(activeId: ActiveWorkspaceId) {
   useCommandPaletteStore.setState(useCommandPaletteStore.getInitialState(), true);
   useWorkspacesStore.setState({
     byEnvironment: {},
-    supported: new Set(),
     local: [work],
     activeId,
     dialog: null,

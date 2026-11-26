@@ -125,7 +125,6 @@ function setup(
 ) {
   useWorkspacesStore.setState({
     byEnvironment: {},
-    supported: new Set(),
     local: [enterprise],
     activeId: options.active === undefined ? WORKSPACE_ID : options.active,
     dialog: null,

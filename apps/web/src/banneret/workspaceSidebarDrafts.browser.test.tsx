@@ -91,7 +91,6 @@ function setup(
   __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
   useWorkspacesStore.setState({
     byEnvironment: {},
-    supported: new Set(),
     local: [input.workspace],
     activeId: input.activeId,
     dialog: null,

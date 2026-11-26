@@ -37,7 +37,7 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import * as Workspaces from "../Workspaces.ts";
-import { BanneretFacts, factsRequestBody, protocolCarriesUsage } from "./Facts.ts";
+import { BanneretFacts, factsRequestBody } from "./Facts.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
 import { RelayCallError, type RelayReply, relayFetch } from "./RelayClient.ts";
 import { type BoardTaskEntry, taskIdForLinks } from "./Snapshot.ts";
@@ -82,7 +82,7 @@ const Persisted = Schema.Union([
     displayName: Schema.String,
     machineId: Schema.String,
     label: Schema.String,
-    kind: Schema.optional(BanneretMachineKind),
+    kind: BanneretMachineKind,
     startedAt: Schema.String,
     counterMark: Schema.optional(Schema.String),
   }),
@@ -92,7 +92,7 @@ const Persisted = Schema.Union([
     displayName: Schema.String,
     machineId: Schema.String,
     label: Schema.String,
-    kind: Schema.optional(BanneretMachineKind),
+    kind: BanneretMachineKind,
     me: Me,
     replacedLabel: Schema.optional(Schema.String),
     lastOkAt: Schema.optional(Schema.String),
@@ -131,11 +131,10 @@ const PollReply = Schema.Struct({
   reason: Schema.optional(Schema.String),
 });
 const PublicCapabilities = Schema.Struct({
-  protocol: Schema.String,
   displayName: Schema.String,
   enrolment: Schema.Struct({ start: Schema.String, browser: Schema.String }),
 });
-const EnrolledCapabilities = Schema.Struct({ me: Me, protocol: Schema.optional(Schema.String) });
+const EnrolledCapabilities = Schema.Struct({ me: Me });
 const MachinesReply = Schema.Struct({
   items: Schema.Array(
     Schema.Struct({
@@ -303,8 +302,8 @@ const notConfigured = Effect.fail(
 );
 
 /**
- * A reference, not a required service: a server built without the enrolment layer (tests, older
- * wiring) answers as an environment that never enrolled, and still makes no relay call.
+ * A reference, not a required service: a server built without the enrolment layer (upstream's
+ * ws.test.ts) answers as an environment that never enrolled, and still makes no relay call.
  */
 export class BanneretEnrolment extends Context.Reference<EnrolmentService>(
   "t3/banneret/relay/Enrolment/BanneretEnrolment",
@@ -366,9 +365,6 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   let health: BanneretRelayHealth | undefined;
   let unreachableSince: string | undefined;
   let etag: string | undefined;
-  // The relay's protocol from its last enrolled capabilities read; unknown after a restart until
-  // the first heartbeat's refetch, so a 1.0 relay never gets a field it would refuse.
-  let relayProtocol: string | undefined;
   let snapshotEtag: string | undefined;
   let boardTasks: ReadonlyArray<BoardTaskEntry> = [];
   let backoffMs = 0;
@@ -780,8 +776,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const outcome = yield* Effect.gen(function* () {
       const capabilities = yield* signedCall(from, "GET", "/relay/v1/capabilities");
       etag = capabilities.etag;
-      const { me, protocol } = yield* decodeReply(EnrolledCapabilities, capabilities);
-      relayProtocol = protocol;
+      const { me } = yield* decodeReply(EnrolledCapabilities, capabilities);
       const replacedLabel = yield* findReplaced(from, me.id);
       return { me, replacedLabel };
     }).pipe(Effect.result);
@@ -804,7 +799,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           displayName: from.displayName,
           machineId: from.machineId,
           label: from.label,
-          ...(from.kind === undefined ? {} : { kind: from.kind }),
+          kind: from.kind,
           me,
           lastOkAt,
           ...(replacedLabel === undefined ? {} : { replacedLabel }),
@@ -842,7 +837,6 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     if (reply.etag !== undefined) etag = reply.etag;
     const lastOkAt = yield* nowIso;
     const decoded = reply.status === 304 ? Option.none() : decodeEnrolledCapabilities(reply.body);
-    if (Option.isSome(decoded)) relayProtocol = decoded.value.protocol;
     const me = Option.getOrElse(
       Option.map(decoded, (body) => body.me),
       () => from.me,
@@ -867,11 +861,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const collected = yield* facts.collect(from.relayOrigin, (links) =>
       taskIdForLinks(tasks, links),
     );
-    const body = factsRequestBody(
-      machineFacts(environmentId, from.label, from.kind ?? "desktop"),
-      collected,
-      protocolCarriesUsage(relayProtocol),
-    );
+    const body = factsRequestBody(machineFacts(environmentId, from.label, from.kind), collected);
     const outcome = yield* signedCall(from, "POST", "/relay/v1/facts", undefined, body).pipe(
       Effect.result,
     );
@@ -1009,7 +999,6 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       ),
     );
     if (
-      !/^1\.(0|[1-9][0-9]*)$/.test(capabilities.protocol) ||
       capabilities.enrolment.start !== "/relay/v1/enroll/start" ||
       capabilities.displayName.length === 0 ||
       capabilities.displayName.length > 80
@@ -1019,7 +1008,6 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     return {
       origin: address.origin,
       displayName: capabilities.displayName,
-      protocol: capabilities.protocol,
     };
   });
 

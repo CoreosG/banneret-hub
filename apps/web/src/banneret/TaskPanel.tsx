@@ -262,8 +262,8 @@ function TaskPanelBody(props: {
   useEffect(() => watchFeed(environmentId), [environmentId]);
 
   const card = feed.board?.value?.cards.find((candidate) => candidate.task.id === taskId) ?? null;
-  // Only a relay that advertises the section serves the read; before capabilities are known a 1.1
-  // relay would answer 404 for a task that exists.
+  // Only a relay that advertises the section serves the read; any other relay answers 404 for a task
+  // that exists.
   const offered = feed.joined && feed.sectionsKnown && feed.sections.includes("task");
   const read = useTaskRead(environmentId, taskId, offered, feed.board?.fetchedAt ?? null);
 

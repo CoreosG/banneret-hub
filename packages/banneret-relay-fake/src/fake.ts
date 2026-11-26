@@ -315,7 +315,6 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const COUNTER_PATTERN = /^(0|[1-9][0-9]{0,18})$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]{86}==$/;
 const COUNTER_WINDOW = 256;
-const PROTOCOL = "1.2";
 const LEASE_STALE_MS = 6 * 60 * 60 * 1000;
 const LEASE_EXPIRES_MS = 24 * 60 * 60 * 1000;
 const BOARD_COLUMNS = [
@@ -862,7 +861,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
 
   const publicCapabilities = () => ({
-    protocol: PROTOCOL,
     displayName: options.displayName ?? "Example Company",
     iconUrl: null,
     enrolment: { start: "/relay/v1/enroll/start", browser: "/enroll" },
@@ -1328,7 +1326,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
     const now = Date.now();
     const head = {
-      protocol: PROTOCOL,
       generatedAt: iso(now),
       files: refs,
     };

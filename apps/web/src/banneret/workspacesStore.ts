@@ -30,7 +30,7 @@ const putCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   tag: BANNERET_WORKSPACES_WS_METHODS.put,
 });
 
-// An older server may not answer an unknown method at all; it must not hold the switcher up.
+// An environment that never answers must not hold the switcher up.
 const RPC_TIMEOUT_MS = 10_000;
 
 async function settle<T>(run: Promise<{ _tag: string; value?: T }>): Promise<T | null> {
@@ -47,7 +47,7 @@ async function settle<T>(run: Promise<{ _tag: string; value?: T }>): Promise<T |
 }
 
 export const workspacesRpc = {
-  /** null when the environment cannot answer, such as an older server without the method. */
+  /** null when the environment cannot answer. */
   list: (environmentId: EnvironmentId) =>
     settle<{ readonly workspaces: ReadonlyArray<BanneretWorkspace> }>(
       runAtomCommand(appAtomRegistry, listCommand, { environmentId, input: {} }),
@@ -78,10 +78,8 @@ export type WorkspaceDialogState =
   | null;
 
 interface WorkspacesState {
-  /** Each environment's last known copy; an environment without the method holds none. */
+  /** Each environment's last known copy; empty until it first answers. */
   readonly byEnvironment: EnvironmentWorkspaces;
-  /** Environments that answered the list; only they receive writes. */
-  readonly supported: ReadonlySet<EnvironmentId>;
   /** This client's own writes, merged in until every environment has them. */
   readonly local: ReadonlyArray<BanneretWorkspace>;
   readonly activeId: ActiveWorkspaceId;
@@ -90,7 +88,6 @@ interface WorkspacesState {
 
 export const useWorkspacesStore = create<WorkspacesState>(() => ({
   byEnvironment: {},
-  supported: new Set(),
   local: [],
   activeId: readActive(),
   dialog: null,
@@ -141,17 +138,12 @@ function storeEnvironmentCopy(
 export async function loadEnvironmentWorkspaces(environmentId: EnvironmentId) {
   const listed = await workspacesRpc.list(environmentId);
   if (listed === null) {
-    useWorkspacesStore.setState((state) => {
-      const supported = new Set(state.supported);
-      supported.delete(environmentId);
-      return { supported, byEnvironment: { ...state.byEnvironment, [environmentId]: [] } };
-    });
+    if (!Object.hasOwn(useWorkspacesStore.getState().byEnvironment, environmentId)) {
+      storeEnvironmentCopy(environmentId, []);
+    }
     return;
   }
-  useWorkspacesStore.setState((state) => ({
-    supported: new Set(state.supported).add(environmentId),
-    byEnvironment: { ...state.byEnvironment, [environmentId]: listed.workspaces },
-  }));
+  storeEnvironmentCopy(environmentId, listed.workspaces);
   const merged = mergeBanneretWorkspaces(...allCopies(useWorkspacesStore.getState()));
   const stale = staleOnEnvironment(merged, listed.workspaces);
   if (stale.length === 0) return;
@@ -159,12 +151,12 @@ export async function loadEnvironmentWorkspaces(environmentId: EnvironmentId) {
   if (stored !== null) storeEnvironmentCopy(environmentId, stored.workspaces);
 }
 
-/** Records changed workspaces here at once, then on every environment that supports them. */
+/** Records changed workspaces here at once, then on every known environment. */
 export async function saveWorkspaces(changed: ReadonlyArray<BanneretWorkspace>) {
   useWorkspacesStore.setState((state) => ({
     local: mergeBanneretWorkspaces(state.local, changed),
   }));
-  const targets = [...useWorkspacesStore.getState().supported];
+  const targets = Object.keys(useWorkspacesStore.getState().byEnvironment) as EnvironmentId[];
   await Promise.all(
     targets.map(async (environmentId) => {
       const stored = await workspacesRpc.put(environmentId, changed);
