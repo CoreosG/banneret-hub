@@ -290,6 +290,7 @@ import {
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
 import { WorkspaceNoThreads } from "../banneret/WorkspaceNoThreads";
+import { EnterpriseSidebarRows } from "../banneret/EnterpriseSidebarRows";
 import {
   useWorkspaceScopedThreads,
   useWorkspaceScopeProjectKeys,
@@ -3092,6 +3093,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   return (
     <SidebarFolderDrop>
       <SidebarChromeHeader isElectron={isElectron} />
+      <EnterpriseSidebarRows />
       <SidebarContent
         ref={sidebarContentRef}
         className="min-h-full"

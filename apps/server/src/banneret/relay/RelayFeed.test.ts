@@ -209,6 +209,18 @@ const isDown = (event: BanneretFeedEvent) => event.type === "snapshot" && !event
 const eventsRequests = (relay: Forwarder) =>
   relay.requests.filter((request) => request.url === "/relay/v1/events");
 
+describe("protocolSupportsVisit", () => {
+  it("allows visit=1 only from protocol 1.1 on", () => {
+    expect(RelayFeed.protocolSupportsVisit("1.0")).toBe(false);
+    expect(RelayFeed.protocolSupportsVisit("1.1")).toBe(true);
+    expect(RelayFeed.protocolSupportsVisit("1.12")).toBe(true);
+    expect(RelayFeed.protocolSupportsVisit("2.0")).toBe(true);
+    expect(RelayFeed.protocolSupportsVisit(undefined)).toBe(false);
+    expect(RelayFeed.protocolSupportsVisit("1")).toBe(false);
+    expect(RelayFeed.protocolSupportsVisit("v1.1")).toBe(false);
+  });
+});
+
 describe("BanneretRelayFeed", () => {
   it.live("makes no relay call while the environment has not joined, nor after Leave", () =>
     withFake((fake, relay) =>

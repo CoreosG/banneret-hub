@@ -78,7 +78,6 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
   },
 ) {}
 
-
 type Fields = Readonly<Record<string, unknown>>;
 type LabelFor = (environmentId: string) => string | undefined;
 
@@ -259,6 +258,14 @@ const linkedEnvironments = (body: unknown): Set<string> => {
 const sectionKinds = (body: unknown): ReadonlyArray<string> =>
   defined(list(fields(body)?.sections, 64).map((section) => text(fields(section)?.kind, 32)));
 
+/** `visit=1` is a 1.1 addition; a 1.0 relay may refuse it (relay-v1 changelog). */
+export const protocolSupportsVisit = (protocol: string | undefined): boolean => {
+  const match = /^([0-9]{1,4})\.([0-9]{1,6})$/.exec(protocol ?? "");
+  if (match === null) return false;
+  const major = Number(match[1]);
+  return major > 1 || (major === 1 && Number(match[2]) >= 1);
+};
+
 const problemMessage = (error: RelayCallError, relay: string): string => {
   if (error.status === 0) return `Cannot reach ${relay}.`;
   if (error.code === "bad_response") return `${relay}'s answer did not match relay v1.`;
@@ -275,7 +282,6 @@ const badResponse = (status: number) =>
     message: "The relay's answer did not match relay v1.",
     retryable: true,
   });
-
 
 interface SseMessage {
   readonly id: string | undefined;
@@ -343,6 +349,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   let live = false;
   let since: string | null = null;
   let sections: ReadonlyArray<string> = [];
+  let protocol: string | undefined;
   let needsCount: number | null = null;
   let today: { readonly value: BanneretFeedToday; readonly fetchedAt: string } | null = null;
   let needsFirst: { readonly value: BanneretFeedNeedsPage; readonly fetchedAt: string } | null =
@@ -452,7 +459,11 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
 
   const withProblem = () => (problem === null ? {} : { problem });
 
-  const readToday = Effect.fn("BanneretRelayFeed.today")(function* (visit: boolean) {
+  const readToday = Effect.fn("BanneretRelayFeed.today")(function* (open: boolean) {
+    yield* adopt(joinedOf(yield* enrolment.status));
+    const key = joined?.key;
+    if (open && protocol === undefined && key !== undefined) yield* refreshSections(key);
+    const visit = open && protocolSupportsVisit(protocol);
     const outcome = yield* read(
       visit ? "/relay/v1/today?visit=1" : "/relay/v1/today",
       reshapeToday,
@@ -495,6 +506,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         Effect.suspend(() => {
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
+          protocol = text(fields(reply.body)?.protocol, 16);
           return publishSnapshot;
         }),
       ),
@@ -669,6 +681,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         live = false;
         since = null;
         sections = [];
+        protocol = undefined;
         needsCount = null;
         today = null;
         needsFirst = null;

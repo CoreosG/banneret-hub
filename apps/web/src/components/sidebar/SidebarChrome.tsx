@@ -171,7 +171,7 @@ function HistoryNavigationButton({
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   const gt = useGT();
   return (
-    <WorkspaceSwitcher ariaLabel={gt("T3 Code home")} onBackdrop={onBackdrop}>
+    <WorkspaceSwitcher homeLabel={gt("T3 Code home")} onBackdrop={onBackdrop}>
       <SidebarBrandMark onBackdrop={onBackdrop} />
     </WorkspaceSwitcher>
   );

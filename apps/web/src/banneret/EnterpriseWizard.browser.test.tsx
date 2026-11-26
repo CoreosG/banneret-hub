@@ -200,7 +200,7 @@ async function prepareScreen(stack: DisposableStack) {
 function Harness() {
   return (
     <>
-      <WorkspaceSwitcher ariaLabel="Switch workspace" onBackdrop={false}>
+      <WorkspaceSwitcher homeLabel="T3 Code home" onBackdrop={false}>
         <span>Brand</span>
       </WorkspaceSwitcher>
       <WorkspacesHost />

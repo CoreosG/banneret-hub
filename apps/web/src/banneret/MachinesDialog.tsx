@@ -178,8 +178,8 @@ export function LeavePanel(props: { readonly onClose: () => void }) {
       <DialogHeader>
         <DialogTitle>Leave {company}</DialogTitle>
         <DialogDescription>
-          This machine leaves {company} and its workspace is removed. Your projects stay on this
-          machine, in Personal.
+          This machine's access to {company} is revoked and its workspace is removed. Your projects
+          stay on this machine, in Personal.
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
