@@ -43,10 +43,40 @@ export interface PersonInput {
   readonly awaitFounder?: boolean;
 }
 
+/** Checks that a public origin is a bare http(s) origin and returns it normalised; throws otherwise. */
+export const parsePublicOrigin = (value: string): string => {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`publicOrigin must be an origin such as https://host:8443, got "${value}"`);
+  }
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.hostname === "" ||
+    parsed.pathname !== "/" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    parsed.username !== "" ||
+    parsed.password !== ""
+  ) {
+    throw new Error(
+      `publicOrigin must be a scheme, a host and an optional port with no path, got "${value}"`,
+    );
+  }
+  return parsed.origin;
+};
+
 export interface FakeRelayOptions {
   /** 0 (the default) picks a free port. */
   readonly port?: number;
   readonly host?: string;
+  /**
+   * The origin clients reach the fake at when it sits behind a proxy, such as `https://host:port` from Tailscale
+   * Serve. Used for the absolute `browserUrl`. A scheme, a host and an optional port, no path. Default: the
+   * request's Host header over http.
+   */
+  readonly publicOrigin?: string;
   readonly displayName?: string;
   /** Approve every pairing as `defaultPerson` as soon as it starts. Default true; the conformance suite turns it off. */
   readonly autoApprove?: boolean;
@@ -338,6 +368,8 @@ export interface FakeRelay {
 }
 
 export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<FakeRelay> => {
+  const publicOrigin =
+    options.publicOrigin === undefined ? undefined : parsePublicOrigin(options.publicOrigin);
   const startedAt = Date.now();
   const log = options.log ?? (() => undefined);
   const autoApprove = options.autoApprove ?? true;
@@ -1001,11 +1033,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         wrongCodes: 0,
       };
       pairings.set(pairing.id, pairing);
-      const host = headerValue(request, "Host") ?? "localhost";
+      const origin = publicOrigin ?? `http://${headerValue(request, "Host") ?? "localhost"}`;
       const reply = {
         pairingId: pairing.id,
         confirmCode: pairing.code,
-        browserUrl: `http://${host}/enroll?pairing=${pairing.id}`,
+        browserUrl: `${origin}/enroll?pairing=${pairing.id}`,
         expiresAt: iso(pairing.expiresAt),
         state: "pending",
         retryAfterMs,
