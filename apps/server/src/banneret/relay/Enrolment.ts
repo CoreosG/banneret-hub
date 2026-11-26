@@ -40,7 +40,14 @@ import * as Workspaces from "../Workspaces.ts";
 import { BanneretFacts, factsRequestBody, protocolCarriesUsage } from "./Facts.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
 import { RelayCallError, type RelayReply, relayFetch } from "./RelayClient.ts";
-import { type MachineKey, RelayCounter, keyFromSeed, waitBeforeSigning } from "./RelaySigning.ts";
+import {
+  type MachineKey,
+  RelayCounter,
+  keyFromSeed,
+  rfc3339,
+  sign,
+  waitBeforeSigning,
+} from "./RelaySigning.ts";
 
 export const KEY_SECRET = "banneret-relay-key";
 export const TOKEN_SECRET = "banneret-relay-token";
@@ -260,10 +267,28 @@ interface EnrolmentService {
   ) => Effect.Effect<ReadonlyArray<string>, BanneretRelayError>;
   /** An effect that completes at the next change of the view or the files, or driver step. */
   readonly nextChange: Effect.Effect<Effect.Effect<void>>;
+  /** RelayFeed seam: a signed GET, only while configured. */
+  readonly signedGet: (target: string) => Effect.Effect<RelayReply, RelayCallError>;
+  /** RelayFeed seam: the signed headers for one GET of the event stream, only while configured. */
+  readonly signStream: (
+    target: string,
+  ) => Effect.Effect<
+    { readonly origin: string; readonly headers: Record<string, string> },
+    RelayCallError
+  >;
 }
 
 const notRunning = Effect.fail(
   new BanneretRelayError({ message: "Enterprise enrolment is not running on this server." }),
+);
+
+const notConfigured = Effect.fail(
+  new RelayCallError({
+    status: 0,
+    code: "not_configured",
+    message: "This machine has not joined a company.",
+    retryable: false,
+  }),
 );
 
 /**
@@ -283,6 +308,8 @@ export class BanneretEnrolment extends Context.Reference<EnrolmentService>(
       revokeMachine: () => notRunning,
       matchProjects: () => notRunning,
       nextChange: Effect.succeed(Effect.never),
+      signedGet: () => notConfigured,
+      signStream: () => notConfigured,
     }),
   },
 ) {}
@@ -1174,6 +1201,38 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     });
   });
 
+  const configuredNow = Effect.suspend(() =>
+    current.state === "configured" ? Effect.succeed(current) : notConfigured,
+  );
+
+  const signStream = Effect.fn("BanneretEnrolment.signStream")(function* (target: string) {
+    const from = yield* configuredNow;
+    const credentials = yield* loadCredentials;
+    yield* awaitClock;
+    const counterText = counter.next().toString();
+    const sentAt = rfc3339(yield* nowMs());
+    const signature = sign(credentials.key, {
+      method: "GET",
+      target,
+      device: from.machineId,
+      counter: counterText,
+      sentAt,
+      body: new Uint8Array(),
+    });
+    yield* saveCounterMark;
+    return {
+      origin: from.relayOrigin,
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${credentials.token}`,
+        "X-Banneret-Device": from.machineId,
+        "X-Banneret-Counter": counterText,
+        "X-Banneret-Sent-At": sentAt,
+        "X-Banneret-Signature": signature,
+      },
+    };
+  });
+
   const service: EnrolmentService = {
     probe: probeRelay,
     status: Effect.sync(view),
@@ -1184,6 +1243,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     revokeMachine,
     matchProjects: matchRepositories,
     nextChange: Effect.sync(() => Deferred.await(changeSignal)),
+    signedGet: (target) => Effect.flatMap(configuredNow, (from) => signedCall(from, "GET", target)),
+    signStream,
   };
   return service;
 });
