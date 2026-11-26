@@ -64,6 +64,15 @@ describe("relay v1 contract", () => {
     expect(spec.check("NeedsPage", needs)).not.toBeNull();
   });
 
+  it("accepts an error envelope with an unknown code, and refuses a malformed one", () => {
+    const envelope = (code: unknown) => ({
+      error: { code, message: "Plain words.", retryable: false },
+    });
+    expect(spec.check("Error", envelope("code_added_in_v1_9"))).toBeNull();
+    expect(spec.check("Error", envelope("not_found"))).toBeNull();
+    expect(spec.check("Error", envelope("Not A Code"))).not.toBeNull();
+  });
+
   it("derives the README's public key from the vector seed", () => {
     expect(keyFromSeed(vectorSeed).publicKey).toBe("A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=");
   });

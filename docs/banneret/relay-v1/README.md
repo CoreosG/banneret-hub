@@ -214,6 +214,8 @@ class. [Orchestrator]
 
 `kind` is an open set. A client shows an unknown kind as a generic item and never fails on it.
 
+Error `code` is an open set too. A client treats an unknown error code by its HTTP status.
+
 ## Events
 
 `GET /events` without `Last-Event-ID` is live only: it starts with the next event. With `Last-Event-ID` the relay
