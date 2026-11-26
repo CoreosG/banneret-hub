@@ -1,24 +1,13 @@
-// Banneret Hub: the open tabs bar's model, as pure functions over one saved object.
-//
-// A tab is a thread route (a server thread, a linked thread or a draft) or a workspace page. Every
-// navigation opens or reuses the one preview tab (kept: false, shown in italics). A tab becomes kept
-// on double-click, on pin, or when a message is sent in it. At most MAX_TABS tabs: past that the
-// least recently used unpinned tab closes, never the active one.
-//
-// | State   | Enters when                         | Leaves when                                  | Saved |
-// |---------|-------------------------------------|----------------------------------------------|-------|
-// | preview | a navigation to something not open  | the next such navigation replaces it; kept   | yes   |
-// | kept    | double-click, pin, a message sent   | closed; evicted past MAX_TABS                | yes   |
-// | pinned  | pin (implies kept)                  | unpin (stays kept); never evicted            | yes   |
-// | closed  | close, middle-click, eviction, gone | (removed)                                    | no    |
-//
-// Everything else (live title, offline, gone) is derived on render and never saved.
+// Banneret Hub: the open tabs bar's model, as pure functions over one saved object. A tab is a
+// thread route (server thread, linked thread or draft) or a workspace page. A tab is a preview
+// (kept: false, at most one) until double-click, pin or a sent message keeps it; pinned implies
+// kept and is never evicted. Live title, offline and gone are derived on render, never saved.
 import * as Schema from "effect/Schema";
 
 export const MAX_TABS = 20;
 export const TABS_STORAGE_KEY = "banneret.tabs.v1";
 
-export const PAGE_PATHS = ["/today", "/board", "/map", "/feed", "/needs"] as const;
+const PAGE_PATHS = ["/today", "/board", "/map", "/feed", "/needs"] as const;
 export type PagePath = (typeof PAGE_PATHS)[number];
 
 const TabThreadRef = Schema.Struct({ environmentId: Schema.String, threadId: Schema.String });
@@ -108,8 +97,8 @@ function evict(tabs: ReadonlyArray<Tab>, activeId: string | null): ReadonlyArray
 
 /**
  * The router showed `target` (null: a route no tab holds). Activates its tab; otherwise the preview
- * tab becomes it in place, or a new preview tab opens at the end. With every slot pinned, the new
- * target gets no tab.
+ * tab becomes it in place, or a new preview opens at the end, evicting past MAX_TABS. With every
+ * slot pinned, the new target gets no tab.
  */
 export function observeTarget(
   state: TabsState,

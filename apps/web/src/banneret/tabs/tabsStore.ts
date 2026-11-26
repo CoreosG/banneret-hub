@@ -1,17 +1,5 @@
 // Banneret Hub: the open tabs, saved on this device under one localStorage key. A saved copy of
 // another shape is wiped, never migrated.
-//
-// Activating a page tab switches the workspace and then navigates. In between, the router still
-// shows the old route under the new workspace, which must not count as a navigation. So the store
-// is either following the router or `activating` one tab:
-//
-// | Mode       | Enters when                 | Leaves when                                        |
-// |------------|-----------------------------|----------------------------------------------------|
-// | following  | start; activation settles   | a tab is activated                                 |
-// | activating | activateTab                 | the router shows that tab, or its navigation ends  |
-//
-// While activating, route observations other than the target are ignored. `activating` is in
-// memory only; a reload starts in following.
 import { create } from "zustand";
 
 import {
@@ -31,6 +19,11 @@ import {
   type TabTarget,
 } from "./tabs.logic";
 
+/**
+ * Activating a page tab switches the workspace, then navigates. Until the router shows that tab (or
+ * the navigation ends), `activating` holds its key and other route observations are ignored, so
+ * the old route under the new workspace never counts. In memory only.
+ */
 interface TabsStore extends TabsState {
   /** The key of the tab being activated, or null while following the router. */
   readonly activating: string | null;
@@ -66,7 +59,8 @@ function update(change: (state: TabsState) => TabsState) {
   save(next);
 }
 
-const newTabId = () => crypto.randomUUID();
+let tabSequence = 0;
+const newTabId = () => `tab-${Date.now().toString(36)}-${++tabSequence}`;
 
 /** The router now shows `target`. Ignored while another tab is being activated. */
 export function observeRoute(target: TabTarget | null) {

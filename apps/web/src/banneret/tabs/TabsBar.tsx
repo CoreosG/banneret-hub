@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../../components/ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { cn } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { readEnvironment, useConnectedEnvironmentIds } from "../../state/environments";
@@ -33,7 +34,7 @@ import {
 const TAB_DRAG_TYPE = "application/x-banneret-tab";
 
 /** Shows a tab: a page tab switches its workspace first; a thread tab's workspace follows itself. */
-export async function activateTab(router: AnyRouter, tab: Tab) {
+async function activateTab(router: AnyRouter, tab: Tab) {
   if (tab.kind === "thread") {
     await router.navigate({ href: tab.href });
     return;
@@ -48,7 +49,7 @@ export async function activateTab(router: AnyRouter, tab: Tab) {
   }
 }
 
-export async function closeTab(router: AnyRouter, id: string) {
+async function closeTab(router: AnyRouter, id: string) {
   const { closedActive, next } = close(new Set([id]));
   if (!closedActive) return;
   if (next === null) await router.navigate({ to: "/" });
@@ -75,17 +76,16 @@ function ThreadGoneWatcher(props: {
   shell: EnvironmentThreadShell | null;
 }) {
   const { shell, threadRef } = props;
-  const live = useAtomValue(environmentShell.stateValueAtom(threadRef.environmentId)).status === "live";
-  const hasDraft = useComposerDraftStore(
-    (store) => store.getDraftSessionByRef(threadRef) !== null,
-  );
+  const live =
+    useAtomValue(environmentShell.stateValueAtom(threadRef.environmentId)).status === "live";
+  const hasDraft = useComposerDraftStore((store) => store.getDraftSessionByRef(threadRef) !== null);
   // Whether this window saw the thread in a live shell since the environment last went live.
-  const [seen] = useState(() => ({ value: false }));
-  if (!live) seen.value = false;
-  else if (shell !== null) seen.value = true;
+  const [seen, setSeen] = useState(false);
+  const seenNow = live && (shell !== null || seen);
+  if (seenNow !== seen) setSeen(seenNow);
   const gone =
     !hasDraft &&
-    (shell !== null ? shell.deletedAt !== null || shell.archivedAt !== null : live && seen.value);
+    (shell !== null ? shell.deletedAt !== null || shell.archivedAt !== null : live && seen);
   const router = useRouter();
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a thread deleted or archived elsewhere closes its tab
   useEffect(() => {
@@ -100,9 +100,9 @@ function ThreadGoneWatcher(props: {
  * takes a fresh baseline once the shell has loaded.
  */
 function SendKeeper({ tabId, sentAt }: { tabId: string; sentAt: string | null | undefined }) {
-  const [baseline] = useState(() => ({ value: sentAt }));
-  if (baseline.value === undefined && sentAt !== undefined) baseline.value = sentAt;
-  const sent = baseline.value !== undefined && sentAt !== undefined && sentAt !== baseline.value;
+  const [baseline, setBaseline] = useState(sentAt);
+  if (baseline === undefined && sentAt !== undefined) setBaseline(sentAt);
+  const sent = baseline !== undefined && sentAt !== undefined && sentAt !== baseline;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a message sent in a preview tab keeps it
   useEffect(() => {
     if (sent) keep(tabId);
@@ -127,9 +127,14 @@ function TabItem(props: {
   useEffect(() => {
     if (liveTitle) retitle(tab.id, liveTitle);
   }, [liveTitle, tab.id]);
-  const title = tab.kind === "page" ? `${tab.title} · ${props.workspaceName ?? "Personal"}` : (liveTitle ?? tab.title);
-  const machine = tab.threadRef ? readEnvironment(EnvironmentId.make(tab.threadRef.environmentId))?.label : undefined;
-  const tooltip = props.offline ? `${title}\nOn ${machine ?? "a machine"}, not connected` : title;
+  const title =
+    tab.kind === "page"
+      ? `${tab.title} · ${props.workspaceName ?? "Personal"}`
+      : (liveTitle ?? tab.title);
+  const machine = tab.threadRef
+    ? readEnvironment(EnvironmentId.make(tab.threadRef.environmentId))?.label
+    : undefined;
+  const offlineNote = `On ${machine ?? "a machine"}, not connected`;
   const itemRef = useRef<HTMLDivElement>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- brings the active tab into view in a bar that scrolls sideways
   useEffect(() => {
@@ -139,83 +144,92 @@ function TabItem(props: {
     shell === null ? undefined : (shell.latestUserAuthoredMessageAt ?? shell.latestUserMessageAt);
 
   return (
-    <div
-      ref={itemRef}
-      role="tab"
-      tabIndex={active ? 0 : -1}
-      aria-selected={active}
-      title={tooltip}
-      draggable
-      data-tab-id={tab.id}
-      data-preview={tab.kept ? undefined : ""}
-      data-pinned={tab.pinned ? "" : undefined}
-      data-offline={props.offline ? "" : undefined}
-      className={cn(
-        "group/tab relative flex h-7 max-w-52 min-w-0 shrink-0 cursor-default select-none items-center gap-1 rounded-md border border-transparent ps-2 pe-1 text-xs [-webkit-app-region:no-drag]",
-        active
-          ? "border-border bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-        !tab.kept && "italic",
-        props.offline && "opacity-50",
-      )}
-      onClick={() => void activateTab(router, tab)}
-      onDoubleClick={() => keep(tab.id)}
-      onMouseDown={(event) => {
-        // Middle-click must not start the browser's autoscroll.
-        if (event.button === 1) event.preventDefault();
-      }}
-      onAuxClick={(event) => {
-        if (event.button !== 1) return;
-        event.preventDefault();
-        void closeTab(router, tab.id);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          void activateTab(router, tab);
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <div
+            ref={itemRef}
+            role="tab"
+            tabIndex={active ? 0 : -1}
+            aria-selected={active}
+            draggable
+            data-tab-id={tab.id}
+            data-preview={tab.kept ? undefined : ""}
+            data-pinned={tab.pinned ? "" : undefined}
+            data-offline={props.offline ? "" : undefined}
+            className={cn(
+              "group/tab relative flex h-7 max-w-52 min-w-0 shrink-0 cursor-default select-none items-center gap-1 rounded-md border border-transparent ps-2 pe-1 text-xs [-webkit-app-region:no-drag]",
+              active
+                ? "border-border bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              !tab.kept && "italic",
+              props.offline && "opacity-50",
+            )}
+            onClick={() => void activateTab(router, tab)}
+            onDoubleClick={() => keep(tab.id)}
+            onMouseDown={(event) => {
+              // Middle-click must not start the browser's autoscroll.
+              if (event.button === 1) event.preventDefault();
+            }}
+            onAuxClick={(event) => {
+              if (event.button !== 1) return;
+              event.preventDefault();
+              void closeTab(router, tab.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                void activateTab(router, tab);
+              }
+            }}
+            onDragStart={(event) => props.onDragStart(event, tab.id)}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes(TAB_DRAG_TYPE)) event.preventDefault();
+            }}
+            onDrop={(event) => props.onDrop(event, tab.id)}
+          />
         }
-      }}
-      onDragStart={(event) => props.onDragStart(event, tab.id)}
-      onDragOver={(event) => {
-        if (event.dataTransfer.types.includes(TAB_DRAG_TYPE)) event.preventDefault();
-      }}
-      onDrop={(event) => props.onDrop(event, tab.id)}
-    >
-      {threadRef !== null ? (
-        <ThreadGoneWatcher tabId={tab.id} threadRef={threadRef} shell={shell} />
-      ) : null}
-      {active && !tab.kept && threadRef !== null ? (
-        <SendKeeper key={tab.id} tabId={tab.id} sentAt={sentAt} />
-      ) : null}
-      <span className="min-w-0 truncate">{title}</span>
-      <button
-        type="button"
-        aria-label={tab.pinned ? `Unpin ${title}` : `Pin ${title}`}
-        className={cn(
-          "flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted",
-          !tab.pinned && "hidden group-hover/tab:flex",
-        )}
-        onClick={(event) => {
-          event.stopPropagation();
-          pin(tab.id);
-        }}
-        onDoubleClick={(event) => event.stopPropagation()}
       >
-        <PinIcon className={cn("size-3", tab.pinned && "fill-current")} />
-      </button>
-      <button
-        type="button"
-        aria-label={`Close ${title}`}
-        className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
-        onClick={(event) => {
-          event.stopPropagation();
-          void closeTab(router, tab.id);
-        }}
-        onDoubleClick={(event) => event.stopPropagation()}
-      >
-        <XIcon className="size-3" />
-      </button>
-    </div>
+        {threadRef !== null ? (
+          <ThreadGoneWatcher tabId={tab.id} threadRef={threadRef} shell={shell} />
+        ) : null}
+        {active && !tab.kept && threadRef !== null ? (
+          <SendKeeper key={tab.id} tabId={tab.id} sentAt={sentAt} />
+        ) : null}
+        <span className="min-w-0 truncate">{title}</span>
+        <button
+          type="button"
+          aria-label={tab.pinned ? `Unpin ${title}` : `Pin ${title}`}
+          className={cn(
+            "flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted",
+            !tab.pinned && "hidden group-hover/tab:flex",
+          )}
+          onClick={(event) => {
+            event.stopPropagation();
+            pin(tab.id);
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          <PinIcon className={cn("size-3", tab.pinned && "fill-current")} />
+        </button>
+        <button
+          type="button"
+          aria-label={`Close ${title}`}
+          className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
+          onClick={(event) => {
+            event.stopPropagation();
+            void closeTab(router, tab.id);
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          <XIcon className="size-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        {title}
+        {props.offline ? <div className="text-muted-foreground">{offlineNote}</div> : null}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -275,7 +289,9 @@ export function TabsBar() {
               tab.threadRef !== null &&
               !connected.includes(EnvironmentId.make(tab.threadRef.environmentId))
             }
-            workspaceName={tab.workspaceId === null ? undefined : workspaceNames.get(tab.workspaceId)}
+            workspaceName={
+              tab.workspaceId === null ? undefined : workspaceNames.get(tab.workspaceId)
+            }
             onDragStart={onDragStart}
             onDrop={onDrop}
           />

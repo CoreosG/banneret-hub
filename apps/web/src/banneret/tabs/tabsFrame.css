@@ -44,7 +44,9 @@
   }
 
   /* Collapsed sidebar: the traffic lights sit over the bar (the same condition as the header gap). */
-  [data-slot="sidebar-wrapper"][data-sidebar-state="collapsed"]:not([data-sidebar-drag-state="expanded"])
+  [data-slot="sidebar-wrapper"][data-sidebar-state="collapsed"]:not(
+      [data-sidebar-drag-state="expanded"]
+    )
     > [data-banneret-tabs-frame="on"]
     > [data-banneret-tabs-bar],
   [data-slot="sidebar-wrapper"][data-sidebar-drag-state="collapsed"]
@@ -84,9 +86,13 @@
   }
 
   /* The sidebar toggle of a collapsed sidebar moves down into the page header's gap. */
-  [data-slot="sidebar-wrapper"][data-sidebar-state="collapsed"]:not([data-sidebar-drag-state="expanded"]):has(> [data-banneret-tabs-frame="on"])
+  [data-slot="sidebar-wrapper"][data-sidebar-state="collapsed"]:not(
+      [data-sidebar-drag-state="expanded"]
+    ):has(> [data-banneret-tabs-frame="on"])
     > [data-sidebar-control],
-  [data-slot="sidebar-wrapper"][data-sidebar-drag-state="collapsed"]:has(> [data-banneret-tabs-frame="on"])
+  [data-slot="sidebar-wrapper"][data-sidebar-drag-state="collapsed"]:has(
+      > [data-banneret-tabs-frame="on"]
+    )
     > [data-sidebar-control] {
     top: calc(env(titlebar-area-y, 0px) + var(--banneret-tabs-height));
     left: calc(env(safe-area-inset-left) + 0.75rem);

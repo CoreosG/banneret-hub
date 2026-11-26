@@ -11,7 +11,7 @@ import { isPagePath, pageTitle, tabKey, type TabTarget, type TabThreadRef } from
 import { observeRoute, useTabsStore } from "./tabsStore";
 
 /** "modal": Settings and Usage open over the last view, which keeps its tab. */
-export function readRouteTarget(router: AnyRouter): TabTarget | null | "modal" {
+function readRouteTarget(router: AnyRouter): TabTarget | null | "modal" {
   const { pathname } = router.state.location;
   if (isAppModalPage(pathname)) return "modal";
   if (isPagePath(pathname)) {
