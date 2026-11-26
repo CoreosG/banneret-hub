@@ -6,9 +6,10 @@ import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { isAppModalPage } from "../../components/sidebar/mainAppLocation";
 import { readThreadShell } from "../../state/entities";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
+import { resolveWorkspaces } from "../workspaces.logic";
 import { useWorkspacesStore } from "../workspacesStore";
 import { isPagePath, pageTitle, tabKey, type TabTarget, type TabThreadRef } from "./tabs.logic";
-import { observeRoute, useTabsStore } from "./tabsStore";
+import { closeInactive, observeRoute, useTabsStore } from "./tabsStore";
 
 /** "modal": Settings and Usage open over the last view, which keeps its tab. */
 function readRouteTarget(router: AnyRouter): TabTarget | null | "modal" {
@@ -84,15 +85,46 @@ export function syncTabsWithRoute(router: AnyRouter) {
   if (target !== "modal") observeRoute(target);
 }
 
+/**
+ * A workspace listed earlier in this session and gone from the list since was deleted: its inactive
+ * page tabs close. A list that failed to load (empty) never closes a workspace it never listed.
+ */
+function workspacePruner() {
+  const listed = new Set<string>();
+  const gone = new Set<string>();
+  return () => {
+    const { local, byEnvironment } = useWorkspacesStore.getState();
+    const live = new Set(
+      resolveWorkspaces(local, ...Object.values(byEnvironment)).map((w) => w.id),
+    );
+    for (const id of live) {
+      listed.add(id);
+      gone.delete(id);
+    }
+    for (const id of listed) if (!live.has(id)) gone.add(id);
+    if (gone.size > 0)
+      closeInactive((tab) => tab.workspaceId !== null && gone.has(tab.workspaceId));
+  };
+}
+
 /** Feeds the store from the router and from manual workspace switches (a page tab per workspace). */
 export function subscribeTabsToRoute(router: AnyRouter): () => void {
+  const pruneWorkspaces = workspacePruner();
   syncTabsWithRoute(router);
+  pruneWorkspaces();
   const stopRouter = router.subscribe("onResolved", () => syncTabsWithRoute(router));
   const stopWorkspaces = useWorkspacesStore.subscribe((state, previous) => {
     if (state.activeId !== previous.activeId) syncTabsWithRoute(router);
+    if (state.byEnvironment !== previous.byEnvironment || state.local !== previous.local) {
+      pruneWorkspaces();
+    }
+  });
+  const stopTabs = useTabsStore.subscribe((state, previous) => {
+    if (state.activeId !== previous.activeId) pruneWorkspaces();
   });
   return () => {
     stopRouter();
     stopWorkspaces();
+    stopTabs();
   };
 }

@@ -90,6 +90,13 @@ export const move = (id: string, beforeId: string | null) =>
 export const setTabsHidden = (hidden: boolean) =>
   update((state) => (state.hidden === hidden ? state : { ...state, hidden }));
 
+/** Closes the inactive tabs that match, without navigating (things deleted elsewhere). */
+export function closeInactive(match: (tab: Tab) => boolean) {
+  const { tabs, activeId } = useTabsStore.getState();
+  const ids = new Set(tabs.filter((tab) => tab.id !== activeId && match(tab)).map((tab) => tab.id));
+  if (ids.size > 0) close(ids);
+}
+
 /** Closes tabs; returns the tab to show when the active one closed (null: go home). */
 export function close(ids: ReadonlySet<string>): { closedActive: boolean; next: Tab | null } {
   let result = { closedActive: false, next: null as Tab | null };

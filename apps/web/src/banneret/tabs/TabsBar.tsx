@@ -16,7 +16,7 @@ import { cn } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { readEnvironment, useConnectedEnvironmentIds } from "../../state/environments";
 import { environmentShell } from "../../state/shell";
-import { setActiveWorkspace, useWorkspaces, useWorkspacesStore } from "../workspacesStore";
+import { setActiveWorkspace, useWorkspaces } from "../workspacesStore";
 import type { Tab } from "./tabs.logic";
 import { syncTabsWithRoute } from "./tabsRoute";
 import {
@@ -72,6 +72,7 @@ function toScopedRef(tab: Tab): ScopedThreadRef | null {
  */
 function ThreadGoneWatcher(props: {
   tabId: string;
+  active: boolean;
   threadRef: ScopedThreadRef;
   shell: EnvironmentThreadShell | null;
 }) {
@@ -86,11 +87,12 @@ function ThreadGoneWatcher(props: {
   const gone =
     !hasDraft &&
     (shell !== null ? shell.deletedAt !== null || shell.archivedAt !== null : live && seen);
-  const router = useRouter();
+  // The active tab stays: its route already handles a missing thread. It closes once left.
+  const closeNow = gone && !props.active;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a thread deleted or archived elsewhere closes its tab
   useEffect(() => {
-    if (gone) void closeTab(router, props.tabId);
-  }, [gone, router, props.tabId]);
+    if (closeNow) close(new Set([props.tabId]));
+  }, [closeNow, props.tabId]);
   return null;
 }
 
@@ -127,10 +129,13 @@ function TabItem(props: {
   useEffect(() => {
     if (liveTitle) retitle(tab.id, liveTitle);
   }, [liveTitle, tab.id]);
+  const workspaceLabel = tab.workspaceId === null ? "Personal" : props.workspaceName;
   const title =
-    tab.kind === "page"
-      ? `${tab.title} · ${props.workspaceName ?? "Personal"}`
-      : (liveTitle ?? tab.title);
+    tab.kind === "thread"
+      ? (liveTitle ?? tab.title)
+      : workspaceLabel === undefined
+        ? tab.title
+        : `${tab.title} · ${workspaceLabel}`;
   const machine = tab.threadRef
     ? readEnvironment(EnvironmentId.make(tab.threadRef.environmentId))?.label
     : undefined;
@@ -191,7 +196,7 @@ function TabItem(props: {
         }
       >
         {threadRef !== null ? (
-          <ThreadGoneWatcher tabId={tab.id} threadRef={threadRef} shell={shell} />
+          <ThreadGoneWatcher tabId={tab.id} active={active} threadRef={threadRef} shell={shell} />
         ) : null}
         {active && !tab.kept && threadRef !== null ? (
           <SendKeeper key={tab.id} tabId={tab.id} sentAt={sentAt} />
@@ -238,24 +243,7 @@ export function TabsBar() {
   const activeId = useTabsStore((state) => state.activeId);
   const connected = useConnectedEnvironmentIds();
   const workspaces = useWorkspaces();
-  const allWorkspacesLoaded = useWorkspacesStore(
-    (state) =>
-      connected.length > 0 && connected.every((id) => Object.hasOwn(state.byEnvironment, id)),
-  );
   const workspaceNames = new Map(workspaces.map((workspace) => [workspace.id, workspace.name]));
-  const router = useRouter();
-
-  // A deleted workspace closes its page tabs once every connected environment has answered.
-  const goneWorkspaceTabs = allWorkspacesLoaded
-    ? tabs
-        .filter((tab) => tab.workspaceId !== null && !workspaceNames.has(tab.workspaceId))
-        .map((tab) => tab.id)
-        .join(",")
-    : "";
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a workspace deleted elsewhere closes its page tabs
-  useEffect(() => {
-    for (const id of goneWorkspaceTabs.split(",")) if (id !== "") void closeTab(router, id);
-  }, [goneWorkspaceTabs, router]);
 
   const onDragStart = (event: DragEvent, id: string) => {
     event.dataTransfer.setData(TAB_DRAG_TYPE, id);

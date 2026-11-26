@@ -28,7 +28,7 @@ import {
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
-import { useWorkspacesStore } from "../workspacesStore";
+import { loadEnvironmentWorkspaces, useWorkspacesStore } from "../workspacesStore";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
 import { __reloadTabsForTests, setTabsHidden, useTabsStore } from "./tabsStore";
 
@@ -300,6 +300,29 @@ describe("open tabs", () => {
     // The switch in between did not turn the Beta preview into "Today · Alpha".
     expect(tabTitles()).not.toContain("Today · Alpha");
     expect(useTabsStore.getState().tabs.filter((tab) => !tab.kept)).toHaveLength(1);
+  });
+
+  it("closes the inactive page tabs of a workspace deleted elsewhere", async () => {
+    await vi.waitFor(() => expect(tabTitles()).toContain("Today · Beta"));
+    await userEvent.dblClick(tabs().find((tab) => tab.textContent === "Today · Beta")!);
+    await go(threadPath(THREAD.id));
+    using _deleted = answerRpc(BANNERET_WORKSPACES_WS_METHODS.list, () =>
+      Effect.succeed({ workspaces: [ALPHA] }),
+    );
+    await act(() => loadEnvironmentWorkspaces(ENVIRONMENT_ID));
+    await vi.waitFor(() =>
+      expect(tabTitles().some((title) => title?.includes("Beta"))).toBe(false),
+    );
+    expect(tabTitles()).toContain("Board · Alpha");
+    await act(() => loadEnvironmentWorkspaces(ENVIRONMENT_ID));
+  });
+
+  it("stays on a page whose remembered workspace no longer exists", async () => {
+    await act(() => useWorkspacesStore.setState({ activeId: "ws-gone" }));
+    await go("/map");
+    await vi.waitFor(() => expect(activeTab()?.textContent).toBe("Map"));
+    expect(router.state.location.pathname).toBe("/map");
+    await act(() => useWorkspacesStore.setState({ activeId: null }));
   });
 
   it("hides the bar without remounting the page, and shows it again", async () => {
