@@ -1,0 +1,37 @@
+{
+  "entries": [
+    {
+      "task": {
+        "id": "t_D2m8Ew",
+        "title": "Old chat widget",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "33",
+          "url": "https://github.com/example-org/example-app/issues/33"
+        }
+      },
+      "ruledAt": "2026-11-24T14:30:00Z",
+      "by": {
+        "id": "p_7Hq2xK",
+        "login": "ada-example"
+      },
+      "link": "https://github.com/example-org/example-app/issues/33"
+    },
+    {
+      "task": {
+        "id": "t_C7v1Fg",
+        "title": "Email digests",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "29",
+          "url": "https://github.com/example-org/example-app/issues/29"
+        }
+      },
+      "cause": "Out of scope until after launch.",
+      "ruledAt": "2026-11-20T11:00:00Z"
+    }
+  ],
+  "nextCursor": null
+}

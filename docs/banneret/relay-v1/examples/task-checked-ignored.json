@@ -1,0 +1,33 @@
+{
+  "task": {
+    "id": "t_K9w3Ls",
+    "title": "Guild invites",
+    "ref": {
+      "tracker": "github",
+      "scope": "example-org/example-app",
+      "key": "42",
+      "url": "https://github.com/example-org/example-app/issues/42"
+    }
+  },
+  "column": "validating",
+  "status": "built",
+  "statusWhy": "The pull request merged and nobody has checked it yet.",
+  "pr": {
+    "number": 58,
+    "url": "https://github.com/example-org/example-app/pull/58",
+    "state": "merged"
+  },
+  "checks": {
+    "state": "passing"
+  },
+  "restsOn": [],
+  "checked": {
+    "by": {
+      "id": "p_Wm4c9B",
+      "login": "bo-example"
+    },
+    "at": "2026-11-26T09:40:00Z",
+    "valid": false,
+    "ignoredReason": "bo-example does not hold the sign-off role."
+  }
+}

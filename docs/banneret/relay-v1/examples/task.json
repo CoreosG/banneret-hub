@@ -1,0 +1,36 @@
+{
+  "task": {
+    "id": "t_K9w3Ls",
+    "title": "Guild invites",
+    "ref": {
+      "tracker": "github",
+      "scope": "example-org/example-app",
+      "key": "42",
+      "url": "https://github.com/example-org/example-app/issues/42"
+    }
+  },
+  "column": "shipped",
+  "status": "checked",
+  "statusWhy": "A sign-off role holder checked it after the merge.",
+  "pr": {
+    "number": 58,
+    "url": "https://github.com/example-org/example-app/pull/58",
+    "state": "merged"
+  },
+  "checks": {
+    "state": "passing"
+  },
+  "restsOn": [],
+  "preview": {
+    "state": "ready",
+    "url": "https://preview.example.com/guild-invites"
+  },
+  "checked": {
+    "by": {
+      "id": "p_7Hq2xK",
+      "login": "ada-example"
+    },
+    "at": "2026-11-26T09:40:00Z",
+    "valid": true
+  }
+}
