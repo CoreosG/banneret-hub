@@ -294,6 +294,30 @@ it("presents completion notifications and sound as soon as the shell completes",
   expect(state.sound).toHaveBeenCalledWith("completion", expect.any(Function));
 });
 
+// Banneret Hub: Windows keeps a requireInteraction toast on screen until dismissed.
+it("lets completion toasts time out on Windows and replaces a thread's earlier one", async () => {
+  await using app = setup();
+  using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
+  app.start();
+  const completed = (turnId: string, completedAt: string) =>
+    shell({ latestTurn: { turnId, state: "completed", completedAt } });
+  state.shells.set("one", completed("turn-1", "2026-09-13T07:00:01.000Z"));
+  state.shells.set(
+    "one",
+    shell({ latestTurn: { turnId: "turn-2", state: "running", completedAt: null } }),
+  );
+  state.shells.set("one", completed("turn-2", "2026-09-13T07:00:02.000Z"));
+  const [first, second] = TestNotification.sent;
+  expect(TestNotification.sent.map(({ options }) => options.requireInteraction)).toEqual([
+    undefined,
+    undefined,
+  ]);
+  expect(second!.tag).toBe(first!.tag);
+  expect(first!.close).toHaveBeenCalledOnce();
+  expect(second!.close).not.toHaveBeenCalled();
+  expect(state.badge).toHaveBeenLastCalledWith(1);
+});
+
 it.each([
   { client: "desktop app", when: "at startup", bridge: {}, beforeGesture: 1 },
   { client: "browser", when: "on the first gesture", bridge: undefined, beforeGesture: 0 },

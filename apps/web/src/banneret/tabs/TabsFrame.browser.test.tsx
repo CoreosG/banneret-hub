@@ -256,6 +256,60 @@ describe("open tabs", () => {
     });
   });
 
+  // Pointer events, not HTML5 drag events: the desktop bar is a window drag region, and on Windows
+  // HTML5 drag events do not reach the page over one.
+  it("reorders tabs by dragging with the pointer", async () => {
+    await go(threadPath(OTHER.id));
+    await vi.waitFor(() => expect(tabs().length).toBeGreaterThan(2));
+    const [first, , third] = tabs();
+    const firstId = first!.dataset.tabId;
+    const from = first!.getBoundingClientRect();
+    const to = third!.getBoundingClientRect();
+    const at = (x: number) => ({ clientX: x, clientY: from.top + from.height / 2 });
+    const pointer = (target: EventTarget, type: string, x: number) =>
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          isPrimary: true,
+          pointerId: 1,
+          button: 0,
+          buttons: type === "pointerup" ? 0 : 1,
+          ...at(x),
+        }),
+      );
+    const startX = from.left + from.width / 2;
+    const endX = to.left + to.width / 2 + 2;
+    await act(() => pointer(first!, "pointerdown", startX));
+    for (let step = 1; step <= 10; step += 1) {
+      await act(() => pointer(document, "pointermove", startX + ((endX - startX) * step) / 10));
+    }
+    await act(() => pointer(document, "pointerup", endX));
+    // Dropped on the third tab from the left, it lands after it.
+    await vi.waitFor(() => expect(tabs()[2]?.dataset.tabId).toBe(firstId));
+  });
+
+  it("keeps tabs and the menu out of the desktop window drag region, and empty bar space in it", async () => {
+    const shown = bar()!;
+    // The desktop app adds this class (isElectron); the browser test adds it by hand.
+    shown.classList.add("drag-region");
+    try {
+      const region = (element: Element) =>
+        getComputedStyle(element).getPropertyValue("-webkit-app-region");
+      expect(region(shown)).toBe("drag");
+      // Empty bar space: the tab list adds no rectangle of its own, so the bar's drag shows through.
+      const list = shown.querySelector('[role="tablist"]')!;
+      expect(["", "initial", "none", "drag"]).toContain(region(list));
+      expect(region(list)).not.toBe("no-drag");
+      for (const tab of tabs()) expect(region(tab)).toBe("no-drag");
+      expect(region(page.getByRole("button", { name: "Tabs bar options" }).element())).toBe(
+        "no-drag",
+      );
+    } finally {
+      shown.classList.remove("drag-region");
+    }
+  });
+
   it("closes a tab with its close button and the active one moves to a neighbour", async () => {
     const before = tabTitles();
     const active = activeTab()!;
