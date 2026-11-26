@@ -256,8 +256,8 @@ forever. They carry nothing those calls do not already return to the same caller
   when the relay serves `GET /repositories`, `repositories` to `sha256:<hex>`. The path of a file uses the bare hex.
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
-  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`. A client ignores keys under `files`
-  it does not know.
+  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board` (added in 1.2) is
+  `SnapshotBoard`. A client ignores keys under `files` it does not know, so a 1.1 Hub ignores `board`.
 - **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
   head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
   fetch its files.
@@ -291,9 +291,58 @@ What the files hold, and who sees what, is the same as the live calls:
 | work | `Today.working` and `Today.stuck` for the caller | role, in practice |
 | machines | `GET /machines` for the caller | person (revoked machines for owner and founders; `revocable`) |
 | repositories | `GET /repositories` | nothing (relay-wide) |
+| board | none (snapshot only, added in 1.2) | nothing (relay-wide) |
 
 "No titles" means no title, text or path that a Hub reported (a heartbeat never carries them). The tracker titles that
 `GET /needs` and `GET /today` already return to staff stay in the needs and work files.
+
+## Board and leases
+
+Added in 1.2, all additive. A relay that serves the board advertises the section `{kind:"board", flags:["leases"]}`
+and names the `board` file in the snapshot head. A 1.1 Hub ignores the head key and the section. A Hub does not
+read the board unless capabilities carry the section. The board is snapshot-only: the relay computes it, the Hub
+draws it. Writes (take, release, hand-off) are not part of this contract.
+
+**The file.** `SnapshotBoard` is `{state, notMeasured, columns[], cards[]}`.
+
+- `columns` are the relay's five, each `{id, title}`: `free` (Free), `taken` (Taken), `validating` (Validating),
+  `stuck` (Stuck), `shipped` (Shipped). Ids are open strings.
+- A card is `{task{id, title, ref{tracker, host?, scope, key, url}}, column, status, statusWhy, lease?, pr?{number,
+  url, state}, checks?{state}, restsOn[taskId]}`. Objects in the file are closed, so an unknown field is a relay
+  defect and a conformance failure. New fields come with a new minor version.
+- `lease` is `{holder{id, login}, state, since, lastSignalAt, staleAt, expiresAt}`. A card with no `lease` is
+  Free. A relay that cannot read claims says so in the board's `state` and `notMeasured`, never as a lease state.
+- The "agent at work" ring is not in the file. The Hub derives it from the `work` file, joined by task id.
+
+**Status.** `status` is an open string; a client accepts values it does not know. One vocabulary serves the board,
+and later the map and the feed. `statusWhy` is one plain sentence for hover and for the Task tab. The relay picks the
+first matching row:
+
+| Mark | `status` | Word | First match wins |
+|---|---|---|---|
+| † | `ruled_dead` | ruled dead | Issue closed as "not planned" |
+| ● | `checked` | checked | `checked` label that passes the sign-off rule (below) |
+| ✕ | `sent_back` | sent back | Issue reopened after its PR merged; review "changes requested"; PR closed unmerged |
+| ◆ | `needs_you` | needs you or blocked | `needs:<person>` or `blocked` label; failing required checks; lease conflict; a rests-on task that is `needs_you`, `sent_back` or `ruled_dead` |
+| ◐ | `built` | built, unchecked | Linked PR merged, or issue closed as completed |
+| ○ | `planned` | planned | Open, none of the above |
+
+"Checked" requires that the person who reviewed and the person who checked are different people. The relay applies
+that rule and ignores a `checked` label that fails it.
+
+**Lease state.** `state` is an open string; known values `active`, `stale`, `expired`, `paused`, `conflict`. Time
+runs from `lastSignalAt`, the latest heartbeat, push or comment:
+
+- `staleAt` is `lastSignalAt` plus 6 hours. After it the lease is `stale` and the card is in Stuck.
+- `expiresAt` is `lastSignalAt` plus 24 hours. After it the lease is `expired`.
+- An expired lease stays in Stuck. It is never shown as Free while the tracker still names the assignee, because
+  only a release on the tracker frees the task.
+- `paused` and `conflict` (two holders claim one task) come from the claims, not from time.
+
+**Heartbeat from facts.** The relay treats every activity fact as a lease heartbeat. It finds the task by `taskId`
+when the activity carries one, otherwise by `branch` and `projectKey`. A match sets `lastSignalAt` to the receipt
+time, which returns a `stale` or `expired` lease to `active`. A fact that matches no held task changes nothing.
+The `taskId` is an opaque id the Hub takes from the thread's linked issue.
 
 ## Events
 
@@ -333,6 +382,9 @@ thread when the environment is its own, and otherwise says which machine holds i
 
 ### Changelog
 
+- **1.2.** Adds the board and leases (see "Board and leases"): the `board` head key and `SnapshotBoard` file, the
+  `board` section kind with flag `leases`, and the facts-as-heartbeat rule. A 1.1 Hub ignores unknown head keys and
+  section kinds, so nothing breaks. A client reads the board only when capabilities carry the `board` section.
 - **1.1.** Banneret Hub 0.1.1211 shipped with 1.0, so from here on every additive change bumps the minor. 1.1 adds:
   - the `visit=1` flag on `GET /today`;
   - `usage` in facts;

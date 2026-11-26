@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Relay protocol v1
-  version: "1.1"
+  version: "1.2"
   summary: The calls a Banneret Hub server makes to a central relay.
   description: |
     Every call starts from a Banneret Hub server. The relay never dials a machine and cannot run anything on one.
@@ -419,8 +419,8 @@ paths:
         "200":
           description: |
             The file. Its schema is the one its head key names: `needs` is SnapshotNeeds, `health` is HealthBlock,
-            `work` is SnapshotWork, `machines` is SnapshotMachines, `repositories` is SnapshotRepositories. The head
-            key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
+            `work` is SnapshotWork, `machines` is SnapshotMachines, `repositories` is SnapshotRepositories, `board` is
+            SnapshotBoard. The head key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
           headers:
             ETag:
               schema: { type: string, pattern: '^"sha256:[0-9a-f]{64}"$' }
@@ -435,6 +435,7 @@ paths:
                   - { $ref: "#/components/schemas/SnapshotWork" }
                   - { $ref: "#/components/schemas/SnapshotMachines" }
                   - { $ref: "#/components/schemas/SnapshotRepositories" }
+                  - { $ref: "#/components/schemas/SnapshotBoard" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -1114,6 +1115,9 @@ components:
             repositories:
               description: Present when the relay serves `GET /repositories`.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
+            board:
+              description: Added in 1.2. Present when the relay advertises the `board` section. A 1.1 Hub ignores it.
+              allOf: [{ $ref: "#/components/schemas/FileRef" }]
     SnapshotNeeds:
       description: |
         The caller's needs-you block, the same as `Today.needsYou`: the 20 most urgent items in the needs order.
@@ -1129,6 +1133,112 @@ components:
       properties:
         working: { $ref: "#/components/schemas/WorkingBlock" }
         stuck: { $ref: "#/components/schemas/StuckBlock" }
+    SnapshotBoard:
+      description: |
+        Added in 1.2. The task board with leases, relay-wide. The relay computes every status, column and lease
+        state; the Hub only draws them. `state` and `notMeasured` say when a source (for example the claims) could not
+        be read, so a partial board is never shown as complete. A card with no `lease` is Free. The "agent at work"
+        ring is not here: the Hub derives it from the `work` file, joined by task id.
+      type: object
+      additionalProperties: false
+      required: [state, notMeasured, columns, cards]
+      properties:
+        state: { $ref: "#/components/schemas/BlockState" }
+        notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        columns:
+          description: |
+            The relay's five, in display order: `free` (Free), `taken` (Taken), `validating` (Validating), `stuck`
+            (Stuck) and `shipped` (Shipped). Ids are open strings with these known values.
+          type: array
+          maxItems: 16
+          items: { $ref: "#/components/schemas/BoardColumn" }
+        cards:
+          type: array
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/BoardCard" }
+    BoardColumn:
+      type: object
+      additionalProperties: false
+      required: [id, title]
+      properties:
+        id: { $ref: "#/components/schemas/OpenToken" }
+        title: { type: string, minLength: 1, maxLength: 40 }
+    OpenToken:
+      description: An open set. A lowercase token with known values documented where it is used; clients accept unknown values.
+      type: string
+      pattern: "^[a-z][a-z0-9_]{0,31}$"
+    BoardCard:
+      description: |
+        Closed: an unknown field is a defect in the relay, not an extension. New card fields arrive with a new minor
+        version of this schema.
+      type: object
+      additionalProperties: false
+      required: [task, column, status, statusWhy, restsOn]
+      properties:
+        task: { $ref: "#/components/schemas/BoardTask" }
+        column: { description: "A `columns[].id`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+        status:
+          description: |
+            One status vocabulary for Board, Map and Feed. Open string; known values `ruled_dead` (†), `checked` (●),
+            `sent_back` (✕), `needs_you` (◆), `built` (◐) and `planned` (○). See README, "Board and leases".
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        statusWhy: { description: "One plain sentence that says why the card has this status.", type: string, minLength: 1, maxLength: 240 }
+        lease: { $ref: "#/components/schemas/BoardLease" }
+        pr: { $ref: "#/components/schemas/BoardPr" }
+        checks: { $ref: "#/components/schemas/BoardChecks" }
+        restsOn:
+          description: Ids of the tasks this one rests on.
+          type: array
+          maxItems: 100
+          items: { $ref: "#/components/schemas/Id" }
+    BoardTask:
+      type: object
+      additionalProperties: false
+      required: [id, title, ref]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        title: { type: string, maxLength: 300 }
+        ref: { $ref: "#/components/schemas/BoardTaskRef" }
+    BoardTaskRef:
+      description: Where the task lives in its tracker; the fields of a Hub issue target.
+      type: object
+      additionalProperties: false
+      required: [tracker, scope, key, url]
+      properties:
+        tracker: { description: "Open string; known: `github`.", type: string, pattern: "^[a-z][a-z0-9_]{0,31}$" }
+        host: { type: string, maxLength: 255 }
+        scope: { description: "For GitHub, `owner/name`.", type: string, maxLength: 200 }
+        key: { description: "For GitHub, the issue number as text.", type: string, maxLength: 100 }
+        url: { type: string, format: uri }
+    BoardLease:
+      description: |
+        Present only on a held task; a task with no lease is Free. `state` is an open string with known values
+        `active`, `stale`, `expired`, `paused` and `conflict`. A relay that cannot read claims says so in the board's
+        `notMeasured`, never as a lease state.
+      type: object
+      additionalProperties: false
+      required: [holder, state, since, lastSignalAt, staleAt, expiresAt]
+      properties:
+        holder: { $ref: "#/components/schemas/PersonRef" }
+        state: { $ref: "#/components/schemas/OpenToken" }
+        since: { description: "When the lease began.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+        lastSignalAt: { description: "The last heartbeat, push or comment.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+        staleAt: { description: "`lastSignalAt` plus 6 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+        expiresAt: { description: "`lastSignalAt` plus 24 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+    BoardPr:
+      type: object
+      additionalProperties: false
+      required: [number, url, state]
+      properties:
+        number: { type: integer, minimum: 1 }
+        url: { type: string, format: uri }
+        state: { description: "Open string; known: `open`, `merged`, `closed`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+    BoardChecks:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: { description: "Open string; known: `passing`, `failing`, `pending`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
     SnapshotMachines:
       description: |
         The caller's full `GET /machines` list in the same order, with the same visibility and `revocable` for the

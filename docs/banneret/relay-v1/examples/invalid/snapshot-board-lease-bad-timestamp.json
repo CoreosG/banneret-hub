@@ -1,0 +1,73 @@
+{
+  "state": "ok",
+  "notMeasured": [],
+  "columns": [
+    {
+      "id": "free",
+      "title": "Free"
+    },
+    {
+      "id": "taken",
+      "title": "Taken"
+    },
+    {
+      "id": "validating",
+      "title": "Validating"
+    },
+    {
+      "id": "stuck",
+      "title": "Stuck"
+    },
+    {
+      "id": "shipped",
+      "title": "Shipped"
+    }
+  ],
+  "cards": [
+    {
+      "task": {
+        "id": "t_R4k1Vd",
+        "title": "Rate limits",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "51",
+          "url": "https://github.com/example-org/example-app/issues/51"
+        }
+      },
+      "column": "free",
+      "status": "planned",
+      "statusWhy": "Open and nobody has taken it yet.",
+      "restsOn": [
+        "t_K9w3Ls"
+      ]
+    },
+    {
+      "task": {
+        "id": "t_K9w3Ls",
+        "title": "Guild invites",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "42",
+          "url": "https://github.com/example-org/example-app/issues/42"
+        }
+      },
+      "column": "taken",
+      "status": "planned",
+      "statusWhy": "Open and ada-example is working on it.",
+      "lease": {
+        "holder": {
+          "id": "p_7Hq2xK",
+          "login": "ada-example"
+        },
+        "state": "active",
+        "since": "2026-11-26T08:00:00Z",
+        "lastSignalAt": "2026-11-26 09:58",
+        "staleAt": "2026-11-26T15:58:00Z",
+        "expiresAt": "2026-11-27T09:58:00Z"
+      },
+      "restsOn": []
+    }
+  ]
+}

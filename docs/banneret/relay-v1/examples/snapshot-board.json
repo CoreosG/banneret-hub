@@ -1,0 +1,156 @@
+{
+  "state": "ok",
+  "notMeasured": [],
+  "columns": [
+    {
+      "id": "free",
+      "title": "Free"
+    },
+    {
+      "id": "taken",
+      "title": "Taken"
+    },
+    {
+      "id": "validating",
+      "title": "Validating"
+    },
+    {
+      "id": "stuck",
+      "title": "Stuck"
+    },
+    {
+      "id": "shipped",
+      "title": "Shipped"
+    }
+  ],
+  "cards": [
+    {
+      "task": {
+        "id": "t_R4k1Vd",
+        "title": "Rate limits",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "51",
+          "url": "https://github.com/example-org/example-app/issues/51"
+        }
+      },
+      "column": "free",
+      "status": "planned",
+      "statusWhy": "Open and nobody has taken it yet.",
+      "restsOn": [
+        "t_K9w3Ls"
+      ]
+    },
+    {
+      "task": {
+        "id": "t_K9w3Ls",
+        "title": "Guild invites",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "42",
+          "url": "https://github.com/example-org/example-app/issues/42"
+        }
+      },
+      "column": "taken",
+      "status": "planned",
+      "statusWhy": "Open and ada-example is working on it.",
+      "lease": {
+        "holder": {
+          "id": "p_7Hq2xK",
+          "login": "ada-example"
+        },
+        "state": "active",
+        "since": "2026-11-26T08:00:00Z",
+        "lastSignalAt": "2026-11-26T09:58:00Z",
+        "staleAt": "2026-11-26T15:58:00Z",
+        "expiresAt": "2026-11-27T09:58:00Z"
+      },
+      "restsOn": []
+    },
+    {
+      "task": {
+        "id": "t_P5n2Hd",
+        "title": "Profile blocks",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "47",
+          "url": "https://github.com/example-org/example-app/issues/47"
+        }
+      },
+      "column": "stuck",
+      "status": "needs_you",
+      "statusWhy": "bo-example has been quiet for 7 hours, so the claim is stale.",
+      "lease": {
+        "holder": {
+          "id": "p_3Nc8vR",
+          "login": "bo-example"
+        },
+        "state": "stale",
+        "since": "2026-11-25T20:00:00Z",
+        "lastSignalAt": "2026-11-26T03:00:00Z",
+        "staleAt": "2026-11-26T09:00:00Z",
+        "expiresAt": "2026-11-27T03:00:00Z"
+      },
+      "pr": {
+        "number": 88,
+        "url": "https://github.com/example-org/example-app/pull/88",
+        "state": "open"
+      },
+      "checks": {
+        "state": "failing"
+      },
+      "restsOn": []
+    },
+    {
+      "task": {
+        "id": "t_M2x8Qe",
+        "title": "Search filters",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "44",
+          "url": "https://github.com/example-org/example-app/issues/44"
+        }
+      },
+      "column": "validating",
+      "status": "built",
+      "statusWhy": "The pull request merged and nobody has checked it yet.",
+      "pr": {
+        "number": 85,
+        "url": "https://github.com/example-org/example-app/pull/85",
+        "state": "merged"
+      },
+      "checks": {
+        "state": "passing"
+      },
+      "restsOn": []
+    },
+    {
+      "task": {
+        "id": "t_Z7b4Nf",
+        "title": "Sign-in page",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "39",
+          "url": "https://github.com/example-org/example-app/issues/39"
+        }
+      },
+      "column": "shipped",
+      "status": "checked",
+      "statusWhy": "A founder checked it after the merge.",
+      "pr": {
+        "number": 80,
+        "url": "https://github.com/example-org/example-app/pull/80",
+        "state": "merged"
+      },
+      "checks": {
+        "state": "passing"
+      },
+      "restsOn": []
+    }
+  ]
+}

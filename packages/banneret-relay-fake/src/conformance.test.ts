@@ -1237,6 +1237,159 @@ describe("snapshot", () => {
   });
 });
 
+describe("board and leases", () => {
+  interface Card {
+    readonly task: { readonly id: string };
+    readonly column: string;
+    readonly status: string;
+    readonly lease?: { readonly holder: { readonly login: string }; readonly state: string };
+  }
+  interface Board {
+    readonly columns: ReadonlyArray<{ readonly id: string; readonly title: string }>;
+    readonly cards: ReadonlyArray<Card>;
+  }
+  const POLL = { timeout: 20_000, interval: 100 };
+  const readBoard = async (machine: Enrolled): Promise<Board | undefined> => {
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    expect(head.status, JSON.stringify(head.body)).toBe(200);
+    const ref = (head.body as { files: Record<string, string> }).files.board;
+    if (ref === undefined) return undefined;
+    const file = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
+    expect(file.status, JSON.stringify(file.body)).toBe(200);
+    expectSchema("SnapshotBoard", file.body);
+    return file.body as Board;
+  };
+  const cardFor = async (machine: Enrolled, taskId: string) => {
+    await client.rebuildSnapshot(machine.login);
+    const board = await readBoard(machine);
+    return board?.cards.find((card) => card.task.id === taskId);
+  };
+  const seed = async (tasks: ReadonlyArray<Record<string, unknown>>) => {
+    await client.control("/board/seed", { tasks });
+  };
+  const id = () => `t_${randomText(5)}`;
+
+  it("advertises the board section and keeps the 1.1 fields", async () => {
+    const machine = await enrol();
+    const reply = await call(machine, "GET", "/relay/v1/capabilities");
+    expectSchema("Capabilities", reply.body);
+    const body = reply.body as {
+      protocol: string;
+      snapshot?: { version: number; head: string };
+      sections: Array<{ kind: string; flags: string[] }>;
+      me: { login: string };
+    };
+    const board = body.sections.find((section) => section.kind === "board");
+    expect(board?.flags).toContain("leases");
+    expect(body.protocol).toMatch(/^1\.([2-9]|[1-9][0-9]+)$/);
+    expect(body.snapshot?.head).toBe("/relay/v1/snapshot/head");
+    expect(body.me.login).toBe(machine.login);
+    for (const kind of ["today", "needs", "machines"]) {
+      expect(body.sections.some((section) => section.kind === kind)).toBe(true);
+    }
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    const files = (head.body as { files: Record<string, string> }).files;
+    for (const key of ["needs", "health", "work", "machines"]) expect(files[key]).toBeDefined();
+  });
+
+  it("puts a seeded board in the head, with the five columns, and validates it", async () => {
+    const machine = await enrol();
+    const free = id();
+    const taken = id();
+    await seed([
+      { id: free, title: "Free task" },
+      { id: taken, title: "Taken task", column: "taken", holder: "bo-example", restsOn: [free] },
+    ]);
+    const board = await readBoardAfterRebuild(machine);
+    expect(board.columns.map((column) => column.id)).toEqual([
+      "free",
+      "taken",
+      "validating",
+      "stuck",
+      "shipped",
+    ]);
+    const freeCard = board.cards.find((card) => card.task.id === free);
+    expect(freeCard?.column).toBe("free");
+    expect(freeCard?.lease).toBeUndefined();
+    const takenCard = board.cards.find((card) => card.task.id === taken);
+    expect(takenCard?.column).toBe("taken");
+    expect(takenCard?.lease?.state).toBe("active");
+    expect(takenCard?.lease?.holder.login).toBe("bo-example");
+  });
+
+  const readBoardAfterRebuild = async (machine: Enrolled) => {
+    await client.rebuildSnapshot(machine.login);
+    const board = await readBoard(machine);
+    expect(board).toBeDefined();
+    return board as Board;
+  };
+
+  it("ages a lease to stale at 7 h and expired at 25 h, in Stuck and never Free", async () => {
+    const machine = await enrol();
+    const task = id();
+    await seed([{ id: task, title: "Held task", column: "taken", holder: "bo-example" }]);
+    await client.control("/lease/age", { taskId: task, hours: 7 });
+    await expect.poll(async () => (await cardFor(machine, task))?.lease?.state, POLL).toBe("stale");
+    expect((await cardFor(machine, task))?.column).toBe("stuck");
+    await client.control("/lease/age", { taskId: task, hours: 18 });
+    await expect
+      .poll(async () => (await cardFor(machine, task))?.lease?.state, POLL)
+      .toBe("expired");
+    const expired = await cardFor(machine, task);
+    expect(expired?.column).toBe("stuck");
+    expect(expired?.column).not.toBe("free");
+    expect(expired?.lease?.holder.login).toBe("bo-example");
+  });
+
+  it("returns the lease to active when a fact carries the taskId", async () => {
+    const machine = await enrol();
+    const task = id();
+    await seed([{ id: task, title: "Held task", column: "taken", holder: "bo-example" }]);
+    await client.control("/lease/age", { taskId: task, hours: 25 });
+    await expect
+      .poll(async () => (await cardFor(machine, task))?.lease?.state, POLL)
+      .toBe("expired");
+    const body = factsFor(machine) as unknown as { activity: Array<Record<string, unknown>> };
+    const first = body.activity[0];
+    if (first === undefined) throw new Error("facts example has no activity");
+    first.taskId = task;
+    const sent = await call(machine, "POST", "/relay/v1/facts", body);
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    await expect
+      .poll(async () => (await cardFor(machine, task))?.lease?.state, POLL)
+      .toBe("active");
+    expect((await cardFor(machine, task))?.column).toBe("taken");
+  });
+
+  it("refreshes a lease from a fact that matches the task's branch and projectKey", async () => {
+    const machine = await enrol();
+    const task = id();
+    const body = factsFor(machine) as unknown as {
+      activity: Array<{ branch?: string; projectKey: string; taskId?: string }>;
+    };
+    const first = body.activity[0];
+    if (first === undefined) throw new Error("facts example has no activity");
+    delete first.taskId;
+    await seed([
+      {
+        id: task,
+        title: "Held task",
+        column: "taken",
+        holder: "bo-example",
+        branch: first.branch,
+        projectKey: first.projectKey,
+      },
+    ]);
+    await client.control("/lease/age", { taskId: task, hours: 8 });
+    await expect.poll(async () => (await cardFor(machine, task))?.lease?.state, POLL).toBe("stale");
+    const sent = await call(machine, "POST", "/relay/v1/facts", body);
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    await expect
+      .poll(async () => (await cardFor(machine, task))?.lease?.state, POLL)
+      .toBe("active");
+  });
+});
+
 describe("event retention", () => {
   // The 24-hour bound cannot be waited out; only the fake can shorten it.
   it.skipIf(external !== undefined)(

@@ -125,6 +125,8 @@ interface ActivityFact {
   readonly sessionId: string;
   readonly threadId: string;
   readonly branch?: string;
+  readonly projectKey?: string;
+  readonly taskId?: string;
   readonly state: "working" | "waiting" | "idle" | "stopped";
   readonly lastSeenAt: string;
 }
@@ -187,6 +189,21 @@ interface SnapshotHeadRecord {
   replacedAt: number | null;
 }
 
+/** A seeded board task. The lease clock is `lastSignalAt`; state is computed from it on every read. */
+interface BoardTask {
+  readonly id: string;
+  readonly title: string;
+  readonly column: string;
+  readonly status: string;
+  readonly holder: { readonly id: string; readonly login: string } | null;
+  readonly forcedLeaseState: "paused" | "conflict" | null;
+  readonly branch: string | null;
+  readonly projectKey: string | null;
+  readonly restsOn: ReadonlyArray<string>;
+  since: number;
+  lastSignalAt: number;
+}
+
 interface RelayEvent {
   readonly id: number;
   readonly at: number;
@@ -246,7 +263,24 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const COUNTER_PATTERN = /^(0|[1-9][0-9]{0,18})$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]{86}==$/;
 const COUNTER_WINDOW = 256;
-const PROTOCOL = "1.1";
+const PROTOCOL = "1.2";
+const LEASE_STALE_MS = 6 * 60 * 60 * 1000;
+const LEASE_EXPIRES_MS = 24 * 60 * 60 * 1000;
+const BOARD_COLUMNS = [
+  { id: "free", title: "Free" },
+  { id: "taken", title: "Taken" },
+  { id: "validating", title: "Validating" },
+  { id: "stuck", title: "Stuck" },
+  { id: "shipped", title: "Shipped" },
+] as const;
+const STATUS_WHY: Readonly<Record<string, string>> = {
+  ruled_dead: "The issue was closed as not planned.",
+  checked: "A sign-off role holder checked it after the merge.",
+  sent_back: "The work was sent back after review or merge.",
+  needs_you: "Something on it needs a person.",
+  built: "The pull request merged and nobody has checked it yet.",
+  planned: "Open and none of the other statuses apply.",
+};
 // Snapshot retention (README, Snapshot): a file stays readable while one of the person's last 16 heads names it, or
 // a head replaced less than 10 minutes ago does.
 const SNAPSHOT_KEEP_HEADS = 16;
@@ -432,6 +466,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const snapshotFiles = new Map<string, Buffer>();
   /** Per person, oldest head first. The last one is current. */
   const snapshotHeads = new Map<string, SnapshotHeadRecord[]>();
+  /** Board tasks in seeding order. Relay-wide. */
+  let boardTasks: BoardTask[] = [];
+  const holderIds = new Map<string, string>();
   let capabilitiesRevision = 1;
   const capabilitiesVersion = () => `c-${capabilitiesRevision}`;
 
@@ -885,6 +922,63 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     };
   };
 
+  // Board and leases (README, Board and leases). State is computed from the lease age on every read.
+  const leaseState = (task: BoardTask, now: number): string => {
+    if (task.forcedLeaseState !== null) return task.forcedLeaseState;
+    const age = now - task.lastSignalAt;
+    return age >= LEASE_EXPIRES_MS ? "expired" : age >= LEASE_STALE_MS ? "stale" : "active";
+  };
+
+  const boardView = () => {
+    const now = Date.now();
+    const cards = boardTasks.map((task, index) => {
+      const lease =
+        task.holder === null
+          ? undefined
+          : {
+              holder: task.holder,
+              state: leaseState(task, now),
+              since: iso(task.since),
+              lastSignalAt: iso(task.lastSignalAt),
+              staleAt: iso(task.lastSignalAt + LEASE_STALE_MS),
+              expiresAt: iso(task.lastSignalAt + LEASE_EXPIRES_MS),
+            };
+      // A held task that is not active is in Stuck, never Free; a held task never sits in Free.
+      const held = lease !== undefined;
+      const column =
+        held && lease.state !== "active" && lease.state !== "paused"
+          ? "stuck"
+          : held && task.column === "free"
+            ? "taken"
+            : task.column;
+      const status = held && lease.state === "conflict" ? "needs_you" : task.status;
+      const statusWhy =
+        held && lease.state === "conflict"
+          ? "Two people claim this task."
+          : held && (lease.state === "stale" || lease.state === "expired")
+            ? `${task.holder?.login ?? "The holder"} has been quiet, so the claim is ${lease.state}.`
+            : (STATUS_WHY[status] ?? STATUS_WHY.planned ?? "");
+      return {
+        task: {
+          id: task.id,
+          title: task.title,
+          ref: {
+            tracker: "github",
+            scope: "example-org/example-app",
+            key: String(index + 1),
+            url: `https://github.com/example-org/example-app/issues/${index + 1}`,
+          },
+        },
+        column,
+        status,
+        statusWhy,
+        ...(lease === undefined ? {} : { lease }),
+        restsOn: task.restsOn,
+      };
+    });
+    return { state: "ok", notMeasured: [], columns: BOARD_COLUMNS, cards };
+  };
+
   // Snapshot (README, Snapshot). A head is rebuilt on every change and on every read, so a served head is always
   // current. Files are content-addressed and shared, but a read checks the caller's own retained heads.
   const buildSnapshotFiles = (person: Person): Record<string, string> => {
@@ -910,6 +1004,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           truncated: repositories.length > SNAPSHOT_REPOSITORIES_MAX,
         },
       ],
+      ["board", "SnapshotBoard", boardView()],
     ];
     const refs: Record<string, string> = {};
     for (const [kind, schema, value] of entries) {
@@ -1174,6 +1269,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { id: "today", kind: "today", version: 1, flags: [] },
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
             { id: "machines", kind: "machines", version: 1, flags: ["revoke"] },
+            { id: "board", kind: "board", version: 1, flags: ["leases"] },
           ],
           mcpTools: [
             {
@@ -1300,6 +1396,19 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       caller.machine.sessions = facts.activity;
       caller.machine.usage = facts.usage ?? [];
       caller.machine.lastHeardAt = Date.now();
+      // An activity fact is a lease heartbeat: by taskId, otherwise by branch (and projectKey, when the task has one).
+      for (const fact of facts.activity) {
+        for (const task of boardTasks) {
+          if (task.holder === null) continue;
+          const byTask = fact.taskId !== undefined && fact.taskId === task.id;
+          const byBranch =
+            fact.taskId === undefined &&
+            fact.branch !== undefined &&
+            task.branch === fact.branch &&
+            (task.projectKey === null || task.projectKey === fact.projectKey);
+          if (byTask || byBranch) task.lastSignalAt = Date.now();
+        }
+      }
       refreshAllHeads();
       const head = snapshotHeads.get(caller.person.id)?.at(-1);
       sendJson(response, 200, "FactsResponse", {
@@ -1475,6 +1584,53 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const before = snapshotHeads.get(person.id)?.at(-1);
       const head = refreshHead(person);
       reply({ changed: head !== before, etag: head.etag });
+      return;
+    }
+    if (request.method === "POST" && route === "/board/seed") {
+      const list = input.tasks;
+      if (!Array.isArray(list)) throw new RelayError("malformed", "tasks must be a list.");
+      const now = Date.now();
+      boardTasks = list.map((raw: Record<string, unknown>) => {
+        const login = raw.holder === undefined ? null : String(raw.holder);
+        const known = login === null ? undefined : peopleByLogin.get(login);
+        const holderId =
+          login === null
+            ? null
+            : (known?.id ??
+              holderIds.get(login) ??
+              (() => {
+                const id = randomId("p");
+                holderIds.set(login, id);
+                return id;
+              })());
+        const forced = raw.leaseState === "paused" || raw.leaseState === "conflict";
+        return {
+          id: String(raw.id),
+          title: String(raw.title ?? raw.id),
+          column: String(raw.column ?? "free"),
+          status: String(raw.status ?? "planned"),
+          holder: login === null || holderId === null ? null : { id: holderId, login },
+          forcedLeaseState: forced ? (raw.leaseState as "paused" | "conflict") : null,
+          branch: raw.branch === undefined ? null : String(raw.branch),
+          projectKey: raw.projectKey === undefined ? null : String(raw.projectKey),
+          restsOn: Array.isArray(raw.restsOn) ? raw.restsOn.map(String) : [],
+          since: now,
+          lastSignalAt: now,
+        };
+      });
+      refreshAllHeads();
+      reply({ tasks: boardTasks.length });
+      return;
+    }
+    if (request.method === "POST" && route === "/lease/age") {
+      const task = boardTasks.find((candidate) => candidate.id === String(input.taskId));
+      if (task === undefined || task.holder === null)
+        throw new RelayError("not_found", "That task has no lease.");
+      const shift = Number(input.hours) * 3_600_000;
+      task.lastSignalAt -= shift;
+      task.since -= shift;
+      refreshAllHeads();
+      reply({});
       return;
     }
     if (request.method === "POST" && route === "/staff/remove") {

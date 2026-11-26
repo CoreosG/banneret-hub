@@ -1,5 +1,5 @@
 {
-  "protocol": "1.1",
+  "protocol": "1.2",
   "displayName": "Example Company",
   "iconUrl": null,
   "enrolment": { "start": "/relay/v1/enroll/start", "browser": "/admin/hub/enroll" },
@@ -7,7 +7,8 @@
   "sections": [
     { "id": "today", "kind": "today", "version": 1, "flags": [] },
     { "id": "needs", "kind": "needs", "version": 1, "flags": ["mentions"] },
-    { "id": "machines", "kind": "machines", "version": 1, "flags": ["revoke"] }
+    { "id": "machines", "kind": "machines", "version": 1, "flags": ["revoke"] },
+    { "id": "board", "kind": "board", "version": 1, "flags": ["leases"] }
   ],
   "mcpTools": [
     { "name": "needs_list", "description": "List the caller's needs-you items.", "role": "limited_staff",
