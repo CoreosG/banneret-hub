@@ -418,23 +418,14 @@ components:
           required: [code, message, retryable]
           properties:
             code:
+              description: |
+                Open set. Known values: `malformed`, `too_large`, `unauthenticated`, `token_revoked`,
+                `bad_signature`, `signature_invalid`, `clock_skew`, `counter_reused`, `forbidden`,
+                `network_identity_mismatch`, `not_found`, `rate_limited`, `capacity`, `unavailable`, `internal`.
+                New codes may be added within v1, so this is not a closed enum; a client treats an unknown code by its
+                HTTP status and never fails on it.
               type: string
-              enum:
-                - malformed
-                - too_large
-                - unauthenticated
-                - token_revoked
-                - bad_signature
-                - signature_invalid
-                - clock_skew
-                - counter_reused
-                - forbidden
-                - network_identity_mismatch
-                - not_found
-                - rate_limited
-                - capacity
-                - unavailable
-                - internal
+              pattern: "^[a-z][a-z0-9_]{0,31}$"
             message: { type: string, maxLength: 500, description: Plain words for a person; never parsed. }
             retryable: { type: boolean }
             details:
