@@ -115,4 +115,26 @@ describe("shipped and stuck subjects", () => {
     expect(stuckSubject({ title: "" })).toEqual({ kind: "none" });
     expect(stuckSubject(undefined)).toEqual({ kind: "none" });
   });
+
+  it("names a task-less item by its subject: repo and run name, linked to the run", () => {
+    const run = {
+      name: "ci / test",
+      url: "https://github.com/example-org/example-app/actions/runs/9",
+    };
+    expect(stuckSubject(undefined, { repo: "example-org/example-app", run })).toEqual({
+      kind: "task",
+      title: "example-org/example-app \u00b7 ci / test",
+      url: run.url,
+    });
+    expect(stuckSubject(undefined, { repo: "example-org/example-app" })).toEqual({
+      kind: "task",
+      title: "example-org/example-app",
+      url: undefined,
+    });
+    expect(stuckSubject({ title: "Profile blocks" }, { repo: "example-org/example-app" })).toEqual({
+      kind: "task",
+      title: "Profile blocks",
+      url: undefined,
+    });
+  });
 });

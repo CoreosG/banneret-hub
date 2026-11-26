@@ -19,6 +19,7 @@ import {
   shippedRefLabel,
   stuckRulesLabel,
   stuckSubject,
+  type StuckSubjectRef,
   type Tone,
   workingStateLabel,
 } from "./relayFeed.logic";
@@ -72,8 +73,9 @@ function ShippedRef(props: { readonly url: string | undefined }) {
 
 function StuckSubjectView(props: {
   readonly task: { readonly title: string; readonly url?: string | undefined } | undefined;
+  readonly subject?: StuckSubjectRef | undefined;
 }) {
-  const subject = stuckSubject(props.task);
+  const subject = stuckSubject(props.task, props.subject);
   return subject.kind === "task" ? (
     <TaskTitle task={subject} />
   ) : (
@@ -243,14 +245,14 @@ export function TodayPage() {
             <ul className="flex flex-col gap-1.5 text-sm">
               {today.stuck.items.map((item) => (
                 <li
-                  key={`${item.rules.join(",")}:${item.since}:${item.task?.title ?? ""}`}
+                  key={`${item.rules.join(",")}:${item.since}:${item.task?.title ?? item.subject?.repo ?? ""}:${item.subject?.run?.name ?? ""}`}
                   className="flex items-start gap-3"
                 >
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="break-words">
                       {stuckRulesLabel(item.rules)}
                       {": "}
-                      <StuckSubjectView task={item.task} />
+                      <StuckSubjectView task={item.task} subject={item.subject} />
                     </span>
                     <span className="text-muted-foreground text-xs">
                       since <When at={item.since} />

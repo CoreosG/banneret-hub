@@ -211,6 +211,11 @@ and never repeats a rule. It is ordered most important first, in this fixed prio
 
 A client shows the reasons in the order it receives them.
 
+An item has either a `task` or a `subject`, never both. An item without a task may carry a `subject`:
+`{ repo, run? }`. `repo` is the `owner/name` display string and nothing else identifies the repository. `run`, when
+present, names the CI run or job (`name`) and gives its `url`. The object is closed. Items without a task are one
+per repository and rule, and are never merged across repositories.
+
 ## Errors
 
 Every failure has one shape:

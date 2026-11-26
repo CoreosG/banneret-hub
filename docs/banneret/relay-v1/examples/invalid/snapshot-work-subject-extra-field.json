@@ -1,0 +1,57 @@
+{
+  "working": {
+    "state": "partial",
+    "items": [
+      {
+        "person": {
+          "id": "p_7Hq2xK",
+          "login": "ada-example"
+        },
+        "task": {
+          "id": "t_K9w3Ls",
+          "title": "Guild invites"
+        },
+        "branch": "work/42-guild-invites",
+        "sessions": 2,
+        "state": "working",
+        "lastActivityAt": "2026-11-26T10:00:00Z",
+        "deepLink": {
+          "environmentId": "env_9d8c7b6a-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+          "threadId": "th_01JDX3K9"
+        }
+      }
+    ],
+    "notMeasured": [
+      {
+        "source": "github",
+        "reason": "rate_limited",
+        "since": "2026-11-26T09:55:00Z"
+      }
+    ]
+  },
+  "stuck": {
+    "state": "ok",
+    "items": [
+      {
+        "rules": [
+          "check_failed",
+          "claim_quiet"
+        ],
+        "since": "2026-11-26T03:00:00Z",
+        "owner": {
+          "id": "p_3Nc8vR",
+          "login": "bo-example"
+        },
+        "subject": {
+          "repo": "banneret-app/banneret-hub",
+          "run": {
+            "name": "ci / test",
+            "url": "https://github.com/banneret-app/banneret-hub/actions/runs/1234567890"
+          },
+          "id": "r_1"
+        }
+      }
+    ],
+    "notMeasured": []
+  }
+}

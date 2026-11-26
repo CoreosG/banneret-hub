@@ -70,15 +70,30 @@ export type StuckSubject =
   | { readonly kind: "task"; readonly title: string; readonly url: string | undefined }
   | { readonly kind: "none" };
 
+export interface StuckSubjectRef {
+  readonly repo: string;
+  readonly run?: { readonly name: string; readonly url: string } | undefined;
+}
+
 /**
- * What a stuck row is about: the task's title, else its number and repository from its link. The
- * relay's stuck item names nothing else (no pull request, repository or job), so an item with no
- * usable `task` has no subject and the row says so.
+ * What a stuck row is about: the task's title, else its number and repository from its link, else
+ * the relay's `subject` ("repo · run name", linked to the run). An item with none of these has no
+ * subject and the row says so.
  */
 export function stuckSubject(
   task: { title: string; url?: string | undefined } | undefined,
+  subject?: StuckSubjectRef,
 ): StuckSubject {
-  if (task === undefined) return { kind: "none" };
+  if (task === undefined) {
+    if (subject === undefined) return { kind: "none" };
+    return subject.run === undefined
+      ? { kind: "task", title: subject.repo, url: undefined }
+      : {
+          kind: "task",
+          title: `${subject.repo} \u00b7 ${subject.run.name}`,
+          url: subject.run.url,
+        };
+  }
   if (task.title.trim() !== "") return { kind: "task", title: task.title, url: task.url };
   const ref = linkRef(task.url);
   return ref === null
