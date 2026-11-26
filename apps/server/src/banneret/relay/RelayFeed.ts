@@ -757,7 +757,8 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       ...(graveyardOffered ? ["graveyard"] : []),
     ];
     const at = yield* nowIso;
-    const notPublished = (what: string) => `${current.displayName} does not publish its ${what} yet.`;
+    const notPublished = (what: string) =>
+      `${current.displayName} does not publish its ${what} yet.`;
     const unreadable = problemMessage(badResponse(200), current.displayName);
     const problemOn = <R extends { readonly problem?: Problem | undefined }>(
       read: R,

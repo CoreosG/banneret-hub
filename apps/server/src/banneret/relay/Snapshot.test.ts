@@ -532,7 +532,11 @@ describe("BanneretRelayFeed feed and graveyard", () => {
         const first = yield* events.next(() => true, "the first state");
         expect(first.feed).toBeNull();
         expect(first.graveyard).toBeNull();
-        expect(yield* feed.feedPage("c_1")).toEqual({ joined: false, value: null, fetchedAt: null });
+        expect(yield* feed.feedPage("c_1")).toEqual({
+          joined: false,
+          value: null,
+          fetchedAt: null,
+        });
         expect(yield* feed.graveyardPage("c_1")).toEqual({
           joined: false,
           value: null,
@@ -598,9 +602,9 @@ describe("BanneretRelayFeed feed and graveyard", () => {
         expect(older.value!.nextCursor).toBeNull();
         const olderGraves = yield* feed.graveyardPage(graveyardFile.nextCursor!);
         expect(olderGraves.value!.entries).toHaveLength(5);
-        expect(olderGraves.value!.entries.every((entry) => entry.cause === "superseded by #12")).toBe(
-          true,
-        );
+        expect(
+          olderGraves.value!.entries.every((entry) => entry.cause === "superseded by #12"),
+        ).toBe(true);
         expect(olderGraves.value!.nextCursor).toBeNull();
         const pages = relay.requests.filter(
           (request) => isPage(request.url, "/feed") || isPage(request.url, "/graveyard"),
@@ -660,8 +664,7 @@ describe("BanneretRelayFeed feed and graveyard", () => {
         yield* join(fake, relay);
         const good = yield* events.next(
           (event) =>
-            event.feed?.value?.entries.length === 3 &&
-            event.graveyard?.value?.entries.length === 1,
+            event.feed?.value?.entries.length === 3 && event.graveyard?.value?.entries.length === 1,
           "the feed",
         );
         yield* Effect.promise(() => relay.close());

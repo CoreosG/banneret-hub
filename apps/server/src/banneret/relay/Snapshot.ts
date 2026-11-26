@@ -192,7 +192,12 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
   const column = text(source?.column, 32);
   const status = text(source?.status, 32);
   const statusWhy = text(source?.statusWhy, 240);
-  if (task === undefined || column === undefined || status === undefined || statusWhy === undefined) {
+  if (
+    task === undefined ||
+    column === undefined ||
+    status === undefined ||
+    statusWhy === undefined
+  ) {
     return undefined;
   }
   const held = lease(source?.lease);
