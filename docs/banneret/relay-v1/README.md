@@ -29,6 +29,7 @@ All under `/relay/v1`.
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
 | `GET /today` | The five ordered Today blocks: needs you, shipped, working, stuck, health. |
 | `GET /needs` | Needs-you items, paged, most urgent first. |
+| `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
 | `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
 
 ## Enrolment
@@ -198,6 +199,13 @@ revoked machine is listed only to its owner and to founders, with `revokedAt` se
 `revocable` false; nobody else sees it. Live machines come first, newest heartbeat first; revoked machines follow,
 most recently revoked first. `DELETE /machines/{machineId}` answers 404 `not_found` for a malformed or unknown
 id, never 400. [Orchestrator]
+
+## Repositories
+
+`GET /repositories` is the company's repository list. Enterprise workspaces are made of the local projects whose
+repository is on it. The Hub computes the same `projectKey` from each project's git remote and matches it against
+the list; no path or remote is sent to the relay. `name` is the display string `owner/name`; `url` is an optional
+https link to the repository page. Paged like `GET /needs`. [Orchestrator]
 
 ## Needs you
 

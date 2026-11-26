@@ -129,6 +129,12 @@ interface NeedsItem {
   readonly deepLink?: { readonly environmentId: string; readonly threadId: string };
 }
 
+interface RepositoryItem {
+  readonly projectKey: string;
+  readonly name: string;
+  readonly url: string;
+}
+
 interface RelayEvent {
   readonly id: number;
   readonly at: number;
@@ -322,6 +328,8 @@ export interface FakeRelay {
   readonly refuse: (confirmCode: string, reason: Refusal) => PairingState;
   /** Adds needs-you items for the machine's owner and sends `needs.changed` (and `mention` for mentions). */
   readonly seedNeeds: (machineId: string, count: number, kind?: string) => void;
+  /** Adds `count` repositories (`example-org/repo-N`) to the company list, in recording order. */
+  readonly seedRepositories: (count: number) => void;
   /** Changes the capabilities document and sends `capabilities.changed`. */
   readonly bumpCapabilities: () => string;
   readonly publishBundle: (bundleSha: string) => void;
@@ -352,6 +360,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const eventClock = options.eventClock ?? (() => Date.now());
   let nextEventId = 1;
   let nextNeedsSeq = 1;
+  const repositories: RepositoryItem[] = [];
   let capabilitiesRevision = 1;
   const capabilitiesVersion = () => `c-${capabilitiesRevision}`;
 
@@ -807,6 +816,17 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     emit("needs.changed", "NeedsChangedEvent", { at, count: list.length }, machine.personId);
   };
 
+  const seedRepositories = (count: number) => {
+    for (let index = 0; index < count; index += 1) {
+      const name = `example-org/repo-${repositories.length + 1}`;
+      repositories.push({
+        projectKey: `sha256:${NodeCrypto.createHash("sha256").update(`github.com/${name}`).digest("hex")}`,
+        name,
+        url: `https://github.com/${name}`,
+      });
+    }
+  };
+
   const bumpCapabilities = () => {
     capabilitiesRevision += 1;
     emit(
@@ -1079,6 +1099,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       return;
     }
 
+    if (method === "GET" && route === "/repositories") {
+      const { offset, limit } = pageParams(query);
+      sendJson(response, 200, "RepositoriesPage", page(repositories, offset, limit));
+      return;
+    }
+
     if (method === "GET" && route === "/events") {
       openStream(request, response, caller);
       return;
@@ -1126,6 +1152,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         Number(input.count ?? 1),
         (input.kind as string | undefined) ?? undefined,
       );
+      reply({});
+      return;
+    }
+    if (request.method === "POST" && route === "/repositories") {
+      seedRepositories(Number(input.count ?? 1));
       reply({});
       return;
     }
@@ -1196,6 +1227,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     },
     refuse: (code, reason) => refusePairing(pairingByCode(code).id, reason),
     seedNeeds,
+    seedRepositories,
     bumpCapabilities,
     publishBundle,
     removeStaff,

@@ -21,6 +21,7 @@ tags:
   - name: machines
   - name: facts
   - name: needs
+  - name: repositories
   - name: events
 paths:
   /capabilities:
@@ -233,6 +234,33 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Today" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /repositories:
+    get:
+      tags: [repositories]
+      operationId: listRepositories
+      summary: The company's repository list.
+      description: |
+        The repositories the company's workspaces are made of, in the order the relay holds them. The Hub hashes the
+        git remote of each local project into a `projectKey` (see `ActivityFact`) and matches it against this list;
+        no path or remote is ever sent to the relay.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of repositories.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepositoriesPage" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
@@ -651,6 +679,31 @@ components:
       required: [items, nextCursor]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/Machine" } }
+        nextCursor: { type: [string, "null"] }
+    Repository:
+      description: One repository of the company's list. Closed; no path and no remote.
+      type: object
+      additionalProperties: false
+      required: [projectKey, name]
+      properties:
+        projectKey:
+          description: |
+            `sha256:` plus the lowercase hex SHA-256 of the normalised repository identity `host/owner/name`, the same
+            hash as `ActivityFact.projectKey`.
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        name: { description: "Display string `owner/name`.", type: string, pattern: "^[^/\\s]{1,100}/[^/\\s]{1,100}$" }
+        url:
+          description: Link to the repository page.
+          type: string
+          format: uri
+          pattern: "^https://"
+          maxLength: 500
+    RepositoriesPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Repository" } }
         nextCursor: { type: [string, "null"] }
     ActivityFact:
       description: One agent session, reduced to facts (company hub plan §7.4). Closed; no content of any kind.
