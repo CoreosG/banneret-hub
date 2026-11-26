@@ -291,7 +291,9 @@ describe("EnterpriseWizard", () => {
 
     // The switcher row shows this machine's status.
     await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
-    await expect.element(page.getByText("Connected as ada-example")).toBeVisible();
+    await expect
+      .element(page.getByRole("menu").getByText("Connected as ada-example · Founder"))
+      .toBeVisible();
     await expect.element(page.getByRole("menuitem", { name: "Machines…" })).toBeVisible();
     await expect.element(page.getByRole("menuitem", { name: "Leave…" })).toBeVisible();
   });
@@ -312,6 +314,30 @@ describe("EnterpriseWizard", () => {
     await server.setView({ state: "none", reason });
     await expect.element(page.getByRole("status")).toHaveTextContent(message);
     await expect.element(page.getByLabelText("Relay address")).toHaveValue(ORIGIN);
+  });
+
+  it("drops the last result as soon as a new Join starts", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const server = setup();
+    await using _screen = await render(<Harness />);
+    await server.setView({ state: "none", reason: "cancelled" });
+    await act(() => openWorkspaceDialog({ kind: "enterprise" }));
+    await expect.element(page.getByRole("status")).toHaveTextContent("Joining was cancelled.");
+
+    await userEvent.fill(page.getByLabelText("Relay address"), ORIGIN);
+    await userEvent.click(page.getByRole("button", { name: "Continue" }));
+    await expect.element(page.getByText("Joining was cancelled.")).not.toBeInTheDocument();
+
+    // While the start is in flight, and after it fails, the old result stays gone.
+    let finish: (value: { ok: false; message: string }) => void = () => {};
+    server.spies.start.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    await userEvent.click(page.getByRole("button", { name: "Join Example Company" }));
+    await expect.element(page.getByRole("button", { name: "Join Example Company" })).toBeDisabled();
+    await expect.element(page.getByText("Joining was cancelled.")).not.toBeInTheDocument();
+    await act(async () => finish({ ok: false, message: "The relay is unavailable." }));
+    await expect.element(page.getByRole("alert")).toHaveTextContent("The relay is unavailable.");
+    await expect.element(page.getByText("Joining was cancelled.")).not.toBeInTheDocument();
   });
 
   it("renders hostile relay strings as text and never fetches an icon", async () => {

@@ -97,8 +97,11 @@ function JoinForm(props: {
   const [kind, setKind] = useState<BanneretMachineKind>("laptop");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The previous attempt's result shows only until this form starts a new one.
+  const [attempted, setAttempted] = useState(false);
 
   const check = async () => {
+    setAttempted(true);
     setBusy(true);
     setError(null);
     const result = await enrolmentRpc.probe(props.environmentId, address);
@@ -108,6 +111,7 @@ function JoinForm(props: {
   };
   const join = async () => {
     if (relay === null) return;
+    setAttempted(true);
     setBusy(true);
     setError(null);
     const result = await enrolmentRpc.start(props.environmentId, {
@@ -133,7 +137,7 @@ function JoinForm(props: {
         void (relay === null ? check() : join());
       }}
     >
-      {props.notice !== null ? (
+      {props.notice !== null && !attempted ? (
         <p role="status" className="text-muted-foreground text-sm">
           {props.notice}
         </p>

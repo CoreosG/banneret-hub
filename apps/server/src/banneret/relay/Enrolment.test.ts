@@ -305,6 +305,30 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("a new start clears the last result, even when that start fails", () =>
+    withFake((_fake, relay) =>
+      Effect.gen(function* () {
+        const enrolment = yield* Enrolment.BanneretEnrolment;
+        yield* start(relay.origin);
+        yield* enrolment.cancel;
+        expect(yield* status).toEqual({ state: "none", reason: "cancelled" });
+
+        // The relay is down: the start fails, and the old "cancelled" is gone all the same.
+        relay.intercept = (request) =>
+          request.url === "/relay/v1/enroll/start" ? { status: 503 } : undefined;
+        const failed = yield* Effect.exit(start(relay.origin));
+        expect(JSON.stringify(failed)).toContain("unavailable");
+        expect(yield* status).toEqual({ state: "none" });
+        expect(JSON.parse(yield* stateFileText)).toEqual({ state: "none" });
+
+        relay.intercept = undefined;
+        const requested = yield* start(relay.origin);
+        expect(requested.state).toBe("requested");
+        expect(requested.reason).toBeUndefined();
+      }).pipe(onFreshHub()),
+    ),
+  );
+
   it.live("a same-owner re-enrolment replaces the old machine, whose Hub lands in revoked", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {

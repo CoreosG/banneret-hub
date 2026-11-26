@@ -1111,9 +1111,16 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         if (!joinAgain) {
           return yield* fail("This machine is already joining or joined to a company.");
         }
+        // A new attempt drops the previous one's last result, so it never shows during this one.
+        if (
+          before.state === "none" &&
+          (before.reason !== undefined || before.message !== undefined)
+        ) {
+          yield* persist({ state: "none" });
+        }
         const relay = yield* probeRelay(input.origin);
-        // Nothing is written until the relay has answered: a failed join again keeps the old key,
-        // token and state.
+        // Beyond that cleared result, nothing is written until the relay has answered: a failed
+        // join again keeps the old key, token and state.
         const seed = NodeCrypto.randomBytes(32);
         const key: MachineKey = keyFromSeed(seed);
         const started = yield* Effect.flatMap(nowMs(), (now) =>
