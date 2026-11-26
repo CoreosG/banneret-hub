@@ -1,13 +1,10 @@
 // Banneret Hub: keeps workspaces loaded from every connected environment, switches to the workspace
-// of a thread opened from elsewhere, and hosts the workspace dialog.
-import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+// of a thread or draft opened from elsewhere, and hosts the workspace dialog.
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useParams } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
-import { useProject, useThreadShell } from "../state/entities";
 import { useConnectedEnvironmentIds } from "../state/environments";
-import { resolveThreadRouteTarget } from "../threadRoutes";
+import { useRouteProject } from "./useRouteProject";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 import { autoSwitchTarget } from "./workspaces.logic";
 import {
@@ -44,18 +41,14 @@ function useWorkspaceSync() {
 }
 
 /**
- * Opening a thread (palette, link, notification) shows its workspace. It decides once per routed
- * thread, after the thread, its project and that environment's workspaces have loaded, so a manual
- * switch while the thread stays open is left alone.
+ * Opening a thread or a draft (palette, sidebar, link, notification) shows its workspace. It decides
+ * once per routed thread, after the thread, its project and that environment's workspaces have
+ * loaded, so a manual switch while the thread stays open is left alone.
  */
 function useWorkspaceAutoSwitch() {
-  const target = resolveThreadRouteTarget(useParams({ strict: false }));
-  const threadRef = target?.kind === "server" ? target.threadRef : null;
-  const threadKey = threadRef === null ? null : scopedThreadKey(threadRef);
-  const shell = useThreadShell(threadRef);
-  const project = useProject(
-    shell === null ? null : scopeProjectRef(shell.environmentId, shell.projectId),
-  );
+  const routed = useRouteProject();
+  const routeKey = routed?.key ?? null;
+  const project = routed?.project ?? null;
   const workspacesLoaded = useWorkspacesLoaded(project?.environmentId ?? null);
   const workspaces = useWorkspaces();
   const activeId = useWorkspacesStore((state) => state.activeId);
@@ -65,16 +58,16 @@ function useWorkspaceAutoSwitch() {
       ? undefined
       : autoSwitchTarget({ project, workspaces, activeId });
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the router: a newly opened thread selects its workspace once
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the router: a newly opened thread or draft selects its workspace once
   useEffect(() => {
-    if (threadKey === null) {
+    if (routeKey === null) {
       decided.current = null;
       return;
     }
-    if (decided.current === threadKey || decision === undefined) return;
-    decided.current = threadKey;
+    if (decided.current === routeKey || decision === undefined) return;
+    decided.current = routeKey;
     if (decision !== null) setActiveWorkspace(decision.switchTo);
-  }, [threadKey, decision]);
+  }, [routeKey, decision]);
 }
 
 export function WorkspacesHost() {
