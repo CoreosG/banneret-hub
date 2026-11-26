@@ -6,6 +6,7 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { type SkippedMachines, withoutSkipped } from "~/banneret/updateSelection";
 import { useRef, useState } from "react";
 import { T, useGT } from "gt-react";
 
@@ -94,19 +95,23 @@ export function useProviderUpdates() {
       : [];
   });
 
-  const updateAll = async ({ quiet = false }: { readonly quiet?: boolean } = {}) => {
+  const updateAll = async ({
+    quiet = false,
+    skipped,
+  }: { readonly quiet?: boolean; readonly skipped?: SkippedMachines } = {}) => {
     const runs = await Promise.all(
-      machines.flatMap(({ environmentId, label, candidates }) =>
-        candidates.map(async (candidate): Promise<ProviderUpdateRun> => ({
-          environmentId,
-          machineLabel: label,
-          driver: candidate.driver,
-          instanceId: candidate.instanceId,
-          result: await updateProvider({
+      withoutSkipped(machines, skipped ?? new Set()).flatMap(
+        ({ environmentId, label, candidates }) =>
+          candidates.map(async (candidate): Promise<ProviderUpdateRun> => ({
             environmentId,
-            input: { provider: candidate.driver, instanceId: candidate.instanceId },
-          }),
-        })),
+            machineLabel: label,
+            driver: candidate.driver,
+            instanceId: candidate.instanceId,
+            result: await updateProvider({
+              environmentId,
+              input: { provider: candidate.driver, instanceId: candidate.instanceId },
+            }),
+          })),
       ),
     );
     const view = quiet ? null : getProviderUpdateRunToastView(runs);

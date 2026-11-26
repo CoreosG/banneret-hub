@@ -42,6 +42,7 @@ import {
 } from "./DesktopUpdateStatusIcon";
 import { SidebarUpdateReleaseNotes } from "./SidebarUpdateReleaseNotes";
 import { SidebarUpdateCapsule } from "./SidebarUpdateCapsule";
+import type { SkippedMachines } from "~/banneret/updateSelection";
 import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
 import type { UpdateEverythingRun, UpdateRunLocalState } from "./updateEverything.logic";
 import {
@@ -371,12 +372,13 @@ function SidebarUpdateControl() {
     void Promise.allSettled([appCheck, providersChecked]).then(() => setIsActionPending(false));
   };
 
-  const runEverything = async () => {
+  const runEverything = async (skipped: SkippedMachines) => {
     const bridge = window.desktopBridge;
     setIsConfirmingEverything(false);
     setIsActionPending(true);
     const result = await settlePromise(() =>
       everything.run({
+        unticked: skipped,
         ...(bridge && action === "download"
           ? {
               downloadLocal: (reportError) =>
@@ -430,7 +432,8 @@ function SidebarUpdateControl() {
       rows={everything.rows}
       restarts={everything.restarts}
       checking={providerCheck === "dialog"}
-      onConfirm={() => void runEverything()}
+      selectable
+      onConfirm={(skipped) => void runEverything(skipped)}
     />
   );
 
