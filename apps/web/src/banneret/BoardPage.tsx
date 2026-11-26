@@ -73,7 +73,7 @@ export function BoardPage() {
         ) : null
       ) : (
         <>
-          <StatusLegend />
+          <StatusLegend checked={read?.checked === true} />
           {boardIncomplete(board) ? (
             <div
               role="note"

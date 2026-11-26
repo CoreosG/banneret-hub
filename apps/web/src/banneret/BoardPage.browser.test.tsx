@@ -138,6 +138,7 @@ const boardRead = (value: BanneretBoard | null, extra: Partial<BanneretFeedBoard
   fetchedAt: "2026-11-26T10:00:00.000Z",
   atWork: [],
   leases: true,
+  checked: true,
   ...extra,
 });
 
@@ -280,6 +281,34 @@ describe("Enterprise board", () => {
     // Without the section's leases flag the chips stay off.
     await emit(state(["board"], boardRead(boardOf(CARDS()), { leases: false })));
     await vi.waitFor(() => expect(document.querySelector('[data-testid="lease-chip"]')).toBeNull());
+  });
+
+  it("shows the checked mark on a checked card and only lists it in the legend when the board flags it", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    const cards = () => [
+      ...CARDS(),
+      card("8", "Signed off", "shipped", { status: "checked", statusWhy: "Checked after merge." }),
+    ];
+    const legend = () => document.querySelector('[aria-label="Status legend"]')!.textContent ?? "";
+
+    await emit(state(["board"], boardRead(boardOf(cards()))));
+    await expect.element(page.getByText("Signed off")).toBeVisible();
+    const signedOff = document.querySelector('[data-task-id="8"] [data-status]')!;
+    expect(signedOff.textContent).toContain("●");
+    expect(signedOff.textContent).toContain("checked");
+    // The card carries no who and when, and a built card carries no notice about a rejected check.
+    expect(document.querySelector('[data-task-id="8"]')?.querySelector("time")).toBeNull();
+    const built = document.querySelector('[data-task-id="7"]')!;
+    expect(built.textContent).toContain("built, unchecked");
+    expect(built.textContent).not.toContain("does not count");
+    expect(legend()).toContain("●");
+    expect(legend()).toContain("◐");
+
+    await emit(state(["board"], boardRead(boardOf(cards()), { checked: false })));
+    await vi.waitFor(() => expect(legend()).not.toContain("●"));
+    expect(legend()).toContain("built, unchecked");
   });
 
   it("rings a card whose task has a live agent session in the work file", async () => {

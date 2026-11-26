@@ -87,6 +87,9 @@ directory and health checks. Adapters are compiled into the relay and chosen in 
 - Banneret's own configuration is a preset that adds only its specifics: repositories, domains and health
   sources.
 
+In the Task tab, the issue thread and composer are the work tracker's own panel. Edits there are made on
+the tracker (GitHub by default) as you; the board's rules for claims and sign-off still apply.
+
 **No UI code plugins.** Banneret Hub loads no third-party code into the app. A relay extends the app only
 through:
 

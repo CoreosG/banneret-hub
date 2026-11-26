@@ -733,6 +733,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     if (!stillJoined(key) || current === null || !sectionsKnown) return;
     const graveyardOffered = feedFlags?.includes("graveyard") === true;
     const leases = boardFlags?.includes("leases") === true;
+    const checked = boardFlags?.includes("checked") === true;
     let changed = false;
     let boardChanged = false;
     if (boardFlags === null) {
@@ -770,12 +771,18 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       message: string,
     ): R => ({ ...read, problem: { message, since: read.problem?.since ?? at } });
     const boardProblem = (message: string) => {
-      if (boardFlags === null || (board?.problem?.message === message && board.leases === leases)) {
+      if (
+        boardFlags === null ||
+        (board?.problem?.message === message &&
+          board.leases === leases &&
+          board.checked === checked)
+      ) {
         return;
       }
       const base: BanneretFeedBoardRead = {
         ...(board ?? { value: null, fetchedAt: null, atWork: [] }),
         leases,
+        checked,
       };
       board = problemOn(base, message);
       changed = true;
@@ -813,13 +820,13 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           else {
             const atWork = files.work === undefined ? [] : liveTaskIds(files.work);
             // The work file changes on every heartbeat; only the ring it yields counts.
-            const signature = `${refs.board} ${atWork.join(",")} ${leases}`;
+            const signature = `${refs.board} ${atWork.join(",")} ${leases} ${checked}`;
             if (signature === boardSignature && board !== null && board.problem === undefined) {
               // Unchanged: keep the newer age for the next publish without sending it again.
               board = { ...board, fetchedAt: at };
             } else {
               boardSignature = signature;
-              board = { value, fetchedAt: at, atWork, leases };
+              board = { value, fetchedAt: at, atWork, leases, checked };
               changed = boardChanged = true;
             }
           }
