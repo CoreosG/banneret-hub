@@ -725,7 +725,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           me,
           lastOkAt,
           ...(replacedLabel === undefined ? {} : { replacedLabel }),
-          ...(from.counterMark === undefined ? {} : { counterMark: from.counterMark }),
+          // The mark signedCall saved meanwhile, not the one this step started from.
+          ...(isEnrolled(current) && current.counterMark !== undefined
+            ? { counterMark: current.counterMark }
+            : {}),
         });
         health = "healthy";
       }),
@@ -752,7 +755,12 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
             () => from.me,
           );
     if (me.login !== from.me.login || me.role !== from.me.role) {
-      yield* whileStill(from, persist({ ...from, me, lastOkAt }));
+      yield* whileStill(
+        from,
+        Effect.suspend(() =>
+          current.state === "configured" ? persist({ ...current, me, lastOkAt }) : Effect.void,
+        ),
+      );
     } else {
       yield* whileStill(
         from,
