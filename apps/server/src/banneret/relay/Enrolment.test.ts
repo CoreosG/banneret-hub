@@ -4,7 +4,12 @@ import * as NodeOS from "node:os";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import type { FakeRelay, PersonInput } from "@t3tools/banneret-relay-fake";
+import {
+  type FakeRelay,
+  keyFromSeed,
+  type PersonInput,
+  RelayClient,
+} from "@t3tools/banneret-relay-fake";
 import { type BanneretEnrolmentView, EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -834,6 +839,117 @@ describe("BanneretEnrolment", () => {
       }),
     ),
   );
+
+  describe("token re-issue", () => {
+    const tokenOf = (body: string) => (JSON.parse(body) as { token?: string }).token;
+
+    it.live("re-polls for a fresh token after a crash between receiving and saving it", () =>
+      withFake((fake, relay) =>
+        Effect.gen(function* () {
+          const baseDir = yield* makeBaseDir;
+          let reached: () => void = () => undefined;
+          const crashed = new Promise<void>((resolve) => {
+            reached = resolve;
+          });
+          // The token is written; the `approved` state write never lands.
+          const beforeWrite = (step: string) =>
+            Effect.suspend(() => {
+              if (step !== "state:approved") return Effect.void;
+              reached();
+              return Effect.die(new Error(`crash at ${step}`));
+            });
+          const lostToken = yield* Effect.gen(function* () {
+            const requested = yield* start(relay.origin);
+            fake.approve(requested.confirmCode!, ADA);
+            yield* Effect.promise(() => crashed);
+            return (yield* secretsOnDisk).token;
+          }).pipe(Effect.provide(hubLayer(baseDir, { beforeWrite })));
+          expect(lostToken).toBeDefined();
+
+          // Restart: still `requested`, the unsaved token is dropped, and the next poll brings a fresh one.
+          relay.requests.length = 0;
+          yield* Effect.gen(function* () {
+            yield* waitForState("configured");
+            const { token } = yield* secretsOnDisk;
+            expect(token).toBeDefined();
+            expect(token).not.toBe(lostToken);
+            const polls = relay.requests.filter(
+              (request) => request.url === "/relay/v1/enroll/poll",
+            );
+            expect(polls.length).toBeGreaterThan(0);
+            expect(JSON.parse(yield* stateFileText).pairingId).toBeUndefined();
+          }).pipe(Effect.provide(hubLayer(baseDir)));
+        }),
+      ),
+    );
+
+    it.live("recovers when the poll reply that carried the token is lost", () =>
+      withFake((fake, relay) =>
+        Effect.gen(function* () {
+          const dropped: string[] = [];
+          relay.drop = (request, body) => {
+            if (request.url !== "/relay/v1/enroll/poll" || dropped.length > 0) return false;
+            const token = tokenOf(body);
+            if (token === undefined) return false;
+            dropped.push(token);
+            return true;
+          };
+          const requested = yield* start(relay.origin);
+          fake.approve(requested.confirmCode!, ADA);
+          yield* waitForState("configured");
+          yield* waitFor(status, (view) => view.health === "healthy");
+          expect(dropped).toHaveLength(1);
+          const { token } = yield* secretsOnDisk;
+          expect(token).toBeDefined();
+          expect(token).not.toBe(dropped[0]);
+        }).pipe(onFreshHub()),
+      ),
+    );
+
+    it.live("polls again when an older token is refused as unauthenticated", () =>
+      withFake((fake, relay) =>
+        Effect.gen(function* () {
+          // Hold the Hub in `approved`: every signed call answers 503.
+          relay.intercept = (request) =>
+            request.headers["x-banneret-device"] !== undefined ? { status: 503 } : undefined;
+          const requested = yield* start(relay.origin);
+          fake.approve(requested.confirmCode!, ADA);
+          yield* waitForState("approved");
+          const held = yield* secretsOnDisk;
+          const id = yield* pairingId;
+
+          // Someone else polls the pairing with this machine's key: the Hub's token is now an older one.
+          const reply = yield* Effect.promise(() =>
+            new RelayClient(fake.url).send(
+              keyFromSeed(held.key!),
+              "POST",
+              "/relay/v1/enroll/poll",
+              {
+                body: { pairingId: id },
+              },
+            ),
+          );
+          const replacing = (reply.body as { token?: string }).token;
+          expect(replacing).toBeDefined();
+          expect(replacing).not.toBe(held.token);
+
+          relay.requests.length = 0;
+          relay.intercept = undefined;
+          yield* waitForState("configured");
+          const refusedAt = relay.requests.findIndex(
+            (request) => request.url === "/relay/v1/capabilities" && request.status === 401,
+          );
+          expect(refusedAt).toBeGreaterThanOrEqual(0);
+          const pollAt = relay.requests.findIndex(
+            (request, index) => index > refusedAt && request.url === "/relay/v1/enroll/poll",
+          );
+          expect(pollAt).toBeGreaterThan(refusedAt);
+          const { token } = yield* secretsOnDisk;
+          expect([held.token, replacing]).not.toContain(token);
+        }).pipe(onFreshHub()),
+      ),
+    );
+  });
 
   it.live("leaves a state from the table after a crash at any write", () =>
     withFake((fake, relay) =>

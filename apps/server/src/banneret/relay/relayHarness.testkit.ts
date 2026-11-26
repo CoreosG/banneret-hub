@@ -28,6 +28,8 @@ export interface Forwarder {
   readonly requests: Recorded[];
   intercept: ((request: Recorded) => Interception | undefined) | undefined;
   rewrite: ((request: Recorded, body: string) => string) | undefined;
+  /** After the relay has answered: true loses the answer (the client's connection is cut). */
+  drop: ((request: Recorded, body: string) => boolean) | undefined;
   readonly close: () => Promise<void>;
   readonly reopen: () => Promise<void>;
 }
@@ -39,6 +41,7 @@ const startForwarder = async (target: string): Promise<Forwarder> => {
     requests: [],
     intercept: undefined,
     rewrite: undefined,
+    drop: undefined,
     close: async () => undefined,
     reopen: async () => undefined,
   };
@@ -84,6 +87,11 @@ const startForwarder = async (target: string): Promise<Forwarder> => {
           reply.on("data", (chunk: Buffer) => replyChunks.push(chunk));
           reply.on("end", () => {
             let text = Buffer.concat(replyChunks).toString("utf8");
+            if (forwarder.drop?.(recorded, text) === true) {
+              recorded.status = 0;
+              response.destroy();
+              return;
+            }
             if (forwarder.rewrite) text = forwarder.rewrite(recorded, text);
             const headers = { ...reply.headers };
             delete headers["content-length"];

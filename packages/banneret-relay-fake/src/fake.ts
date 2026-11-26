@@ -145,15 +145,16 @@ interface Pairing {
   reason?: Refusal | Expiry;
   personId?: string;
   machineId?: string;
-  /** Held only until the first poll after approval. */
-  token?: string;
 }
 
 interface Machine {
   readonly id: string;
   readonly personId: string;
   readonly publicKey: NodeCrypto.KeyObject;
-  readonly tokenHash: string;
+  /** The latest token's hash; null until the first poll after approval mints one. */
+  tokenHash: string | null;
+  /** Set by the first call authenticated with the token; ends re-issue on poll. */
+  tokenUsed: boolean;
   readonly enrolledAt: number;
   facts: MachineFacts;
   sessions: ReadonlyArray<ActivityFact>;
@@ -637,12 +638,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       revokeMachine(machine);
     }
-    const token = `rdt_${NodeCrypto.randomBytes(32).toString("base64url")}`;
     const machine: Machine = {
       id: randomId("m"),
       personId: person.id,
       publicKey: pairing.publicKey,
-      tokenHash: hashToken(token),
+      tokenHash: null,
+      tokenUsed: false,
       enrolledAt: Date.now(),
       facts: pairing.machine,
       sessions: [],
@@ -652,11 +653,23 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       revokedAt: null,
     };
     machines.set(machine.id, machine);
-    machinesByToken.set(machine.tokenHash, machine);
     refreshAllHeads();
     pairing.state = "approved";
     pairing.machineId = machine.id;
-    pairing.token = token;
+  };
+
+  /**
+   * Re-issue on poll: until a token is used, every poll after approval mints a fresh one and the one
+   * before it stops working. Nothing is minted for a revoked machine or a removed person.
+   */
+  const reissueToken = (machine: Machine): string | undefined => {
+    if (machine.tokenUsed || machine.revokedAt !== null) return undefined;
+    if (people.get(machine.personId)?.removed !== false) return undefined;
+    const token = `rdt_${NodeCrypto.randomBytes(32).toString("base64url")}`;
+    if (machine.tokenHash !== null) machinesByToken.delete(machine.tokenHash);
+    machine.tokenHash = hashToken(token);
+    machinesByToken.set(machine.tokenHash, machine);
+    return token;
   };
 
   const pairingById = (pairingId: string): Pairing => {
@@ -857,6 +870,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const at = machine.counters.findIndex((value) => value > counter);
     machine.counters.splice(at === -1 ? machine.counters.length : at, 0, counter);
     if (machine.counters.length > COUNTER_WINDOW) machine.counters.shift();
+    machine.tokenUsed = true;
     return { machine, person };
   };
 
@@ -1615,10 +1629,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       };
       if (pairing.state === "approved") {
         reply.machineId = pairing.machineId;
-        if (pairing.token !== undefined) {
-          reply.token = pairing.token;
-          delete pairing.token;
-        }
+        const machine =
+          pairing.machineId === undefined ? undefined : machines.get(pairing.machineId);
+        const token = machine === undefined ? undefined : reissueToken(machine);
+        if (token !== undefined) reply.token = token;
       }
       if (pairing.state === "refused" || pairing.state === "expired") reply.reason = pairing.reason;
       sendJson(response, 200, "EnrolPollResponse", reply);

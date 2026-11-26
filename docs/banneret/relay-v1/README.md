@@ -57,9 +57,18 @@ All under `/relay/v1`.
    - every later signed call is checked again, and a mismatch is refused with 403 `network_identity_mismatch`.
 5. A person new to the relay waits in `awaiting_approval` until a founder approves, for at most 7 days; then the
    pairing is `expired` with reason `approval_expired`. [Orchestrator]
-6. The Hub polls `POST /enroll/poll`, no sooner than `retryAfterMs`. On `approved` the first poll returns
-   `machineId` and `token`; later polls never return the token again. `expiresAt` is the deadline of the current
-   state (the code while `pending`, the approval while `awaiting_approval`).
+6. The Hub polls `POST /enroll/poll`, no sooner than `retryAfterMs`. `expiresAt` is the deadline of the current
+   state (the code while `pending`, the approval while `awaiting_approval`). Once the pairing is `approved`:
+   - every poll returns `machineId` and a **fresh token** until a token is used, meaning the relay authenticates
+     a signed call made with it;
+   - each fresh token replaces the one before it, so only the latest one works; an older one is refused with
+     401 `unauthenticated`;
+   - after the first call the relay authenticates, or once the machine is revoked, polls still answer `approved` with `machineId`, but without
+     `token`.
+
+   So a lost poll reply costs nothing: the Hub polls again. **Hub rule:** if the token is refused with 401
+   `unauthenticated` before any call made with it has succeeded, the Hub polls again, stores the fresh token and
+   retries.
 7. **One representation for outcomes.** A refused or expired pairing is a 200 poll response with `state` and
    `reason`:
    - refused: `declined`, `not_staff`, `network_identity_mismatch`, `environment_enrolled`;
