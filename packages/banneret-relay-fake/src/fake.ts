@@ -5,6 +5,7 @@ import type * as NodeNet from "node:net";
 
 import { publicKeyFromBase64, verify } from "./signing.ts";
 import { loadSpec, type SchemaName } from "./spec.ts";
+import { checkStagePlan, type StagePlan } from "./stage-plan.ts";
 
 /**
  * A fake /relay/v1 relay: a test double and conformance target, never a production server. Everything lives in
@@ -222,6 +223,20 @@ interface GraveyardRecord {
   readonly ruledAt: number;
   readonly by: PersonView | null;
 }
+
+/** What the relay's configured stage plan currently gives it (README, Map and the stage plan). */
+type StagePlanSource =
+  | {
+      readonly kind: "ok";
+      readonly plan: StagePlan;
+      readonly statuses: ReadonlyMap<string, string>;
+    }
+  | {
+      readonly kind: "broken";
+      readonly reason: "malformed" | "unreachable";
+      readonly detail: string;
+      readonly since: number;
+    };
 
 interface BoardTask {
   readonly id: string;
@@ -508,6 +523,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   /** Derived entries, newest first. Relay-wide. */
   let feedRecords: FeedRecord[] = [];
   let graveyardRecords: GraveyardRecord[] = [];
+  /** The configured stage plan; null means none is configured, so the map is not advertised. */
+  let stagePlan: StagePlanSource | null = null;
   const holderIds = new Map<string, string>();
   let capabilitiesRevision = 1;
   const capabilitiesVersion = () => `c-${capabilitiesRevision}`;
@@ -1047,6 +1064,128 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return { state: "ok", notMeasured: [], columns: BOARD_COLUMNS, cards };
   };
 
+  // README, Map and the stage plan.
+  const BLOCKING = new Set(["needs_you", "sent_back", "ruled_dead"]);
+  const STATUS_WORD: Readonly<Record<string, string>> = {
+    needs_you: "needs you",
+    sent_back: "was sent back",
+    ruled_dead: "was ruled dead",
+  };
+  const mapView = () => {
+    if (stagePlan === null)
+      throw new Error("the map is built only when a stage plan is configured");
+    if (stagePlan.kind === "broken") {
+      return {
+        state: "not_measured",
+        notMeasured: [
+          {
+            source: "stage_plan",
+            reason: stagePlan.reason,
+            since: iso(stagePlan.since),
+            detail: stagePlan.detail.slice(0, 240),
+          },
+        ],
+        stages: [],
+        items: [],
+        counters: { byStatus: {}, byStage: {} },
+      };
+    }
+    const { plan, statuses } = stagePlan;
+    const now = Date.now();
+    // The join: the plan's task names tracker, host, scope and key; a board card is found by its ref.
+    const cards = boardTasks.map((task, index) => ({
+      view: cardView(task, index, now),
+      ref: taskRefView(task, index),
+    }));
+    const findCard = (item: StagePlan["items"][number]) =>
+      item.task === undefined
+        ? undefined
+        : cards.find(
+            ({ ref }) =>
+              ref.ref.tracker === item.task?.tracker &&
+              ref.ref.scope === item.task.scope &&
+              ref.ref.key === item.task.key &&
+              // The fake's board has no host, so a plan that names one matches nothing.
+              item.task.host === undefined,
+          );
+    const planned = new Map(plan.items.map((item) => [item.id, item] as const));
+    const resolved = new Map<string, { status: string; statusWhy: string }>();
+    const resolve = (id: string): { status: string; statusWhy: string } => {
+      const known = resolved.get(id);
+      if (known !== undefined) return known;
+      const item = planned.get(id);
+      if (item === undefined) throw new Error(`unknown item ${id}`);
+      const card = findCard(item);
+      let own: { status: string; statusWhy: string } =
+        card !== undefined
+          ? { status: card.view.status, statusWhy: card.view.statusWhy }
+          : item.task !== undefined
+            ? { status: "planned", statusWhy: "The tracker issue is not on the board yet." }
+            : {
+                status: statuses.get(item.id) ?? "planned",
+                statusWhy:
+                  STATUS_WHY[statuses.get(item.id) ?? "planned"] ?? STATUS_WHY.planned ?? "",
+              };
+      if (own.status === "built" || own.status === "planned") {
+        for (const target of item.restsOn ?? []) {
+          const blocker = resolve(target);
+          if (BLOCKING.has(blocker.status)) {
+            own = {
+              status: "needs_you",
+              statusWhy:
+                `It rests on "${planned.get(target)?.title ?? target}", which ${STATUS_WORD[blocker.status] ?? "is blocked"}.`.slice(
+                  0,
+                  240,
+                ),
+            };
+            break;
+          }
+        }
+      }
+      resolved.set(id, own);
+      return own;
+    };
+    const stages = plan.stages.toSorted((a, b) => a.order - b.order);
+    const stageRank = new Map(stages.map((stage, index) => [stage.id, index] as const));
+    const items = plan.items
+      .map((item, position) => ({ item, position }))
+      .toSorted(
+        (a, b) =>
+          (stageRank.get(a.item.stageId) ?? 0) - (stageRank.get(b.item.stageId) ?? 0) ||
+          a.position - b.position,
+      )
+      .map(({ item }) => {
+        const { status, statusWhy } = resolve(item.id);
+        const card = findCard(item);
+        return {
+          id: item.id,
+          stageId: item.stageId,
+          title: item.title,
+          status,
+          statusWhy,
+          ...(card === undefined ? {} : { task: card.ref }),
+          restsOn: [...(item.restsOn ?? [])],
+        };
+      });
+    const byStatus: Record<string, number> = {};
+    const byStage: Record<string, Record<string, number>> = Object.fromEntries(
+      stages.map((stage) => [stage.id, {}]),
+    );
+    for (const item of items) {
+      byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
+      const stage = byStage[item.stageId] ?? {};
+      stage[item.status] = (stage[item.status] ?? 0) + 1;
+      byStage[item.stageId] = stage;
+    }
+    return {
+      state: "ok",
+      notMeasured: [],
+      stages: stages.map(({ id, title, order }) => ({ id, title, order })),
+      items,
+      counters: { byStatus, byStage },
+    };
+  };
+
   // README, Task: the card plus the preview and the sign-off record.
   const taskView = (task: BoardTask, index: number) => ({
     ...cardView(task, index, Date.now()),
@@ -1133,6 +1272,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         },
       ],
       ["board", "SnapshotBoard", boardView()],
+      ...(stagePlan === null
+        ? []
+        : [["map", "SnapshotMap", mapView()] as readonly [string, SchemaName, unknown]]),
       ["feed", "FeedPage", feedFile()],
       ["graveyard", "GraveyardPage", graveyardFile()],
     ];
@@ -1400,6 +1542,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
             { id: "machines", kind: "machines", version: 1, flags: ["revoke"] },
             { id: "board", kind: "board", version: 1, flags: ["leases", "checked"] },
+            ...(stagePlan === null
+              ? []
+              : [{ id: "map", kind: "map", version: 1, flags: ["rests_on"] }]),
             { id: "feed", kind: "feed", version: 1, flags: ["graveyard"] },
             { id: "task", kind: "task", version: 1, flags: [] },
           ],
@@ -1792,6 +1937,43 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       });
       refreshAllHeads();
       reply({ tasks: boardTasks.length });
+      return;
+    }
+    if (request.method === "POST" && route === "/map/seed") {
+      // The whole body is a stage plan, or `{plan, statuses?}`. `plan: null` removes the plan.
+      const wrapped = "plan" in input;
+      const plan: unknown = wrapped ? input.plan : input;
+      const had = stagePlan !== null;
+      const statusInput = wrapped ? input.statuses : undefined;
+      const statuses = new Map<string, string>();
+      if (typeof statusInput === "object" && statusInput !== null) {
+        for (const [id, status] of Object.entries(statusInput)) statuses.set(id, String(status));
+      } else if (statusInput !== undefined) {
+        throw new RelayError("malformed", "statuses must map item ids to statuses.");
+      }
+      if (plan === null) {
+        stagePlan = null;
+      } else if (
+        typeof plan === "object" &&
+        (plan as { unreadable?: unknown }).unreadable === true
+      ) {
+        stagePlan = {
+          kind: "broken",
+          reason: "unreachable",
+          detail: "The stage plan file could not be read.",
+          since: Date.now(),
+        };
+      } else {
+        const checked = checkStagePlan(plan);
+        stagePlan = checked.ok
+          ? { kind: "ok", plan: checked.plan, statuses }
+          : { kind: "broken", reason: "malformed", detail: checked.detail, since: Date.now() };
+      }
+      refreshAllHeads();
+      if (had !== (stagePlan !== null)) bumpCapabilities();
+      reply({
+        state: stagePlan === null ? "none" : stagePlan.kind === "ok" ? "ok" : "not_measured",
+      });
       return;
     }
     if (request.method === "POST" && route === "/feed/seed") {

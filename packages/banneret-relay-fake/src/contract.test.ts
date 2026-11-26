@@ -5,6 +5,7 @@ import * as NodeFS from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keyFromSeed, signingInput, verify } from "./signing.ts";
+import { checkStagePlan } from "./stage-plan.ts";
 import {
   exampleSchemas,
   invalidExampleSchema,
@@ -47,6 +48,32 @@ describe("relay v1 contract", () => {
   it.each(listExamples("invalid/"))("refuses invalid example %s", (file) => {
     expect(spec.check(invalidExampleSchema(file), readExample(`invalid/${file}`))).not.toBeNull();
   });
+
+  it("keeps the stage plan examples out of the openapi example list", () => {
+    expect(listExamples("")).not.toContain("stage-plan.json");
+  });
+
+  it("validates the stage plan example against stage-plan.schema.json and its rules", () => {
+    const checked = checkStagePlan(readExample("stage-plan.json"));
+    expect(checked.ok).toBe(true);
+  });
+
+  it.each(NodeFS.readdirSync(`${specDirectory}examples/invalid-stage-plan/`).toSorted())(
+    "refuses invalid stage plan %s",
+    (file) => {
+      const plan = JSON.parse(
+        NodeFS.readFileSync(`${specDirectory}examples/invalid-stage-plan/${file}`, "utf8"),
+      ) as unknown;
+      const checked = checkStagePlan(plan);
+      expect(checked.ok).toBe(false);
+      if (!checked.ok) {
+        expect(checked.detail.length).toBeGreaterThan(0);
+        if (file === "cycle.json") expect(checked.detail).toMatch(/cycle/);
+        if (file === "unknown-stage.json") expect(checked.detail).toMatch(/s9/);
+        if (file === "missing-rests-on.json") expect(checked.detail).toMatch(/ghost/);
+      }
+    },
+  );
 
   it("accepts unknown values in the open sets: needs-you kinds and roles", () => {
     const needs = readExample("needs.json") as { items: Array<{ kind: string }> };

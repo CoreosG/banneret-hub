@@ -39,6 +39,7 @@ export type SchemaName =
   | "SnapshotMachines"
   | "SnapshotRepositories"
   | "SnapshotBoard"
+  | "SnapshotMap"
   | "FeedPage"
   | "GraveyardPage"
   | "TaskRead"
@@ -118,6 +119,8 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "snapshot-machines.json": "SnapshotMachines",
   "snapshot-repositories.json": "SnapshotRepositories",
   "snapshot-board.json": "SnapshotBoard",
+  "snapshot-map.json": "SnapshotMap",
+  "snapshot-map-not-measured.json": "SnapshotMap",
   "snapshot-feed.json": "FeedPage",
   "snapshot-graveyard.json": "GraveyardPage",
   "task.json": "TaskRead",
@@ -142,17 +145,20 @@ export const invalidExampleSchema = (file: string): SchemaName =>
                 ? "SnapshotWork"
                 : file.startsWith("snapshot-board")
                   ? "SnapshotBoard"
-                  : file.startsWith("snapshot-feed")
-                    ? "FeedPage"
-                    : file.startsWith("snapshot-graveyard")
-                      ? "GraveyardPage"
-                      : file.startsWith("task-")
-                        ? "TaskRead"
-                        : "FactsRequest";
+                  : file.startsWith("snapshot-map")
+                    ? "SnapshotMap"
+                    : file.startsWith("snapshot-feed")
+                      ? "FeedPage"
+                      : file.startsWith("snapshot-graveyard")
+                        ? "GraveyardPage"
+                        : file.startsWith("task-")
+                          ? "TaskRead"
+                          : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)
-    .filter((file) => file.endsWith(".json"))
+    // stage-plan.json follows stage-plan.schema.json, not openapi.yaml, so it has its own contract test.
+    .filter((file) => file.endsWith(".json") && !file.startsWith("stage-plan"))
     .toSorted();
 
 export const readExample = (file: string): unknown =>

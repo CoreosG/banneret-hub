@@ -17,3 +17,4 @@ export {
   type SigningParts,
 } from "./signing.ts";
 export { loadSpec, specDirectory, type SpecValidator } from "./spec.ts";
+export { checkStagePlan, type StagePlan, type StagePlanCheck } from "./stage-plan.ts";

@@ -86,16 +86,27 @@ returns JSON.
 | `POST /conformance/v1/feed/seed` `{count?, type?, importance?, taskId?, by?}`                                                      | Replaces the feed with `count` derived entries (default 3), newest first and one minute apart. `type` defaults to `built` and `importance` to `normal`; `taskId` (a seeded board task, else 404) attaches the task, its link and its status; `by` is a login and sets the author. More than 100 entries leave the rest behind `nextCursor`. Rebuilds every head.                                                                                               |
 | `POST /conformance/v1/graveyard/seed` `{cause, count?, taskId?, by?}`                                                              | Replaces the graveyard with `count` entries (default 1), all with this `cause`, newest first. `taskId` (a seeded board task, else 404) names the task; otherwise each entry gets a made-up task. `by` is a login. Rebuilds every head.                                                                                                                                                                                                                         |
 | `POST /conformance/v1/checked/seed` `{taskId, by, reviewer}` (person ids)                                                          | Gives the seeded board task a merged pull request, passing checks and a `checked` label added by person id `by`, approved by person id `reviewer`, and releases any lease. The check is valid when `by` is an enrolled founder (the sign-off role) and `reviewer` is another id; otherwise `checked.valid` is false with an `ignoredReason` and the card stays `built`. Answers `{valid}`; 404 for an unknown task or an unknown `by` id. Rebuilds every head. |
+| `POST /conformance/v1/map/seed` `{plan, statuses?}` or a stage plan document                                                       | Sets the stage plan the map is built from; see below. Rebuilds every head.                                                                                                                                                                                                                                                                                                                                                                                     |
 | `POST /conformance/v1/staff/remove` `{login}`                                                                                      | Removes a person, revokes their machines and sends `staff.removed`.                                                                                                                                                                                                                                                                                                                                                                                            |
 
 The Go test relay (banneret-platform) offers matching operator commands for the seeds: `hub work seed`,
 `hub lease age --task --hours`, `hub feed seed`, `hub graveyard seed --cause` and `hub checked seed --task --by
-<login> --reviewer <login>`. The control calls and the commands do the same thing. `board/seed` also accepts
+<login> --reviewer <login>` and `hub map seed --file -` (the plan on stdin). The control calls and the commands do the same thing. `board/seed` also accepts
 `preview: {state, url?}` per task, which `GET /tasks/{taskId}` returns.
 
 The fake computes lease state from age on every read: under 6 h `active`, from 6 h `stale`, from 24 h `expired`. A
 held card with a stale or expired lease is in Stuck, never Free. A fact with a matching `taskId`, or a matching
 `branch` (and `projectKey`, when the task has one), sets `lastSignalAt` to now and returns the lease to `active`.
+
+`map/seed` takes a stage plan document (README, "Stage plan file") as the whole body, or `{plan, statuses?}` where
+`statuses` maps an item id to a status for items with no `task` (the plan itself carries none). `hub map seed --file -`
+reads the document from stdin and sends the same call. The fake accepts any `plan` and judges it the way a relay judges
+its configured file, so a test can seed a broken one: a valid plan gives the map section and a `map` head file; an
+invalid one (schema, duplicate or unknown ids, a `restsOn` that names nothing, a cycle) leaves the section present with a
+`not_measured` map and the reason; `{plan: {"unreadable": true}}` does the same with `unreachable`; `{plan: null}` removes
+the plan, so the section and the head key are omitted. The map joins an item's `task` to the seeded board cards by
+`tracker`, `host`, `scope` and `key`. The fake's cards use tracker `github`, scope `example-org/example-app` and the key
+`1`, `2`, ... in `board/seed` order. Changing whether the plan exists bumps the capabilities version.
 
 ## Changing the spec
 

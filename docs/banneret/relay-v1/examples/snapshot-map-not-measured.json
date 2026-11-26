@@ -1,0 +1,9 @@
+{
+  "state": "not_measured",
+  "notMeasured": [
+    { "source": "stage_plan", "reason": "malformed", "since": "2026-11-26T10:00:00Z", "detail": "Items a and b rest on each other, so the plan has a cycle." }
+  ],
+  "stages": [],
+  "items": [],
+  "counters": { "byStatus": {}, "byStage": {} }
+}

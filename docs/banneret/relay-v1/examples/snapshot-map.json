@@ -1,0 +1,79 @@
+{
+  "state": "ok",
+  "notMeasured": [],
+  "stages": [
+    { "id": "s1", "title": "Foundations", "order": 10 },
+    { "id": "s2", "title": "Social", "order": 20 }
+  ],
+  "items": [
+    {
+      "id": "sign-in",
+      "stageId": "s1",
+      "title": "Sign-in page",
+      "status": "checked",
+      "statusWhy": "A founder checked it after the merge.",
+      "task": {
+        "id": "t_Z7b4Nf",
+        "title": "Sign-in page",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "39",
+          "url": "https://github.com/example-org/example-app/issues/39"
+        }
+      },
+      "restsOn": []
+    },
+    {
+      "id": "guild-invites",
+      "stageId": "s2",
+      "title": "Guild invites",
+      "status": "planned",
+      "statusWhy": "Open and ada-example is working on it.",
+      "task": {
+        "id": "t_K9w3Ls",
+        "title": "Guild invites",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "42",
+          "url": "https://github.com/example-org/example-app/issues/42"
+        }
+      },
+      "restsOn": ["sign-in"]
+    },
+    {
+      "id": "profile-blocks",
+      "stageId": "s2",
+      "title": "Profile blocks",
+      "status": "needs_you",
+      "statusWhy": "bo-example has been quiet for 7 hours, so the claim is stale.",
+      "task": {
+        "id": "t_P5n2Hd",
+        "title": "Profile blocks",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "47",
+          "url": "https://github.com/example-org/example-app/issues/47"
+        }
+      },
+      "restsOn": []
+    },
+    {
+      "id": "rate-limits",
+      "stageId": "s2",
+      "title": "Rate limits",
+      "status": "needs_you",
+      "statusWhy": "It rests on \"Profile blocks\", which needs you.",
+      "restsOn": ["profile-blocks"]
+    }
+  ],
+  "counters": {
+    "byStatus": { "checked": 1, "planned": 1, "needs_you": 2 },
+    "byStage": {
+      "s1": { "checked": 1 },
+      "s2": { "planned": 1, "needs_you": 2 }
+    }
+  }
+}
