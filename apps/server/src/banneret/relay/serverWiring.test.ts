@@ -181,6 +181,7 @@ it.live(
         yield* client[BANNERET_RELAY_WS_METHODS.status]({}).pipe(
           Effect.repeat({
             until: (view) => view.state === "configured",
+            // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- the server is a subprocess and /ws has no enrolment change stream; status is a local read.
             schedule: Schedule.spaced("100 millis"),
           }),
           Effect.timeoutOrElse({
@@ -193,5 +194,4 @@ it.live(
       expect(today.joined).toBe(true);
       expect(today.value?.needsYou.items).toEqual([]);
     }).pipe(Effect.scoped),
-  60_000,
 );

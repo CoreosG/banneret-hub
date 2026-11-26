@@ -119,9 +119,7 @@ export function NeedsItemRow(props: { readonly item: BanneretFeedNeedsItem }) {
   );
 }
 
-function NotMeasuredLines(props: {
-  readonly lines: ReadonlyArray<BanneretFeedNotMeasured>;
-}) {
+function NotMeasuredLines(props: { readonly lines: ReadonlyArray<BanneretFeedNotMeasured> }) {
   if (props.lines.length === 0) return null;
   return (
     <ul className="flex flex-col gap-0.5 text-muted-foreground text-xs">
