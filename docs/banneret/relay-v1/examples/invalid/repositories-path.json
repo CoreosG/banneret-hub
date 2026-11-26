@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "projectKey": "sha256:f874b75d32fb5213185b52937bc07958552247a69956a2579eb0d762f66d74b0",
+      "name": "example-org/example-app",
+      "path": "/home/ada/code/example-app"
+    }
+  ],
+  "nextCursor": null
+}

@@ -19,7 +19,7 @@ pairing is approved as soon as it starts, as the founder `ada-example`. Options:
 - `--host`, `--quiet`.
 
 In tests, `startFakeRelay({ port: 0 })` from `@t3tools/banneret-relay-fake` returns the same server with
-in-process helpers: `approve(confirmCode, person?)`, `refuse(confirmCode, reason)`, `seedNeeds`,
+in-process helpers: `approve(confirmCode, person?)`, `refuse(confirmCode, reason)`, `seedNeeds`, `seedRepositories`,
 `bumpCapabilities`, `publishBundle` and `removeStaff`. `eventClock` replaces the clock that ages
 the event log, so a test can prove the 24-hour `Last-Event-ID` bound and its `reset` event without waiting a
 day.
@@ -55,6 +55,7 @@ returns JSON.
 | `POST /conformance/v1/pairings/{pairingId}/refuse` `{reason}`                                       | Refuses with `declined` or `not_staff`.                                                                                                                   |
 | `POST /conformance/v1/pairings/{pairingId}/expire`                                                  | Expires the pairing now: `code_expired` while `pending`, `approval_expired` while `awaiting_approval`.                                                    |
 | `POST /conformance/v1/needs` `{machineId, count, kind?}`                                            | Adds needs-you items for the machine's owner, in this order, and sends one `mention` per item for kind `mention`, then one `needs.changed`.               |
+| `POST /conformance/v1/repositories` `{count}`                                                       | Adds `count` repositories (`example-org/repo-N`) to the company list, in this order.                                                                      |
 | `POST /conformance/v1/capabilities/bump`                                                            | Changes the capabilities version and sends `capabilities.changed`.                                                                                        |
 | `POST /conformance/v1/bundle` `{bundleSha}`                                                         | Sends `bundle.changed`.                                                                                                                                   |
 | `POST /conformance/v1/staff/remove` `{login}`                                                       | Removes a person, revokes their machines and sends `staff.removed`.                                                                                       |

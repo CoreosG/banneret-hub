@@ -23,6 +23,7 @@ export type SchemaName =
   | "FactsResponse"
   | "MachinesPage"
   | "NeedsPage"
+  | "RepositoriesPage"
   | "Today"
   | "Error"
   | "NeedsChangedEvent"
@@ -90,6 +91,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "facts-response.json": "FactsResponse",
   "machines.json": "MachinesPage",
   "needs.json": "NeedsPage",
+  "repositories.json": "RepositoriesPage",
   "today.json": "Today",
   "error.json": "Error",
   "event-needs-changed.json": "NeedsChangedEvent",
@@ -106,7 +108,9 @@ export const invalidExampleSchema = (file: string): SchemaName =>
     ? "EnrolPollResponse"
     : file.startsWith("enroll-start")
       ? "EnrolStartRequest"
-      : "FactsRequest";
+      : file.startsWith("repositories-")
+        ? "RepositoriesPage"
+        : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

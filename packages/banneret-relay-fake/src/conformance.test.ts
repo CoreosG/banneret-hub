@@ -649,6 +649,72 @@ describe("paging", () => {
   );
 });
 
+describe("repositories", () => {
+  it("lists the company repositories to a signed caller", async () => {
+    const machine = await enrol();
+    await client.control("/repositories", { count: 2 });
+    const reply = await call(machine, "GET", "/relay/v1/repositories?limit=100");
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    expectSchema("RepositoriesPage", reply.body);
+    const items = (reply.body as { items: Array<{ projectKey: string; name: string }> }).items;
+    expect(items.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("refuses an unsigned call with bad_signature", async () => {
+    const machine = await enrol();
+    const reply = await client.send(machine.key, "GET", "/relay/v1/repositories", {
+      token: machine.token,
+      device: machine.machineId,
+      unsigned: true,
+    });
+    expectError(reply, 401, "bad_signature");
+  });
+
+  it("refuses a call without a device token", async () => {
+    const machine = await enrol();
+    const reply = await client.send(machine.key, "GET", "/relay/v1/repositories", {
+      device: machine.machineId,
+      counter: client.nextCounter(),
+    });
+    expectError(reply, 401, "unauthenticated");
+  });
+
+  it("pages with cursor and limit without repeats", async () => {
+    const machine = await enrol();
+    await client.control("/repositories", { count: 5 });
+    const seen: string[] = [];
+    let target: string | null = "/relay/v1/repositories?limit=2";
+    let pages = 0;
+    while (target !== null) {
+      const reply: Reply = await call(machine, "GET", target);
+      expect(reply.status).toBe(200);
+      expectSchema("RepositoriesPage", reply.body);
+      const body = reply.body as {
+        items: Array<{ projectKey: string }>;
+        nextCursor: string | null;
+      };
+      expect(body.items.length).toBeLessThanOrEqual(2);
+      seen.push(...body.items.map((item) => item.projectKey));
+      pages += 1;
+      target =
+        body.nextCursor === null
+          ? null
+          : `/relay/v1/repositories?limit=2&cursor=${encodeURIComponent(body.nextCursor)}`;
+    }
+    expect(pages).toBeGreaterThanOrEqual(3);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  it("validates the example and refuses the invalid ones", () => {
+    expectSchema("RepositoriesPage", readExample("repositories.json"));
+    const invalid = listExamples("invalid/").filter((file) => file.startsWith("repositories-"));
+    expect(invalid.length).toBeGreaterThan(0);
+    for (const file of invalid) {
+      expect(spec.check("RepositoriesPage", readExample(`invalid/${file}`))).not.toBeNull();
+    }
+  });
+});
+
 describe("events", () => {
   it("delivers needs.changed and mention to the person's stream", async () => {
     const machine = await enrol();
