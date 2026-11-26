@@ -8,6 +8,7 @@ import {
   type BanneretBoardCard,
   type BanneretEnrolmentView,
   type BanneretFeedState,
+  type BanneretMapItem,
   type BanneretTask,
   type BanneretTaskRead,
 } from "@t3tools/contracts";
@@ -27,8 +28,9 @@ import { useProjects, useServerConfigs } from "../state/entities";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
+import { TaskDialogHost } from "./TaskDialog";
 import { TaskPanel } from "./TaskPanel";
-import { taskRpc } from "./taskStore";
+import { openTaskDialog, taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
 import { useOpenTask } from "./useOpenTask";
 
@@ -105,6 +107,26 @@ const state = (sections: string[], cards: BanneretBoardCard[] | null): BanneretF
   map: null,
   feed: null,
   graveyard: null,
+});
+
+const withMap = (feed: BanneretFeedState, item: BanneretMapItem): BanneretFeedState => ({
+  ...feed,
+  map: {
+    value: {
+      state: "ok",
+      notMeasured: [],
+      stages: [{ id: item.stageId, title: "Stage one", order: 1 }],
+      items: [item],
+      counters: {
+        byStatus: { [item.status]: 1 },
+        byStage: { [item.stageId]: { [item.status]: 1 } },
+      },
+    },
+    fetchedAt: "2026-11-26T10:00:00.000Z",
+    atWork: [],
+    restsOn: true,
+    checked: true,
+  },
 });
 
 const found = (task: BanneretTask): BanneretTaskRead => ({
@@ -229,18 +251,47 @@ describe("Task tab", () => {
     expect(header().textContent).toContain("PR #77 open · checks failing");
   });
 
-  it("says so when the relay does not know the task, keeping its title and link out", async () => {
+  it("keeps its title and link out with a neutral line when the relay has no details", async () => {
     const { emit, read } = setup();
     read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
     await using _panel = await openPanel(taskSurface(LOCAL, card("9", "Gone").task));
     await emit(state(["task"], null));
     await expect
-      .element(page.getByText("The relay does not know this task any more."))
+      .element(page.getByText("Details from the relay aren't available for this task."))
       .toBeVisible();
     await expect.element(page.getByRole("heading", { name: "Gone" })).toBeVisible();
-    expect(document.querySelector('[data-testid="task-link-out"] a')?.getAttribute("href")).toBe(
+    expect(header().querySelector("a")?.getAttribute("href")).toBe(
       "https://github.com/example-org/example-app/issues/9",
     );
+  });
+
+  it("shows the map item's status for a task the relay does not serve", async () => {
+    const { emit, read } = setup({ issues: true });
+    read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
+    const closed = card("12", "Closed delivery").task;
+    await using _panel = await openPanel(taskSurface(LOCAL, closed));
+    await emit(
+      withMap(state(["map", "task"], null), {
+        id: "i_12",
+        stageId: "s_1",
+        title: "Closed delivery",
+        status: "built",
+        statusWhy: "The issue was closed as completed.",
+        task: closed,
+        restsOn: [],
+      }),
+    );
+    await expect
+      .element(page.getByText("Details from the relay aren't available for this task."))
+      .toBeVisible();
+    expect(header().querySelector("[data-status]")?.textContent).toContain("◐");
+    expect(header().querySelector("[data-status]")?.textContent).toContain("built, unchecked");
+    expect(header().textContent).toContain("The issue was closed as completed.");
+    expect(header().textContent).not.toContain("does not know");
+    // The issue's own state comes from upstream's embedded issue panel.
+    await expect
+      .element(page.getByTestId("issue-thread"))
+      .toHaveTextContent("github example-org/example-app 12");
   });
 
   it("does not read a relay that does not offer the task section", async () => {
@@ -307,9 +358,8 @@ describe("Task tab", () => {
     const shown = card("2", "Guild invites");
     await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
     await emit(state(["board"], [shown]));
-    const fallback = document.querySelector('[data-testid="task-link-out"]')!;
-    expect(fallback).not.toBeNull();
-    const link = fallback.querySelector("a")!;
+    expect(document.querySelector('[data-testid="task-link-out"]')).not.toBeNull();
+    const link = header().querySelector("a")!;
     expect(link.textContent).toBe("Open on GitHub");
     expect(link.getAttribute("href")).toBe("https://github.com/example-org/example-app/issues/2");
     expect(link.getAttribute("target")).toBe("_blank");
@@ -330,8 +380,8 @@ describe("Task tab", () => {
     };
     await using _panel = await openPanel(taskSurface(LOCAL, odd));
     await emit(state([], null));
-    const fallback = document.querySelector('[data-testid="task-link-out"]')!;
-    expect(fallback.querySelector("a")?.textContent).toBe("Open on youtrack");
+    expect(document.querySelector('[data-testid="task-link-out"]')).not.toBeNull();
+    expect(header().querySelector("a")?.textContent).toBe("Open on youtrack");
     expect(document.querySelector('[data-testid="task-thread-help"]')).toBeNull();
     expect(document.querySelector('[data-testid="issue-thread"]')).toBeNull();
   });
@@ -447,5 +497,42 @@ describe("Task tab in a thread's right panel", () => {
     expect(panel.isOpen).toBe(true);
     expect(panel.surfaces).toEqual([taskSurface(LOCAL, task)]);
     expect(panel.activeSurfaceId).toBe(taskSurface(LOCAL, task).id);
+  });
+});
+
+describe("Task dialog", () => {
+  async function openDialog(issues: boolean) {
+    const { emit } = setup({ issues });
+    await page.viewport(1280, 800);
+    const style = document.createElement("style");
+    style.textContent = appCss;
+    document.head.append(style);
+    const shown = card("2", "Guild invites");
+    const screen = await render(<TaskDialogHost />);
+    await act(async () => openTaskDialog(taskSurface(LOCAL, shown.task)));
+    await emit(state(["board"], [shown]));
+    await expect.element(page.getByRole("heading", { name: "Guild invites" })).toBeVisible();
+    const popup = () => document.querySelector('[data-slot="dialog-popup"]') as HTMLElement;
+    return {
+      height: () => popup().getBoundingClientRect().height,
+      [Symbol.asyncDispose]: async () => {
+        await act(async () => openTaskDialog(null));
+        await screen[Symbol.asyncDispose]();
+        style.remove();
+      },
+    };
+  }
+
+  it("fits its content when no issue thread is embedded, with the link out in the header", async () => {
+    await using dialog = await openDialog(false);
+    expect(document.querySelector('[data-testid="task-link-out"]')).not.toBeNull();
+    expect(header().querySelector("a")?.textContent).toBe("Open on GitHub");
+    expect(dialog.height()).toBeLessThan(800 * 0.5);
+  });
+
+  it("takes the tall height when it embeds the issue thread", async () => {
+    await using dialog = await openDialog(true);
+    await expect.element(page.getByTestId("issue-thread")).toBeVisible();
+    expect(dialog.height()).toBeGreaterThan(800 * 0.7);
   });
 });

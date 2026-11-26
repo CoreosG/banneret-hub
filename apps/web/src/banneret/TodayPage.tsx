@@ -16,7 +16,9 @@ import {
   offersSection,
   safeLinkOut,
   shippedLabel,
+  shippedRefLabel,
   stuckRulesLabel,
+  stuckSubject,
   type Tone,
   workingStateLabel,
 } from "./relayFeed.logic";
@@ -46,6 +48,38 @@ function TaskTitle(props: {
     >
       {props.task.title}
     </a>
+  );
+}
+
+/** "repo · #41 · ", linked to the pull request; nothing when its link names neither. */
+function ShippedRef(props: { readonly url: string | undefined }) {
+  const label = shippedRefLabel(props.url);
+  if (label === null) return null;
+  const href = safeLinkOut(props.url);
+  return (
+    <>
+      {href === null ? (
+        <span>{label}</span>
+      ) : (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="hover:underline">
+          {label}
+        </a>
+      )}
+      {" \u00b7 "}
+    </>
+  );
+}
+
+function StuckSubjectView(props: {
+  readonly task: { readonly title: string; readonly url?: string | undefined } | undefined;
+}) {
+  const subject = stuckSubject(props.task);
+  return subject.kind === "task" ? (
+    <TaskTitle task={subject} />
+  ) : (
+    <span className="text-muted-foreground" data-stuck-subject="none">
+      no task or pull request named
+    </span>
   );
 }
 
@@ -146,8 +180,8 @@ export function TodayPage() {
                 <li key={`${item.task.title}:${item.mergedAt}`} className="flex flex-col">
                   <span className="break-words">{item.summary}</span>
                   <span className="text-muted-foreground text-xs">
-                    <TaskTitle task={item.task} /> · {shippedLabel(item.live)} ·{" "}
-                    <Age at={item.mergedAt} />
+                    <ShippedRef url={item.task.url} />
+                    {shippedLabel(item.live)} · <Age at={item.mergedAt} />
                   </span>
                 </li>
               ))}
@@ -215,12 +249,8 @@ export function TodayPage() {
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="break-words">
                       {stuckRulesLabel(item.rules)}
-                      {item.task === undefined ? null : (
-                        <>
-                          {": "}
-                          <TaskTitle task={item.task} />
-                        </>
-                      )}
+                      {": "}
+                      <StuckSubjectView task={item.task} />
                     </span>
                     <span className="text-muted-foreground text-xs">
                       since <When at={item.since} />

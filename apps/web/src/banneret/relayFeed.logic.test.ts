@@ -5,7 +5,9 @@ import {
   needsCountLabel,
   needsKindLabel,
   safeLinkOut,
+  shippedRefLabel,
   stuckRulesLabel,
+  stuckSubject,
   workingStateLabel,
 } from "./relayFeed.logic";
 
@@ -82,5 +84,35 @@ describe("relay feed words", () => {
         threadKnown: false,
       }),
     ).toEqual({ kind: "none" });
+  });
+});
+
+describe("shipped and stuck subjects", () => {
+  it("names the repository and number of a pull request or issue link", () => {
+    expect(shippedRefLabel("https://github.com/example-org/example-app/pull/38")).toBe(
+      "example-app \u00b7 #38",
+    );
+    expect(shippedRefLabel("https://gitlab.com/group/app/-/merge_requests/7")).toBe(
+      "app \u00b7 #7",
+    );
+    expect(shippedRefLabel(undefined)).toBeNull();
+    expect(shippedRefLabel("javascript:alert(1)")).toBeNull();
+    expect(shippedRefLabel("https://example.com/no-number")).toBeNull();
+  });
+
+  it("uses the task title, then its number and repository, else says nothing is named", () => {
+    expect(stuckSubject({ title: "Profile blocks" })).toEqual({
+      kind: "task",
+      title: "Profile blocks",
+      url: undefined,
+    });
+    const url = "https://github.com/example-org/example-app/issues/12";
+    expect(stuckSubject({ title: "", url })).toEqual({
+      kind: "task",
+      title: "#12 in example-app",
+      url,
+    });
+    expect(stuckSubject({ title: "" })).toEqual({ kind: "none" });
+    expect(stuckSubject(undefined)).toEqual({ kind: "none" });
   });
 });

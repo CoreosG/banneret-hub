@@ -1,6 +1,7 @@
-// Banneret Hub: the Task tab. The header comes from the relay (the board card, plus one task read for
-// the preview and the sign-off); the body is upstream's issue thread and composer on the person's own
-// tracker login when a project here is on that tracker, else a link out. Relay strings stay text.
+// Banneret Hub: the Task tab. The header comes from the relay: the board card, one task read for the
+// preview and sign-off, or the map item's status for a task only the map holds. The body is upstream's
+// issue thread on the person's own tracker login when a project here is on that tracker, else a note.
+// Relay strings stay text.
 import {
   resolveIssueLinkTarget,
   mayContainStandaloneIssueLink,
@@ -9,6 +10,7 @@ import {
   EnvironmentId,
   type BanneretBoardCard,
   type BanneretBoardTask,
+  type BanneretMapItem,
   type BanneretTask,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -100,6 +102,8 @@ function CheckedSection(props: {
 function TaskHeader(props: {
   readonly task: BanneretBoardTask;
   readonly card: BanneretBoardCard | BanneretTask | null;
+  /** The map's item for the task; its status shows when neither the board nor the relay has a card. */
+  readonly mapItem: BanneretMapItem | null;
   readonly relayTask: BanneretTask | null;
   readonly cards: ReadonlyArray<BanneretBoardCard>;
   readonly leases: boolean;
@@ -107,13 +111,26 @@ function TaskHeader(props: {
   readonly note: string | null;
 }) {
   const nowMs = useNowMs();
-  const { card, relayTask } = props;
+  const { card, mapItem, relayTask } = props;
   const pr = card === null ? null : prLine(card);
   const preview = relayTask?.preview;
   const restsOn = card === null ? [] : restsOnItems(card.restsOn, props.cards);
   return (
     <header className="flex shrink-0 flex-col gap-2 border-b p-3" data-testid="task-header">
-      <h2 className="break-words font-medium text-sm">{card?.task.title ?? props.task.title}</h2>
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h2 className="min-w-0 break-words font-medium text-sm">
+          {card?.task.title ?? props.task.title}
+        </h2>
+        <LinkOut url={props.task.ref.url}>Open on {trackerName(props.task.ref.tracker)}</LinkOut>
+      </div>
+      {card !== null || mapItem === null ? null : (
+        <>
+          <StatusMark status={mapItem.status} />
+          <p className="break-words text-muted-foreground text-xs" data-testid="task-status-why">
+            {mapItem.statusWhy}
+          </p>
+        </>
+      )}
       {card === null ? null : (
         <>
           <StatusMark status={card.status} />
@@ -185,17 +202,14 @@ function TaskThread(props: {
   if (!matches) {
     const name = trackerName(task.ref.tracker);
     return (
-      <div className="flex flex-col gap-1.5 p-3 text-xs" data-testid="task-link-out">
-        <LinkOut url={task.ref.url}>Open on {name}</LinkOut>
-        <p className="text-muted-foreground">
-          The thread shows here when a project on this machine uses {name} for {task.ref.scope}.
-        </p>
-      </div>
+      <p className="p-3 text-muted-foreground text-xs" data-testid="task-link-out">
+        The thread shows here when a project on this machine uses {name} for {task.ref.scope}.
+      </p>
     );
   }
   const { threadRef } = props;
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="task-thread">
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="task-thread" data-task-thread>
       <p className="px-3 pt-2 text-muted-foreground text-xs" data-testid="task-thread-help">
         Edits here are made on {trackerName(task.ref.tracker)} as you; the board's rules for claims
         and sign-off still apply.
@@ -262,6 +276,8 @@ function TaskPanelBody(props: {
   useEffect(() => watchFeed(environmentId), [environmentId]);
 
   const card = feed.board?.value?.cards.find((candidate) => candidate.task.id === taskId) ?? null;
+  // The map carries every planned task, closed issues included, that the relay may not serve.
+  const mapItem = feed.map?.value?.items.find((item) => item.task?.id === taskId) ?? null;
   // Only a relay that advertises the section serves the read; any other relay answers 404 for a task
   // that exists.
   const offered = feed.joined && feed.sectionsKnown && feed.sections.includes("task");
@@ -270,14 +286,15 @@ function TaskPanelBody(props: {
   const answer = read.kind === "done" ? read.read : null;
   const relayTask = answer?.value ?? null;
   const shown = card ?? relayTask;
+  const known = shown !== null || mapItem !== null;
   const note =
-    read.kind === "loading" && shown === null
+    read.kind === "loading" && !known
       ? "Loading…"
       : answer?.notFound === true && card === null
-        ? "The relay does not know this task any more."
-        : answer?.problem !== undefined && shown === null
+        ? "Details from the relay aren't available for this task."
+        : answer?.problem !== undefined && !known
           ? answer.problem.message
-          : read.kind === "done" && answer === null && shown === null
+          : read.kind === "done" && answer === null && !known
             ? "The task could not be read."
             : null;
   return (
@@ -285,6 +302,7 @@ function TaskPanelBody(props: {
       <TaskHeader
         task={surface.task}
         card={shown}
+        mapItem={mapItem}
         relayTask={relayTask}
         cards={feed.board?.value?.cards ?? []}
         leases={card === null || feed.board?.leases === true}
