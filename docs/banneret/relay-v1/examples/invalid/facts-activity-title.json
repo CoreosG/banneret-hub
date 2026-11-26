@@ -1,0 +1,61 @@
+{
+  "machine": {
+    "environmentId": "env_9d8c7b6a-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+    "label": "Ada server",
+    "kind": "server",
+    "hostname": "dev-host-1",
+    "os": "Ubuntu 24.04",
+    "hubVersion": "0.4.2",
+    "policyFingerprint": "sha256:823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+    "sandbox": {
+      "enabled": true,
+      "image": "ghcr.io/example-org/agent-sandbox@sha256:b29814cf5792e684cd75d6a7fce7a67a11887e312f87ca2ac2496d81f365ff72"
+    }
+  },
+  "activity": [
+    {
+      "sessionId": "s_q8Lm2Vx",
+      "threadId": "th_01JDX3K9",
+      "projectKey": "sha256:f874b75d32fb5213185b52937bc07958552247a69956a2579eb0d762f66d74b0",
+      "branch": "work/42-guild-invites",
+      "provider": "claude",
+      "providerVersion": "2.1.0",
+      "model": "claude-opus-5-5",
+      "persona": "kb-steward",
+      "state": "working",
+      "tool": {
+        "name": "Bash",
+        "activity": "running_tests",
+        "since": "2026-11-26T09:59:30Z"
+      },
+      "processRunning": true,
+      "startedAt": "2026-11-26T09:12:00Z",
+      "lastSeenAt": "2026-11-26T10:00:00Z",
+      "bundleSha": "0123456789abcdef0123456789abcdef01234567",
+      "title": "Fix login"
+    },
+    {
+      "sessionId": "s_h3Pw7Nc",
+      "parentSessionId": "s_q8Lm2Vx",
+      "threadId": "th_01JDX3K9",
+      "projectKey": "sha256:f874b75d32fb5213185b52937bc07958552247a69956a2579eb0d762f66d74b0",
+      "provider": "claude",
+      "state": "waiting",
+      "waiting": "permission",
+      "processRunning": true,
+      "startedAt": "2026-11-26T09:40:00Z",
+      "lastSeenAt": "2026-11-26T09:58:00Z"
+    },
+    {
+      "sessionId": "s_c4Rt1Ya",
+      "threadId": "th_01JDX7Q2",
+      "projectKey": "sha256:f874b75d32fb5213185b52937bc07958552247a69956a2579eb0d762f66d74b0",
+      "provider": "codex",
+      "state": "stopped",
+      "stopReason": "usage_limit",
+      "processRunning": false,
+      "startedAt": "2026-11-26T08:00:00Z",
+      "lastSeenAt": "2026-11-26T09:30:00Z"
+    }
+  ]
+}

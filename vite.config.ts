@@ -201,6 +201,7 @@ export default defineConfig({
       "apps/mobile/modules/t3-highlights/cpp/generated/**",
       "apps/mobile/modules/t3-highlights/nitrogen/generated/**",
       "*.icon/**",
+      "docs/banneret/relay-v1/{openapi.yaml,README.md,examples/**}", // Banneret Hub: vendored verbatim
     ],
     sortPackageJson: {},
     overrides: [
