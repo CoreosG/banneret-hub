@@ -13,23 +13,7 @@ compiles, every example validates (and, in Go, decodes into the Go types), and e
 
 Every call starts from a Hub server. The relay never dials a machine and cannot run anything on one.
 
-Rules marked [Orchestrator] are the orchestrator's decisions, pending founder review.
-
-### Pending founder review
-
-These [Orchestrator] rules hold until the founder reviews them:
-
-- the signing scope (method, target with query, device, counter, sending time and body);
-- the time-based counter and its 256-counter window;
-- `projectKey` hashing;
-- the owner and last-heard time set by the relay, never reported by a machine;
-- the recognition tick on the confirm page;
-- same-owner re-enrolment replacing the old machine;
-- the expiry timings: a 10-minute code, 5 wrong codes, a 7-day approval wait;
-- the decisions of 2026-11-26: the counter window keeps the 256 highest counters; the quoted `ETag`;
-  `DELETE /machines/{machineId}` answering 404 for a malformed or unknown id; the int64 counter maximum; open
-  sets for roles and needs-you kinds; and the newly specified behaviour (403 for a foreign `environmentId`, the
-  1 MiB body limit, machine visibility, needs-you order, event resume and `reset`, 401 `bad_signature`).
+Rules marked [Orchestrator] were accepted by the founder on 2026-11-26.
 
 ## Endpoints
 
