@@ -4,13 +4,14 @@ import * as NodeUtil from "node:util";
 
 import { startFakeRelay } from "./fake.ts";
 
-// node packages/banneret-relay-fake/src/bin.ts --port 0 [--manual-approval] [--network-identity-header <name>]
+// node packages/banneret-relay-fake/src/bin.ts --port 0 [--manual-approval] [--network-identity-header <name>] [--public-origin <url>]
 const { values } = NodeUtil.parseArgs({
   options: {
     port: { type: "string", default: "0" },
     host: { type: "string", default: "127.0.0.1" },
     "manual-approval": { type: "boolean", default: false },
     "network-identity-header": { type: "string" },
+    "public-origin": { type: "string" },
     quiet: { type: "boolean", default: false },
   },
 });
@@ -22,6 +23,7 @@ const relay = await startFakeRelay({
   ...(values["network-identity-header"] === undefined
     ? {}
     : { networkIdentityHeader: values["network-identity-header"] }),
+  ...(values["public-origin"] === undefined ? {} : { publicOrigin: values["public-origin"] }),
   ...(values.quiet ? {} : { log: (line: string) => console.error(line) }),
 });
 

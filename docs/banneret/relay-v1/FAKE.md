@@ -16,9 +16,21 @@ pairing is approved as soon as it starts, as the founder `ada-example`. Options:
 - `--manual-approval`: pairings wait until a test confirms them through the control surface below.
 - `--network-identity-header <name>`: turns on the optional network identity check, reading the caller's
   identity from that request header.
+- `--public-origin <url>`: the origin clients reach the fake at when a proxy sits in front of it. It becomes the
+  origin of the `browserUrl` that `POST /enroll/start` returns. Without it the fake uses the request's Host
+  header over `http`, which is wrong behind an HTTPS proxy and is refused by the Hub's enrolment client as a
+  different origin. The value is a scheme (`http` or `https`), a host and an optional port, with no path; the
+  fake exits at start-up on anything else.
 - `--host`, `--quiet`.
 
-In tests, `startFakeRelay({ port: 0 })` from `@t3tools/banneret-relay-fake` returns the same server with
+To demo the fake over Tailscale Serve:
+
+```sh
+node packages/banneret-relay-fake/src/bin.ts --port 4100 --public-origin https://<host>.<tailnet>.ts.net:8443
+tailscale serve --https=8443 http://127.0.0.1:4100
+```
+
+In tests, `startFakeRelay({ port: 0 })` (also `publicOrigin`) from `@t3tools/banneret-relay-fake` returns the same server with
 in-process helpers: `approve(confirmCode, person?)`, `refuse(confirmCode, reason)`, `seedNeeds`, `seedRepositories`,
 `bumpCapabilities`, `publishBundle` and `removeStaff`. `eventClock` replaces the clock that ages
 the event log, so a test can prove the 24-hour `Last-Event-ID` bound and its `reset` event without waiting a
