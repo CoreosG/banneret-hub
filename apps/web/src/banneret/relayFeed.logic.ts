@@ -45,7 +45,10 @@ const STUCK_RULES: Readonly<Record<string, string>> = {
   deploy_failed: "The latest preview deploy failed",
   watched_job_down: "A watched server job failed",
 };
-export const stuckRuleLabel = (rule: string) => STUCK_RULES[rule] ?? "Stuck";
+const stuckRuleLabel = (rule: string) => STUCK_RULES[rule] ?? "Stuck";
+/** All of an item's reasons in the relay's order (most important first), on one row. */
+export const stuckRulesLabel = (rules: ReadonlyArray<string>) =>
+  rules.length === 0 ? "Stuck" : rules.map(stuckRuleLabel).join(" \u00b7 ");
 
 const HEALTH_STATES: Readonly<Record<string, string>> = {
   good: "healthy",

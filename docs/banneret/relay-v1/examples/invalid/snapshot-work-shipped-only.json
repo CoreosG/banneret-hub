@@ -19,7 +19,7 @@
     "state": "ok",
     "items": [
       {
-        "rule": "claim_quiet",
+        "rules": ["check_failed", "claim_quiet"],
         "since": "2026-11-26T03:00:00Z",
         "task": {
           "id": "t_P5n2Hd",

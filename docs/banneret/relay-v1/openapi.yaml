@@ -1157,11 +1157,18 @@ components:
           maxItems: 20
           items:
             type: object
-            required: [rule, since]
+            required: [rules, since]
             properties:
-              rule:
-                type: string
-                enum: [claim_quiet, check_failed, unreviewed, checks_queued, dev_red, deploy_failed, watched_job_down]
+              rules:
+                description: |
+                  Every stuck reason of this task and owner, most important first, in the relay's priority order
+                  (README, Stuck). One item per task and owner. Never empty, never repeated.
+                type: array
+                minItems: 1
+                uniqueItems: true
+                items:
+                  type: string
+                  enum: [dev_red, check_failed, deploy_failed, watched_job_down, unreviewed, claim_quiet, checks_queued]
               since: { $ref: "#/components/schemas/Timestamp" }
               task: { $ref: "#/components/schemas/TaskRef" }
               owner: { $ref: "#/components/schemas/PersonRef" }

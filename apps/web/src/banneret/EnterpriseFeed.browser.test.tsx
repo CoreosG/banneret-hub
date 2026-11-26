@@ -98,7 +98,16 @@ const TODAY: BanneretFeedToday = {
     ],
   },
   working: block,
-  stuck: block,
+  stuck: {
+    ...block,
+    items: [
+      {
+        rules: ["check_failed", "unreviewed"],
+        since: "2026-11-26T03:00:00.000Z",
+        task: { title: "Profile blocks" },
+      },
+    ],
+  },
   health: block,
 };
 
@@ -314,6 +323,10 @@ describe("Enterprise Today and Needs you", () => {
     await expect.element(page.getByText("Should invites expire?")).toBeVisible();
     await expect.element(page.getByText("Recommended: After 7 days")).toBeVisible();
     await expect.element(page.getByText("on Bo desktop")).toBeVisible();
+    // One row per stuck item, with every reason in the relay's order.
+    await expect
+      .element(page.getByText("Checks are failing \u00b7 Ready but not reviewed", { exact: false }))
+      .toBeVisible();
     await expect
       .element(page.getByText("work_tracker: not measured since", { exact: false }))
       .toBeVisible();

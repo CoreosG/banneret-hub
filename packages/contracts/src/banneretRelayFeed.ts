@@ -78,7 +78,7 @@ export const BanneretFeedWorkingItem = Schema.Struct({
 });
 
 export const BanneretFeedStuckItem = Schema.Struct({
-  rule: Schema.String,
+  rules: Schema.Array(Schema.String),
   since: Schema.String,
   task: Schema.optional(BanneretFeedTask),
   owner: Schema.optional(BanneretFeedPerson),
