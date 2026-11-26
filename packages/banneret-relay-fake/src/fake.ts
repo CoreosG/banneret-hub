@@ -128,6 +128,7 @@ interface ActivityFact {
   readonly projectKey?: string;
   readonly taskId?: string;
   readonly state: "working" | "waiting" | "idle" | "stopped";
+  readonly processRunning?: boolean;
   readonly lastSeenAt: string;
 }
 
@@ -1526,10 +1527,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       caller.machine.sessions = facts.activity;
       caller.machine.usage = facts.usage ?? [];
       caller.machine.lastHeardAt = Date.now();
-      // An activity fact is a lease heartbeat: by taskId, otherwise by branch (and projectKey, when the task has one).
+      // An activity fact is a lease heartbeat only when the sending machine's owner holds the lease and the
+      // session is running. Match by taskId, otherwise by branch (and projectKey, when the task has one).
       for (const fact of facts.activity) {
+        if (fact.state === "stopped" && fact.processRunning !== true) continue;
         for (const task of boardTasks) {
-          if (task.holder === null) continue;
+          if (task.holder === null || task.holder.id !== caller.person.id) continue;
           const byTask = fact.taskId !== undefined && fact.taskId === task.id;
           const byBranch =
             fact.taskId === undefined &&
@@ -1841,12 +1844,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const by = String(input.by ?? "");
       const reviewer = String(input.reviewer ?? "");
       if (by === "" || reviewer === "")
-        throw new RelayError("malformed", "by and reviewer are logins.");
-      // README, Checked: the checker holds the sign-off role (founders here), and the reviewer is someone else.
-      // The merged pull request and the green checks are fixed by the seed, so only these two can fail.
-      const holdsRole = peopleByLogin.get(by)?.role === "founder";
+        throw new RelayError("malformed", "by and reviewer are person ids.");
+      const checker = people.get(by);
+      if (checker === undefined) throw new RelayError("not_found", "No such person for by.");
+      // README, Checked: identity is the stable id. The checker holds the sign-off role (founders here), and the
+      // reviewer is someone else. The merged head, the approval on it and the green checks are fixed by the
+      // seed, so only these two can fail.
+      const holdsRole = checker.role === "founder";
       const ignoredReason = !holdsRole
-        ? `${by} does not hold the sign-off role.`
+        ? `${checker.login} does not hold the sign-off role.`
         : by === reviewer
           ? "The person who checked it also approved the review."
           : undefined;
@@ -1857,7 +1863,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       task.status = valid ? "checked" : "built";
       task.column = valid ? "shipped" : "validating";
       task.checked = {
-        by: personRefFor(by),
+        by: { id: checker.id, login: checker.login },
         at: Date.now(),
         valid,
         ...(ignoredReason === undefined ? {} : { ignoredReason }),

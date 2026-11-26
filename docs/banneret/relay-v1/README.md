@@ -342,10 +342,17 @@ runs from `lastSignalAt`, the latest heartbeat, push or comment:
   only a release on the tracker frees the task.
 - `paused` and `conflict` (two holders claim one task) come from the claims, not from time.
 
-**Heartbeat from facts.** The relay treats every activity fact as a lease heartbeat. It finds the task by `taskId`
-when the activity carries one, otherwise by `branch` and `projectKey`. A match sets `lastSignalAt` to the receipt
-time, which returns a `stale` or `expired` lease to `active`. A fact that matches no held task changes nothing.
-The `taskId` is an opaque id the Hub takes from the thread's linked issue.
+**Heartbeat from facts.** An activity fact refreshes a lease only when **all** of these hold:
+
+- the machine that sent it belongs to the **lease holder**. A coworker's agent on the same task or branch never
+  refreshes someone else's claim, because that would hide the `stale` (6 h) and `expired` (24 h) rules. This mirrors
+  GitHub activity, where only the holder's own pushes and comments count;
+- its session is **running**: `processRunning` is true, or `state` is not `stopped`. A fact whose `state` is
+  `stopped` with `processRunning` false (a failed, interrupted or cancelled run) is not a heartbeat;
+- it matches the task: by `taskId` when the activity carries one, otherwise by `branch` and `projectKey`.
+
+A match sets `lastSignalAt` to the receipt time, which returns a `stale` or `expired` lease to `active`. A fact that
+fails any of the three changes nothing. The `taskId` is an opaque id the Hub takes from the thread's linked issue.
 
 ## Feed and graveyard
 
@@ -389,10 +396,16 @@ preset gives the sign-off role to founders; another company may map it different
 lives in the `checked` label on the tracker issue; the relay keeps no store of its own. It counts only when the tracker's
 event log shows **all** of:
 
-1. a holder of the sign-off role added the `checked` label;
+1. a holder of the sign-off role added the `checked` label, and it is the **latest** `labeled` event for `checked`
+   (a later `unlabeled` event removes the check);
 2. the linked pull request had already merged;
 3. its checks were green;
-4. a review was approved by someone **other than the person who added the label**.
+4. a review was approved by someone **other than the person who added the label**, the approval is on the **merged
+   head commit**, and it still stands: a dismissed approval, or a later "changes requested" from the same reviewer,
+   voids it.
+
+Identity is the stable `id`, never the login: `checked.by` and the reviewer are compared by `id`, and the login is
+display only (`checked.by` is `{id, login}` like every other person in this protocol).
 
 If any of these fails, the relay ignores the label: `checked.valid` is false, `checked.ignoredReason` says why in one
 plain sentence (for example "The person who checked it also approved the review." or "ada-example does not hold the
