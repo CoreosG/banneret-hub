@@ -477,6 +477,27 @@ describe("BanneretFacts heartbeat", () => {
     );
   });
 
+  it.live("never sends usage to a relay that reports protocol 1.0", () => {
+    const world = emptyWorld();
+    world.providers = [
+      claude(readings([{ id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 17 }])),
+    ];
+    return withFake((fake, relay) =>
+      Effect.gen(function* () {
+        relay.rewrite = (request, body) =>
+          request.url.startsWith("/relay/v1/capabilities") && body.includes('"protocol"')
+            ? JSON.stringify({ ...JSON.parse(body), protocol: "1.0" })
+            : body;
+        yield* join(fake, relay);
+        yield* waitFor(
+          Effect.sync(() => factsBodies(relay).length),
+          (count) => count >= 3,
+        );
+        for (const body of factsBodies(relay)) expect(body.usage).toBeUndefined();
+      }).pipe(onFreshHub(world)),
+    );
+  });
+
   it.live("after Leave the environment makes no relay call", () => {
     const world = emptyWorld();
     world.threads = [thread("th-enterprise", ENTERPRISE)];
@@ -670,6 +691,15 @@ describe("Facts", () => {
     expect(facts.some((fact) => fact.threadId === "th-done")).toBe(false);
   });
 
+  it("sends usage only to protocol 1.1 or later", () => {
+    expect(Facts.protocolCarriesUsage(undefined)).toBe(false);
+    expect(Facts.protocolCarriesUsage("1.0")).toBe(false);
+    expect(Facts.protocolCarriesUsage("1.1")).toBe(true);
+    expect(Facts.protocolCarriesUsage("1.12")).toBe(true);
+    expect(Facts.protocolCarriesUsage("2.0")).toBe(false);
+    expect(Facts.protocolCarriesUsage("1.01")).toBe(false);
+  });
+
   it("trims the least recently active sessions to stay under the body limit", () => {
     const fact = (index: number): Facts.ActivityFact => ({
       sessionId: `s_${index}`,
@@ -689,6 +719,7 @@ describe("Facts", () => {
         usage: [],
         policyFingerprint: null,
       },
+      true,
     );
     expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(Facts.MAX_BODY_BYTES);
     expect(body.activity.length).toBeGreaterThan(0);

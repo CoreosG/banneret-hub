@@ -37,7 +37,7 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import * as Workspaces from "../Workspaces.ts";
-import { BanneretFacts, factsRequestBody } from "./Facts.ts";
+import { BanneretFacts, factsRequestBody, protocolCarriesUsage } from "./Facts.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
 import { RelayCallError, type RelayReply, relayFetch } from "./RelayClient.ts";
 import { type MachineKey, RelayCounter, keyFromSeed, waitBeforeSigning } from "./RelaySigning.ts";
@@ -127,7 +127,7 @@ const PublicCapabilities = Schema.Struct({
   displayName: Schema.String,
   enrolment: Schema.Struct({ start: Schema.String, browser: Schema.String }),
 });
-const EnrolledCapabilities = Schema.Struct({ me: Me });
+const EnrolledCapabilities = Schema.Struct({ me: Me, protocol: Schema.optional(Schema.String) });
 const MachinesReply = Schema.Struct({
   items: Schema.Array(
     Schema.Struct({
@@ -326,6 +326,9 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   let health: BanneretRelayHealth | undefined;
   let unreachableSince: string | undefined;
   let etag: string | undefined;
+  // The relay's protocol from its last enrolled capabilities read; unknown after a restart until
+  // the first heartbeat's refetch, so a 1.0 relay never gets a field it would refuse.
+  let relayProtocol: string | undefined;
   let backoffMs = 0;
   let lastMarkSaveMs = 0;
   // The counter saved by the previous run; signed calls wait until the clock has passed it.
@@ -733,7 +736,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const outcome = yield* Effect.gen(function* () {
       const capabilities = yield* signedCall(from, "GET", "/relay/v1/capabilities");
       etag = capabilities.etag;
-      const { me } = yield* decodeReply(EnrolledCapabilities, capabilities);
+      const { me, protocol } = yield* decodeReply(EnrolledCapabilities, capabilities);
+      relayProtocol = protocol;
       const replacedLabel = yield* findReplaced(from, me.id);
       return { me, replacedLabel };
     }).pipe(Effect.result);
@@ -793,13 +797,12 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const reply = outcome.success;
     if (reply.etag !== undefined) etag = reply.etag;
     const lastOkAt = yield* nowIso;
-    const me =
-      reply.status === 304
-        ? from.me
-        : Option.getOrElse(
-            Option.map(decodeEnrolledCapabilities(reply.body), (body) => body.me),
-            () => from.me,
-          );
+    const decoded = reply.status === 304 ? Option.none() : decodeEnrolledCapabilities(reply.body);
+    if (Option.isSome(decoded)) relayProtocol = decoded.value.protocol;
+    const me = Option.getOrElse(
+      Option.map(decoded, (body) => body.me),
+      () => from.me,
+    );
     if (me.login !== from.me.login || me.role !== from.me.role) {
       yield* whileStill(
         from,
@@ -820,6 +823,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const body = factsRequestBody(
       machineFacts(environmentId, from.label, from.kind ?? "desktop"),
       collected,
+      protocolCarriesUsage(relayProtocol),
     );
     const outcome = yield* signedCall(from, "POST", "/relay/v1/facts", undefined, body).pipe(
       Effect.result,

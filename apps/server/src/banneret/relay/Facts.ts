@@ -367,6 +367,12 @@ function buildUsage(providers: ReadonlyArray<FactsProvider>): UsageFact[] {
   return usage;
 }
 
+/** `usage` arrived in protocol 1.1; a 1.0 relay refuses it as an unknown field. */
+export function protocolCarriesUsage(protocol: string | undefined): boolean {
+  const minor = /^1\.(0|[1-9][0-9]*)$/.exec(protocol ?? "")?.[1];
+  return minor !== undefined && Number(minor) >= 1;
+}
+
 /** The relay refuses a larger body with 413 `too_large`. */
 export const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -378,8 +384,9 @@ export const MAX_BODY_BYTES = 1024 * 1024;
 export function factsRequestBody<Machine extends { readonly policyFingerprint: string | null }>(
   machine: Machine,
   collected: FactsCollection,
+  includeUsage: boolean,
 ) {
-  const usage = collected.usage.length === 0 ? {} : { usage: collected.usage };
+  const usage = !includeUsage || collected.usage.length === 0 ? {} : { usage: collected.usage };
   const withActivity = (activity: ReadonlyArray<ActivityFact>) => ({
     machine: { ...machine, policyFingerprint: collected.policyFingerprint },
     activity,
