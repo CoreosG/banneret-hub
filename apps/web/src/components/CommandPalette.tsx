@@ -61,7 +61,6 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
-  CableIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -263,6 +262,7 @@ import {
   PORT_FORWARD_GROUP_PREFIX,
   useCommandPalettePortForwardItem,
 } from "./CommandPalettePortForwardItems";
+import { useCommandPaletteShowPortsItem } from "./ports/showPortsCommand";
 import {
   CommandPaletteVirtualizedResults,
   scrollCommandPaletteRowIntoView,
@@ -734,6 +734,7 @@ function OpenCommandPaletteDialog(props: {
     : activeDraftThread
       ? scopeThreadRef(activeDraftThread.environmentId, activeDraftThread.threadId)
       : null;
+  const showPortsItem = useCommandPaletteShowPortsItem({ panelRef: previewPanelThreadRef });
   const activeThreadPreviewOpen = useRightPanelStore(
     (state) => selectActiveRightPanel(state.byThreadKey, previewPanelThreadRef) === "preview",
   );
@@ -1547,19 +1548,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread) {
-    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
-    actionItems.push({
-      kind: "action",
-      value: "action:open-ports",
-      searchTerms: ["ports", "forward", "port forwarding", "localhost", "tunnel", "listening"],
-      title: gt("Show ports"),
-      icon: <CableIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        useRightPanelStore.getState().open(threadRef, "ports");
-      },
-    });
-  }
+  if (showPortsItem) actionItems.push(showPortsItem);
 
   if (activeThread !== null && canShareActiveThreadWithGuest) {
     const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);

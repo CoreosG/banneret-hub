@@ -1,3 +1,4 @@
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -8,6 +9,8 @@ import { openCommandPalette } from "../commandPaletteBus";
 import { dispatchCommandPalette, useCommandPaletteStore } from "../commandPaletteStore";
 import { LAST_USED_PROJECT_STORAGE_KEY } from "../hooks/useHandleNewThread";
 import { removeLocalStorageItem } from "../hooks/useLocalStorage";
+import { useRightPanelStore } from "../rightPanelStore";
+import type { DraftThreadState } from "../composerDraftStore";
 import { makeThreadFixture } from "../test-fixtures";
 import type { Project, Thread } from "../types";
 import { CommandPalette } from "./CommandPalette";
@@ -16,6 +19,7 @@ const entities = vi.hoisted(() => ({
   projects: [] as ReadonlyArray<Project>,
   threads: [] as ReadonlyArray<Thread>,
   activeThread: undefined as Thread | undefined,
+  activeDraftThread: null as DraftThreadState | null,
   delegatedUnderParent: new Set<string>() as ReadonlySet<string>,
   handleNewThread: vi.fn(async () => undefined),
 }));
@@ -40,6 +44,7 @@ vi.mock("../hooks/useHandleNewThread", async (original) => {
     useHandleNewThread: () => ({
       ...actual.useHandleNewThread(),
       activeThread: entities.activeThread,
+      activeDraftThread: entities.activeDraftThread,
       handleNewThread: entities.handleNewThread,
     }),
   };
@@ -59,6 +64,7 @@ function setup(state: Partial<typeof entities> = {}) {
   entities.projects = state.projects ?? [];
   entities.threads = state.threads ?? [];
   entities.activeThread = state.activeThread;
+  entities.activeDraftThread = state.activeDraftThread ?? null;
   entities.delegatedUnderParent = state.delegatedUnderParent ?? new Set();
   entities.handleNewThread.mockClear();
 }
@@ -383,5 +389,37 @@ describe("CommandPalette open intents", () => {
 
     await userEvent.keyboard("{Escape}");
     await expect.element(palette).not.toBeInTheDocument();
+  });
+
+  it("opens Show ports in a draft thread's right panel", async () => {
+    const environmentId = EnvironmentId.make("remote");
+    const threadId = ThreadId.make("draft-thread");
+    setup({
+      activeDraftThread: {
+        threadId,
+        environmentId,
+        projectId: ProjectId.make("project"),
+        logicalProjectKey: "remote:project",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        envMode: "local",
+        startFromOrigin: false,
+      },
+    });
+    const draftRef = scopeThreadRef(environmentId, threadId);
+    useRightPanelStore.getState().removeThread(draftRef);
+    await using _screen = await render(<CommandPalette>{null}</CommandPalette>);
+
+    openCommandPalette({ query: "Show ports" });
+    await userEvent.click(page.getByRole("option", { name: /Show ports/ }));
+
+    await expect.poll(() => useCommandPaletteStore.getState().open).toBe(false);
+    const panel = useRightPanelStore.getState().byThreadKey[scopedThreadKey(draftRef)];
+    expect(panel?.isOpen).toBe(true);
+    expect(panel?.activeSurfaceId).toBe("ports");
+    expect(panel?.surfaces.map((surface) => surface.kind)).toContain("ports");
   });
 });

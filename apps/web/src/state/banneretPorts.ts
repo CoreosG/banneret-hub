@@ -3,6 +3,7 @@
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { BANNERET_PORTS_WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import { Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -16,6 +17,19 @@ export async function listListeningPorts(environmentId: EnvironmentId) {
   const result = await runAtomCommand(appAtomRegistry, listCommand, { environmentId, input: {} });
   if (result._tag === "Success") return result.value;
   throw Cause.squash(result.cause);
+}
+
+/**
+ * The environment whose ports show in the Ports dialog: the way in when no thread or draft has a
+ * right panel to hold them. The palette closes as its command runs, so the root renders the dialog.
+ */
+export const portsDialogEnvironmentAtom = Atom.make<EnvironmentId | null>(null).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("banneret-ports:dialog-environment"),
+);
+
+export function openPortsDialog(environmentId: EnvironmentId | null): void {
+  appAtomRegistry.set(portsDialogEnvironmentAtom, environmentId);
 }
 
 const LABELS_KEY = "banneret:port-labels";
