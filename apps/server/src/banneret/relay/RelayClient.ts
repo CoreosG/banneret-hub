@@ -24,6 +24,8 @@ export interface RelayReply {
   readonly status: number;
   readonly etag: string | undefined;
   readonly body: unknown;
+  /** The exact body bytes, for content-addressed snapshot files. */
+  readonly bytes: Uint8Array;
 }
 
 export type RelaySigner =
@@ -45,6 +47,8 @@ export interface RelayRequest {
   readonly body?: unknown;
   readonly signer?: RelaySigner;
   readonly ifNoneMatch?: string;
+  /** Snapshot files may be larger than other answers. */
+  readonly maxResponseBytes?: number;
   readonly nowMs: number;
 }
 
@@ -53,7 +57,7 @@ const jsonBytes = (value: unknown): Uint8Array => Buffer.from(JSON.stringify(val
 const network = (message: string) =>
   new RelayCallError({ status: 0, code: "network", message, retryable: true });
 
-async function readCapped(response: Response): Promise<Uint8Array | null> {
+async function readCapped(response: Response, max: number): Promise<Uint8Array | null> {
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = [];
@@ -62,7 +66,7 @@ async function readCapped(response: Response): Promise<Uint8Array | null> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_RESPONSE_BYTES) {
+    if (size > max) {
       await reader.cancel();
       return null;
     }
@@ -100,7 +104,7 @@ const errorFields = (body: unknown) => {
   };
 };
 
-/** One relay call: no redirects, 10 s, a 1 MiB response at most. */
+/** One relay call: no redirects, 10 s, a 1 MiB response at most unless the caller allows more. */
 export const relayFetch = Effect.fn("BanneretRelay.fetch")(function* (request: RelayRequest) {
   const bodyBytes = request.body === undefined ? new Uint8Array() : jsonBytes(request.body);
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -136,7 +140,10 @@ export const relayFetch = Effect.fn("BanneretRelay.fetch")(function* (request: R
         redirect: "manual",
         signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
       });
-      return { response, bytes: await readCapped(response) };
+      return {
+        response,
+        bytes: await readCapped(response, request.maxResponseBytes ?? MAX_RESPONSE_BYTES),
+      };
     },
     catch: () => network("The relay could not be reached."),
   });
@@ -167,10 +174,20 @@ export const relayFetch = Effect.fn("BanneretRelay.fetch")(function* (request: R
         retryable: true,
       });
     }
-    return { status: response.status, etag: response.headers.get("etag") ?? undefined, body };
+    return {
+      status: response.status,
+      etag: response.headers.get("etag") ?? undefined,
+      body,
+      bytes,
+    };
   }
   if (response.status === 304) {
-    return { status: 304, etag: response.headers.get("etag") ?? undefined, body: null };
+    return {
+      status: 304,
+      etag: response.headers.get("etag") ?? undefined,
+      body: null,
+      bytes: new Uint8Array(),
+    };
   }
   const fields = errorFields(body);
   const status = response.status;

@@ -114,6 +114,7 @@ const snapshot = (
   since: "2026-11-26T09:59:00.000Z",
   sections,
   needsCount,
+  board: null,
 });
 
 function setup(

@@ -9,6 +9,8 @@ export interface Recorded {
   readonly url: string;
   readonly body: string;
   readonly headers: NodeHttp.IncomingHttpHeaders;
+  /** The status the client got, once the answer is sent. */
+  status?: number;
 }
 
 export interface Interception {
@@ -53,6 +55,7 @@ const startForwarder = async (target: string): Promise<Forwarder> => {
       forwarder.requests.push(recorded);
       const intercepted = forwarder.intercept?.(recorded);
       if (intercepted !== undefined) {
+        recorded.status = intercepted.status;
         response.writeHead(intercepted.status, {
           "content-type": "application/json",
           ...intercepted.headers,
@@ -85,6 +88,7 @@ const startForwarder = async (target: string): Promise<Forwarder> => {
             const headers = { ...reply.headers };
             delete headers["content-length"];
             delete headers["transfer-encoding"];
+            recorded.status = reply.statusCode ?? 502;
             response.writeHead(reply.statusCode ?? 502, headers);
             response.end(text);
           });
