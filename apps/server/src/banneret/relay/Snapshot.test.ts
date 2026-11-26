@@ -39,6 +39,7 @@ const at = (ms: number) => DateTime.makeUnsafe(ms);
 
 interface World {
   threads: Facts.FactsThread[];
+  reads: number;
 }
 
 const PROJECT: Facts.FactsProject = {
@@ -129,7 +130,15 @@ const hubLayer = (
               Effect.provideContext(context),
             ),
             projects: Effect.succeed([PROJECT]),
-            threads: () => Effect.sync(() => world.threads),
+            // Each heartbeat reports a newer lastSeenAt, so the work file changes every time, as live.
+            threads: () =>
+              Effect.sync(() => {
+                world.reads += 1;
+                return world.threads.map((entry) => ({
+                  ...entry,
+                  updatedAt: at(EPOCH + world.reads * 1000),
+                }));
+              }),
             providers: Effect.succeed([
               {
                 instanceId: ProviderInstanceId.make("claudeAgent"),
@@ -235,7 +244,10 @@ const subscribe = Effect.gen(function* () {
         orElse: () => Effect.die(new Error(`timed out waiting for ${label}`)),
       }),
     );
-  return { next };
+  /** Drops what arrived so far; `count` then says how many states arrived since. */
+  const reset = Queue.clear(queue);
+  const count = Queue.size(queue);
+  return { next, reset, count };
 });
 
 const leaseOf = (event: BanneretFeedState, taskId: string) =>
@@ -280,7 +292,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- proving silence needs a window; no event marks "no request was sent".
         yield* Effect.sleep(400);
         expect(relay.requests).toEqual([]);
-      }).pipe(onFreshHub({ threads: [] })),
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
     ),
   );
 
@@ -332,7 +344,9 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         expect(heads.filter((request) => request.status === 304).length).toBeGreaterThanOrEqual(2);
         for (const head of heads) expect(head.headers["if-none-match"]).toMatch(/^"sha256:/);
         expect(relay.requests.filter((request) => isFile(request.url))).toEqual([]);
-      }).pipe(onFreshHub({ threads: [] }, { healthIntervalMs: 60_000, snapshotPollMs: 100 })),
+      }).pipe(
+        onFreshHub({ threads: [], reads: 0 }, { healthIntervalMs: 60_000, snapshotPollMs: 100 }),
+      ),
     ),
   );
 
@@ -365,7 +379,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         expect(isHead(nextHead.url)).toBe(true);
         expect(nextHead.headers["if-none-match"]).toBeUndefined();
         expect(after).toContain(urls[refusedAt]);
-      }).pipe(onFreshHub({ threads: [] })),
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
     ),
   );
 
@@ -396,7 +410,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
           "the new board",
         );
         expect(fixed.board!.value!.cards[0]!.task.title).toBe("Rate limits");
-      }).pipe(onFreshHub({ threads: [] })),
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
     ),
   );
 
@@ -426,14 +440,14 @@ describe("BanneretRelayFeed board from the snapshot", () => {
           (event) => event.board?.problem === undefined && event.board?.value !== null,
           "the relay back",
         );
-      }).pipe(onFreshHub({ threads: [] })),
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
     ),
   );
 
   it.live(
     "sends the board task id of a thread's linked issue, which keeps that lease active",
     () => {
-      const world: World = { threads: [] };
+      const world: World = { threads: [], reads: 0 };
       return withFake((fake, relay) =>
         Effect.gen(function* () {
           const events = yield* subscribe;
@@ -473,6 +487,37 @@ describe("BanneretRelayFeed board from the snapshot", () => {
       );
     },
   );
+
+  it.live("does not send the board again when only the work file changes", () => {
+    const world: World = { threads: [], reads: 0 };
+    return withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const events = yield* subscribe;
+        yield* control(fake, "/board/seed", SEED);
+        const joined = yield* join(fake, relay);
+        yield* assignProject(joined.workspaceId!);
+        // A live thread on no board task: each heartbeat moves the work file, never the board.
+        world.threads = [thread("th-plain")];
+        yield* events.next((event) => event.board?.value != null, "a settled board");
+        const before = relay.requests.filter((request) => isFile(request.url)).length;
+        yield* events.reset;
+        // Reads run in order, so a head answered after the second new file means it was handled.
+        yield* untilEnrolment(() => {
+          const files = relay.requests.flatMap((request, index) =>
+            isFile(request.url) ? [index] : [],
+          );
+          const second = files[before + 1];
+          return (
+            second !== undefined &&
+            relay.requests
+              .slice(second + 1)
+              .some((request) => isHead(request.url) && request.status !== undefined)
+          );
+        }, "two new work files handled");
+        expect(yield* events.count).toBe(0);
+      }).pipe(onFreshHub(world)),
+    );
+  });
 });
 
 describe("snapshot reshaping", () => {

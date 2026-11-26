@@ -740,7 +740,8 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     }
     const atWork = files.work === undefined ? [] : liveTaskIds(files.work);
     const fetchedAt = yield* nowIso;
-    const signature = `${refs.board} ${refs.work ?? ""} ${leases}`;
+    // The work file changes on every heartbeat; only the ring it yields counts.
+    const signature = `${refs.board} ${atWork.join(",")} ${leases}`;
     if (signature === boardSignature && board !== null && board.problem === undefined) {
       // Unchanged: keep the newer age for the next publish without sending the board again.
       board = { ...board, fetchedAt };
