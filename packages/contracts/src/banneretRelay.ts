@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 
 import {
   AuthEnvironmentMaintainScope,
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentAuthorizationError,
 } from "./auth.ts";
@@ -39,13 +40,14 @@ export const BanneretEnrolmentState = Schema.Literals([
 ]);
 export type BanneretEnrolmentState = typeof BanneretEnrolmentState.Type;
 
-/** Run-time health of a `configured` enrolment; never persisted. */
+/** Run-time health of an `approved` or `configured` enrolment; never persisted. */
 export const BanneretRelayHealth = Schema.Literals([
   "healthy",
   "unreachable",
   "clock_wrong",
   "refused",
   "forbidden",
+  "invalid_reply",
 ]);
 export type BanneretRelayHealth = typeof BanneretRelayHealth.Type;
 
@@ -134,7 +136,10 @@ const WsBanneretRelayCancelRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.cancel, {
   error: RelayRpcError,
 });
 
-/** `revoke` tells the relay first; `forget` is offered only while the relay cannot be reached. */
+/**
+ * `revoke` tells the relay first; `forget` is offered only while the relay cannot be reached, and
+ * is the only way out of `approved` besides `cancel`.
+ */
 const WsBanneretRelayLeaveRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.leave, {
   payload: Schema.Struct({ mode: Schema.Literals(["revoke", "forget"]) }),
   success: BanneretEnrolmentView,
@@ -182,9 +187,9 @@ export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.start]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.cancel]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.leave]: AuthEnvironmentMaintainScope,
-  [BANNERET_RELAY_WS_METHODS.machines]: AuthOrchestrationReadScope,
+  [BANNERET_RELAY_WS_METHODS.machines]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.revokeMachine]: AuthEnvironmentMaintainScope,
-  [BANNERET_RELAY_WS_METHODS.matchProjects]: AuthOrchestrationReadScope,
+  [BANNERET_RELAY_WS_METHODS.matchProjects]: AuthOrchestrationOperateScope,
 } as const;
 
 /** Spread into the server's `RPC_AGGREGATES`. */
@@ -203,7 +208,8 @@ export type BanneretRelayAddress =
   | { readonly ok: true; readonly origin: string }
   | { readonly ok: false; readonly message: string };
 
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "[::1]"]);
+const IPV4_LOOPBACK = /^127(\.\d{1,3}){3}$/;
 
 /**
  * A relay address reduced to its origin. https only; plain http only on loopback (the fake relay in
@@ -224,7 +230,7 @@ export function parseBanneretRelayAddress(input: string): BanneretRelayAddress {
   if ((url.pathname !== "/" && url.pathname !== "") || url.search !== "" || url.hash !== "") {
     return { ok: false, message: "Enter only the relay's address, without a path." };
   }
-  const loopback = LOOPBACK_HOSTS.has(url.hostname) || /^127\./.test(url.hostname);
+  const loopback = LOOPBACK_HOSTS.has(url.hostname) || IPV4_LOOPBACK.test(url.hostname);
   if (url.protocol === "http:" && !loopback) {
     return { ok: false, message: "The relay must use https." };
   }
