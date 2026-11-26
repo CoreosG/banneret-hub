@@ -1,0 +1,74 @@
+# Banneret Hub: runs the fork-owned server tests (relay enrolment, workspaces, the real-server wiring
+# check), the contracts they share with the web app, the web app's fork-owned unit tests, and the web
+# and server typechecks. Upstream's CI stays disabled in this repository, so this is the only check
+# these files get. Browser tests run in banneret-web-tests.yml.
+name: Banneret server tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/server/**
+      - apps/web/**
+      - packages/contracts/**
+      - packages/banneret-relay-fake/**
+      - packages/shared/**
+      - pnpm-lock.yaml
+      - .github/workflows/banneret-server-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/server/**
+      - apps/web/**
+      - packages/contracts/**
+      - packages/banneret-relay-fake/**
+      - packages/shared/**
+      - pnpm-lock.yaml
+      - .github/workflows/banneret-server-tests.yml
+
+concurrency:
+  group: banneret-server-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  server-tests:
+    name: Server tests and typechecks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        # The whole workspace: the shared root test config imports from scripts/, infra/ and packages/shared.
+        with:
+          save-pnpm-store: "false"
+
+      - name: Server typecheck
+        working-directory: apps/server
+        run: vp run typecheck
+
+      - name: Web typecheck
+        working-directory: apps/web
+        run: vp run typecheck
+
+      - name: Contracts relay tests
+        working-directory: packages/contracts
+        run: vp test run --config ../../vite.config.ts --dir . src/banneretRelay
+
+      - name: Server relay and workspace tests
+        working-directory: apps/server
+        run: vp test run src/banneret/
+
+      - name: Web fork-owned unit tests
+        working-directory: apps/web
+        run: vp test run --project unit src/banneret/
