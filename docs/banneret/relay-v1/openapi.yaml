@@ -1398,13 +1398,14 @@ components:
         status:
           description: |
             The board's vocabulary: open string; known values `ruled_dead`, `checked`, `sent_back`, `needs_you`,
-            `built` and `planned`. An item with a `task` takes the task's computed status; an item without one is
-            `planned`. An item that rests on one that is `needs_you`, `sent_back` or `ruled_dead` shows `needs_you`
+            `built` and `planned`. An item whose task has a board card takes the card's computed status. Without a card,
+            a closed-completed issue is `built`, a not-planned one `ruled_dead`, an open one `planned`. An item without a
+            `task` is `planned`. An item that rests on one that is `needs_you`, `sent_back` or `ruled_dead` shows `needs_you`
             unless it already has a status that ranks higher.
           allOf: [{ $ref: "#/components/schemas/OpenToken" }]
         statusWhy: { description: "One plain sentence. For a blocked item it names the blocker.", type: string, minLength: 1, maxLength: 240 }
         task:
-          description: The board task behind the item. Absent when the item has no `task` in the plan, or the board does not hold it.
+          description: The task behind the item. Always present when the plan item has a `task` ref, card or no card; absent only when it has none. Without a board card the relay builds it from the ref, and `GET /tasks/{taskId}` may answer 404 for its id.
           allOf: [{ $ref: "#/components/schemas/BoardTask" }]
         restsOn:
           description: Ids of the items this one rests on (item ids, not task ids).

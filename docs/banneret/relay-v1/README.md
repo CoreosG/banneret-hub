@@ -398,9 +398,13 @@ Objects are closed, like the board's.
 
 - `stages` are in ascending `order`, ties in plan order. `items` are grouped by stage in that order, and keep plan
   order within a stage.
-- `task` is the board task the item's plan `task` resolves to: the board card whose `ref` has the same `tracker`,
-  `host` (both absent counts as equal), `scope` and `key`. It is absent when the plan gives the item no `task`, and
-  also when the board holds no such task.
+- `task` is present whenever the item's plan has a `task` ref, and absent only when it has none. It is always
+  `{id, title, ref}`. When the board holds a card whose `ref` has the same `tracker`, `host` (both absent counts as
+  equal), `scope` and `key`, `task` is that card's task. When it holds none (the issue is closed, say, or not on the
+  board), the relay builds `task` from the plan ref and its own read of the issue: `id` is the relay's opaque task id
+  for that ref, `title` is the issue title (the plan item's title if the issue cannot be read), and `ref` is
+  `{tracker, host?, scope, key, url}`. `GET /tasks/{id}` may answer 404 for such a task. The client then shows the
+  map item's status and the issue by `ref`.
 - `restsOn` lists **item** ids, copied from the plan.
 - `counters` count every item once by its final status. `byStage` has an entry for every stage, empty when the stage
   has no items.
@@ -408,8 +412,9 @@ Objects are closed, like the board's.
 **Status.** The vocabulary is the board's (see "Board and leases"): `ruled_dead`, `checked`, `sent_back`, `needs_you`,
 `built`, `planned`, and the same first-match order.
 
-1. An item with a `task` takes that task's computed status and `statusWhy` from the board card. An item without a
-   `task`, or whose task is not on the board, is `planned`.
+1. An item whose task has a board card takes that card's computed status and `statusWhy`. An item whose task has no
+   card takes it from the issue: closed as completed is `built`, closed as not planned is `ruled_dead`, open is
+   `planned`. An item without a `task` is `planned`.
 2. A rests-on item that ends up `needs_you`, `sent_back` or `ruled_dead` makes its dependant `needs_you`, with a
    `statusWhy` that names the blocker, for example `It rests on "Profile blocks", which needs you.` This applies only
    when the dependant's own status ranks below `needs_you` (`built` or `planned`): `ruled_dead`, `checked` and

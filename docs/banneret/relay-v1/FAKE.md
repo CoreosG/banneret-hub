@@ -106,7 +106,8 @@ invalid one (schema, duplicate or unknown ids, a `restsOn` that names nothing, a
 `not_measured` map and the reason; `{plan: {"unreadable": true}}` does the same with `unreachable`; `{plan: null}` removes
 the plan, so the section and the head key are omitted. The map joins an item's `task` to the seeded board cards by
 `tracker`, `host`, `scope` and `key`. The fake's cards use tracker `github`, scope `example-org/example-app` and the key
-`1`, `2`, ... in `board/seed` order. Changing whether the plan exists bumps the capabilities version.
+`1`, `2`, ... in `board/seed` order. An item whose `task` matches no card still carries `task`: id `ref_<hash of the ref>`, the plan item's title (the fake reads no
+issues), and the ref with a url; its status is `planned`, because the fake has no issue state. Changing whether the plan exists bumps the capabilities version.
 
 ## Changing the spec
 

@@ -1693,7 +1693,11 @@ describe("map and the stage plan", () => {
     readonly stageId: string;
     readonly status: string;
     readonly statusWhy: string;
-    readonly task?: { readonly id: string };
+    readonly task?: {
+      readonly id: string;
+      readonly title: string;
+      readonly ref: { tracker: string; scope: string; key: string; url: string };
+    };
     readonly restsOn: ReadonlyArray<string>;
   }
   interface MapFile {
@@ -1848,6 +1852,31 @@ describe("map and the stage plan", () => {
     expect(item("orphan")?.statusWhy).toContain("Old idea");
     expect(item("free")?.status).toBe("planned");
     expect(item("free")?.task).toBeUndefined();
+  });
+
+  it("carries task from the plan ref even when the board has no card for it", async () => {
+    const machine = await enrol();
+    await seedBoard(machine, []);
+    const ref = { tracker: "github", scope: "example-org/example-app", key: "9001" };
+    await client.control("/map/seed", {
+      ...base,
+      stages: [{ id: "s", title: "Stage", order: 1 }],
+      items: [
+        { id: "closed", stageId: "s", title: "Closed issue", task: ref },
+        { id: "plain", stageId: "s", title: "No task" },
+      ],
+    });
+    const map = await readMap(machine);
+    const closed = map.items.find((item) => item.id === "closed");
+    expect(closed?.task?.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    expect(closed?.task?.title).toBeTruthy();
+    expect(closed?.task?.ref).toMatchObject(ref);
+    expect(closed?.task?.ref.url).toContain("/9001");
+    expect(map.items.find((item) => item.id === "plain")?.task).toBeUndefined();
+    // The same ref gives the same id on the next read.
+    expect((await readMap(machine)).items.find((item) => item.id === "closed")?.task?.id).toBe(
+      closed?.task?.id,
+    );
   });
 
   it("keeps a higher status on a dependant, and counts every item once", async () => {
