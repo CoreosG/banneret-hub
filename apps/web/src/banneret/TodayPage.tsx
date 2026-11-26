@@ -21,6 +21,7 @@ import {
   workingStateLabel,
 } from "./relayFeed.logic";
 import { refreshToday } from "./relayFeedStore";
+import { loginOrUnknown, loginSuffix } from "./enterprise.logic";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
 const TONE_DOT: Record<Tone, string> = {
@@ -168,7 +169,7 @@ export function TodayPage() {
                   >
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="break-words">
-                        {item.person.login}
+                        {loginOrUnknown(item.person.login)}
                         {item.task === undefined ? null : (
                           <>
                             {" on "}
@@ -223,7 +224,9 @@ export function TodayPage() {
                     </span>
                     <span className="text-muted-foreground text-xs">
                       since <When at={item.since} />
-                      {item.owner === undefined ? null : ` · claimed by ${item.owner.login}`}
+                      {item.owner === undefined
+                        ? null
+                        : loginSuffix("claimed by", item.owner.login)}
                     </span>
                   </div>
                   <OpenTarget deepLink={item.deepLink} />

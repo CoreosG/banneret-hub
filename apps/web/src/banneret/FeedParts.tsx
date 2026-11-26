@@ -18,6 +18,7 @@ import { useEnvironment } from "../state/environments";
 import { formatDateTimeTimestamp, formatRelativeTimeLabel } from "../timestampFormat";
 import type { EnvironmentFeed } from "./relayFeedStore";
 import { deepLinkTarget, needsKindLabel, notMeasuredReason } from "./relayFeed.logic";
+import { loginSuffix } from "./enterprise.logic";
 
 // Reads the minute tick because the compiler caches a render-time Date.now().
 function useNowMs(): number {
@@ -103,7 +104,7 @@ export function NeedsItemRow(props: { readonly item: BanneretFeedNeedsItem }) {
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-muted-foreground text-xs">
           {needsKindLabel(item.kind)}
-          {item.from === undefined ? null : ` · from ${item.from.login}`}
+          {item.from === undefined ? null : loginSuffix("from", item.from.login)}
           {" · "}
           <Age at={item.createdAt} />
         </span>

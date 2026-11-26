@@ -116,7 +116,7 @@ export function enrolmentLine(
 export function healthLine(view: BanneretEnrolmentView): EnrolmentLine {
   switch (view.health) {
     case "healthy":
-      return { tone: "ok", text: `Connected as ${view.me?.login ?? "you"}` };
+      return { tone: "ok", text: connectedLine({ login: view.me?.login }) };
     case "unreachable":
       return {
         tone: "warn",
@@ -180,6 +180,32 @@ export function countdown(expiresAt: string | undefined, nowMs: number): string 
 /** Relays name roles in an open set; anything unknown is limited staff. */
 export function roleLabel(role: string): string {
   return role === "founder" ? "Founder" : "Staff";
+}
+
+/** A login from the relay, trimmed; empty when the relay sent none. */
+export function cleanLogin(login: string | undefined): string {
+  return login?.trim() ?? "";
+}
+
+/** A login for a column of people; "Unknown" when the relay sent none. */
+export function loginOrUnknown(login: string | undefined): string {
+  return cleanLogin(login) || "Unknown";
+}
+
+/** " · <label> <login>" or nothing when the login is empty; never a dangling separator. */
+export function loginSuffix(label: string, login: string | undefined): string {
+  const clean = cleanLogin(login);
+  return clean === "" ? "" : ` \u00b7 ${label} ${clean}`;
+}
+
+/** "Connected as ada · Founder"; drops the login or the role when the relay sent none. */
+export function connectedLine(
+  me: { login?: string | undefined; role?: string | undefined } | undefined,
+): string {
+  const login = cleanLogin(me?.login);
+  const role = me?.role?.trim() ? roleLabel(me.role) : "";
+  const head = login === "" ? "Connected" : `Connected as ${login}`;
+  return role === "" ? head : `${head} \u00b7 ${role}`;
 }
 
 const KNOWN_NEEDS_KINDS: Readonly<Record<string, string>> = {

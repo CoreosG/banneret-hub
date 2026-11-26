@@ -28,7 +28,7 @@ import {
   machineLabelFrom,
   remoteUrlsOf,
   revokedMessage,
-  roleLabel,
+  connectedLine,
   wizardStep,
 } from "./enterprise.logic";
 import {
@@ -397,7 +397,7 @@ function ProjectStep(props: {
         <div className="min-w-0">
           <p className="truncate font-medium text-sm">
             <span aria-hidden className="mr-1.5 inline-block size-2 rounded-full bg-success" />
-            Connected as {props.view.me?.login} · {roleLabel(props.view.me?.role ?? "")}
+            {connectedLine(props.view.me)}
           </p>
           {props.view.replacedLabel !== undefined ? (
             <p className="truncate text-muted-foreground text-xs">
