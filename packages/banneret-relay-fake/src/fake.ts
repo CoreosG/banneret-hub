@@ -1468,6 +1468,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       reply({ heads: heads.length });
       return;
     }
+    if (request.method === "POST" && route === "/snapshot/rebuild") {
+      const person = peopleByLogin.get(String(input.login));
+      if (person === undefined || person.removed)
+        throw new RelayError("not_found", "No such person.");
+      const before = snapshotHeads.get(person.id)?.at(-1);
+      const head = refreshHead(person);
+      reply({ changed: head !== before, etag: head.etag });
+      return;
+    }
     if (request.method === "POST" && route === "/staff/remove") {
       removeStaff(String(input.login));
       reply({});

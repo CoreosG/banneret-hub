@@ -118,6 +118,12 @@ export class RelayClient {
     if (!response.ok) throw new Error(`control ${path} failed: ${JSON.stringify(reply)}`);
     return reply;
   }
+
+  /** Forces an immediate rebuild of a person's snapshot head (FAKE.md); an unchanged head stays as it is. */
+  async rebuildSnapshot(login: string): Promise<{ changed: boolean; etag: string }> {
+    const reply = await this.control("/snapshot/rebuild", { login });
+    return { changed: reply.changed === true, etag: String(reply.etag) };
+  }
 }
 
 export interface SseEvent {
