@@ -1,7 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalFetchInEffect:off globalTimers:off globalTimersInEffect:off - boots the real server in a child process and calls it over HTTP and WebSocket.
 // Banneret Hub: the enrolment service reaches clients only through server.ts's layer wiring. The
 // service is a Context.Reference whose default answers "not running", so a unit test cannot see a
-// dropped provide line; this boots the real server and calls banneretRelay.probe over /ws.
+// dropped provide line; this boots the real server and calls banneretRelay.probe over /ws. The feed
+// is a reference too (its default answers "not joined"), so the second test joins a fake relay.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -11,7 +12,9 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import { expect, it } from "@effect/vitest";
+import { startFakeRelay } from "@t3tools/banneret-relay-fake";
 import {
+  BANNERET_RELAY_FEED_WS_METHODS,
   BANNERET_RELAY_WS_METHODS,
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION,
@@ -19,6 +22,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
@@ -144,4 +148,50 @@ it.live(
         message: "The relay must use https.",
       });
     }).pipe(Effect.scoped),
+);
+
+it.live(
+  "banneretRelay.today through the real server reads the relay once the machine has joined",
+  () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.acquireRelease(
+        Effect.promise(() => startFakeRelay({ port: 0, retryAfterMs: 50 })),
+        (relay) => Effect.promise(() => relay.close()),
+      );
+      const server = yield* Effect.acquireRelease(Effect.promise(bootServer), (booted) =>
+        Effect.promise(() => stopServer(booted)),
+      );
+      const ticket = yield* Effect.promise(() => webSocketTicket(server));
+      const protocol = RpcClient.layerProtocolSocket().pipe(
+        Layer.provide(
+          Socket.layerWebSocket(
+            `${server.origin.replace("http:", "ws:")}/ws?orchestrationProtocol=${ORCHESTRATION_PROTOCOL_VERSION}&wsTicket=${encodeURIComponent(ticket)}`,
+          ).pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal)),
+        ),
+        Layer.provide(RpcSerialization.layerJson),
+      );
+      const today = yield* Effect.gen(function* () {
+        const client = yield* RpcClient.make(WsRpcGroup);
+        yield* client[BANNERET_RELAY_WS_METHODS.start]({
+          origin: fake.url,
+          label: "Wiring check",
+          kind: "server",
+        });
+        // The fake approves at once; the server finishes setup on its own schedule.
+        yield* client[BANNERET_RELAY_WS_METHODS.status]({}).pipe(
+          Effect.repeat({
+            until: (view) => view.state === "configured",
+            schedule: Schedule.spaced("100 millis"),
+          }),
+          Effect.timeoutOrElse({
+            duration: "20 seconds",
+            orElse: () => Effect.die(new Error("the machine never finished joining")),
+          }),
+        );
+        return yield* client[BANNERET_RELAY_FEED_WS_METHODS.today]({});
+      }).pipe(Effect.provide(protocol));
+      expect(today.joined).toBe(true);
+      expect(today.value?.needsYou.items).toEqual([]);
+    }).pipe(Effect.scoped),
+  60_000,
 );

@@ -13,6 +13,7 @@ import { Age, FeedSection, FeedStatus, NeedsItemRow, OpenTarget, When } from "./
 import {
   healthStateLabel,
   healthTone,
+  offersSection,
   safeLinkOut,
   shippedLabel,
   stuckRuleLabel,
@@ -86,7 +87,7 @@ export function TodayPage() {
   }
   const { feed, workspace } = enterprise;
   const today = feed.today;
-  if (feed.sections.length > 0 && !feed.sections.includes("today")) {
+  if (!offersSection(feed, "today")) {
     return (
       <FeedPage title="Today">
         <p className="text-muted-foreground text-sm">{workspace.name} does not offer Today.</p>
@@ -112,7 +113,7 @@ export function TodayPage() {
             empty={today.needsYou.items.length === 0}
             notMeasured={today.needsYou.notMeasured}
             action={
-              feed.sections.includes("needs") ? (
+              offersSection(feed, "needs") ? (
                 <Link to="/needs" className="text-primary text-xs hover:underline">
                   See all
                 </Link>

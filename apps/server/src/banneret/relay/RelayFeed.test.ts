@@ -3,7 +3,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import type { FakeRelay } from "@t3tools/banneret-relay-fake";
-import { type BanneretFeedEvent, EnvironmentId } from "@t3tools/contracts";
+import { type BanneretFeedState, EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -115,13 +115,13 @@ const join = (fake: FakeRelay, relay: Forwarder) =>
 
 /** A client of the feed: every event it receives, and a way to wait for one. */
 const subscribe = Effect.gen(function* () {
-  const queue = yield* Queue.unbounded<BanneretFeedEvent>();
+  const queue = yield* Queue.unbounded<BanneretFeedState>();
   const service = yield* feed;
   yield* service.events.pipe(
     Stream.runForEach((event) => Queue.offer(queue, event)),
     Effect.forkScoped,
   );
-  const next = (predicate: (event: BanneretFeedEvent) => boolean, label: string) =>
+  const next = (predicate: (event: BanneretFeedState) => boolean, label: string) =>
     Effect.gen(function* () {
       for (;;) {
         const event = yield* Queue.take(queue);
@@ -136,8 +136,8 @@ const subscribe = Effect.gen(function* () {
   return { next };
 });
 
-const isLive = (event: BanneretFeedEvent) => event.type === "snapshot" && event.live;
-const isDown = (event: BanneretFeedEvent) => event.type === "snapshot" && !event.live;
+const isLive = (event: BanneretFeedState) => event.live;
+const isDown = (event: BanneretFeedState) => event.joined && !event.live;
 
 const eventsRequests = (relay: Forwarder) =>
   relay.requests.filter((request) => request.url === "/relay/v1/events");
@@ -160,7 +160,7 @@ describe("BanneretRelayFeed", () => {
       onFreshHub(
         Effect.gen(function* () {
           const client = yield* subscribe;
-          const first = yield* client.next((event) => event.type === "snapshot", "snapshot");
+          const first = yield* client.next(() => true, "snapshot");
           expect(first).toMatchObject({ joined: false, live: false });
           expect(yield* (yield* feed).today(true)).toEqual({
             joined: false,
@@ -174,10 +174,7 @@ describe("BanneretRelayFeed", () => {
           yield* client.next(isLive, "live");
           const enrolment = yield* Enrolment.BanneretEnrolment;
           yield* enrolment.leave("revoke");
-          yield* client.next(
-            (event) => event.type === "snapshot" && !event.joined,
-            "not joined after leave",
-          );
+          yield* client.next((event) => !event.joined, "not joined after leave");
           relay.requests.length = 0;
           // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- proving silence needs a window; no event marks "no request was sent".
           yield* Effect.sleep(500);
@@ -274,9 +271,11 @@ describe("BanneretRelayFeed", () => {
             });
 
             yield* control(fake, "/needs", { machineId, count: 2, kind: "thread_question" });
-            expect(
-              yield* client.next((event) => event.type === "changed", "needs.changed"),
-            ).toEqual({ type: "changed", reason: "needs", needsCount: 2 });
+            const changed = yield* client.next(
+              (event) => event.revision > live.revision,
+              "needs.changed",
+            );
+            expect(changed.needsCount).toBe(2);
 
             // The stream drops; an event lands while it is down and is replayed on resume.
             yield* Effect.promise(() => relay.close());
@@ -286,14 +285,11 @@ describe("BanneretRelayFeed", () => {
             yield* client.next(isLive, "live again");
             const resumed = eventsRequests(relay).at(-1)!;
             expect(resumed.headers["last-event-id"]).toEqual(expect.stringMatching(/^[0-9]+$/));
-            yield* client.next(
-              (event) => event.type === "changed" && event.reason === "mention",
-              "replayed mention",
-            );
-            yield* client.next(
-              (event) => event.type === "changed" && event.needsCount === 3,
+            const replayed = yield* client.next(
+              (event) => event.needsCount === 3,
               "replayed needs.changed",
             );
+            expect(replayed.revision).toBeGreaterThan(changed.revision);
 
             // Events the relay no longer holds: it sends reset, and the feed rereads capabilities.
             yield* Effect.promise(() => relay.close());
@@ -302,18 +298,23 @@ describe("BanneretRelayFeed", () => {
             clock.offsetMs = 25 * 60 * 60 * 1000;
             relay.requests.length = 0;
             yield* Effect.promise(() => relay.reopen());
+            // The reset clears the count the relay can no longer vouch for, and moves the revision.
             yield* client.next(
-              (event) => event.type === "changed" && event.reason === "reset",
+              (event) =>
+                event.live && event.needsCount === null && event.revision > replayed.revision,
               "reset",
             );
             expect(relay.requests.map((request) => request.url)).toContain(
               "/relay/v1/capabilities",
             );
-            // A capabilities change reaches the client as a new snapshot.
+            // A capabilities change: the feed rereads them and sends the new state.
+            relay.requests.length = 0;
             yield* control(fake, "/capabilities/bump", {});
             yield* client.next(
-              (event) => event.type === "snapshot" && event.live,
-              "snapshot after bump",
+              (event) =>
+                event.sectionsKnown &&
+                relay.requests.some((request) => request.url === "/relay/v1/capabilities"),
+              "state after capabilities.changed",
             );
           }),
         ),

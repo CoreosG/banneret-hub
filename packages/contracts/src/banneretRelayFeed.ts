@@ -129,28 +129,24 @@ export const BanneretFeedNeedsRead = read(BanneretFeedNeedsPage);
 export type BanneretFeedNeedsRead = typeof BanneretFeedNeedsRead.Type;
 
 /**
- * The live feed. A new subscriber gets a `snapshot` first; `changed` means refetch Today and Needs
- * you (after `needs.changed`, `mention`, a `reset`, or a reconnect that may have missed events).
+ * The live feed: the whole state each time, so a client that only keeps the latest value misses
+ * nothing. `revision` moves whenever Today or Needs you may have changed (`needs.changed`,
+ * `mention`, a `reset`, or a reconnect that may have missed events); the client refetches then.
  */
-export const BanneretFeedEvent = Schema.Union([
-  Schema.Struct({
-    type: Schema.Literal("snapshot"),
-    joined: Schema.Boolean,
-    live: Schema.Boolean,
-    /** When the stream last went live or down. */
-    since: Schema.NullOr(Schema.String),
-    /** The section kinds the relay advertises. */
-    sections: Schema.Array(Schema.String),
-    /** The open needs-you count from the last `needs.changed`, if one arrived. */
-    needsCount: Schema.NullOr(Schema.Number),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("changed"),
-    reason: Schema.Literals(["needs", "mention", "reset", "reconnected"]),
-    needsCount: Schema.optional(Schema.Number),
-  }),
-]);
-export type BanneretFeedEvent = typeof BanneretFeedEvent.Type;
+export const BanneretFeedState = Schema.Struct({
+  joined: Schema.Boolean,
+  live: Schema.Boolean,
+  /** When the stream last went live or down. */
+  since: Schema.NullOr(Schema.String),
+  /** False until the relay's capabilities have been read. */
+  sectionsKnown: Schema.Boolean,
+  /** The section kinds the relay advertises. */
+  sections: Schema.Array(Schema.String),
+  /** The open needs-you count from the last `needs.changed`, if one arrived. */
+  needsCount: Schema.NullOr(Schema.Number),
+  revision: Schema.Number,
+});
+export type BanneretFeedState = typeof BanneretFeedState.Type;
 
 const WsBanneretRelayTodayRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.today, {
   /** `visit` only when the person actually opens Today. */
@@ -167,7 +163,7 @@ const WsBanneretRelayNeedsRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.needs, {
 
 const WsBanneretRelayFeedRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.feed, {
   payload: Schema.Struct({}),
-  success: BanneretFeedEvent,
+  success: BanneretFeedState,
   error: EnvironmentAuthorizationError,
   stream: true,
 });

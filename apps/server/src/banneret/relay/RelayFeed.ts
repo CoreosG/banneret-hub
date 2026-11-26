@@ -7,7 +7,7 @@ import {
   BANNERET_RELAY_FEED_WS_METHODS,
   type BanneretEnrolmentView,
   type BanneretFeedDeepLink,
-  type BanneretFeedEvent,
+  type BanneretFeedState,
   type BanneretFeedNeedsItem,
   type BanneretFeedNeedsPage,
   type BanneretFeedNeedsRead,
@@ -53,17 +53,18 @@ const DEFAULT_OPTIONS: RelayFeedOptions = {
 interface FeedService {
   readonly today: (visit: boolean) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (cursor: string | undefined) => Effect.Effect<BanneretFeedNeedsRead>;
-  readonly events: Stream.Stream<BanneretFeedEvent>;
+  readonly events: Stream.Stream<BanneretFeedState>;
 }
 
 const NOT_JOINED = { joined: false, value: null, fetchedAt: null } as const;
-const NOT_JOINED_SNAPSHOT: BanneretFeedEvent = {
-  type: "snapshot",
+const NOT_JOINED_SNAPSHOT: BanneretFeedState = {
   joined: false,
   live: false,
   since: null,
+  sectionsKnown: false,
   sections: [],
   needsCount: null,
+  revision: 0,
 };
 
 /** A reference, so a server built without the feed layer answers as an environment that never joined. */
@@ -334,7 +335,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   const options = { ...DEFAULT_OPTIONS, ...overrides };
   const enrolment = yield* BanneretEnrolment;
   const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
-  const changes = yield* PubSub.unbounded<BanneretFeedEvent>();
+  const changes = yield* PubSub.unbounded<BanneretFeedState>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   interface Joined {
@@ -349,6 +350,9 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   let live = false;
   let since: string | null = null;
   let sections: ReadonlyArray<string> = [];
+  let sectionsKnown = false;
+  // Never reset, so a client can tell any two states apart.
+  let revision = 0;
   let protocol: string | undefined;
   let needsCount: number | null = null;
   let today: { readonly value: BanneretFeedToday; readonly fetchedAt: string } | null = null;
@@ -367,16 +371,21 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         }
       : null;
 
-  const snapshot = (): BanneretFeedEvent => ({
-    type: "snapshot",
+  const snapshot = (): BanneretFeedState => ({
     joined: joined !== null,
     live,
     since,
+    sectionsKnown,
     sections,
     needsCount,
+    revision,
   });
-  const publish = (event: BanneretFeedEvent) => PubSub.publish(changes, event);
-  const publishSnapshot = Effect.suspend(() => publish(snapshot()));
+  const publishSnapshot = Effect.suspend(() => PubSub.publish(changes, snapshot()));
+  /** Today or Needs you may have changed: clients refetch. */
+  const bump = Effect.suspend(() => {
+    revision += 1;
+    return publishSnapshot;
+  });
 
   const stillJoined = (key: string) => joined?.key === key;
 
@@ -506,6 +515,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         Effect.suspend(() => {
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
+          sectionsKnown = true;
           protocol = text(fields(reply.body)?.protocol, 16);
           return publishSnapshot;
         }),
@@ -530,16 +540,12 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     switch (message.event) {
       case "needs.changed": {
         const count = data?.count;
-        if (typeof count === "number" && Number.isInteger(count) && count >= 0) {
-          needsCount = count;
-          yield* publish({ type: "changed", reason: "needs", needsCount: count });
-        } else {
-          yield* publish({ type: "changed", reason: "needs" });
-        }
+        if (typeof count === "number" && Number.isInteger(count) && count >= 0) needsCount = count;
+        yield* bump;
         return;
       }
       case "mention":
-        yield* publish({ type: "changed", reason: "mention" });
+        yield* bump;
         return;
       case "capabilities.changed":
         yield* refreshSections(key);
@@ -548,7 +554,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         // The relay cannot replay what this server missed: refetch everything.
         needsCount = null;
         yield* refreshSections(key);
-        yield* publish({ type: "changed", reason: "reset" });
+        yield* bump;
         return;
       default:
         // bundle.changed and staff.removed belong to other parts of the Hub; unknown events are ignored.
@@ -651,7 +657,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           delay = 0;
           yield* setLive(key, true);
           // Without a resume id the relay cannot replay what a reconnect missed.
-          if (connections > 1) yield* publish({ type: "changed", reason: "reconnected" });
+          if (connections > 1) yield* bump;
         }),
       ).pipe(Effect.result);
       yield* setLive(key, false);
@@ -681,6 +687,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         live = false;
         since = null;
         sections = [];
+        sectionsKnown = false;
         protocol = undefined;
         needsCount = null;
         today = null;
@@ -707,7 +714,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     ),
   );
 
-  const events = Stream.callback<BanneretFeedEvent>(
+  const events = Stream.callback<BanneretFeedState>(
     (mailbox) =>
       Effect.gen(function* () {
         const subscription = yield* PubSub.subscribe(changes);

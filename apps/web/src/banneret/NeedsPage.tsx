@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button } from "../components/ui/button";
 import { FeedStatus, NeedsItemRow } from "./FeedParts";
+import { offersSection } from "./relayFeed.logic";
 import { loadMoreNeeds } from "./relayFeedStore";
 import { FeedPage, NotJoinedNote } from "./TodayPage";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
@@ -19,7 +20,7 @@ export function NeedsPage() {
     );
   }
   const { feed, workspace, environmentId } = enterprise;
-  if (feed.sections.length > 0 && !feed.sections.includes("needs")) {
+  if (!offersSection(feed, "needs")) {
     return (
       <FeedPage title="Needs you">
         <p className="text-muted-foreground text-sm">{workspace.name} does not offer Needs you.</p>

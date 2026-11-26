@@ -10,7 +10,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
-  type BanneretFeedEvent,
+  type BanneretFeedState,
   type BanneretFeedNeedsItem,
   type BanneretFeedNeedsRead,
   type BanneretFeedToday,
@@ -61,8 +61,8 @@ export const feedRpc = {
         input: cursor === undefined ? {} : { cursor },
       }),
     ),
-  /** Calls `listener` with each feed event; returns the unsubscribe. */
-  subscribe: (environmentId: EnvironmentId, listener: (event: BanneretFeedEvent) => void) =>
+  /** Calls `listener` with each feed state; returns the unsubscribe. */
+  subscribe: (environmentId: EnvironmentId, listener: (event: BanneretFeedState) => void) =>
     appAtomRegistry.subscribe(
       feedAtom({ environmentId, input: {} }),
       (result) => {
@@ -81,6 +81,8 @@ export interface EnvironmentFeed {
   readonly joined: boolean;
   readonly live: boolean;
   readonly liveSince: string | null;
+  /** False until the relay's capabilities have been read; sections then show until they are. */
+  readonly sectionsKnown: boolean;
   readonly sections: ReadonlyArray<string>;
   /** From the last `needs.changed`; null until one arrives. */
   readonly needsCount: number | null;
@@ -99,6 +101,7 @@ const EMPTY_FEED: EnvironmentFeed = {
   joined: false,
   live: false,
   liveSince: null,
+  sectionsKnown: false,
   sections: [],
   needsCount: null,
   today: null,
@@ -188,26 +191,27 @@ export async function loadMoreNeeds(environmentId: EnvironmentId) {
   });
 }
 
-function applyEvent(environmentId: EnvironmentId, event: BanneretFeedEvent) {
-  if (event.type === "snapshot") {
-    const before = useRelayFeedStore.getState().feeds[environmentId];
-    update(environmentId, {
-      joined: event.joined,
-      live: event.live,
-      liveSince: event.since,
-      sections: event.sections,
-      needsCount: event.needsCount,
-    });
-    // Joining (or a new company) starts the copies again.
-    if (event.joined && before?.joined !== true) {
-      void refreshToday(environmentId);
-      void refreshNeeds(environmentId);
-    }
-    return;
+// The revision each watched environment's copies were read at.
+const seenRevisions = new Map<EnvironmentId, number>();
+
+function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
+  const before = useRelayFeedStore.getState().feeds[environmentId];
+  update(environmentId, {
+    joined: state.joined,
+    live: state.live,
+    liveSince: state.since,
+    sectionsKnown: state.sectionsKnown,
+    sections: state.sections,
+    needsCount: state.needsCount,
+  });
+  const seen = seenRevisions.get(environmentId);
+  seenRevisions.set(environmentId, state.revision);
+  // Joining (or a new company), or a change since the copies were read: read them again.
+  const joinedNow = state.joined && before?.joined !== true;
+  if (joinedNow || (seen !== undefined && seen !== state.revision)) {
+    void refreshToday(environmentId);
+    void refreshNeeds(environmentId);
   }
-  if (event.needsCount !== undefined) update(environmentId, { needsCount: event.needsCount });
-  void refreshToday(environmentId);
-  void refreshNeeds(environmentId);
 }
 
 const watchers = new Map<EnvironmentId, { count: number; stop: () => void }>();
@@ -221,7 +225,7 @@ export function watchFeed(environmentId: EnvironmentId): () => void {
   if (existing !== undefined) {
     existing.count += 1;
   } else {
-    const stop = feedRpc.subscribe(environmentId, (event) => applyEvent(environmentId, event));
+    const stop = feedRpc.subscribe(environmentId, (state) => applyState(environmentId, state));
     watchers.set(environmentId, { count: 1, stop });
     void refreshToday(environmentId);
     void refreshNeeds(environmentId);
@@ -235,6 +239,7 @@ export function watchFeed(environmentId: EnvironmentId): () => void {
     entry.count -= 1;
     if (entry.count === 0) {
       watchers.delete(environmentId);
+      seenRevisions.delete(environmentId);
       entry.stop();
     }
   };

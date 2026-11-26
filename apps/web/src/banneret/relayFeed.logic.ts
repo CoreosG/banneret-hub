@@ -121,3 +121,12 @@ export function deepLinkTarget(input: {
   }
   return { kind: "none" };
 }
+
+/**
+ * Whether to show a section: the relay advertises it, or its capabilities are not read yet (a relay
+ * that is down when the Hub starts still shows the rows, with their last-known state).
+ */
+export const offersSection = (
+  feed: { readonly sectionsKnown: boolean; readonly sections: ReadonlyArray<string> },
+  kind: string,
+) => !feed.sectionsKnown || feed.sections.includes(kind);

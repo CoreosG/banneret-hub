@@ -3,7 +3,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import {
   EnvironmentId,
   type BanneretEnrolmentView,
-  type BanneretFeedEvent,
+  type BanneretFeedState,
   type BanneretFeedNeedsItem,
   type BanneretFeedNeedsRead,
   type BanneretFeedToday,
@@ -102,8 +102,13 @@ const TODAY: BanneretFeedToday = {
   health: block,
 };
 
-const snapshot = (sections: string[], needsCount: number | null = null): BanneretFeedEvent => ({
-  type: "snapshot",
+const snapshot = (
+  sections: string[],
+  needsCount: number | null = null,
+  revision = 1,
+): BanneretFeedState => ({
+  sectionsKnown: true,
+  revision,
   joined: true,
   live: true,
   since: "2026-11-26T09:59:00.000Z",
@@ -133,7 +138,7 @@ function setup(
       ? ({ environmentId: LOCAL, id: ref.threadId } as EnvironmentThreadShell)
       : null,
   );
-  const listeners = new Set<(event: BanneretFeedEvent) => void>();
+  const listeners = new Set<(event: BanneretFeedState) => void>();
   const server = {
     today: {
       joined: true,
@@ -154,7 +159,7 @@ function setup(
       return () => listeners.delete(listener);
     }),
   };
-  const emit = (event: BanneretFeedEvent) =>
+  const emit = (event: BanneretFeedState) =>
     act(() => {
       for (const listener of listeners) listener(event);
     });
@@ -254,7 +259,7 @@ describe("Enterprise Today and Needs you", () => {
     // No needs.changed yet: the loaded page is the count.
     await expect.element(screen.getByTestId("needs-count")).toHaveTextContent("4");
     const needsCalls = spies.needs.mock.calls.length;
-    await emit({ type: "changed", reason: "needs", needsCount: 7 });
+    await emit(snapshot(["today", "needs"], 7, 2));
     await expect.element(screen.getByTestId("needs-count")).toHaveTextContent("7");
     await vi.waitFor(() => expect(spies.needs.mock.calls.length).toBeGreaterThan(needsCalls));
     // A refetch is never a visit.
@@ -331,7 +336,7 @@ describe("Enterprise Today and Needs you", () => {
       fetchedAt: "2026-11-26T10:00:00.000Z",
       problem: { message: "Cannot reach Example Company.", since: "2026-11-26T10:05:00.000Z" },
     };
-    await emit({ type: "changed", reason: "needs" });
+    await emit(snapshot(["today", "needs"], null, 2));
     const statusText = () => document.querySelector('[role="status"]')?.textContent ?? "";
     await vi.waitFor(() => expect(statusText()).toContain("Cannot reach Example Company."));
     expect(statusText()).toContain("Showing what Example Company said");
@@ -340,7 +345,7 @@ describe("Enterprise Today and Needs you", () => {
     // This machine's own server cannot be reached either: the page still shows what it had.
     server.today = null;
     server.needs = null;
-    await emit({ type: "changed", reason: "reconnected" });
+    await emit(snapshot(["today", "needs"], null, 3));
     await vi.waitFor(() =>
       expect(useRelayFeedStore.getState().feeds[LOCAL]?.unreachable).toBe(true),
     );

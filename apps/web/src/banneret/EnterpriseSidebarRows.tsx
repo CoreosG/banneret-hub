@@ -10,7 +10,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "../components/ui/sidebar";
-import { needsCountLabel } from "./relayFeed.logic";
+import { needsCountLabel, offersSection } from "./relayFeed.logic";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
 export function EnterpriseSidebarRows() {
@@ -20,8 +20,8 @@ export function EnterpriseSidebarRows() {
   const { isMobile, setOpenMobile } = useSidebar();
   if (enterprise === null) return null;
   const { feed, workspace } = enterprise;
-  const showToday = feed.sections.includes("today");
-  const showNeeds = feed.sections.includes("needs");
+  const showToday = offersSection(feed, "today");
+  const showNeeds = offersSection(feed, "needs");
   if (!showToday && !showNeeds) return null;
   const go = (to: "/today" | "/needs") => {
     if (isMobile) setOpenMobile(false);
