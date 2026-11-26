@@ -1,6 +1,15 @@
 // Banneret Hub: the sidebar brand mark doubles as the workspace switcher.
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronsUpDownIcon, HouseIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import type { BanneretEnrolmentView, BanneretWorkspace } from "@t3tools/contracts";
+import {
+  ChevronsUpDownIcon,
+  HouseIcon,
+  LaptopIcon,
+  LogOutIcon,
+  PlusIcon,
+  Settings2Icon,
+  UsersIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
@@ -14,6 +23,9 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../components/ui/menu";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { enrolmentLine, type EnrolmentTone } from "./enterprise.logic";
+import { useEnrolmentView } from "./enrolmentStore";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
   openWorkspaceDialog,
@@ -37,8 +49,13 @@ export function WorkspaceSwitcher(props: {
     useWorkspacesStore((state) => state.activeId),
     workspaces,
   );
-  const activeName =
-    activeId === null ? null : workspaces.find((workspace) => workspace.id === activeId)?.name;
+  const active = workspaces.find((workspace) => workspace.id === activeId) ?? null;
+  const activeName = active?.name ?? null;
+  const enrolment = useEnrolmentView(usePrimaryEnvironmentId());
+  const joinedHere =
+    active?.relay !== undefined &&
+    enrolment?.workspaceId === active.id &&
+    enrolment.state === "configured";
 
   return (
     <Menu>
@@ -80,9 +97,47 @@ export function WorkspaceSwitcher(props: {
         >
           <WorkspaceRadioItem value={PERSONAL_VALUE} name="Personal" />
           {workspaces.map((workspace) => (
-            <WorkspaceRadioItem key={workspace.id} value={workspace.id} name={workspace.name} />
+            <WorkspaceRadioItem
+              key={workspace.id}
+              value={workspace.id}
+              name={workspace.name}
+              workspace={workspace}
+              enrolment={enrolment}
+            />
           ))}
         </MenuRadioGroup>
+        {active?.relay !== undefined ? (
+          <>
+            <MenuSeparator />
+            {joinedHere ? (
+              <>
+                <MenuItem onClick={() => openWorkspaceDialog({ kind: "machines" })}>
+                  <LaptopIcon />
+                  Machines…
+                </MenuItem>
+                <MenuItem onClick={() => openWorkspaceDialog({ kind: "leave" })}>
+                  <LogOutIcon />
+                  Leave…
+                </MenuItem>
+              </>
+            ) : (
+              <MenuItem
+                onClick={() =>
+                  openWorkspaceDialog(
+                    active.relay === undefined
+                      ? { kind: "enterprise" }
+                      : { kind: "enterprise", origin: active.relay.origin },
+                  )
+                }
+              >
+                <UsersIcon />
+                {enrolment?.workspaceId === active.id && enrolment.state !== "none"
+                  ? "Enrolment…"
+                  : "Join on this machine…"}
+              </MenuItem>
+            )}
+          </>
+        ) : null}
         <MenuSeparator />
         <MenuItem onClick={() => openWorkspaceDialog({ kind: "create" })}>
           <PlusIcon />
@@ -104,11 +159,35 @@ export function WorkspaceSwitcher(props: {
 
 // The active workspace carries a check, as upstream's selection menus do. Picking one closes the
 // menu, since the sidebar behind it changes.
-function WorkspaceRadioItem(props: { readonly value: string; readonly name: string }) {
+const TONE_DOT: Record<EnrolmentTone, string> = {
+  ok: "bg-success",
+  warn: "bg-warning",
+  error: "bg-destructive",
+  muted: "bg-muted-foreground/50",
+};
+
+function WorkspaceRadioItem(props: {
+  readonly value: string;
+  readonly name: string;
+  readonly workspace?: BanneretWorkspace;
+  readonly enrolment?: BanneretEnrolmentView | null;
+}) {
+  const line =
+    props.workspace?.relay !== undefined
+      ? enrolmentLine(props.workspace, props.enrolment ?? null)
+      : null;
   return (
     <MenuRadioItem value={props.value} closeOnClick>
-      <span className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate">{props.name}</span>
+      <span className="flex min-w-0 items-center gap-2">
+        {line !== null ? (
+          <span aria-hidden className={cn("size-2 shrink-0 rounded-full", TONE_DOT[line.tone])} />
+        ) : null}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate">{props.name}</span>
+          {line !== null ? (
+            <span className="truncate text-muted-foreground text-xs">{line.text}</span>
+          ) : null}
+        </span>
         <MenuRadioItemIndicator />
       </span>
     </MenuRadioItem>
