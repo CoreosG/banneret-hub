@@ -1,6 +1,7 @@
 # Relay protocol v1
 
 Canonical copy. The Go relay keeps a mirror with a drift test.
+Vendored from banneret-platform `aed7ce53054b1b45ef77e6399244ce1461791106`.
 
 `openapi.yaml` (OpenAPI 3.1) is the contract between a Banneret Hub server and a central relay. The canonical
 specification lives in the public Banneret Hub fork at `docs/banneret/relay-v1/`, with its TypeScript fake relay and

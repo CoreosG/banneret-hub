@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Banneret Hub: copies the /relay/v1 contract from a banneret-platform checkout into docs/banneret/relay-v1/.
-//   node scripts/banneret/sync-relay-spec.mjs <platform>/internal/hub/contract/relay-v1
+//   node scripts/banneret/sync-relay-spec.mjs <platform>/internal/hub/contract/relay-v1 <commit>
+// <commit> is the banneret-platform commit the folder comes from; the README header records it.
 // Copies openapi.yaml, README.md and examples/ (valid and invalid), never the Go files, and replaces the
 // examples so files removed upstream disappear here too. Running it twice gives the same tree.
 import * as NodeFS from "node:fs";
@@ -8,11 +9,13 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 const header = "Canonical copy. The Go relay keeps a mirror with a drift test.";
+const sourcePrefix = "Vendored from banneret-platform ";
 
 const source = process.argv[2];
-if (!source) {
+const commit = process.argv[3];
+if (!source || !commit || !/^[0-9a-f]{40}$/.test(commit)) {
   console.error(
-    "usage: node scripts/banneret/sync-relay-spec.mjs <path-to-platform relay-v1 folder>",
+    "usage: node scripts/banneret/sync-relay-spec.mjs <path-to-platform relay-v1 folder> <full commit sha>",
   );
   process.exit(2);
 }
@@ -37,9 +40,9 @@ NodeFS.copyFileSync(NodePath.join(source, "openapi.yaml"), NodePath.join(target,
 // The header goes right under the title, once.
 const readme = NodeFS.readFileSync(NodePath.join(source, "README.md"), "utf8")
   .split("\n")
-  .filter((line) => line !== header);
+  .filter((line) => line !== header && !line.startsWith(sourcePrefix));
 const titleIndex = readme.findIndex((line) => line.startsWith("# "));
-readme.splice(titleIndex + 1, 0, "", header);
+readme.splice(titleIndex + 1, 0, "", header, `${sourcePrefix}\`${commit}\`.`);
 NodeFS.writeFileSync(
   NodePath.join(target, "README.md"),
   readme.join("\n").replace(/\n\n\n+/g, "\n\n"),

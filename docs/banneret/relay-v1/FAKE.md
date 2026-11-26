@@ -60,7 +60,7 @@ returns JSON.
 ## Updating the spec
 
 ```sh
-node scripts/banneret/sync-relay-spec.mjs <banneret-platform>/internal/hub/contract/relay-v1
+node scripts/banneret/sync-relay-spec.mjs <banneret-platform>/internal/hub/contract/relay-v1 <commit-sha>
 ```
 
-It copies `openapi.yaml`, `README.md` and `examples/` here and keeps the header line. Then run the suite.
+It copies `openapi.yaml`, `README.md` and `examples/` here and records the source commit in the header. Then run the suite.
