@@ -429,6 +429,7 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+import { linkOriginLabel } from "../banneret/linkOriginLabel";
 
 const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
@@ -1010,7 +1011,8 @@ export default function ChatView(props: ChatViewProps) {
     const parentRef = delegatedFromRef;
     return {
       title: delegatedFromThread?.title ?? delegatedFrom.title,
-      environmentLabel: delegatedFromEnvironment?.label ?? activeThread?.linkOrigin?.label ?? "",
+      environmentLabel:
+        delegatedFromEnvironment?.label ?? linkOriginLabel(activeThread?.linkOrigin) ?? "",
       // Only an environment this client is connected to can open the parent.
       ...(delegatedFromEnvironment === null
         ? {}
@@ -3592,7 +3594,7 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadId={activeThread.id}
               isServerThread={isServerThread}
               activeThreadTitle={activeThread.title}
-              activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
+              activeThreadLinkOrigin={linkOriginLabel(activeThreadShell?.linkOrigin) ?? null}
               activeProject={activeProject ?? null}
               parentThreadLink={headerParentThreadLink}
               onOpenThread={onOpenRelatedThreadStable}

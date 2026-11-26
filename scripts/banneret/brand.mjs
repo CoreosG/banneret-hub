@@ -1,7 +1,6 @@
 // Build-time identity rewrite, so upstream files stay unedited: product name, T3CODE_* / T3_*
-// variables, the t3code:// scheme and (`cli: true`) the `t3` command and server process title.
-// Source and tests keep upstream's values. Catalogs are keyed by a hash of the English source,
-// so changed entries are re-keyed too.
+// variables, the t3code:// scheme, copy naming the `t3` command and (`cli: true`) the server's
+// command and process title. Source and tests keep upstream's values; catalogs are re-keyed.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -97,6 +96,17 @@ const CLI_RULES = [
 ];
 
 /**
+ * Web and desktop copy that names the command: the About row "t3 command", its "`t3`", and the
+ * desktop's launcher messages. Their launcher is `banneret` too (`DesktopCliShim.launcherPath`).
+ * Applied to every bundle and catalog, so translations are re-keyed. A `$context` ("verb, installs
+ * the t3 command") is part of General Translation's key but not of the catalog, so it is left alone.
+ */
+const COMMAND_COPY_RULES = [
+  [/(?<!installs the )\bt3 command\b/g, `${CLI_NAME} command`],
+  [/`t3`/g, `\`${CLI_NAME}\``],
+];
+
+/**
  * The server entry names its process `banneret`, so `ps` and Activity Monitor stop listing a `t3`
  * process (Linux also takes it as the thread name; Windows as the console title). The runtime
  * executable keeps upstream's `t3` file name. Anchored on upstream's first line of entrypoint code.
@@ -121,6 +131,8 @@ export function titleServerEntry(code, file) {
 export function rebrandText(text, { cli = false } = {}) {
   let result = text.replace(NAME_PATTERN, BRAND_NAME).replace(ENV_PATTERN, (n) => ENV_RENAMES[n]);
   for (const [pattern, replacement] of SCHEME_RULES) result = result.replace(pattern, replacement);
+  for (const [pattern, replacement] of COMMAND_COPY_RULES)
+    result = result.replace(pattern, replacement);
   if (cli)
     for (const [pattern, replacement] of CLI_RULES) result = result.replace(pattern, replacement);
   return result;

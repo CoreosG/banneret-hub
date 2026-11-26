@@ -95,6 +95,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { Spinner } from "../ui/spinner";
 import { cn } from "~/lib/utils";
+import { linkOriginLabel } from "../../banneret/linkOriginLabel";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
@@ -1107,7 +1108,7 @@ export function ThreadRelationshipsPanel(props: {
             <ThreadLineageRowList hiddenCount={0} onShowMore={() => {}}>
               <DelegatedFromRow
                 delegatedFrom={delegatedFrom}
-                fallbackLabel={currentThread?.linkOrigin?.label}
+                fallbackLabel={linkOriginLabel(currentThread?.linkOrigin)}
                 anyInstanceBadge={hasInstanceBadge(providerEntries)}
               />
             </ThreadLineageRowList>
