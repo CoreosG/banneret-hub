@@ -95,7 +95,7 @@ export interface EnvironmentFeed {
   readonly unreachable: boolean;
 }
 
-export const EMPTY_FEED: EnvironmentFeed = {
+const EMPTY_FEED: EnvironmentFeed = {
   joined: false,
   live: false,
   liveSince: null,
@@ -147,7 +147,7 @@ export async function refreshToday(environmentId: EnvironmentId, visit = false) 
 }
 
 /** Reads the first page of Needs you, replacing any pages loaded before. */
-export async function refreshNeeds(environmentId: EnvironmentId) {
+async function refreshNeeds(environmentId: EnvironmentId) {
   const read = await feedRpc.needs(environmentId);
   if (read === null) {
     update(environmentId, { unreachable: true });

@@ -119,7 +119,7 @@ export function NeedsItemRow(props: { readonly item: BanneretFeedNeedsItem }) {
   );
 }
 
-export function NotMeasuredLines(props: {
+function NotMeasuredLines(props: {
   readonly lines: ReadonlyArray<BanneretFeedNotMeasured>;
 }) {
   if (props.lines.length === 0) return null;
