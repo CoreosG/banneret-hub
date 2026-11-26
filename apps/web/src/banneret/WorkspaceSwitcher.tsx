@@ -25,6 +25,8 @@ import {
 const PERSONAL_VALUE = "";
 
 export function WorkspaceSwitcher(props: {
+  /** The brand's own label, so the upstream string stays in use. */
+  readonly ariaLabel: string;
   readonly onBackdrop: boolean;
   readonly children: ReactNode;
 }) {
@@ -43,7 +45,7 @@ export function WorkspaceSwitcher(props: {
         render={
           <button
             type="button"
-            aria-label="Switch workspace"
+            aria-label={props.ariaLabel}
             className={cn(
               "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md px-1 outline-hidden ring-ring [-webkit-app-region:no-drag] hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset md:flex",
               props.onBackdrop ? "text-white hover:bg-white/10" : "text-foreground",
