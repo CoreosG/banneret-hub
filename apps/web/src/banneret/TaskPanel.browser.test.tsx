@@ -390,14 +390,33 @@ describe("Task tab", () => {
 });
 
 describe("Task tab in a thread's right panel", () => {
-  it("keeps a saved task tab when the panel state loads again", () => {
+  it("keeps a saved task tab when the app reloads", async () => {
     const surface = taskSurface(LOCAL, card("2", "Guild invites").task);
     const key = scopedThreadKey(scopeThreadRef(LOCAL, ThreadId.make("thread-1")));
-    const loaded = migratePersistedRightPanelState({
-      byThreadKey: { [key]: { isOpen: true, activeSurfaceId: surface.id, surfaces: [surface] } },
-    });
-    expect(loaded.byThreadKey[key]?.surfaces).toEqual([surface]);
-    expect(loaded.byThreadKey[key]?.activeSurfaceId).toBe(surface.id);
+    const saved = { isOpen: true, activeSurfaceId: surface.id, surfaces: [surface] };
+    const storageKey = "t3code:right-panel-state:v2";
+    const before = localStorage.getItem(storageKey);
+    try {
+      // Same version: the saved state loads as written.
+      useRightPanelStore.setState({ byThreadKey: {} });
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          state: { byThreadKey: { [key]: saved }, threadPanelVisibilityByThreadKey: {} },
+          version: useRightPanelStore.persist.getOptions().version,
+        }),
+      );
+      await useRightPanelStore.persist.rehydrate();
+      expect(useRightPanelStore.getState().byThreadKey[key]?.surfaces).toEqual([surface]);
+    } finally {
+      if (before === null) localStorage.removeItem(storageKey);
+      else localStorage.setItem(storageKey, before);
+      useRightPanelStore.setState({ byThreadKey: {} });
+    }
+    // An older version migrates, and the migration keeps only registered kinds.
+    const migrated = migratePersistedRightPanelState({ byThreadKey: { [key]: saved } });
+    expect(migrated.byThreadKey[key]?.surfaces).toEqual([surface]);
+    expect(migrated.byThreadKey[key]?.activeSurfaceId).toBe(surface.id);
   });
 
   it("opens as a tab beside a routed thread", async () => {
