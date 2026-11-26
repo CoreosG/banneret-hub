@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// Banneret Hub: copies the /relay/v1 contract (openapi.yaml, README.md, examples/; never the Go files) from a
-// banneret-platform folder into docs/banneret/relay-v1/, recording <commit> in the README header.
+// One-off import only: docs/banneret/relay-v1/ here is canonical and banneret-platform mirrors it. This copies
+// openapi.yaml, README.md and examples/ from a platform folder over the canonical copy (examples replaced).
 //   node scripts/banneret/sync-relay-spec.mjs <platform>/internal/hub/contract/relay-v1 <commit>
-// Examples are replaced, so files removed upstream disappear here too.
+// See docs/banneret/relay-v1/FAKE.md, "Changing the spec".
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
-const header = "Canonical copy. The Go relay keeps a mirror with a drift test.";
-const sourcePrefix = "Vendored from banneret-platform ";
+const header =
+  "Canonical copy. banneret-platform mirrors it at `internal/hub/contract/relay-v1/` with a drift test.";
+const sourcePrefix = "First imported from banneret-platform ";
 
 const source = process.argv[2];
 const commit = process.argv[3];

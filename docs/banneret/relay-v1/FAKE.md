@@ -20,7 +20,9 @@ pairing is approved as soon as it starts, as the founder `ada-example`. Options:
 
 In tests, `startFakeRelay({ port: 0 })` from `@t3tools/banneret-relay-fake` returns the same server with
 in-process helpers: `approve(confirmCode, person?)`, `refuse(confirmCode, reason)`, `seedNeeds`,
-`bumpCapabilities`, `publishBundle` and `removeStaff`.
+`bumpCapabilities`, `publishBundle` and `removeStaff`. `eventClock` replaces the clock that ages
+the event log, so a test can prove the 24-hour `Last-Event-ID` bound and its `reset` event without waiting a
+day.
 
 ## Run the conformance suite
 
@@ -37,8 +39,8 @@ BANNERET_RELAY_URL=http://127.0.0.1:8080 vp test run --config ../../vite.config.
 ```
 
 That relay must run with the network identity check off, and it must expose the control surface below.
-Two tests run only against the fake, because they need a fresh store or a different configuration: the
-empty-store start and the network identity check.
+Three tests run only against the fake, because they need a fresh store or a different configuration: the
+empty-store start, the network identity check and the 24-hour event retention bound.
 
 ## Control surface (tests only)
 
@@ -52,15 +54,23 @@ returns JSON.
 | `POST /conformance/v1/pairings/{pairingId}/approve`                                                 | A founder approves an `awaiting_approval` pairing.                                                                                                        |
 | `POST /conformance/v1/pairings/{pairingId}/refuse` `{reason}`                                       | Refuses with `declined` or `not_staff`.                                                                                                                   |
 | `POST /conformance/v1/pairings/{pairingId}/expire`                                                  | Expires the pairing now: `code_expired` while `pending`, `approval_expired` while `awaiting_approval`.                                                    |
-| `POST /conformance/v1/needs` `{machineId, count, kind?}`                                            | Adds needs-you items for the machine's owner and sends `needs.changed` (and `mention` for kind `mention`).                                                |
+| `POST /conformance/v1/needs` `{machineId, count, kind?}`                                            | Adds needs-you items for the machine's owner, in this order, and sends one `mention` per item for kind `mention`, then one `needs.changed`.               |
 | `POST /conformance/v1/capabilities/bump`                                                            | Changes the capabilities version and sends `capabilities.changed`.                                                                                        |
 | `POST /conformance/v1/bundle` `{bundleSha}`                                                         | Sends `bundle.changed`.                                                                                                                                   |
 | `POST /conformance/v1/staff/remove` `{login}`                                                       | Removes a person, revokes their machines and sends `staff.removed`.                                                                                       |
 
-## Updating the spec
+## Changing the spec
+
+This folder is the canonical contract. Change `openapi.yaml`, `README.md` and `examples/` here, update the fake
+and the conformance suite in the same pull request, and run the suite. banneret-platform then copies the folder
+into its mirror at `internal/hub/contract/relay-v1/`, where a drift test fails until the copy matches.
+
+`scripts/banneret/sync-relay-spec.mjs` remains only for a one-off import from the platform, for example to take
+over a change made there first:
 
 ```sh
 node scripts/banneret/sync-relay-spec.mjs <banneret-platform>/internal/hub/contract/relay-v1 <commit-sha>
 ```
 
-It copies `openapi.yaml`, `README.md` and `examples/` here and records the source commit in the header. Then run the suite.
+It overwrites the canonical `openapi.yaml`, `README.md` and `examples/` here with the platform's, so review the
+diff before committing.
