@@ -70,6 +70,9 @@ returns JSON.
 | `POST /conformance/v1/repositories` `{count}`                                                       | Adds `count` repositories (`example-org/repo-N`) to the company list, in this order.                                                                      |
 | `POST /conformance/v1/capabilities/bump`                                                            | Changes the capabilities version and sends `capabilities.changed`.                                                                                        |
 | `POST /conformance/v1/bundle` `{bundleSha}`                                                         | Sends `bundle.changed`.                                                                                                                                   |
+| `POST /conformance/v1/visits/read` `{login}`                                                        | Returns `{lastVisitAt, lastReadAt}` for the person: the reported last visit and the last `visit=1` read (both null if none).                              |
+| `POST /conformance/v1/visits/age` `{login, minutes}`                                                | Moves the person's stored visit times `minutes` into the past, to cross the 30-minute rule without waiting.                                               |
+| `POST /conformance/v1/usage` `{machineId}`                                                          | Returns `{usage}`: the `usage` array of the machine's latest facts (empty when it sent none).                                                             |
 | `POST /conformance/v1/staff/remove` `{login}`                                                       | Removes a person, revokes their machines and sends `staff.removed`.                                                                                       |
 
 ## Changing the spec
