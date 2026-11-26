@@ -10,6 +10,7 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuRadioItemIndicator,
   MenuSeparator,
   MenuTrigger,
 } from "../components/ui/menu";
@@ -77,11 +78,9 @@ export function WorkspaceSwitcher(props: {
           value={activeId ?? PERSONAL_VALUE}
           onValueChange={(value) => setActiveWorkspace(value === PERSONAL_VALUE ? null : value)}
         >
-          <MenuRadioItem value={PERSONAL_VALUE}>Personal</MenuRadioItem>
+          <WorkspaceRadioItem value={PERSONAL_VALUE} name="Personal" />
           {workspaces.map((workspace) => (
-            <MenuRadioItem key={workspace.id} value={workspace.id}>
-              {workspace.name}
-            </MenuRadioItem>
+            <WorkspaceRadioItem key={workspace.id} value={workspace.id} name={workspace.name} />
           ))}
         </MenuRadioGroup>
         <MenuSeparator />
@@ -100,5 +99,18 @@ export function WorkspaceSwitcher(props: {
         </MenuItem>
       </MenuPopup>
     </Menu>
+  );
+}
+
+// The active workspace carries a check, as upstream's selection menus do. Picking one closes the
+// menu, since the sidebar behind it changes.
+function WorkspaceRadioItem(props: { readonly value: string; readonly name: string }) {
+  return (
+    <MenuRadioItem value={props.value} closeOnClick>
+      <span className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate">{props.name}</span>
+        <MenuRadioItemIndicator />
+      </span>
+    </MenuRadioItem>
   );
 }
