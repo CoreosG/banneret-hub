@@ -345,6 +345,13 @@ describe("Enterprise build map", () => {
     expect(itemRow("polish")!.querySelector("button")).toBeNull();
     expect(itemRow("rate-limits")!.querySelector("button")).toBeNull();
     expect(itemRow("polish")!.querySelector("[tabindex]")).toBeNull();
+    // It looks inert: no pointer, and a hint that no task is linked.
+    const inert = itemRow("polish")!.firstElementChild!;
+    expect(getComputedStyle(inert).cursor).toBe("default");
+    expect(itemRow("polish")!.querySelector("[data-no-task]")?.textContent).toBe("No task linked");
+    const clickable = itemRow("invites")!.querySelector("[data-open-task]")!;
+    expect(getComputedStyle(clickable).cursor).toBe("pointer");
+    expect(itemRow("invites")!.querySelector("[data-no-task]")).toBeNull();
 
     await userEvent.click(itemRow("invites")!.querySelector("[data-open-task]")!);
     const dialog = page.getByRole("dialog");

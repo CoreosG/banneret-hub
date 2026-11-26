@@ -24,6 +24,8 @@ const patterns = [
   { id: "launcher-name", regex: /"t3\.cmd"|"t3\.exe"|command -v t3\b/ },
   // The app-link scheme: `t3code://`, "t3code-dev:" protocol checks, /^t3code(?:-[a-z]+)?:$/.
   { id: "deep-link", regex: /\bt3code(-dev)?:(\/\/|["'$])|\^t3code\(/ },
+  // Copy naming the command, which brand.mjs renames in every bundle (the About row's title).
+  { id: "command-copy", regex: /\bt3 command\b/ },
   {
     id: "official-host",
     regex: /https:\/\/(ingest|app|nightly\.app)\.t3\.codes|t3\.codes\/install/,

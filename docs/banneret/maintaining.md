@@ -63,8 +63,9 @@ are plain source edits in `bootService.ts`, `serviceLauncher.ts` and `cli/update
 The server build also passes `cli: true`, which renames the command: `Command.make("t3")` (help,
 usage and the `--version` banner), quoted commands such as `` `t3 up` ``, the `t3@<version>` status
 line, prose such as "Another t3 at", and the launcher lookups on PATH and in the install bin dir. The runtime executable, the npm package (`npx t3@...`) and
-the hidden `t3 checkpoint` commit messages keep `t3`. Web and desktop copy that names the command
-is not rewritten yet. If the build fails with "cannot reproduce translation key",
+the hidden `t3 checkpoint` commit messages keep `t3`. In web and desktop copy, which `cli` does
+not touch, every bundle rewrites only "t3 command" and a bare `` `t3` `` (`COMMAND_COPY_RULES`), as on
+the About screen; other web copy that names the command still says `t3`. If the build fails with "cannot reproduce translation key",
 General Translation changed its hashing: update `hashCatalogSource` to match `hashSource` in the
 `generaltranslation` package.
 

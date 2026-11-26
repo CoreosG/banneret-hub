@@ -1,7 +1,7 @@
 // Banneret Hub: the build map for an Enterprise workspace, drawn from the relay's snapshot `map` file,
 // with a Rests-on view when the map section carries the `rests_on` flag. The relay computes every
 // stage, status, reason and counter; this page only draws them. Read-only. An item with a task opens
-// its Task tab; an item without one is not clickable. Relay strings render as plain text.
+// its Task tab; an item without one is not clickable and says so. Relay strings render as plain text.
 import type { BanneretBoardTask, BanneretMap, BanneretMapItem } from "@t3tools/contracts";
 import { type ReactNode, useState } from "react";
 
@@ -39,19 +39,25 @@ function MapItemView(props: {
       </span>
     </>
   );
-  const box = "flex w-full flex-col gap-1 rounded-md border bg-card p-2.5 text-start shadow-xs/5";
+  const box = "flex w-full flex-col gap-1 rounded-md border p-2.5 text-start";
   const { task } = item;
   return (
     <li data-item-id={item.id} data-at-work={props.atWork ? "" : undefined}>
       {task === undefined ? (
-        <div className={box}>{content}</div>
+        // Quieter than a card with a task, so it does not read as something to click.
+        <div className={cn(box, "cursor-default border-dashed")}>
+          {content}
+          <span data-no-task className="text-muted-foreground/70 text-xs">
+            No task linked
+          </span>
+        </div>
       ) : (
         <button
           type="button"
           data-open-task={task.id}
           className={cn(
             box,
-            "text-card-foreground hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            "cursor-pointer bg-card text-card-foreground shadow-xs/5 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           )}
           onClick={() => props.onOpen(task)}
         >

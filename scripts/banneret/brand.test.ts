@@ -78,6 +78,32 @@ describe("command name", () => {
   });
 });
 
+describe("copy the 0.1.1217 check found", () => {
+  it("names the banneret command on the About screen, keeping translation contexts", () => {
+    expect(rebrandText(read("apps/web/src/components/settings/settingsSearch.ts"))).toContain(
+      'title: msg("banneret command")',
+    );
+    const row = rebrandText(read("apps/web/src/components/settings/CliCommandSettingsRow.tsx"));
+    expect(row).toContain("Run Banneret Hub's CLI as `banneret` from any terminal.");
+    expect(row).toContain('$context: "verb, installs the t3 command"');
+    expect(row).toContain('$context: "verb, uninstalls the t3 command"');
+    expect(rebrandText(read("apps/web/src/state/desktopCliCommand.ts"))).not.toContain(
+      "t3 command",
+    );
+  });
+
+  it("names new links' sessions Banneret Hub, and still shows only the environment of old ones", () => {
+    expect(rebrandText(read("apps/server/src/peer/PeerLinks.ts"))).toContain(
+      'LINK_CLIENT_NAME_PREFIX = "Banneret Hub · "',
+    );
+    // Threads copied from official T3 Code keep "T3 Code · <environment>"; the shipped helper must
+    // still strip it after the rewrite.
+    expect(rebrandText(read("apps/web/src/banneret/linkOriginLabel.ts"))).toContain(
+      "/^(?:T3\\x20Code|Banneret Hub) · /",
+    );
+  });
+});
+
 describe("environment", () => {
   it("renames the variables that would point at official T3 state", () => {
     expect(rebrandText('Config.String("T3CODE_HOME")')).toBe('Config.String("BANNERET_HOME")');
