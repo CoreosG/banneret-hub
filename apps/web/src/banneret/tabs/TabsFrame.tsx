@@ -3,20 +3,30 @@
 // so the page under it is never remounted (ChatView keeps its composer text and scroll).
 import "./tabsFrame.css";
 
-import { Outlet, useLocation } from "@tanstack/react-router";
+import { Outlet, useLocation, useRouter } from "@tanstack/react-router";
+import { useEffect } from "react";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
+import { TabsBar } from "./TabsBar";
+import { subscribeTabsToRoute } from "./tabsRoute";
+import { useTabsStore } from "./tabsStore";
 
 export function TabsFrame() {
+  const router = useRouter();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const on = pathname !== "/welcome";
+  const hidden = useTabsStore((state) => state.hidden);
+  const on = !hidden && pathname !== "/welcome";
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- every navigation and workspace switch opens or reuses a tab
+  useEffect(() => subscribeTabsToRoute(router), [router]);
   return (
     <div data-banneret-tabs-frame={on ? "on" : "off"}>
       <div
         data-banneret-tabs-bar=""
         className={cn("items-center gap-1 border-b bg-background", isElectron && "drag-region")}
-      />
+      >
+        {on ? <TabsBar /> : null}
+      </div>
       <div data-banneret-tabs-body="">
         <Outlet />
       </div>
