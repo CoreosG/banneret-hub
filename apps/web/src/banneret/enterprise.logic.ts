@@ -128,7 +128,7 @@ export function enrolmentLine(
 export function healthLine(view: BanneretEnrolmentView): EnrolmentLine {
   switch (view.health) {
     case "healthy":
-      return { tone: "ok", text: connectedLine({ login: view.me?.login }) };
+      return { tone: "ok", text: connectedLine(view.me) };
     case "unreachable":
       return {
         tone: "warn",
