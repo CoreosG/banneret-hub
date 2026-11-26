@@ -681,6 +681,131 @@ describe("BanneretRelayFeed feed and graveyard", () => {
   );
 });
 
+const isTaskRead = (url: string) => url.startsWith("/relay/v1/tasks/");
+
+describe("BanneretRelayFeed task read", () => {
+  it.live("an environment that has not joined reads no task and calls no relay", () =>
+    withFake((_fake, relay) =>
+      Effect.gen(function* () {
+        const feed = yield* RelayFeed.BanneretRelayFeed;
+        expect(yield* feed.task("t_active")).toEqual({
+          joined: false,
+          value: null,
+          fetchedAt: null,
+        });
+        expect(relay.requests).toEqual([]);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("reads one task with its preview and sign-off, and a 404 answers not found", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        // The founder's person id is in the capabilities `me`; the sign-off seed takes ids.
+        let founderId: string | undefined;
+        relay.rewrite = (request, body) => {
+          if (request.url === "/relay/v1/capabilities") {
+            const me = (JSON.parse(body) as { me?: { id?: string } }).me;
+            if (me?.id !== undefined) founderId = me.id;
+          }
+          return body;
+        };
+        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const events = yield* subscribe;
+        yield* join(fake, relay);
+        yield* events.next((event) => event.sectionsKnown, "the capabilities");
+        expect(founderId).toBeDefined();
+        yield* control(fake, "/board/seed", {
+          tasks: [
+            ...SEED.tasks,
+            {
+              id: "t_preview",
+              title: "Preview task",
+              restsOn: ["t_free"],
+              preview: { state: "ready", url: "https://preview.example.com/t_preview" },
+            },
+          ],
+        });
+
+        const held = yield* feed.task("t_active");
+        expect(held.joined).toBe(true);
+        expect(held.problem).toBeUndefined();
+        expect(held.notFound).toBeUndefined();
+        expect(held.fetchedAt).not.toBeNull();
+        expect(held.value!.task).toMatchObject({ id: "t_active", title: "Guild invites" });
+        expect(held.value!.task.ref.url).toMatch(/^https:\/\//);
+        expect(held.value!.lease?.holder).toEqual({ login: "bo-example" });
+        expect(held.value!.lease?.state).toBe("active");
+        expect(held.value!.preview).toBeUndefined();
+        expect(held.value!.checked).toBeUndefined();
+
+        const previewed = yield* feed.task("t_preview");
+        expect(previewed.value!.preview).toEqual({
+          state: "ready",
+          url: "https://preview.example.com/t_preview",
+        });
+        expect(previewed.value!.restsOn).toEqual(["t_free"]);
+
+        yield* control(fake, "/checked/seed", {
+          taskId: "t_free",
+          by: founderId,
+          reviewer: "p_someone_else",
+        });
+        const checked = yield* feed.task("t_free");
+        expect(checked.value!.status).toBe("checked");
+        expect(checked.value!.checked).toMatchObject({
+          by: { login: "ada-example" },
+          valid: true,
+        });
+        expect(checked.value!.checked!.ignoredReason).toBeUndefined();
+        expect(checked.value!.pr?.state).toBe("merged");
+
+        yield* control(fake, "/checked/seed", {
+          taskId: "t_stale",
+          by: founderId,
+          reviewer: founderId,
+        });
+        const ignored = yield* feed.task("t_stale");
+        expect(ignored.value!.status).toBe("built");
+        expect(ignored.value!.checked?.valid).toBe(false);
+        expect(ignored.value!.checked?.ignoredReason).toBe(
+          "The person who checked it also approved the review.",
+        );
+
+        const unknown = yield* feed.task("t_unknown/../x");
+        expect(unknown).toMatchObject({ joined: true, value: null, notFound: true });
+        expect(unknown.problem).toBeUndefined();
+        expect(
+          relay.requests.filter((request) => isTaskRead(request.url)).map((r) => r.url),
+        ).toEqual([
+          "/relay/v1/tasks/t_active",
+          "/relay/v1/tasks/t_preview",
+          "/relay/v1/tasks/t_free",
+          "/relay/v1/tasks/t_stale",
+          `/relay/v1/tasks/${encodeURIComponent("t_unknown/../x")}`,
+        ]);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("a relay that cannot be reached is a problem on the read, not not-found", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const feed = yield* RelayFeed.BanneretRelayFeed;
+        yield* join(fake, relay);
+        yield* control(fake, "/board/seed", SEED);
+        relay.intercept = (request) =>
+          isTaskRead(request.url) ? { status: 503, body: "{}" } : undefined;
+        const down = yield* feed.task("t_active");
+        expect(down.joined).toBe(true);
+        expect(down.value).toBeNull();
+        expect(down.notFound).toBeUndefined();
+        expect(down.problem?.message).toBeDefined();
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+});
+
 describe("snapshot reshaping", () => {
   it("joins the work file's live sessions by task id", () => {
     const work = {

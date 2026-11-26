@@ -1,7 +1,7 @@
-// Banneret Hub: Today, Needs you, the board and the feed from the company relay (docs/banneret/relay-v1:
-// GET /today, GET /needs, GET /events, GET /capabilities, the snapshot, GET /feed, GET /graveyard). The server makes every relay call and reshapes the
-// answers into the views below; clients never see the token or key. Relay failures are data, not
-// errors, so a screen always has the last good answer and its age to show.
+// Banneret Hub: Today, Needs you, the board, the feed and one task from the company relay
+// (docs/banneret/relay-v1). The server makes every relay call and reshapes the answers into the
+// views below; clients never see the token or key. Relay failures are data, not errors, so a screen
+// always has the last good answer and its age to show.
 import * as Rpc from "effect/rpc/Rpc";
 import * as Schema from "effect/Schema";
 
@@ -13,6 +13,7 @@ export const BANNERET_RELAY_FEED_WS_METHODS = {
   feed: "banneretRelay.feed",
   feedPage: "banneretRelay.feedPage",
   graveyardPage: "banneretRelay.graveyardPage",
+  task: "banneretRelay.task",
 } as const;
 
 /** Where an item opens: a thread on a machine. `machineLabel` is the relay's label for that machine. */
@@ -256,6 +257,43 @@ export type BanneretFeedEntryPageRead = typeof BanneretFeedEntryPageRead.Type;
 export const BanneretGraveyardPageRead = read(BanneretGraveyardPage);
 export type BanneretGraveyardPageRead = typeof BanneretGraveyardPageRead.Type;
 
+/** A task's preview (relay-v1 `TaskPreview`). `state` is open: `building`, `ready`, `failed` are known. */
+export const BanneretTaskPreview = Schema.Struct({
+  state: Schema.String,
+  url: Schema.optional(Schema.String),
+});
+export type BanneretTaskPreview = typeof BanneretTaskPreview.Type;
+
+/** The sign-off record of a task with a `checked` label; `ignoredReason` says why it does not count. */
+export const BanneretTaskChecked = Schema.Struct({
+  by: BanneretFeedPerson,
+  at: Schema.String,
+  valid: Schema.Boolean,
+  ignoredReason: Schema.optional(Schema.String),
+});
+export type BanneretTaskChecked = typeof BanneretTaskChecked.Type;
+
+/** `GET /tasks/{taskId}` (relay-v1 `TaskRead`): the board card plus its preview and sign-off. */
+export const BanneretTask = Schema.Struct({
+  ...BanneretBoardCard.fields,
+  preview: Schema.optional(BanneretTaskPreview),
+  checked: Schema.optional(BanneretTaskChecked),
+});
+export type BanneretTask = typeof BanneretTask.Type;
+
+/**
+ * One task read. `notFound` is true when the relay does not know the task (404); `joined` false
+ * means nothing was asked of a relay.
+ */
+export const BanneretTaskRead = Schema.Struct({
+  joined: Schema.Boolean,
+  value: Schema.NullOr(BanneretTask),
+  fetchedAt: Schema.NullOr(Schema.String),
+  notFound: Schema.optional(Schema.Boolean),
+  problem: Schema.optional(Schema.Struct({ message: Schema.String, since: Schema.String })),
+});
+export type BanneretTaskRead = typeof BanneretTaskRead.Type;
+
 /**
  * The live feed: the whole state each time, so a client that only keeps the latest value misses
  * nothing. `revision` moves whenever Today or Needs you may have changed (`needs.changed`,
@@ -315,12 +353,19 @@ const WsBanneretRelayGraveyardPageRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.
   error: EnvironmentAuthorizationError,
 });
 
+const WsBanneretRelayTaskRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.task, {
+  payload: Schema.Struct({ taskId: Schema.String }),
+  success: BanneretTaskRead,
+  error: EnvironmentAuthorizationError,
+});
+
 export const BANNERET_RELAY_FEED_RPCS = [
   WsBanneretRelayTodayRpc,
   WsBanneretRelayNeedsRpc,
   WsBanneretRelayFeedRpc,
   WsBanneretRelayFeedPageRpc,
   WsBanneretRelayGraveyardPageRpc,
+  WsBanneretRelayTaskRpc,
 ] as const;
 
 export const BANNERET_RELAY_FEED_RPC_SCOPES = {
@@ -329,6 +374,7 @@ export const BANNERET_RELAY_FEED_RPC_SCOPES = {
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: AuthOrchestrationOperateScope,
+  [BANNERET_RELAY_FEED_WS_METHODS.task]: AuthOrchestrationOperateScope,
 } as const;
 
 export const BANNERET_RELAY_FEED_RPC_AGGREGATES = {
@@ -337,4 +383,5 @@ export const BANNERET_RELAY_FEED_RPC_AGGREGATES = {
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: "banneret-relay",
+  [BANNERET_RELAY_FEED_WS_METHODS.task]: "banneret-relay",
 } as const;
