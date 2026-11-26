@@ -1,7 +1,7 @@
 # Workspaces and the relay
 
-This page describes where Banneret Hub is heading for teams. Joining a relay is built; the team sections
-are not yet. It records the design decisions so contributors and other companies know what to expect.
+This page describes where Banneret Hub is heading for teams. Joining a relay, Today and Needs you are
+built; the other team sections are not yet. It records the design decisions so contributors and other companies know what to expect.
 
 ## Workspaces
 
@@ -11,6 +11,12 @@ have.
 - **Solo** (the default, called "Personal"): plain T3 Code. It never contacts a relay.
 - **Enterprise**: joined to a **relay** that your company runs. It adds Today, Needs you, Board, Map,
   Knowledge, Channels and direct messages, and Team.
+
+**Today and Needs you.** Once this machine has joined, the Enterprise workspace shows Today and Needs you
+above the thread list, if the relay offers them. Today lists what needs you, what shipped since your last
+visit, who is working now, what is stuck and how things are. An item that belongs to a thread opens it when
+that thread is on a machine this app knows; otherwise it says which machine holds it. When the relay cannot
+be reached, both keep showing what the relay last said, with its age.
 
 **Joining.** Create a workspace and choose Enterprise. Enter the relay's address (https only), check the
 company name, and join. Banneret Hub shows a short code and opens the relay's sign-in page in your browser,
