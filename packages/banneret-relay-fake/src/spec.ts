@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - a plain Node test double: it reads the vendored spec from disk.
+// @effect-diagnostics nodeBuiltinImport:off - a plain Node test double: it reads the canonical spec from disk.
 import * as NodeFS from "node:fs";
 import * as NodeURL from "node:url";
 
@@ -6,7 +6,7 @@ import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.
 import addFormats from "ajv-formats";
 import * as Yaml from "yaml";
 
-/** The vendored contract: docs/banneret/relay-v1/ at the repository root. */
+/** The canonical contract: docs/banneret/relay-v1/ at the repository root. */
 export const specDirectory = NodeURL.fileURLToPath(
   new URL("../../../docs/banneret/relay-v1/", import.meta.url),
 );

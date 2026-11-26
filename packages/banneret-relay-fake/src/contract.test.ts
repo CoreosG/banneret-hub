@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - reads the vendored README and signs with node:crypto.
+// @effect-diagnostics nodeBuiltinImport:off - reads the canonical README and signs with node:crypto.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 
@@ -15,7 +15,7 @@ import {
   specDirectory,
 } from "./spec.ts";
 
-// The vendored contract itself: schemas, examples and signing vectors. No relay needed.
+// The canonical contract itself: schemas, examples and signing vectors. No relay needed.
 const spec = loadSpec();
 
 const vectorSeed = Uint8Array.from({ length: 32 }, (_, index) => index);

@@ -113,7 +113,7 @@ Enrolment), or the call is refused with 403 `network_identity_mismatch`. The Hub
 fails (revoked, unknown, badly signed) is refused with 401 and its code, such as `token_revoked`; it never falls
 back to the public document. [Orchestrator]
 
-The signature covers these bytes, joined with `\n` (byte 0x0A), followed by the raw body:
+The signature covers these bytes, joined with `\n` (byte 0x0A), followed by the raw body [Orchestrator]:
 
 ```
 relay/v1
@@ -166,7 +166,7 @@ goes through a different call.
 
 - **Machine facts:** `environmentId`, `label`, `kind` (`laptop`, `desktop`, `server`, `cloud`), `hostname`, `os`,
   `hubVersion`, `policyFingerprint` (or null), `sandbox {enabled, image}` (image or null). The relay sets the
-  owner (from the token) and the last-heard time (from receipt). A machine cannot report either.
+  owner (from the token) and the last-heard time (from receipt). A machine cannot report either. [Orchestrator]
 - **Activity facts:** one per agent session. Each has:
   - a random `sessionId` and an optional `parentSessionId`;
   - T3's `threadId` and a `projectKey`;
@@ -181,7 +181,7 @@ goes through a different call.
 - **`projectKey`** is `sha256:` plus the lowercase hex SHA-256 of the repository identity `host/owner/name`. For
   example `github.com/example-org/example-app` is lowercased, with no scheme, credentials, port or `.git`. It is
   never the T3 project id and never a path. The relay hashes its configured repository list the same way to match
-  projects.
+  projects. [Orchestrator]
 
 ## Errors
 
@@ -234,8 +234,8 @@ class. [Orchestrator]
 
 `GET /events` without `Last-Event-ID` is live only: it starts with the next event. With `Last-Event-ID` the relay
 replays the caller's events after that id, reaching back over the smaller of the last 1000 events and the last 24
-hours. Beyond that, or for an id it does not know, the relay sends one `reset` event and then continues live;
-the client refetches `GET /today`, `GET /needs` and `GET /capabilities`. [Orchestrator]
+hours. When the relay no longer holds every event after that id, or does not know the id, it sends one `reset`
+event instead and then continues live; the client refetches `GET /today`, `GET /needs` and `GET /capabilities`. [Orchestrator]
 
 ## Deep links
 

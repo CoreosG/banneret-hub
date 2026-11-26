@@ -281,8 +281,8 @@ paths:
         `text/event-stream`. Each event has an `id:` line, an `event:` line naming one of `x-sse-events` below, and
         one `data:` line holding the JSON payload. Without `Last-Event-ID` the stream is live only: it starts with
         the next event. With `Last-Event-ID` the relay replays the caller's events after that id, reaching back
-        over the smaller of the last 1000 events and the last 24 hours. When the id is older than that, or unknown,
-        the relay sends one `reset` event instead of a replay, then continues live; on `reset` the client refetches
+        over the smaller of the last 1000 events and the last 24 hours. When the relay no longer holds every event
+        after that id, or does not know the id, it sends one `reset` event instead of a replay, then continues live; on `reset` the client refetches
         `GET /today`, `GET /needs` and `GET /capabilities`. A comment line (`:`) is sent every 25 seconds. Events say what changed, never the content; the client refetches through the
         normal calls, except `mention`, which carries the needs-you item. The stream is closed when the machine is
         revoked or its person is removed.
@@ -925,8 +925,8 @@ components:
         capabilitiesVersion: { type: string, maxLength: 128 }
     ResetEvent:
       description: |
-        The relay cannot replay from the client's `Last-Event-ID` (older than the last 1000 events or 24 hours, or
-        unknown). Sent once, instead of a replay; the client refetches `GET /today`, `GET /needs` and
+        The relay cannot replay from the client's `Last-Event-ID`: it no longer holds every event after that id
+        (the reach is the smaller of the last 1000 events and 24 hours), or does not know the id. Sent once, instead of a replay; the client refetches `GET /today`, `GET /needs` and
         `GET /capabilities`.
       type: object
       required: [at]
