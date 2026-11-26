@@ -1,0 +1,16 @@
+{ "items": [ {
+        "id": "n_Wd7Kp3",
+        "kind": "thread_approval",
+        "title": "A session is waiting for a permission answer",
+        "deepLink": { "environmentId": "env_9d8c7b6a-1e2f-4a3b-8c9d-0e1f2a3b4c5d", "threadId": "th_01JDX3K9" },
+        "createdAt": "2026-11-26T09:58:00Z",
+        "updatedAt": "2026-11-26T09:58:00Z"
+      }, {
+        "id": "n_Tq4Lw9",
+        "kind": "founder_question",
+        "title": "Should guild invites expire?",
+        "recommendation": "After 7 days.",
+        "from": { "id": "p_3Nc8vR", "login": "bo-example" },
+        "url": "https://github.com/example-org/example-app/issues/42",
+        "createdAt": "2026-11-26T08:00:00Z"
+      } ], "nextCursor": "c_eyJvIjoyfQ" }

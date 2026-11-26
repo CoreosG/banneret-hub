@@ -1,0 +1,22 @@
+{
+  "protocol": "1.0",
+  "displayName": "Example Company",
+  "iconUrl": null,
+  "enrolment": { "start": "/relay/v1/enroll/start", "browser": "/admin/hub/enroll" },
+  "me": { "id": "p_7Hq2xK", "login": "ada-example", "role": "founder", "machineId": "m_4fT9wQ" },
+  "sections": [
+    { "id": "today", "kind": "today", "version": 1, "flags": [] },
+    { "id": "needs", "kind": "needs", "version": 1, "flags": ["mentions"] },
+    { "id": "machines", "kind": "machines", "version": 1, "flags": ["revoke"] }
+  ],
+  "mcpTools": [
+    { "name": "needs_list", "description": "List the caller's needs-you items.", "role": "limited_staff",
+      "inputSchema": { "type": "object", "properties": { "cursor": { "type": "string" } }, "additionalProperties": false } }
+  ],
+  "adapters": [
+    { "role": "work_tracker", "kind": "github", "version": 1 },
+    { "role": "staff_directory", "kind": "github", "version": 1 },
+    { "role": "knowledge", "kind": "markdown", "version": 1 },
+    { "role": "health", "kind": "none" }
+  ]
+}

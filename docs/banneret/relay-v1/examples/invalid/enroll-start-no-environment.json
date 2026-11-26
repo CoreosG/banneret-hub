@@ -1,0 +1,15 @@
+{
+  "publicKey": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+  "machine": {
+    "label": "Ada laptop",
+    "kind": "laptop",
+    "hostname": "ada-mbp",
+    "os": "macOS 15.1",
+    "hubVersion": "0.4.2",
+    "policyFingerprint": null,
+    "sandbox": {
+      "enabled": false,
+      "image": null
+    }
+  }
+}

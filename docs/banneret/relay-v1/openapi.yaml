@@ -1,0 +1,877 @@
+openapi: 3.1.0
+info:
+  title: Relay protocol v1
+  version: "1.0"
+  summary: The calls a Banneret Hub server makes to a central relay.
+  description: |
+    Every call starts from a Banneret Hub server. The relay never dials a machine and cannot run anything on one.
+    Conventions (auth, signing, errors, paging, versioning, ids) are in README.md next to this file; the schema
+    descriptions below repeat the binding parts.
+  license:
+    name: MIT
+    identifier: MIT
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: /relay/v1
+security:
+  - deviceToken: []
+tags:
+  - name: discovery
+  - name: enrolment
+  - name: machines
+  - name: facts
+  - name: needs
+  - name: events
+paths:
+  /capabilities:
+    get:
+      tags: [discovery]
+      operationId: getCapabilities
+      summary: What this relay offers.
+      description: |
+        Without an `Authorization` header the relay answers 200 with only `protocol`, `displayName`, `iconUrl` and
+        `enrolment`. With a valid signed device token it adds `sections`, `mcpTools`, `adapters` and `me`. A call
+        that sends a token which fails (revoked, unknown, badly signed) is refused with 401 and its code, such as
+        `token_revoked`; it never falls back to the public document. Nothing in this document is a secret. A client renders only the sections
+        listed here and ignores section kinds it does not know.
+      security:
+        - {}
+        - deviceToken: []
+      responses:
+        "200":
+          description: The capabilities document.
+          headers:
+            ETag:
+              description: Changes whenever the document changes; equals `capabilitiesVersion` in facts responses.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capabilities" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /enroll/start:
+    post:
+      tags: [enrolment]
+      operationId: startEnrolment
+      summary: Start enrolling this Hub server's Enterprise workspace.
+      description: |
+        No `Authorization` and no `X-Banneret-Device` header. The request is signed with the private half of
+        `publicKey`, with counter `0`. The response carries a short confirm code for the Hub to show, and the
+        browser URL the Hub opens. In that browser the person signs in through the relay's staff directory (GitHub
+        organisation members by default) and types the code shown by the Hub; the code is never placed in the URL.
+        The code expires after 10 minutes, or after 5 wrong codes typed for this pairing. The browser rules
+        (machine details shown, the recognition tick, the optional network identity check) are in README.md,
+        "Enrolment"; their outcome is reported by `POST /enroll/poll`, never as an error here.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrolStartRequest" }
+      responses:
+        "200":
+          description: Pairing created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrolStartResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /enroll/poll:
+    post:
+      tags: [enrolment]
+      operationId: pollEnrolment
+      summary: Read the state of a pairing; on approval, receive the device token once.
+      description: |
+        Refused and expired pairings are reported here as a 200 `state` with a `reason`; error responses mean only
+        an unknown pairing id (404 `not_found`), a malformed one (400) or a bad signature (401).
+        No `Authorization` and no `X-Banneret-Device` header. Signed with the pairing's key, counter `0`. Poll no
+        sooner than `retryAfterMs`. The token is returned on the first poll after approval and never again; a later
+        poll of the same pairing answers `approved` without `token`. A Hub that lost the token enrols again.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrolPollRequest" }
+      responses:
+        "200":
+          description: Current pairing state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrolPollResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /machines:
+    get:
+      tags: [machines]
+      operationId: listMachines
+      summary: The Team machines list.
+      description: Every enrolled machine the caller may see, newest heartbeat first. Revoked machines are not listed.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of machines.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MachinesPage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /machines/{machineId}:
+    delete:
+      tags: [machines]
+      operationId: revokeMachine
+      summary: Revoke a machine.
+      description: |
+        Allowed for the machine's owner and for a founder. The machine's token is refused within 1 minute, open
+        event streams from it are closed, and it leaves the Machines list. Revoking is final; the machine enrols
+        again to return. Revoking an already revoked machine answers 204.
+      parameters:
+        - name: machineId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Id" }
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /facts:
+    post:
+      tags: [facts]
+      operationId: postFacts
+      summary: The heartbeat, carrying machine facts and activity facts.
+      description: |
+        Sent every 30 seconds and on any change. Each heartbeat carries the full current set of the machine's
+        sessions; a session missing from a heartbeat has ended. A machine is "not heard from" after 90 seconds
+        without a heartbeat. The body is closed: unknown fields are refused with `malformed`. It never carries
+        prompts, replies, code, command text, titles, local paths or file contents.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FactsRequest" }
+      responses:
+        "200":
+          description: Accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FactsResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /today:
+    get:
+      tags: [needs]
+      operationId: getToday
+      summary: The five ordered Today blocks for the caller.
+      description: |
+        Blocks, in this order: needs you, shipped since the last visit, working now, stuck, health. Each block has
+        its own state; one broken source affects only its own block. A block holds at most 20 items; the needs-you
+        block's `nextCursor` continues in `GET /needs`.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+      responses:
+        "200":
+          description: Today.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Today" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /needs:
+    get:
+      tags: [needs]
+      operationId: listNeeds
+      summary: Needs-you items for the caller.
+      description: |
+        Pending questions and approvals in the caller's threads, pull requests waiting on a human, questions for a
+        founder, mentions and dispatcher suggestions. Most urgent first, then oldest first.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of needs-you items.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NeedsPage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /events:
+    get:
+      tags: [events]
+      operationId: streamEvents
+      summary: Server-sent events for the caller.
+      description: |
+        `text/event-stream`. Each event has an `id:` line, an `event:` line naming one of `x-sse-events` below, and
+        one `data:` line holding the JSON payload. Send `Last-Event-ID` to resume; when the relay cannot resume it
+        sends `needs.changed` and `capabilities.changed` first so the client refetches. A comment line (`:`) is
+        sent every 25 seconds. Events say what changed, never the content; the client refetches through the
+        normal calls, except `mention`, which carries the needs-you item. The stream is closed when the machine is
+        revoked or its person is removed.
+      parameters:
+        - $ref: "#/components/parameters/Device"
+        - $ref: "#/components/parameters/Counter"
+        - $ref: "#/components/parameters/SentAt"
+        - $ref: "#/components/parameters/Signature"
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: string, maxLength: 128 }
+      x-sse-events:
+        needs.changed: { $ref: "#/components/schemas/NeedsChangedEvent" }
+        mention: { $ref: "#/components/schemas/MentionEvent" }
+        bundle.changed: { $ref: "#/components/schemas/BundleChangedEvent" }
+        staff.removed: { $ref: "#/components/schemas/StaffRemovedEvent" }
+        capabilities.changed: { $ref: "#/components/schemas/CapabilitiesChangedEvent" }
+      responses:
+        "200":
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    deviceToken:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer <device token>`. Opaque, bound to one machine (one Hub server environment) and its
+        person. Every call that carries it is also signed with the machine key (see the signature parameters).
+  parameters:
+    Device:
+      name: X-Banneret-Device
+      in: header
+      required: true
+      description: The relay's machine id for the caller, as returned on enrolment.
+      schema: { $ref: "#/components/schemas/Id" }
+    Counter:
+      name: X-Banneret-Counter
+      in: header
+      required: true
+      description: |
+        Decimal unsigned 64-bit integer. `0` on enrolment calls. Otherwise time-based: the Hub's Unix time in
+        milliseconds times 1000, plus a sequence number 0–999 that resets each millisecond, strictly increasing per
+        machine, so a restarted Hub never reuses one. The relay keeps the last 256 counters it accepted from the
+        machine and refuses, with `counter_reused`, a counter among them or below the lowest of them.
+      schema: { type: string, pattern: "^(0|[1-9][0-9]{0,19})$" }
+    SentAt:
+      name: X-Banneret-Sent-At
+      in: header
+      required: true
+      description: RFC 3339 UTC time of sending; refused with `clock_skew` when more than 2 minutes from the relay's clock.
+      schema: { $ref: "#/components/schemas/Timestamp" }
+    Signature:
+      name: X-Banneret-Signature
+      in: header
+      required: true
+      description: |
+        Standard base64 (with padding) of the Ed25519 signature, by the machine key, over the bytes
+        `"relay/v1\n" + METHOD + "\n" + TARGET + "\n" + DEVICE + "\n" + COUNTER + "\n" + SENT_AT + "\n" + BODY`,
+        where TARGET is the request target exactly as sent by the Hub (path and, when there is one, `?` and the
+        query, byte for byte; proxies, including Tailscale Serve path mounts, must not rewrite it), DEVICE is the
+        `X-Banneret-Device` value (empty on enrolment calls), COUNTER and SENT_AT are the header values as sent,
+        and BODY is the exact request body bytes (empty when there is none).
+      schema: { type: string, pattern: "^[A-Za-z0-9+/]{86}==$" }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous page's `nextCursor`. Absent for the first page.
+      schema: { type: string, minLength: 1, maxLength: 512 }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+  responses:
+    Error:
+      description: |
+        Any failure. 400 malformed; 401 unauthenticated, token_revoked, signature_invalid, clock_skew,
+        counter_reused; 403 forbidden, network_identity_mismatch; 404 not_found; 413 too_large; 429 rate_limited,
+        capacity (with `Retry-After`); 503 unavailable (with `Retry-After`); 500 internal.
+      headers:
+        Retry-After:
+          description: Seconds to wait, on 429 and 503.
+          schema: { type: integer, minimum: 0 }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Id:
+      description: An opaque id. Never a GitHub numeric id; never parsed by clients.
+      type: string
+      pattern: "^[A-Za-z0-9_-]{1,64}$"
+    EnvironmentId:
+      description: T3's stable per-server environment id, opaque to the relay.
+      type: string
+      pattern: "^[A-Za-z0-9_-]{1,128}$"
+    Timestamp:
+      description: RFC 3339, UTC, ending in `Z`.
+      type: string
+      format: date-time
+      pattern: "Z$"
+    Login:
+      description: A display login (the person's GitHub login with the default staff directory). Display only, never a key.
+      type: string
+      pattern: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
+    Role:
+      type: string
+      description: "`founder` or `limited_staff`; clients treat an unknown role as `limited_staff`."
+      enum: [founder, limited_staff]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              type: string
+              enum:
+                - malformed
+                - too_large
+                - unauthenticated
+                - token_revoked
+                - signature_invalid
+                - clock_skew
+                - counter_reused
+                - forbidden
+                - network_identity_mismatch
+                - not_found
+                - rate_limited
+                - capacity
+                - unavailable
+                - internal
+            message: { type: string, maxLength: 500, description: Plain words for a person; never parsed. }
+            retryable: { type: boolean }
+            details:
+              type: object
+              description: Optional machine-readable detail, such as the refused field name. Never secrets.
+    Capabilities:
+      type: object
+      required: [protocol, displayName, iconUrl, enrolment]
+      properties:
+        protocol:
+          description: Protocol version, `1.<minor>`. The minor grows with each additive change.
+          type: string
+          pattern: "^1\\.(0|[1-9][0-9]*)$"
+        displayName: { type: string, minLength: 1, maxLength: 80, description: "The company's name, for \"Join <name>\"." }
+        iconUrl: { type: [string, "null"], format: uri, maxLength: 2048 }
+        enrolment:
+          type: object
+          required: [start, browser]
+          properties:
+            start: { type: string, const: /relay/v1/enroll/start }
+            browser:
+              description: Path on the relay's origin of the page where a person confirms enrolment after signing in through the staff directory.
+              type: string
+              pattern: "^/"
+        me:
+          description: The caller. Present only for an authenticated caller.
+          type: object
+          required: [id, login, role]
+          properties:
+            id: { $ref: "#/components/schemas/Id" }
+            login: { $ref: "#/components/schemas/Login" }
+            role: { $ref: "#/components/schemas/Role" }
+            machineId: { $ref: "#/components/schemas/Id" }
+        sections:
+          description: Present only for an authenticated caller. The client renders only these.
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/Section" }
+        mcpTools:
+          description: Present only for an authenticated caller. The toolkit lists exactly these.
+          type: array
+          maxItems: 256
+          items: { $ref: "#/components/schemas/McpTool" }
+        adapters:
+          description: Present only for an authenticated caller. Which adapter fills each role; never configuration or secrets.
+          type: array
+          maxItems: 16
+          items: { $ref: "#/components/schemas/Adapter" }
+    Section:
+      type: object
+      required: [id, kind, version, flags]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        kind:
+          description: |
+            One of the fixed section types: today, needs, machines, health, board, map, feed, task, channel, team,
+            knowledge. New kinds may be added within v1; clients ignore kinds they do not know.
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
+        version: { type: integer, minimum: 1 }
+        flags:
+          type: array
+          maxItems: 32
+          items: { type: string, pattern: "^[a-z][a-z0-9_.]{0,63}$" }
+    McpTool:
+      type: object
+      required: [name, description, role]
+      properties:
+        name: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" }
+        description: { type: string, minLength: 1, maxLength: 500 }
+        role:
+          description: The lowest role that may call the tool.
+          allOf: [{ $ref: "#/components/schemas/Role" }]
+        inputSchema:
+          description: JSON Schema (2020-12) for the tool's arguments.
+          type: object
+    Adapter:
+      type: object
+      required: [role, kind]
+      properties:
+        role: { type: string, enum: [work_tracker, staff_directory, knowledge, health] }
+        kind:
+          description: "`github`, `markdown`, `none`, or another compiled-in adapter."
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,31}$"
+        version: { type: integer, minimum: 1 }
+    MachineFacts:
+      description: What a Hub server reports about itself. Closed; owner and last-heard time are set by the relay.
+      type: object
+      additionalProperties: false
+      required: [environmentId, label, kind, hostname, os, hubVersion, policyFingerprint, sandbox]
+      properties:
+        environmentId: { $ref: "#/components/schemas/EnvironmentId" }
+        label: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$" }
+        kind: { type: string, enum: [laptop, desktop, server, cloud] }
+        hostname: { type: string, pattern: "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$" }
+        os: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,63}$" }
+        hubVersion: { type: string, pattern: "^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$" }
+        policyFingerprint:
+          description: Fingerprint of the signed policy the machine runs, or null when it has none yet.
+          oneOf:
+            - { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+            - { type: "null" }
+        sandbox:
+          type: object
+          additionalProperties: false
+          required: [enabled, image]
+          properties:
+            enabled: { type: boolean }
+            image:
+              description: The pinned sandbox image reference, or null.
+              oneOf:
+                - { type: string, pattern: "^[a-z0-9][a-z0-9._/:-]{0,190}@sha256:[0-9a-f]{64}$" }
+                - { type: "null" }
+    EnrolStartRequest:
+      type: object
+      additionalProperties: false
+      required: [publicKey, machine]
+      properties:
+        publicKey:
+          description: Standard base64 of the machine's 32-byte Ed25519 public key.
+          type: string
+          pattern: "^[A-Za-z0-9+/]{43}=$"
+        machine: { $ref: "#/components/schemas/MachineFacts" }
+    EnrolStartResponse:
+      type: object
+      required: [pairingId, confirmCode, browserUrl, expiresAt, state, retryAfterMs]
+      properties:
+        pairingId: { $ref: "#/components/schemas/Id" }
+        confirmCode:
+          description: Shown by the Hub; the person types it on the relay page. Never put in a URL.
+          type: string
+          pattern: "^[A-Z2-7]{8}$"
+        browserUrl:
+          description: Absolute URL on the relay's origin that the Hub opens in the person's browser.
+          type: string
+          format: uri
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        state: { type: string, const: pending }
+        retryAfterMs: { type: integer, minimum: 0 }
+    EnrolPollRequest:
+      type: object
+      additionalProperties: false
+      required: [pairingId]
+      properties:
+        pairingId: { $ref: "#/components/schemas/Id" }
+    EnrolPollResponse:
+      type: object
+      required: [pairingId, state, expiresAt, retryAfterMs]
+      properties:
+        pairingId: { $ref: "#/components/schemas/Id" }
+        state:
+          description: |
+            `pending`: waiting for the person to confirm the code (at most 10 minutes). `awaiting_approval`:
+            confirmed, waiting for a founder to approve a person new to the relay (at most 7 days). `approved`,
+            `refused`, `expired`: final.
+          type: string
+          enum: [pending, awaiting_approval, approved, refused, expired]
+        expiresAt:
+          description: |
+            When the pairing expires in its current state: the confirm code's expiry while `pending`, the approval
+            deadline (7 days after confirmation) while `awaiting_approval`, and the last of those once final.
+          allOf: [{ $ref: "#/components/schemas/Timestamp" }]
+        retryAfterMs: { type: integer, minimum: 0 }
+        machineId: { $ref: "#/components/schemas/Id" }
+        token:
+          description: The device token, on the first poll after approval only.
+          type: string
+          minLength: 32
+          maxLength: 256
+        reason:
+          description: |
+            Why a pairing is `refused` (`declined`, `not_staff`, `network_identity_mismatch`,
+            `environment_enrolled`) or `expired` (`code_expired`, `too_many_attempts`, `approval_expired`).
+          type: string
+          enum: [declined, not_staff, network_identity_mismatch, environment_enrolled, code_expired, too_many_attempts, approval_expired]
+      allOf:
+        - if: { properties: { state: { const: approved } } }
+          then: { required: [machineId] }
+        - if: { properties: { state: { enum: [refused, expired] } } }
+          then: { required: [reason] }
+          else: { not: { required: [reason] } }
+        - if: { properties: { state: { const: refused } } }
+          then: { properties: { reason: { enum: [declined, not_staff, network_identity_mismatch, environment_enrolled] } } }
+        - if: { properties: { state: { const: expired } } }
+          then: { properties: { reason: { enum: [code_expired, too_many_attempts, approval_expired] } } }
+        - if: { properties: { state: { not: { const: approved } } } }
+          then: { not: { anyOf: [{ required: [token] }, { required: [machineId] }] } }
+    Machine:
+      type: object
+      required: [id, environmentId, ownerId, ownerLogin, label, kind, hostname, os, hubVersion, policyFingerprint, sandbox, enrolledAt, lastHeardAt, connected]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        environmentId: { $ref: "#/components/schemas/EnvironmentId" }
+        ownerId: { $ref: "#/components/schemas/Id" }
+        ownerLogin: { $ref: "#/components/schemas/Login" }
+        label: { type: string }
+        kind: { type: string }
+        hostname: { type: string }
+        os: { type: string }
+        hubVersion: { type: string }
+        policyFingerprint: { type: [string, "null"] }
+        sandbox:
+          type: object
+          required: [enabled, image]
+          properties:
+            enabled: { type: boolean }
+            image: { type: [string, "null"] }
+        enrolledAt: { $ref: "#/components/schemas/Timestamp" }
+        lastHeardAt:
+          description: When the relay last accepted a heartbeat, or null before the first.
+          oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }]
+        connected: { type: boolean, description: "False after 90 seconds without a heartbeat (\"not heard from\")." }
+        revocable: { type: boolean, description: True when the caller may revoke it. }
+    MachinesPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Machine" } }
+        nextCursor: { type: [string, "null"] }
+    ActivityFact:
+      description: One agent session, reduced to facts (company hub plan §7.4). Closed; no content of any kind.
+      type: object
+      additionalProperties: false
+      required: [sessionId, threadId, projectKey, provider, state, processRunning, startedAt, lastSeenAt]
+      properties:
+        sessionId:
+          description: A random id made by the Hub, not the provider's own.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        parentSessionId:
+          description: The parent session, for helpers.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        threadId:
+          description: T3's thread id, opaque.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        projectKey:
+          description: |
+            `sha256:` plus the lowercase hex SHA-256 of the repository identity `host/owner/name`, lowercased,
+            without scheme, credentials, port or `.git`. Never a local path. The relay hashes its own repository
+            list the same way to match it.
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        branch:
+          description: The git branch name only.
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$"
+        taskId:
+          description: The relay's task id when the Hub knows it from the toolkit; otherwise the relay derives the task from the branch.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        provider: { type: string, enum: [claude, codex] }
+        providerVersion: { type: string, pattern: "^[0-9A-Za-z][0-9A-Za-z.+-]{0,31}$" }
+        model: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:\\[\\]-]{0,63}$" }
+        persona: { type: string, pattern: "^[a-z][a-z0-9-]{0,39}$" }
+        state: { type: string, enum: [working, waiting, idle, stopped] }
+        waiting:
+          description: What the session waits on when `state` is `waiting`.
+          type: string
+          enum: [permission, question, input]
+        tool:
+          type: object
+          additionalProperties: false
+          required: [name, activity]
+          properties:
+            name: { description: The tool's name only., type: string, pattern: "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$" }
+            activity:
+              type: string
+              enum: [running_tests, building, editing_files, reading_files, searching, running_command, fetching, delegating, planning, other]
+            fileCount: { type: integer, minimum: 0, maximum: 100000 }
+            since: { $ref: "#/components/schemas/Timestamp" }
+        processRunning: { type: boolean }
+        startedAt: { $ref: "#/components/schemas/Timestamp" }
+        lastSeenAt: { $ref: "#/components/schemas/Timestamp" }
+        stopReason: { type: string, enum: [completed, usage_limit, error, killed, not_reported] }
+        bundleSha: { type: string, pattern: "^[0-9a-f]{40}$" }
+      allOf:
+        - if: { properties: { state: { const: waiting } } }
+          then: { required: [waiting] }
+          else: { not: { required: [waiting] } }
+        - if: { properties: { state: { const: stopped } } }
+          then: { required: [stopReason] }
+          else: { not: { required: [stopReason] } }
+    FactsRequest:
+      type: object
+      additionalProperties: false
+      required: [machine, activity]
+      properties:
+        machine: { $ref: "#/components/schemas/MachineFacts" }
+        activity:
+          type: array
+          maxItems: 256
+          items: { $ref: "#/components/schemas/ActivityFact" }
+    FactsResponse:
+      type: object
+      required: [acceptedAt, heartbeatSeconds, capabilitiesVersion]
+      properties:
+        acceptedAt: { $ref: "#/components/schemas/Timestamp" }
+        heartbeatSeconds: { type: integer, minimum: 5 }
+        capabilitiesVersion: { type: string, maxLength: 128, description: Refetch capabilities when this changes. }
+    DeepLink:
+      description: Where the item opens in a Hub. Present only when the item belongs to a thread on a known machine.
+      type: object
+      required: [environmentId]
+      properties:
+        environmentId: { $ref: "#/components/schemas/EnvironmentId" }
+        threadId: { $ref: "#/components/schemas/Id" }
+    PersonRef:
+      type: object
+      required: [id, login]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        login: { $ref: "#/components/schemas/Login" }
+    NeedsItem:
+      type: object
+      required: [id, kind, title, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        kind:
+          description: New kinds may be added within v1; clients show an unknown kind as a plain item.
+          type: string
+          enum: [thread_question, thread_approval, pull_request, founder_question, promotion, health, mention, suggestion]
+        title: { type: string, maxLength: 300 }
+        recommendation: { type: string, maxLength: 500 }
+        from: { $ref: "#/components/schemas/PersonRef" }
+        url:
+          description: Link out, such as the GitHub issue or pull request.
+          type: string
+          format: uri
+        deepLink: { $ref: "#/components/schemas/DeepLink" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+    NeedsPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/NeedsItem" } }
+        nextCursor: { type: [string, "null"] }
+    NotMeasured:
+      type: object
+      required: [source, reason, since]
+      properties:
+        source: { type: string, maxLength: 64 }
+        reason:
+          type: string
+          enum: [never_read, unreachable, auth_failed, permission_missing, rate_limited, stale_publication, malformed, not_configured, too_large]
+        since: { $ref: "#/components/schemas/Timestamp" }
+    BlockState:
+      type: string
+      enum: [ok, partial, not_measured]
+    TaskRef:
+      type: object
+      required: [id, title]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        title: { type: string, maxLength: 300 }
+        url: { type: string, format: uri }
+    Today:
+      type: object
+      required: [generatedAt, lastVisitAt, needsYou, shipped, working, stuck, health]
+      properties:
+        generatedAt: { $ref: "#/components/schemas/Timestamp" }
+        lastVisitAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
+        needsYou:
+          type: object
+          required: [state, items, nextCursor, notMeasured]
+          properties:
+            state: { $ref: "#/components/schemas/BlockState" }
+            items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/NeedsItem" } }
+            nextCursor:
+              description: Continue with `GET /needs?cursor=`.
+              type: [string, "null"]
+            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        shipped:
+          type: object
+          required: [state, items, notMeasured]
+          properties:
+            state: { $ref: "#/components/schemas/BlockState" }
+            items:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [task, summary, mergedAt, live]
+                properties:
+                  task: { $ref: "#/components/schemas/TaskRef" }
+                  summary: { type: string, maxLength: 300 }
+                  mergedAt: { $ref: "#/components/schemas/Timestamp" }
+                  live: { type: string, enum: [live, not_live_yet, deploy_failed, no_deploy] }
+            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        working:
+          type: object
+          required: [state, items, notMeasured]
+          properties:
+            state: { $ref: "#/components/schemas/BlockState" }
+            items:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [person, lastActivityAt]
+                properties:
+                  person: { $ref: "#/components/schemas/PersonRef" }
+                  task: { $ref: "#/components/schemas/TaskRef" }
+                  branch: { type: string }
+                  sessions: { type: integer, minimum: 0 }
+                  state: { type: string, enum: [working, waiting, idle, stopped, not_heard_from] }
+                  lastActivityAt: { $ref: "#/components/schemas/Timestamp" }
+                  deepLink: { $ref: "#/components/schemas/DeepLink" }
+            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        stuck:
+          type: object
+          required: [state, items, notMeasured]
+          properties:
+            state: { $ref: "#/components/schemas/BlockState" }
+            items:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [rule, since]
+                properties:
+                  rule:
+                    type: string
+                    enum: [claim_quiet, check_failed, unreviewed, checks_queued, dev_red, deploy_failed, watched_job_down]
+                  since: { $ref: "#/components/schemas/Timestamp" }
+                  task: { $ref: "#/components/schemas/TaskRef" }
+                  owner: { $ref: "#/components/schemas/PersonRef" }
+                  deepLink: { $ref: "#/components/schemas/DeepLink" }
+            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        health:
+          type: object
+          required: [state, items, notMeasured]
+          properties:
+            state: { $ref: "#/components/schemas/BlockState" }
+            items:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [id, label, state, observedAt]
+                properties:
+                  id: { $ref: "#/components/schemas/Id" }
+                  label: { type: string, maxLength: 120 }
+                  state: { type: string, enum: [good, warning, bad, not_measured] }
+                  summary: { type: string, maxLength: 300 }
+                  observedAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
+            notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+    NeedsChangedEvent:
+      type: object
+      required: [at, count]
+      properties:
+        at: { $ref: "#/components/schemas/Timestamp" }
+        count: { type: integer, minimum: 0, description: The caller's open needs-you items. }
+    MentionEvent:
+      type: object
+      required: [at, item]
+      properties:
+        at: { $ref: "#/components/schemas/Timestamp" }
+        item: { $ref: "#/components/schemas/NeedsItem" }
+    BundleChangedEvent:
+      type: object
+      required: [at, bundleSha]
+      properties:
+        at: { $ref: "#/components/schemas/Timestamp" }
+        bundleSha: { type: string, pattern: "^[0-9a-f]{40}$" }
+    StaffRemovedEvent:
+      type: object
+      required: [at, personId]
+      properties:
+        at: { $ref: "#/components/schemas/Timestamp" }
+        personId: { $ref: "#/components/schemas/Id" }
+    CapabilitiesChangedEvent:
+      type: object
+      required: [at, capabilitiesVersion]
+      properties:
+        at: { $ref: "#/components/schemas/Timestamp" }
+        capabilitiesVersion: { type: string, maxLength: 128 }
