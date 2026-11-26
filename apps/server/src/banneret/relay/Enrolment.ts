@@ -754,6 +754,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
             : {}),
         });
         health = "healthy";
+        unreachableSince = undefined;
       }),
     );
     return options.healthIntervalMs;

@@ -18,7 +18,8 @@ where you sign in and type the code. A person new to the company then waits for 
 whole machine (this Banneret Hub server) joins once, whichever workspace is active; an environment that has
 not joined never contacts a relay. The switcher shows the machine's status, the company's machines, and
 Leave. Leaving tells the relay; if the relay cannot be reached you can forget the machine here instead, and
-a founder must then remove it on the relay.
+a founder must then remove it on the relay. The same way out applies when a founder has approved the machine
+but setup cannot finish.
 
 Enterprise is **Banneret-only for now**. The relay it talks to is Banneret's own and is not yet published
 (see [The relay](#the-relay)). Solo is the full product for everyone else today.

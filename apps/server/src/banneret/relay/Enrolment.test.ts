@@ -905,38 +905,47 @@ describe("BanneretEnrolment", () => {
         }).pipe(Effect.provide(hub));
         relay.rewrite = undefined;
 
-        // A crash just before `requested` is saved, then a restart.
-        crashAt = "state:requested";
-        const crashed = yield* Effect.gen(function* () {
-          yield* refusedAgain;
-          return yield* Effect.exit(start(relay.origin));
-        }).pipe(Effect.provide(hub));
-        expect(crashOf(crashed)).toContain("crash at state:requested");
-        crashAt = undefined;
-        yield* unchanged.pipe(Effect.provide(hub));
+        // A crash at any write before `requested` is saved, then a restart: nothing changed.
+        for (const step of [`set:${Enrolment.NEXT_KEY_SECRET}`, "state:requested"]) {
+          crashAt = step;
+          const crashed = yield* Effect.gen(function* () {
+            yield* refusedAgain;
+            return yield* Effect.exit(start(relay.origin));
+          }).pipe(Effect.provide(hub));
+          expect(crashOf(crashed)).toContain(`crash at ${step}`);
+          crashAt = undefined;
+          yield* unchanged.pipe(Effect.provide(hub));
+        }
 
-        // A crash after `requested` is saved but before the new key replaced the old one: the
-        // restart promotes the new key and the join completes.
-        crashAt = `set:${Enrolment.KEY_SECRET}`;
-        const requested = yield* Effect.gen(function* () {
-          yield* refusedAgain;
-          return yield* Effect.exit(start(relay.origin));
-        }).pipe(Effect.provide(hub));
-        expect(crashOf(requested)).toContain(`crash at set:${Enrolment.KEY_SECRET}`);
-        crashAt = undefined;
-        relay.intercept = undefined;
-        yield* Effect.gen(function* () {
-          const resumed = yield* status;
-          expect(resumed.state).toBe("requested");
-          const secrets = yield* allSecrets;
-          expect(secrets.next).toBeUndefined();
-          expect(secrets.token).toBeUndefined();
-          expect(Buffer.from(secrets.key!).equals(Buffer.from(working.key!))).toBe(false);
-          fake.approve(resumed.confirmCode!, ADA);
-          const configured = yield* waitForState("configured");
-          yield* waitFor(status, (view) => view.health === "healthy");
-          expect(configured.machineId).not.toBe(undefined);
-        }).pipe(Effect.provide(hub));
+        // A crash at any write after `requested` is saved: the restart keeps the new pairing, with
+        // the new key in place and the old token gone, and the join completes.
+        for (const step of [
+          `set:${Enrolment.KEY_SECRET}`,
+          `remove:${Enrolment.NEXT_KEY_SECRET}`,
+          `remove:${Enrolment.TOKEN_SECRET}`,
+        ]) {
+          relay.intercept = refuseSigned;
+          const { before, crashed } = yield* Effect.gen(function* () {
+            yield* refusedAgain;
+            const before = yield* allSecrets;
+            crashAt = step;
+            return { before, crashed: yield* Effect.exit(start(relay.origin)) };
+          }).pipe(Effect.provide(hub));
+          expect(crashOf(crashed)).toContain(`crash at ${step}`);
+          crashAt = undefined;
+          relay.intercept = undefined;
+          yield* Effect.gen(function* () {
+            const resumed = yield* status;
+            expect(resumed.state).toBe("requested");
+            const secrets = yield* allSecrets;
+            expect(secrets.next).toBeUndefined();
+            expect(secrets.token).toBeUndefined();
+            expect(Buffer.from(secrets.key!).equals(Buffer.from(before.key!))).toBe(false);
+            fake.approve(resumed.confirmCode!, ADA);
+            yield* waitForState("configured");
+            yield* waitFor(status, (view) => view.health === "healthy");
+          }).pipe(Effect.provide(hub));
+        }
       }),
     ),
   );
