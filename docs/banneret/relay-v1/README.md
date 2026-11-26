@@ -1,17 +1,35 @@
 # Relay protocol v1
 
-Canonical copy. The Go relay keeps a mirror with a drift test.
-Vendored from banneret-platform `aed7ce53054b1b45ef77e6399244ce1461791106`.
+Canonical copy. banneret-platform mirrors it at `internal/hub/contract/relay-v1/` with a drift test.
+First imported from banneret-platform `aed7ce53054b1b45ef77e6399244ce1461791106`.
 
-`openapi.yaml` (OpenAPI 3.1) is the contract between a Banneret Hub server and a central relay. The canonical
-specification lives in the public Banneret Hub fork at `docs/banneret/relay-v1/`, with its TypeScript fake relay and
-conformance suite. This folder is a mirror of it for the Go relay; a drift test between the two follows later. `examples/` holds one valid payload per schema, and `examples/invalid/` holds payloads
-the relay must refuse. `contract_test.go` proves the schema compiles, every example validates and decodes into the
-Go types, and every invalid example is refused.
+`openapi.yaml` (OpenAPI 3.1) is the contract between a Banneret Hub server and a central relay. This folder, in
+the public Banneret Hub fork at `docs/banneret/relay-v1/`, is the canonical specification; change the contract
+here first. The fake relay and conformance suite live in `packages/banneret-relay-fake/` (see `FAKE.md`). The Go
+relay in banneret-platform mirrors this folder at `internal/hub/contract/relay-v1/`, and a drift test there fails
+when its copy differs from this one. `examples/` holds one valid payload per schema, and `examples/invalid/` holds
+payloads the relay must refuse. `contract.test.ts` here, and `contract_test.go` in the mirror, prove the schema
+compiles, every example validates (and, in Go, decodes into the Go types), and every invalid example is refused.
 
 Every call starts from a Hub server. The relay never dials a machine and cannot run anything on one.
 
 Rules marked [Orchestrator] are the orchestrator's decisions, pending founder review.
+
+### Pending founder review
+
+These [Orchestrator] rules hold until the founder reviews them:
+
+- the signing scope (method, target with query, device, counter, sending time and body);
+- the time-based counter and its 256-counter window;
+- `projectKey` hashing;
+- the owner and last-heard time set by the relay, never reported by a machine;
+- the recognition tick on the confirm page;
+- same-owner re-enrolment replacing the old machine;
+- the expiry timings: a 10-minute code, 5 wrong codes, a 7-day approval wait;
+- the decisions of 2026-11-26: the counter window keeps the 256 highest counters; the quoted `ETag`;
+  `DELETE /machines/{machineId}` answering 404 for a malformed or unknown id; the int64 counter maximum; open
+  sets for roles and needs-you kinds; and the newly specified behaviour (403 for a foreign `environmentId`, the
+  1 MiB body limit, machine visibility, needs-you order, event resume and `reset`, 401 `bad_signature`).
 
 ## Endpoints
 
@@ -22,12 +40,12 @@ All under `/relay/v1`.
 | `GET /capabilities` | Protocol version, display name, icon and enrolment entry point for anyone; sections, MCP tools, adapters and `me` for an enrolled caller. |
 | `POST /enroll/start` | Start enrolment with the machine's public key and facts; returns a pairing id, confirm code and browser URL. |
 | `POST /enroll/poll` | `pending`, `awaiting_approval`, `approved`, `refused` or `expired`; the device token once, on approval. |
-| `GET /machines` | The Team machines list, paged. |
+| `GET /machines` | The Team machines list, paged: every live machine for everyone, revoked ones for their owner and founders. |
 | `DELETE /machines/{machineId}` | Revoke a machine (its owner or a founder). |
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
 | `GET /today` | The five ordered Today blocks: needs you, shipped, working, stuck, health. |
-| `GET /needs` | Needs-you items, paged. |
-| `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`. |
+| `GET /needs` | Needs-you items, paged, most urgent first. |
+| `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
 
 ## Enrolment
 
@@ -35,8 +53,9 @@ All under `/relay/v1`.
    key and its machine facts (including T3's `environmentId`).
 2. The Hub shows `confirmCode` and opens `browserUrl` in the person's browser. That is a relay page, not an API:
    the person signs in there through the relay's staff directory (GitHub organisation members by default) and
-   types the code the Hub shows. The code is never in a URL. The code expires after 10 minutes, or after 5 wrong
-   codes typed for the pairing (`expired`, reason `too_many_attempts`).
+   types the code the Hub shows. The code is never in a URL. The code expires after 10 minutes, or at once on the
+   5th wrong code typed for the pairing (`expired`, reason `too_many_attempts`, `expiresAt` the time of that 5th
+   attempt).
 3. **The confirm page shows the machine.** Before confirming, the page shows the pending machine's label,
    hostname, operating system and `environmentId`, with the warning "Only confirm a code that your own Banneret
    Hub is showing you right now". The person must tick that they recognise the machine. On a relay without a
@@ -59,8 +78,9 @@ All under `/relay/v1`.
    - refused: `declined`, `not_staff`, `network_identity_mismatch`, `environment_enrolled`;
    - expired: `code_expired`, `too_many_attempts`, `approval_expired`.
 
-   Error responses from the enrolment calls mean only a malformed request (400), a bad signature (401) or an
-   unknown pairing id (404 `not_found`). [Orchestrator]
+   Error responses from the enrolment calls mean only a malformed request (400), a missing, malformed or
+   failing signature (401), an unknown pairing id (404 `not_found`, poll only), a body over 1 MiB (413), rate
+   limiting (429) or an unavailable relay (503), as `openapi.yaml` lists per call. [Orchestrator]
 
 **One token per environment.** A device token belongs to one Hub server environment (`environmentId`) and its
 person, not to a workspace. A server may hold several workspaces, but at most one Enterprise workspace per relay.
@@ -78,7 +98,7 @@ Every call except the two enrolment calls and an anonymous `GET /capabilities` s
 |---|---|
 | `Authorization` | `Bearer <device token>`. Opaque, bound to one machine. |
 | `X-Banneret-Device` | The machine id from enrolment. |
-| `X-Banneret-Counter` | Decimal unsigned 64-bit integer: Unix time in ms × 1000 + a sequence 0–999. |
+| `X-Banneret-Counter` | Decimal integer, 1–19 digits, at most 9223372036854775807 (int64): Unix time in ms × 1000 + a sequence 0–999. |
 | `X-Banneret-Sent-At` | RFC 3339 UTC sending time, ending in `Z`. |
 | `X-Banneret-Signature` | Standard base64 (padded) Ed25519 signature by the machine key. |
 
@@ -112,10 +132,16 @@ Serve path mount must preserve the `/relay/v1/...` target as the Hub sent it.
 0–999 that resets each millisecond. It is strictly increasing per machine, so a restarted Hub never reuses one
 and needs no stored counter. Enrolment calls use `0`.
 
-The relay refuses:
+The relay refuses, each with 401:
+- a missing or malformed `X-Banneret-Counter`, `X-Banneret-Sent-At` or `X-Banneret-Signature` (including a
+  counter above 9223372036854775807, or a non-zero counter on an enrolment call): `bad_signature`;
 - a signature that does not verify: `signature_invalid`;
 - a sending time more than 2 minutes from its clock: `clock_skew`;
-- a counter among the last 256 it accepted from that machine, or below the lowest of them: `counter_reused`.
+- a counter that repeats or falls below its window: `counter_reused`.
+
+**The counter window.** The relay keeps the 256 highest counters it has accepted from each machine. It refuses a
+counter equal to one of them, or below the lowest of them (the 256th highest), and accepts any counter above
+that. While it has seen fewer than 256, it accepts any counter that is not a repeat. [Orchestrator]
 
 The 256-counter window lets concurrent requests arrive out of order. This keeps the old devices pairing rule (an Ed25519 key,
 standard base64, the method, the path and the raw body, and a 2-minute window) and adds the query, the device,
@@ -165,16 +191,51 @@ Every failure has one shape:
 { "error": { "code": "…", "message": "…", "retryable": false, "details": { } } }
 ```
 
-The codes are fixed: `malformed` (400); `unauthenticated`, `token_revoked`, `signature_invalid`, `clock_skew`,
-`counter_reused` (401); `forbidden`, `network_identity_mismatch` (403); `not_found` (404); `too_large` (413);
+The codes are fixed: `malformed` (400); `unauthenticated`, `token_revoked`, `bad_signature`, `signature_invalid`,
+`clock_skew`, `counter_reused` (401); `forbidden`, `network_identity_mismatch` (403); `not_found` (404); `too_large` (413);
 `rate_limited`, `capacity` (429); `unavailable` (503); `internal` (500). `429` and `503` carry `Retry-After`. `message` is for
 people; clients act on `code` and `retryable` only.
+
+**Body limit.** A request body over 1 MiB (1,048,576 bytes) is refused with 413 `too_large`. [Orchestrator]
+
+**Ownership.** `POST /facts` whose `machine.environmentId` is not the environment the token's machine enrolled
+is refused with 403 `forbidden`. [Orchestrator]
 
 ## Paging
 
 List calls take `cursor` and `limit` (1–100, default 50) and return `items` plus `nextCursor` (null on the last
 page). Cursors are opaque. Today's needs-you block holds at most 20 items, and its `nextCursor` continues in
 `GET /needs`.
+
+## Machines
+
+`GET /machines` shows every enrolled person every live (not revoked) machine of the relay, whoever owns it. A
+revoked machine is listed only to its owner and to founders, with `revokedAt` set, `connected` false and
+`revocable` false; nobody else sees it. Live machines come first, newest heartbeat first; revoked machines follow,
+most recently revoked first. `DELETE /machines/{machineId}` answers 404 `not_found` for a malformed or unknown
+id, never 400. [Orchestrator]
+
+## Needs you
+
+`GET /needs`, and Today's needs-you block, are ordered most urgent first: by class, then oldest first within a
+class. [Orchestrator]
+
+| Class | Means | Kinds |
+|---|---|---|
+| 1 | An agent is blocked on a question or approval from you | `thread_question`, `thread_approval` |
+| 2 | Something waits on your review or decision | `pull_request`, `promotion`, `founder_question`, `health` |
+| 3 | You were mentioned | `mention` |
+| 4 | A dispatcher suggestion | `suggestion` |
+| 5 | Any kind not listed above | |
+
+`kind` is an open set. A client shows an unknown kind as a generic item and never fails on it.
+
+## Events
+
+`GET /events` without `Last-Event-ID` is live only: it starts with the next event. With `Last-Event-ID` the relay
+replays the caller's events after that id, reaching back over the smaller of the last 1000 events and the last 24
+hours. Beyond that, or for an id it does not know, the relay sends one `reset` event and then continues live;
+the client refetches `GET /today`, `GET /needs` and `GET /capabilities`. [Orchestrator]
 
 ## Deep links
 
@@ -185,19 +246,23 @@ thread when the environment is its own, and otherwise says which machine holds i
 
 - **Anonymous callers** get `protocol`, `displayName`, `iconUrl` (or null) and `enrolment` only.
 - **Enrolled callers** also get the following, none of it secret:
-  - `me {id, login, role}`, so no separate identity call is needed;
+  - `me {id, login, role}`, so no separate identity call is needed. `role` is an open set (`founder`,
+    `limited_staff` today); a client treats an unknown role as `limited_staff`;
   - `sections[] {id, kind, version, flags}`. The Hub renders only these, and ignores kinds it does not know;
   - `mcpTools[] {name, description, role, inputSchema?}`. `role` is the lowest role that may call the tool;
   - `adapters[] {role, kind, version?}`, for the work tracker, staff directory, knowledge and health.
 - **Refetching.** The facts response carries `capabilitiesVersion`, and the `capabilities.changed` event says when
-  to refetch.
+  to refetch. The `GET /capabilities` `ETag` is the same value in double quotes: `capabilitiesVersion` `c-7f3a`
+  is `ETag: "c-7f3a"`. [Orchestrator]
 
 ## Versioning
 
 - The major version is in the path (`/relay/v1`). Within v1 every change is additive: new optional response
   fields, new endpoints, new section kinds, new needs-you kinds, new adapter kinds.
 - `protocol` (`1.<minor>`) and `info.version` grow by one minor per additive change.
-- Clients ignore response fields and enum values they do not know. Request bodies stay closed: a new request
+- Clients ignore response fields and enum values they do not know. Fields that grow within v1 (`Role`,
+  `NeedsItem.kind`, section and adapter kinds) are open strings with their known values documented, not closed
+  enums, so a validating client accepts new values. Request bodies stay closed: a new request
   field is a new minor that the relay accepts as optional.
 - A breaking change is `/relay/v2`.
 
@@ -210,5 +275,5 @@ thread when the environment is its own, and otherwise says which machine holds i
 
 ## Extraction guards
 
-This folder imports nothing from outside `internal/hub` and names no organisation. Examples use `example-org`.
-The test `TestExtractionGuards` checks both.
+This folder names no organisation; examples use `example-org`. In the platform mirror, the folder also imports
+nothing from outside `internal/hub`, and `TestExtractionGuards` checks both.
