@@ -273,6 +273,22 @@ describe("Enterprise feed", () => {
     expect(entryIds()).toEqual(["e1", "e2", "e3"]);
   });
 
+  it("marks a checked entry with the checked mark", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openFeed(stack, "/feed");
+    await using _screen = screen;
+    await emit(
+      state(
+        ["today", "feed"],
+        feedRead([entry("e1", 1, { type: "checked", status: "checked", summary: "Signed off." })]),
+      ),
+    );
+    await expect.element(page.getByText("Signed off.")).toBeVisible();
+    const mark = rowOf("e1")!.querySelector("[data-status]")!;
+    expect(mark.textContent).toContain("●");
+    expect(mark.textContent).toContain("checked");
+  });
+
   it("renders an unknown type and importance generically", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openFeed(stack);

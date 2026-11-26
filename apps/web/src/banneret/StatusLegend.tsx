@@ -46,17 +46,20 @@ export function StatusMark(props: {
   );
 }
 
-export function StatusLegend(props: { readonly className?: string }) {
+/** `checked` is the board section's flag: without it the relay never applies the sign-off rule, so ● is left out. */
+export function StatusLegend(props: { readonly checked: boolean; readonly className?: string }) {
   return (
     <ul
       aria-label="Status legend"
       className={cn("flex flex-wrap items-center gap-x-4 gap-y-1", props.className)}
     >
-      {STATUS_VOCABULARY.map((entry) => (
-        <li key={entry.status}>
-          <StatusMark status={entry.status} />
-        </li>
-      ))}
+      {STATUS_VOCABULARY.filter((entry) => props.checked || entry.status !== "checked").map(
+        (entry) => (
+          <li key={entry.status}>
+            <StatusMark status={entry.status} />
+          </li>
+        ),
+      )}
       <li className="inline-flex items-center gap-1.5 text-muted-foreground text-xs">
         <span aria-hidden className="inline-flex size-4 rounded-full ring-2 ring-primary" />
         agent at work

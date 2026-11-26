@@ -178,13 +178,14 @@ export type BanneretBoard = typeof BanneretBoard.Type;
 /**
  * The board as last read from the relay's snapshot, kept with its age when the relay is away.
  * `atWork` are task ids with a live agent session in the snapshot `work` file (the ring);
- * `leases` is the board section's `leases` flag.
+ * `leases` and `checked` are the board section's flags of those names.
  */
 export const BanneretFeedBoardRead = Schema.Struct({
   value: Schema.NullOr(BanneretBoard),
   fetchedAt: Schema.NullOr(Schema.String),
   atWork: Schema.Array(Schema.String),
   leases: Schema.Boolean,
+  checked: Schema.Boolean,
   problem: Schema.optional(Schema.Struct({ message: Schema.String, since: Schema.String })),
 });
 export type BanneretFeedBoardRead = typeof BanneretFeedBoardRead.Type;

@@ -104,6 +104,7 @@ const state = (sections: string[], cards: BanneretBoardCard[] | null): BanneretF
           fetchedAt: "2026-11-26T10:00:00.000Z",
           atWork: [],
           leases: true,
+          checked: true,
         },
   feed: null,
   graveyard: null,
@@ -334,6 +335,7 @@ describe("Task tab", () => {
     await emit(state([], null));
     const fallback = document.querySelector('[data-testid="task-link-out"]')!;
     expect(fallback.querySelector("a")?.textContent).toBe("Open on youtrack");
+    expect(document.querySelector('[data-testid="task-thread-help"]')).toBeNull();
     expect(document.querySelector('[data-testid="issue-thread"]')).toBeNull();
   });
 
@@ -346,6 +348,9 @@ describe("Task tab", () => {
       .element(page.getByTestId("issue-thread"))
       .toHaveTextContent("github example-org/example-app 2");
     expect(document.querySelector('[data-testid="task-link-out"]')).toBeNull();
+    expect(document.querySelector('[data-testid="task-thread-help"]')?.textContent).toBe(
+      "Edits here are made on GitHub as you; the board's rules for claims and sign-off still apply.",
+    );
   });
 
   it("renders a hostile title and reason as inert text and never links a javascript: url", async () => {

@@ -196,6 +196,10 @@ function TaskThread(props: {
   const { threadRef } = props;
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="task-thread">
+      <p className="px-3 pt-2 text-muted-foreground text-xs" data-testid="task-thread-help">
+        Edits here are made on {trackerName(task.ref.tracker)} as you; the board's rules for claims
+        and sign-off still apply.
+      </p>
       <IssueDetailPanel
         environmentId={environmentId}
         reference={target.ref}
