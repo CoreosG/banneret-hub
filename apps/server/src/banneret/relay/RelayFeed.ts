@@ -245,11 +245,18 @@ const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedToday | un
     }),
     stuck: block(source?.stuck, (value) => {
       const item = fields(value);
-      const rule = text(item?.rule, 64);
+      const rules = [
+        ...new Set(
+          list(item?.rules, 16).flatMap((rule) => {
+            const name = text(rule, 64);
+            return name === undefined ? [] : [name];
+          }),
+        ),
+      ];
       const since = text(item?.since, 64);
-      if (rule === undefined || since === undefined) return undefined;
+      if (rules.length === 0 || since === undefined) return undefined;
       return {
-        rule,
+        rules,
         since,
         ...optional("task", task(item?.task)),
         ...optional("owner", person(item?.owner)),

@@ -196,6 +196,21 @@ the previous visit read count as one visit and leave it as it was; a visit read 
 visit, and `lastVisitAt` becomes the time of the previous visit's last read. The only accepted value of `visit` is
 `1`; any other is refused with 400 `malformed`.
 
+### Stuck
+
+The stuck block has one item per task and owner. `rules` lists every reason that applies to it. It is never empty
+and never repeats a rule. It is ordered most important first, in this fixed priority:
+
+1. `dev_red`
+2. `check_failed`
+3. `deploy_failed`
+4. `watched_job_down`
+5. `unreviewed`
+6. `claim_quiet`
+7. `checks_queued`
+
+A client shows the reasons in the order it receives them.
+
 ## Errors
 
 Every failure has one shape:

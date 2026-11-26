@@ -49,6 +49,30 @@ describe("relay v1 contract", () => {
     expect(spec.check(invalidExampleSchema(file), readExample(`invalid/${file}`))).not.toBeNull();
   });
 
+  it("orders every stuck item's rules by the relay priority, without repeats", () => {
+    const priority = [
+      "dev_red",
+      "check_failed",
+      "deploy_failed",
+      "watched_job_down",
+      "unreviewed",
+      "claim_quiet",
+      "checks_queued",
+    ];
+    const todayExample = readExample("today.json") as {
+      stuck: { items: { rules: string[] }[] };
+    };
+    const workExample = readExample("snapshot-work.json") as typeof todayExample;
+    const items = [...todayExample.stuck.items, ...workExample.stuck.items];
+    expect(items.length).toBeGreaterThan(0);
+    for (const { rules } of items) {
+      expect(new Set(rules).size).toBe(rules.length);
+      expect(rules.map((rule) => priority.indexOf(rule))).toEqual(
+        rules.map((rule) => priority.indexOf(rule)).toSorted((a, b) => a - b),
+      );
+    }
+  });
+
   it("keeps the stage plan examples out of the openapi example list", () => {
     expect(listExamples("")).not.toContain("stage-plan.json");
   });

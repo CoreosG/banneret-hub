@@ -16,7 +16,7 @@ import {
   offersSection,
   safeLinkOut,
   shippedLabel,
-  stuckRuleLabel,
+  stuckRulesLabel,
   type Tone,
   workingStateLabel,
 } from "./relayFeed.logic";
@@ -209,12 +209,12 @@ export function TodayPage() {
             <ul className="flex flex-col gap-1.5 text-sm">
               {today.stuck.items.map((item) => (
                 <li
-                  key={`${item.rule}:${item.since}:${item.task?.title ?? ""}`}
+                  key={`${item.rules.join(",")}:${item.since}:${item.task?.title ?? ""}`}
                   className="flex items-start gap-3"
                 >
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="break-words">
-                      {stuckRuleLabel(item.rule)}
+                      {stuckRulesLabel(item.rules)}
                       {item.task === undefined ? null : (
                         <>
                           {": "}

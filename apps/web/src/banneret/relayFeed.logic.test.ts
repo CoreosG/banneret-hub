@@ -5,6 +5,7 @@ import {
   needsCountLabel,
   needsKindLabel,
   safeLinkOut,
+  stuckRulesLabel,
   workingStateLabel,
 } from "./relayFeed.logic";
 
@@ -16,6 +17,14 @@ describe("relay feed words", () => {
     expect(needsKindLabel("brand_new")).toBe("Item");
     expect(workingStateLabel("waiting")).toBe("waiting for you");
     expect(workingStateLabel("brand_new")).toBeNull();
+  });
+
+  it("lists every stuck reason in the relay's order", () => {
+    expect(stuckRulesLabel(["check_failed", "unreviewed"])).toBe(
+      "Checks are failing \u00b7 Ready but not reviewed",
+    );
+    expect(stuckRulesLabel(["claim_quiet"])).toBe("No activity on a claimed task");
+    expect(stuckRulesLabel(["brand_new"])).toBe("Stuck");
   });
 
   it("renders only http(s) links out", () => {
