@@ -10,7 +10,7 @@ export const BANNERET_WORKSPACES_WS_METHODS = {
   put: "banneretWorkspaces.put",
 } as const;
 
-/** Only "solo" is creatable; "enterprise" waits for the relay contract (docs/banneret/enterprise.md). */
+/** "enterprise" workspaces are made by the server when this environment joins a relay. */
 export const BanneretWorkspaceKind = Schema.Literals(["solo", "enterprise"]);
 export type BanneretWorkspaceKind = typeof BanneretWorkspaceKind.Type;
 
@@ -22,6 +22,8 @@ export const BanneretWorkspace = Schema.Struct({
   projectKeys: Schema.Array(Schema.String),
   /** ISO time of the last change; the newest copy of a workspace wins. */
   updatedAt: Schema.String,
+  /** The relay an Enterprise workspace belongs to; its id is derived from `origin`. */
+  relay: Schema.optional(Schema.Struct({ origin: Schema.String, displayName: Schema.String })),
   /** A tombstone, kept so a merge with an older copy does not bring the workspace back. */
   deleted: Schema.optional(Schema.Boolean),
 });

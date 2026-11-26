@@ -21,6 +21,7 @@ import { WS_METHODS } from "./rpc.ts";
 import { WORKSPACE_FILES_WS_METHODS } from "./workspaceFiles.ts";
 import { BANNERET_PORTS_WS_METHODS } from "./banneretPorts.ts";
 import { BANNERET_WORKSPACES_WS_METHODS } from "./banneretWorkspaces.ts";
+import { BANNERET_RELAY_RPC_SCOPES } from "./banneretRelay.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
@@ -32,6 +33,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [BANNERET_PORTS_WS_METHODS.list]: AuthOrchestrationReadScope,
   [BANNERET_WORKSPACES_WS_METHODS.list]: AuthOrchestrationReadScope,
   [BANNERET_WORKSPACES_WS_METHODS.put]: AuthOrchestrationOperateScope,
+  ...BANNERET_RELAY_RPC_SCOPES,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   // An MCP sign-in stores a credential for the agent, as an account sign-in does.
   [WS_METHODS.providerMcpSignInStart]: AuthProvidersManageScope,
