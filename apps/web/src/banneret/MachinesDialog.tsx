@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { canForget } from "./enterprise.logic";
+import { canForget, forgetNotice } from "./enterprise.logic";
 import { enrolmentRpc, storeEnrolmentView, useEnrolmentView } from "./enrolmentStore";
 import {
   loadEnvironmentWorkspaces,
@@ -156,6 +156,7 @@ export function LeavePanel(props: { readonly onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const company = view?.displayName ?? "the company";
+  const notice = forgetNotice(view);
 
   const leave = async (mode: "revoke" | "forget") => {
     if (environmentId === null) return;
@@ -187,12 +188,7 @@ export function LeavePanel(props: { readonly onClose: () => void }) {
             {error}
           </p>
         ) : null}
-        {canForget(view) ? (
-          <p className="mt-2 text-muted-foreground text-sm">
-            The relay cannot be reached. You can forget this machine here instead; a founder must
-            then remove it on the relay.
-          </p>
-        ) : null}
+        {notice !== null ? <p className="mt-2 text-muted-foreground text-sm">{notice}</p> : null}
       </DialogPanel>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={props.onClose}>

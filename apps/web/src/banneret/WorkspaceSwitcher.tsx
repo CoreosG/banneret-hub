@@ -24,7 +24,7 @@ import {
   MenuTrigger,
 } from "../components/ui/menu";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { enrolmentLine, type EnrolmentTone } from "./enterprise.logic";
+import { canJoinAgain, enrolmentLine, type EnrolmentTone } from "./enterprise.logic";
 import { useEnrolmentView } from "./enrolmentStore";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
@@ -109,6 +109,20 @@ export function WorkspaceSwitcher(props: {
         {active?.relay !== undefined ? (
           <>
             <MenuSeparator />
+            {joinedHere && canJoinAgain(enrolment) ? (
+              <MenuItem
+                onClick={() =>
+                  openWorkspaceDialog(
+                    active.relay === undefined
+                      ? { kind: "enterprise" }
+                      : { kind: "enterprise", origin: active.relay.origin },
+                  )
+                }
+              >
+                <UsersIcon />
+                Join again…
+              </MenuItem>
+            ) : null}
             {joinedHere ? (
               <>
                 <MenuItem onClick={() => openWorkspaceDialog({ kind: "machines" })}>

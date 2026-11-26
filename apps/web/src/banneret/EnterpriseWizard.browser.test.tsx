@@ -26,7 +26,12 @@ import type { Project } from "../types";
 import { enrolmentRpc, refreshEnrolment, useEnrolmentStore } from "./enrolmentStore";
 import { WorkspacesHost } from "./WorkspacesHost";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
-import { openWorkspaceDialog, useWorkspacesStore, workspacesRpc } from "./workspacesStore";
+import {
+  loadEnvironmentWorkspaces,
+  openWorkspaceDialog,
+  useWorkspacesStore,
+  workspacesRpc,
+} from "./workspacesStore";
 
 const state = vi.hoisted(() => ({ openExternal: vi.fn() }));
 
@@ -343,6 +348,89 @@ describe("EnterpriseWizard", () => {
     expect(document.querySelector('img[src="x"]')).toBeNull();
     expect((window as { __pwned?: number }).__pwned).toBeUndefined();
     expect(fetched.filter((name) => name.endsWith("/x"))).toEqual([]);
+  });
+
+  it("lets a stuck setup be cancelled or forgotten, and shows why it is stuck", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const server = setup();
+    server.spies.leave.mockImplementation(async () => ({
+      ok: true,
+      value: { state: "none", reason: "forgotten" },
+    }));
+    await using _screen = await render(<Harness />);
+    const approved: BanneretEnrolmentView = {
+      state: "approved",
+      workspaceId: WORKSPACE_ID,
+      relayOrigin: ORIGIN,
+      displayName: "Example Company",
+      machineId: "m_1",
+      label: "Ada laptop",
+    };
+    await server.setView(approved);
+    await act(() => openWorkspaceDialog({ kind: "enterprise" }));
+    await expect.element(page.getByText("Finishing setup…")).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+    expect(page.getByRole("button", { name: "Forget this machine here" }).query()).toBeNull();
+
+    await server.setView({ ...approved, health: "forbidden" });
+    await expect.element(page.getByText("The relay does not allow this machine")).toBeVisible();
+    await userEvent.click(page.getByRole("button", { name: "Forget this machine here" }));
+    expect(server.spies.leave).toHaveBeenCalledWith(LOCAL, "forget");
+    // The stub's leave does not change what status answers; make the server agree.
+    await server.setView({ state: "none", reason: "forgotten" });
+    await expect
+      .element(page.getByRole("status"))
+      .toHaveTextContent(
+        "This machine was forgotten here. A founder must still remove it on the relay.",
+      );
+
+    await server.setView({ ...approved, health: "unreachable" });
+    await expect.element(page.getByText(/^Cannot reach relay\.example\.com/)).toBeVisible();
+    await userEvent.click(page.getByRole("button", { name: "Cancel" }));
+    expect(server.spies.cancel).toHaveBeenCalledWith(LOCAL);
+    await expect.element(page.getByLabelText("Relay address")).toBeVisible();
+  });
+
+  it("offers Join again in the switcher after a 401, and keeps the view when a read fails", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const server = setup();
+    await using _screen = await render(<Harness />);
+    server.serverWritesWorkspace();
+    await act(async () => {
+      await loadEnvironmentWorkspaces(LOCAL);
+      useWorkspacesStore.setState({ activeId: WORKSPACE_ID });
+    });
+    const refused: BanneretEnrolmentView = {
+      state: "configured",
+      workspaceId: WORKSPACE_ID,
+      relayOrigin: ORIGIN,
+      displayName: "Example Company",
+      machineId: "m_1",
+      label: "Ada laptop",
+      me: { login: "ada-example", role: "founder" },
+      health: "refused",
+    };
+    await server.setView(refused);
+    await act(() => openWorkspaceDialog({ kind: "leave" }));
+    await expect
+      .element(page.getByText(/The relay refused this machine, so it cannot confirm/))
+      .toBeVisible();
+    await act(() => useWorkspacesStore.setState({ dialog: null }));
+
+    server.spies.status.mockImplementation(async () => ({ ok: false, message: "Lost." }));
+    await act(async () => {
+      await refreshEnrolment(LOCAL);
+    });
+    expect(useEnrolmentStore.getState().views[LOCAL]).toEqual(refused);
+
+    await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
+    await userEvent.click(page.getByRole("menuitem", { name: "Join again…" }));
+    await expect.element(page.getByLabelText("Relay address")).toHaveValue(ORIGIN);
+    await expect
+      .element(page.getByText("The relay refused this machine. Join again to replace it."))
+      .toBeVisible();
   });
 
   it("creating a Solo workspace calls no relay RPC", async () => {

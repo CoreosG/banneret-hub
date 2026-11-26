@@ -137,10 +137,16 @@ export function storeEnrolmentView(environmentId: EnvironmentId, view: BanneretE
   useEnrolmentStore.setState((state) => ({ views: { ...state.views, [environmentId]: view } }));
 }
 
-/** Reads the environment's enrolment. An older server without the method reads as not joined. */
+/**
+ * Reads the environment's enrolment. A failed read keeps the last view, so a dropped connection
+ * never shows a joined machine as not joined; with nothing read yet it shows as not joined.
+ */
 export async function refreshEnrolment(environmentId: EnvironmentId) {
   const result = await enrolmentRpc.status(environmentId);
-  storeEnrolmentView(environmentId, result.ok ? result.value : { state: "none" });
+  if (result.ok) storeEnrolmentView(environmentId, result.value);
+  else if (useEnrolmentStore.getState().views[environmentId] === undefined) {
+    storeEnrolmentView(environmentId, { state: "none" });
+  }
   return result.ok ? result.value : null;
 }
 

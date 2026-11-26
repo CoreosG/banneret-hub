@@ -17,7 +17,11 @@ import { Label } from "../components/ui/label";
 import { readLocalApi } from "../localApi";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
 import {
+  canForget,
+  canJoinAgain,
   countdown,
+  forgetNotice,
+  healthLine,
   isValidMachineLabel,
   lastResultMessage,
   letterAvatar,
@@ -29,6 +33,7 @@ import {
 } from "./enterprise.logic";
 import {
   enrolmentRpc,
+  type RelayOutcome,
   refreshEnrolment,
   storeEnrolmentView,
   useEnrolmentView,
@@ -268,6 +273,66 @@ function CodeStep(props: {
   );
 }
 
+/** Approved, setting up. If setup keeps failing, the person can still cancel or forget. */
+function FinishingStep(props: {
+  readonly environmentId: EnvironmentId;
+  readonly view: BanneretEnrolmentView;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const line = props.view.health === undefined ? null : healthLine(props.view).text;
+  const notice = forgetNotice(props.view);
+  const act = async (run: () => Promise<RelayOutcome<BanneretEnrolmentView>>) => {
+    setBusy(true);
+    setError(null);
+    const result = await run();
+    setBusy(false);
+    if (result.ok) storeEnrolmentView(props.environmentId, result.value);
+    else {
+      setError(result.message);
+      void refreshEnrolment(props.environmentId);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <CompanyAvatar name={props.view.displayName ?? ""} />
+        <p className="min-w-0 truncate font-medium text-sm">Join {props.view.displayName}</p>
+      </div>
+      <p role="status" className="text-sm">
+        Finishing setup…
+      </p>
+      {line !== null ? <p className="text-muted-foreground text-sm">{line}</p> : null}
+      {notice !== null ? <p className="text-muted-foreground text-sm">{notice}</p> : null}
+      {error !== null ? (
+        <p role="alert" className="text-destructive text-sm">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          onClick={() => void act(() => enrolmentRpc.cancel(props.environmentId))}
+        >
+          Cancel
+        </Button>
+        {canForget(props.view) ? (
+          <Button
+            type="button"
+            variant="destructive-outline"
+            disabled={busy}
+            onClick={() => void act(() => enrolmentRpc.leave(props.environmentId, "forget"))}
+          >
+            Forget this machine here
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function ProjectStep(props: {
   readonly environmentId: EnvironmentId;
   readonly view: BanneretEnrolmentView;
@@ -416,10 +481,9 @@ export function EnterpriseWizard(props: {
   const step = joiningAgain && view?.state === "revoked" ? "address" : wizardStep(view);
   const initialOrigin =
     props.initialOrigin ?? (step === "address" ? (view?.relayOrigin ?? lastOrigin) : undefined);
-  const notice =
-    view?.state === "configured" && view.health === "refused"
-      ? "The relay refused this machine. Join again to replace it."
-      : lastResultMessage(view);
+  const notice = canJoinAgain(view)
+    ? "The relay refused this machine. Join again to replace it."
+    : lastResultMessage(view);
 
   return (
     <>
@@ -446,9 +510,7 @@ export function EnterpriseWizard(props: {
           ) : step === "code" || step === "awaiting" ? (
             <CodeStep environmentId={environmentId} view={view!} />
           ) : step === "finishing" ? (
-            <p role="status" className="text-sm">
-              Finishing setup…
-            </p>
+            <FinishingStep environmentId={environmentId} view={view!} />
           ) : step === "revoked" ? (
             <RevokedStep
               view={view!}

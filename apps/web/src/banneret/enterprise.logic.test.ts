@@ -3,8 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   canForget,
+  canJoinAgain,
   countdown,
   enrolmentLine,
+  forgetNotice,
   isKnownSectionKind,
   isValidMachineLabel,
   lastResultMessage,
@@ -124,7 +126,14 @@ describe("enrolmentLine", () => {
     [{ health: "clock_wrong" }, "warn", "This machine's clock is wrong"],
     [{ health: "refused" }, "error", "The relay refused this machine"],
     [{ health: "forbidden" }, "error", "The relay does not allow this machine"],
+    [{ health: "invalid_reply" }, "error", "The relay's answers do not match this version"],
     [{}, "muted", "Checking the connection…"],
+    [{ state: "approved", health: "unreachable" }, "warn", "Cannot reach relay.example.com"],
+    [
+      { state: "approved", health: "invalid_reply" },
+      "error",
+      "The relay's answers do not match this version",
+    ],
     [
       { state: "revoked", reason: "removed" },
       "error",
@@ -155,6 +164,32 @@ describe("helpers", () => {
     expect(canForget(joined({ health: "unreachable" }))).toBe(true);
     expect(canForget(joined({ health: "refused" }))).toBe(true);
     expect(canForget({ state: "revoked" })).toBe(false);
+    expect(canForget(joined({ state: "approved" }))).toBe(false);
+    expect(canForget(joined({ state: "approved", health: "forbidden" }))).toBe(true);
+  });
+
+  it("offers Join again only after a 401 refusal", () => {
+    expect(canJoinAgain(joined({ health: "refused" }))).toBe(true);
+    expect(canJoinAgain(joined({ health: "forbidden" }))).toBe(false);
+    expect(canJoinAgain(joined({ state: "approved", health: "refused" }))).toBe(false);
+    expect(canJoinAgain(null)).toBe(false);
+  });
+
+  it.each([
+    ["unreachable", "The relay cannot be reached."],
+    ["refused", "The relay refused this machine, so it cannot confirm that it left."],
+    ["forbidden", "The relay does not allow this machine to remove itself."],
+    ["clock_wrong", "This machine's clock is wrong, so the relay would reject its calls."],
+    ["invalid_reply", "The relay's answers do not match this version of Banneret Hub."],
+  ] as const)("explains forgetting while %s", (health, opening) => {
+    const notice = forgetNotice(joined({ health }));
+    expect(notice?.startsWith(opening)).toBe(true);
+    expect(notice).toContain("a founder must then remove it on the relay");
+  });
+
+  it("says nothing about forgetting while healthy", () => {
+    expect(forgetNotice(joined({ health: "healthy" }))).toBeNull();
+    expect(forgetNotice(joined())).toBeNull();
   });
 
   it("counts down minutes and seconds, stopping at zero", () => {

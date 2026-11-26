@@ -27,7 +27,7 @@ export function wizardStep(view: BanneretEnrolmentView | null): WizardStep {
     case "approved":
       return "finishing";
     case "configured":
-      return view.health === "refused" ? "address" : "connected";
+      return canJoinAgain(view) ? "address" : "connected";
     case "revoked":
       return "revoked";
     default:
@@ -102,35 +102,72 @@ export function enrolmentLine(
     case "awaiting_approval":
       return { tone: "warn", text: "Waiting for a founder to approve" };
     case "approved":
-      return { tone: "muted", text: "Finishing setup…" };
+      return view.health === undefined
+        ? { tone: "muted", text: "Finishing setup…" }
+        : healthLine(view);
     case "revoked":
       return { tone: "error", text: revokedMessage(view) };
     case "configured":
-      switch (view.health) {
-        case "healthy":
-          return { tone: "ok", text: `Connected as ${view.me?.login ?? "you"}` };
-        case "unreachable":
-          return {
-            tone: "warn",
-            text: `Cannot reach ${relayHost(view.relayOrigin)}${
-              view.unreachableSince ? ` since ${timeOf(view.unreachableSince)}` : ""
-            }`,
-          };
-        case "clock_wrong":
-          return { tone: "warn", text: "This machine's clock is wrong" };
-        case "refused":
-          return { tone: "error", text: "The relay refused this machine" };
-        case "forbidden":
-          return { tone: "error", text: "The relay does not allow this machine" };
-        default:
-          return { tone: "muted", text: "Checking the connection…" };
-      }
+      return healthLine(view);
+  }
+}
+
+/** The line for the run-time health of an approved or configured enrolment. */
+export function healthLine(view: BanneretEnrolmentView): EnrolmentLine {
+  switch (view.health) {
+    case "healthy":
+      return { tone: "ok", text: `Connected as ${view.me?.login ?? "you"}` };
+    case "unreachable":
+      return {
+        tone: "warn",
+        text: `Cannot reach ${relayHost(view.relayOrigin)}${
+          view.unreachableSince ? ` since ${timeOf(view.unreachableSince)}` : ""
+        }`,
+      };
+    case "clock_wrong":
+      return { tone: "warn", text: "This machine's clock is wrong" };
+    case "refused":
+      return { tone: "error", text: "The relay refused this machine" };
+    case "forbidden":
+      return { tone: "error", text: "The relay does not allow this machine" };
+    case "invalid_reply":
+      return { tone: "error", text: "The relay's answers do not match this version" };
+    default:
+      return { tone: "muted", text: "Checking the connection…" };
   }
 }
 
 /** Leave without telling the relay is offered only while the relay cannot confirm. */
 export function canForget(view: BanneretEnrolmentView | null): boolean {
-  return view?.state === "configured" && view.health !== undefined && view.health !== "healthy";
+  return (
+    (view?.state === "configured" || view?.state === "approved") &&
+    view.health !== undefined &&
+    view.health !== "healthy"
+  );
+}
+
+/** A machine the relay refused (401) may join again, replacing its key and token. */
+export function canJoinAgain(view: BanneretEnrolmentView | null): boolean {
+  return view?.state === "configured" && view.health === "refused";
+}
+
+/** Why Leave may not reach the relay, and what forgetting here means; null while healthy. */
+export function forgetNotice(view: BanneretEnrolmentView | null): string | null {
+  if (!canForget(view)) return null;
+  const then =
+    "You can forget this machine here instead; a founder must then remove it on the relay.";
+  switch (view?.health) {
+    case "refused":
+      return `The relay refused this machine, so it cannot confirm that it left. ${then}`;
+    case "forbidden":
+      return `The relay does not allow this machine to remove itself. ${then}`;
+    case "clock_wrong":
+      return `This machine's clock is wrong, so the relay would reject its calls. Fix the clock and try again, or forget it. ${then}`;
+    case "invalid_reply":
+      return `The relay's answers do not match this version of Banneret Hub. ${then}`;
+    default:
+      return `The relay cannot be reached. ${then}`;
+  }
 }
 
 /** Minutes and seconds left, "0:00" once past. */
