@@ -1024,10 +1024,12 @@ describe("snapshot", () => {
       "not_found",
     );
   };
-  // A relay may debounce its rebuilds, so a change shows within seconds, not at once.
+  // The rebuild control forces the new head; the poll only absorbs a relay that applies it asynchronously.
   const POLL = { timeout: 20_000, interval: 100 };
   const needsRefAfterSeed = async (machine: Enrolled, previous: string) => {
     await client.control("/needs", { machineId: machine.machineId, count: 1 });
+    // A relay with a rebuild interval honours this in test mode, so the head moves without waiting.
+    await client.rebuildSnapshot(machine.login);
     await expect
       .poll(async () => (await readHead(machine)).head.files.needs ?? previous, POLL)
       .not.toBe(previous);
@@ -1056,6 +1058,7 @@ describe("snapshot", () => {
     const machine = await enrol();
     await client.control("/repositories", { count: 2 });
     await client.control("/needs", { machineId: machine.machineId, count: 2 });
+    await client.rebuildSnapshot(machine.login);
     const { reply, head } = await readHead(machine);
     expect(reply.headers.get("etag")).toBe(`"sha256:${sha256(reply.bytes)}"`);
     expect(reply.headers.get("cache-control")).toBe("private, no-cache");
@@ -1133,6 +1136,7 @@ describe("snapshot", () => {
     const other = await enrol();
     const stranger = await enrol();
     await client.control("/needs", { machineId: owner.machineId, count: 1 });
+    await client.rebuildSnapshot(owner.login);
     const { head } = await readHead(owner);
     const ownersNeeds = bare(head.files.needs ?? "");
     const ownersHealth = bare(head.files.health ?? "");
