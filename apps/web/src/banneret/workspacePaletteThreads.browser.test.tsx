@@ -1,6 +1,6 @@
 import { EnvironmentId, ProjectId, ThreadId, type BanneretWorkspace } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
@@ -100,6 +100,10 @@ describe("command palette threads follow the active workspace", () => {
     await expect.element(option(/Alpha fix login/)).toBeVisible();
     await expect.element(option(/in other workspaces/)).not.toBeInTheDocument();
     expect(useCommandPaletteStore.getState().open).toBe(true);
+
+    await userEvent.clear(page.getByPlaceholder("Search commands, projects, and threads..."));
+    await expect.element(option(/Alpha fix login/)).toBeVisible();
+    await expect.element(option(/Beta fix login/)).not.toBeInTheDocument();
   });
 
   it("lists only the active workspace's recent threads, without the widen row", async () => {

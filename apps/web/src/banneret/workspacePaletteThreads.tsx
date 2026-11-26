@@ -58,7 +58,8 @@ export function useWorkspacePaletteThreads<
   const scopedShells = useWorkspaceScopedThreads(shells);
   const [widened, setWidened] = useState(false);
   const unchanged = (groups: ReadonlyArray<CommandPaletteGroup>, _searching?: boolean) => groups;
-  if (widened || scopedShells.length === shells.length) {
+  // The recent list (no query) stays scoped even after a search was widened.
+  if ((widened && query.trim().length > 0) || scopedShells.length === shells.length) {
     return { ...threads, withOtherWorkspaces: unchanged };
   }
 

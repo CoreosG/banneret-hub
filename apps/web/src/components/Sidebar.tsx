@@ -1213,6 +1213,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const scopedProjectGroups = revealWidensScope ? [] : chosenProjectGroups;
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
   const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
+  const draftProjectKeys = useWorkspaceScopeProjectKeys(scopedProjectKeys);
   const threadSearch = useThreadSearch(
     connectedEnvironmentIds,
     threadSearchQuery,
@@ -1235,8 +1236,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         continue;
       }
       if (
-        scopedProjectKeys !== null &&
-        !scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
+        draftProjectKeys !== null &&
+        !draftProjectKeys.has(`${session.environmentId}:${session.projectId}`)
       ) {
         continue;
       }
@@ -1475,7 +1476,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
 
   const { draftIds, routeDraftComposer } = useSidebarDrafts(
-    scopedProjectKeys,
+    draftProjectKeys,
     routeDraftIdForRows,
     draftTerminalLabels,
   );
