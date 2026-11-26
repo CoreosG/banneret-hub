@@ -1,8 +1,7 @@
 // Banneret Hub: the open tabs bar. Click activates, double-click keeps, middle-click closes, drag
-// reorders. Dragging uses pointer events (dnd-kit), not HTML5 drag and drop: the bar is the
-// window's drag region in the desktop app, and on Windows HTML5 drag events do not reach the page
-// over a drag region. A thread tab reads its live title from the quiet shell (one subscription per tab, at
-// most MAX_TABS, on data the client already holds).
+// reorders with pointer events (dnd-kit), since HTML5 drag events miss the desktop window's drag
+// region on Windows. A thread tab reads its live title from the quiet shell (one subscription per
+// tab, at most MAX_TABS, on data the client already holds).
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -281,20 +280,23 @@ export function TabsBar() {
           modifiers={TAB_DRAG_MODIFIERS}
           onDragEnd={onDragEnd}
         >
-          <SortableContext items={tabs.map((tab) => tab.id)} strategy={horizontalListSortingStrategy}>
+          <SortableContext
+            items={tabs.map((tab) => tab.id)}
+            strategy={horizontalListSortingStrategy}
+          >
             {tabs.map((tab) => (
-          <TabItem
-            key={tab.id}
-            tab={tab}
-            active={tab.id === activeId}
-            offline={
-              tab.threadRef !== null &&
-              !connected.includes(EnvironmentId.make(tab.threadRef.environmentId))
-            }
-            workspaceName={
-              tab.workspaceId === null ? undefined : workspaceNames.get(tab.workspaceId)
-            }
-          />
+              <TabItem
+                key={tab.id}
+                tab={tab}
+                active={tab.id === activeId}
+                offline={
+                  tab.threadRef !== null &&
+                  !connected.includes(EnvironmentId.make(tab.threadRef.environmentId))
+                }
+                workspaceName={
+                  tab.workspaceId === null ? undefined : workspaceNames.get(tab.workspaceId)
+                }
+              />
             ))}
           </SortableContext>
         </DndContext>

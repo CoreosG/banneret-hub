@@ -280,12 +280,11 @@ describe("open tabs", () => {
       );
     const startX = from.left + from.width / 2;
     const endX = to.left + to.width / 2 + 2;
-    pointer(first!, "pointerdown", startX);
+    await act(() => pointer(first!, "pointerdown", startX));
     for (let step = 1; step <= 10; step += 1) {
-      pointer(document, "pointermove", startX + ((endX - startX) * step) / 10);
-      await new Promise(requestAnimationFrame);
+      await act(() => pointer(document, "pointermove", startX + ((endX - startX) * step) / 10));
     }
-    pointer(document, "pointerup", endX);
+    await act(() => pointer(document, "pointerup", endX));
     // Dropped on the third tab from the left, it lands after it.
     await vi.waitFor(() => expect(tabs()[2]?.dataset.tabId).toBe(firstId));
   });
