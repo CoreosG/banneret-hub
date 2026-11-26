@@ -27,6 +27,8 @@ import { BoardPage } from "./BoardPage";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
+import { TaskDialogHost } from "./TaskDialog";
+import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
 
 vi.mock("../state/environments", { spy: true });
@@ -162,6 +164,7 @@ function setup() {
   });
   useEnrolmentStore.setState({ views: {} });
   useRelayFeedStore.setState({ feeds: {} });
+  openTaskDialog(null);
   storeEnrolmentView(LOCAL, configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
   const listeners = new Set<(event: BanneretFeedState) => void>();
@@ -186,6 +189,7 @@ function Shell() {
         <EnterpriseSidebarRows />
       </nav>
       <Outlet />
+      <TaskDialogHost />
     </SidebarProvider>
   );
 }
@@ -221,7 +225,7 @@ const chipOf = (taskId: string) =>
   document.querySelector(`[data-task-id="${taskId}"] [data-testid="lease-chip"]`);
 
 describe("Enterprise board", () => {
-  it("draws the relay's five columns in order, each card linking out to its issue", async () => {
+  it("draws the relay's five columns in order, each card opening its Task tab", async () => {
     using stack = new DisposableStack();
     const { emit, router, screen } = await openBoard(stack, "/");
     await using _screen = screen;
@@ -245,12 +249,15 @@ describe("Enterprise board", () => {
     await userEvent.hover(mark);
     await expect.element(page.getByText("Required checks are failing.")).toBeVisible();
     expect(invites.textContent).toContain("PR #77 open · checks failing");
-    const link = invites.querySelector("a")!;
-    expect(link.getAttribute("href")).toBe("https://github.com/example-org/example-app/issues/2");
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(invites.querySelector("a")).toBeNull();
 
     await expect.element(page.getByRole("list", { name: "Status legend" })).toBeVisible();
+
+    // No thread is routed on the board, so the card opens the Task tab in its dialog.
+    await userEvent.click(invites.querySelector("[data-open-task]")!);
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog.getByRole("heading", { name: "Guild invites" })).toBeVisible();
+    expect(document.querySelector('[data-task-panel="2"]')).not.toBeNull();
   });
 
   it("shows each lease state on its chip", async () => {

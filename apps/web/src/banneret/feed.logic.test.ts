@@ -1,13 +1,7 @@
 import type { BanneretFeedEntry, BanneretGraveyardEntry } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  feedTypeLabel,
-  importanceOf,
-  mergeFeedEntries,
-  mergeGraveyardEntries,
-  openTaskTarget,
-} from "./feed.logic";
+import { feedTypeLabel, importanceOf, mergeFeedEntries, mergeGraveyardEntries } from "./feed.logic";
 
 const task = (id: string, url = `https://github.com/example-org/app/issues/${id}`) => ({
   id,
@@ -66,12 +60,5 @@ describe("merging pages", () => {
         [grave("t1", "2026-11-26T10:00:00Z"), grave("t2", "2026-11-26T09:00:00Z")],
       ).map((item) => item.task.id),
     ).toEqual(["t1", "t2"]);
-  });
-});
-
-describe("opening a task", () => {
-  it("links out over http(s) only", () => {
-    expect(openTaskTarget(task("1"))).toBe("https://github.com/example-org/app/issues/1");
-    expect(openTaskTarget(task("2", "javascript:alert(1)"))).toBeNull();
   });
 });

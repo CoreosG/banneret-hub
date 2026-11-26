@@ -15,6 +15,7 @@ import type {
   BanneretFeedNotMeasured,
   BanneretGraveyardEntry,
   BanneretGraveyardPage,
+  BanneretTask,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
@@ -312,6 +313,40 @@ export const reshapeFeedPage = (body: unknown): BanneretFeedEntryPage | undefine
 /** The `graveyard` file or a `GET /graveyard` page (GraveyardPage); undefined when it is not one. */
 export const reshapeGraveyardPage = (body: unknown): BanneretGraveyardPage | undefined =>
   entryPage(body, graveyardEntry);
+
+/** `GET /tasks/{taskId}` (TaskRead): a board card plus its preview and sign-off; undefined when not one. */
+export function reshapeTask(body: unknown): BanneretTask | undefined {
+  const base = card(body);
+  if (base === undefined) return undefined;
+  const source = fields(body);
+  const previewSource = fields(source?.preview);
+  const previewState = text(previewSource?.state, 32);
+  const checkedSource = fields(source?.checked);
+  const checkedBy = person(checkedSource?.by);
+  const checkedAt = text(checkedSource?.at, 64);
+  const valid = checkedSource?.valid;
+  return {
+    ...base,
+    ...(previewState === undefined
+      ? {}
+      : {
+          preview: {
+            state: previewState,
+            ...optional("url", text(previewSource?.url, 2048)),
+          },
+        }),
+    ...(checkedBy === undefined || checkedAt === undefined || typeof valid !== "boolean"
+      ? {}
+      : {
+          checked: {
+            by: checkedBy,
+            at: checkedAt,
+            valid,
+            ...optional("ignoredReason", text(checkedSource?.ignoredReason, 240)),
+          },
+        }),
+  };
+}
 
 /** Live means an agent session is working or waiting; idle, stopped and unheard ones are not. */
 const LIVE_WORK = new Set(["working", "waiting"]);

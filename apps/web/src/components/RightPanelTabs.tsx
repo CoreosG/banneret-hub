@@ -71,6 +71,7 @@ import {
 import { isElectron } from "~/env";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
 import { linkedThreadTitle } from "~/linkedThreadSurface";
+import { taskTabTitle } from "~/banneret/taskSurface";
 import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { issueStatePresentation } from "~/components/issue/issuePresentation";
@@ -622,6 +623,8 @@ function surfaceTitle(
     case "ports":
       // oxlint-disable-next-line t3code/no-untranslated-copy -- Banneret fork label, English-only
       return "Ports";
+    case "task":
+      return taskTabTitle(surface);
     case "issue":
       // A git host numbers its issues; a tracker with keys of its own, such as Linear, names them.
       return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;
@@ -725,6 +728,8 @@ function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "ports":
       return <CableIcon className="size-3 shrink-0" />;
+    case "task":
+      return <CircleDotIcon className="size-3 shrink-0" />;
     case "issue":
       return <IssueSurfaceIcon surface={surface} environmentId={environmentId} />;
     case "thread":

@@ -18,6 +18,7 @@ import {
   type LinkedThreadSurface,
 } from "./linkedThreadSurface";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
+import type { TaskSurface } from "./banneret/taskSurface";
 import type { ChatFileAttachment } from "./types";
 
 const RIGHT_PANEL_KINDS = [
@@ -34,6 +35,7 @@ const RIGHT_PANEL_KINDS = [
   "linked-thread",
   // Banneret Hub: every listening port on the environment's host.
   "ports",
+  "task", // Banneret Hub: a company relay task (banneret/TaskPanel.tsx).
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -91,6 +93,7 @@ export type RightPanelSurface =
     }
   | { id: "pull-requests"; kind: "pull-requests" }
   | { id: "ports"; kind: "ports" }
+  | TaskSurface
   /**
    * An issue opened in the issues list's shared panel, or beside a thread. Like `pull-request`,
    * the reference lives in the id so several issues can stay open as peer tabs.
@@ -190,7 +193,7 @@ interface RightPanelStoreState {
     ref: ScopedThreadRef,
     kind: Exclude<
       RightPanelKind,
-      "file" | "terminal" | "pull-request" | "issue" | "thread" | "linked-thread"
+      "file" | "terminal" | "pull-request" | "issue" | "thread" | "linked-thread" | "task"
     >,
   ) => void;
   /** Opens a side chat or subagent of `ref`'s environment as a tab; `ref` itself has no tab. */
@@ -226,6 +229,7 @@ interface RightPanelStoreState {
     },
   ) => void;
   openIssue: (ref: ScopedThreadRef, target: IssueSurfaceTarget) => void;
+  openTask: (ref: ScopedThreadRef, surface: TaskSurface) => void;
   setPullRequestDetailTab: (
     ref: ScopedThreadRef,
     surfaceId: string,
@@ -264,7 +268,7 @@ interface RightPanelStoreState {
     ref: ScopedThreadRef,
     kind: Exclude<
       RightPanelKind,
-      "file" | "terminal" | "pull-request" | "issue" | "thread" | "linked-thread"
+      "file" | "terminal" | "pull-request" | "issue" | "thread" | "linked-thread" | "task"
     >,
   ) => void;
   setThreadPanelOpen: (
@@ -290,7 +294,7 @@ const DEFAULT_THREAD_PANEL_VISIBILITY: ThreadPanelVisibility = {
 const singletonSurface = (
   kind: Exclude<
     RightPanelKind,
-    "file" | "preview" | "terminal" | "pull-request" | "issue" | "thread" | "linked-thread"
+    "file" | "preview" | "terminal" | "pull-request" | "issue" | "thread" | "linked-thread" | "task"
   >,
 ): RightPanelSurface => {
   switch (kind) {
@@ -977,6 +981,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               : next;
           }),
         ),
+      openTask: (ref, surface) =>
+        set((state) => userAction(state, scopedThreadKey(ref), (c) => upsertSurface(c, surface))),
       setPullRequestDetailTab: (ref, surfaceId, detailTab) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);

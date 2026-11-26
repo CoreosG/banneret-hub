@@ -1,10 +1,11 @@
 // Banneret Hub: keeps workspaces loaded from every connected environment, switches to the workspace
-// of a thread or draft opened from elsewhere, and hosts the workspace dialog.
+// of a thread or draft opened from elsewhere, and hosts the workspace and Task dialogs.
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
 
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
 import { ENROLMENT_POLL_MS, refreshEnrolment } from "./enrolmentStore";
+import { TaskDialogHost } from "./TaskDialog";
 import { useRouteProject } from "./useRouteProject";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 import { autoSwitchTarget } from "./workspaces.logic";
@@ -95,5 +96,10 @@ export function WorkspacesHost() {
   useWorkspaceSync();
   useEnrolmentPolling();
   useWorkspaceAutoSwitch();
-  return <WorkspaceDialog />;
+  return (
+    <>
+      <WorkspaceDialog />
+      <TaskDialogHost />
+    </>
+  );
 }

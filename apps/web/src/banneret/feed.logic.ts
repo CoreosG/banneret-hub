@@ -1,13 +1,7 @@
 // Banneret Hub: plain words for the feed and graveyard (relay-v1 "Feed and graveyard"). The relay
 // derives every entry; these only name, merge and order them. `type` and `importance` are open sets,
 // so each has a fallback.
-import type {
-  BanneretBoardTask,
-  BanneretFeedEntry,
-  BanneretGraveyardEntry,
-} from "@t3tools/contracts";
-
-import { safeLinkOut } from "./relayFeed.logic";
+import type { BanneretFeedEntry, BanneretGraveyardEntry } from "@t3tools/contracts";
 
 const FEED_TYPES: Readonly<Record<string, string>> = {
   taken: "Taken",
@@ -75,12 +69,4 @@ export function mergeGraveyardEntries(
     uniqueBy(lists, (entry) => entry.task.id),
     (entry) => entry.ruledAt,
   );
-}
-
-/**
- * Where a click on a task goes. Every task click on the Feed and Graveyard goes through here: today
- * it is the task's link out on its tracker; the Task tab (Phase 2a slice D) replaces it.
- */
-export function openTaskTarget(task: BanneretBoardTask): string | null {
-  return safeLinkOut(task.ref.url);
 }

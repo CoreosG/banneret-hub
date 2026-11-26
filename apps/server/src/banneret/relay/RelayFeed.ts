@@ -4,8 +4,8 @@
 // that has not joined makes no relay call. Relay answers are reshaped field by field (relay strings
 // stay plain data), and the last good answer is kept so a screen is never blank while the relay is
 // away. The board, the feed and the graveyard come from the snapshot (Snapshot.ts), each read only
-// when capabilities advertise the snapshot and its section; older feed and graveyard pages are read
-// on request.
+// when capabilities advertise the snapshot and its section; older feed and graveyard pages, and one
+// task for the Task tab, are read on request.
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
   type BanneretEnrolmentView,
@@ -24,6 +24,7 @@ import {
   type BanneretFeedNotMeasured,
   type BanneretFeedToday,
   type BanneretFeedTodayRead,
+  type BanneretTaskRead,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -47,6 +48,7 @@ import {
   reshapeBoard,
   reshapeFeedPage,
   reshapeGraveyardPage,
+  reshapeTask,
   unquoteEtag,
 } from "./Snapshot.ts";
 
@@ -79,6 +81,8 @@ interface FeedService {
   readonly feedPage: (cursor: string) => Effect.Effect<BanneretFeedEntryPageRead>;
   /** An older graveyard page, from a `nextCursor`. */
   readonly graveyardPage: (cursor: string) => Effect.Effect<BanneretGraveyardPageRead>;
+  /** One task with its preview and sign-off; `notFound` when the relay does not know it. */
+  readonly task: (taskId: string) => Effect.Effect<BanneretTaskRead>;
   readonly events: Stream.Stream<BanneretFeedState>;
 }
 
@@ -105,6 +109,7 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
       needs: () => Effect.succeed(NOT_JOINED),
       feedPage: () => Effect.succeed(NOT_JOINED),
       graveyardPage: () => Effect.succeed(NOT_JOINED),
+      task: () => Effect.succeed(NOT_JOINED),
       events: Stream.concat(Stream.make(NOT_JOINED_SNAPSHOT), Stream.never),
     }),
   },
@@ -856,10 +861,14 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     if (changed) yield* publishSnapshot;
   });
 
-  /** An older feed or graveyard page. A failure says why without touching Today's problem. */
+  /**
+   * An older feed or graveyard page, or one task. A failure says why without touching Today's
+   * problem; with `notFound`, a 404 answers as the relay not knowing the thing asked for.
+   */
   const readPage = Effect.fn("BanneretRelayFeed.page")(function* <T>(
     target: string,
     reshape: (body: unknown) => T | undefined,
+    notFound = false,
   ) {
     yield* adopt(joinedOf(yield* enrolment.status));
     const current = joined;
@@ -874,6 +883,9 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     const at = yield* nowIso;
     if (Result.isFailure(outcome)) {
       if (outcome.failure.code === "not_configured" || !stillJoined(current.key)) return NOT_JOINED;
+      if (notFound && outcome.failure.status === 404) {
+        return { joined: true, value: null, fetchedAt: at, notFound: true };
+      }
       return {
         joined: true,
         value: null,
@@ -892,6 +904,9 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       `/relay/v1/graveyard${pageQuery(cursor)}`,
       reshapeGraveyardPage,
     );
+
+  const readTask = (taskId: string): Effect.Effect<BanneretTaskRead> =>
+    readPage(`/relay/v1/tasks/${encodeURIComponent(taskId)}`, reshapeTask, true);
 
   /** One snapshot reader per joined key: reads on a wake (hint, event, capabilities) or a poll. */
   const watchSnapshot = Effect.fn("BanneretRelayFeed.watchSnapshot")(function* (
@@ -1030,6 +1045,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     needs: readNeeds,
     feedPage: readFeedPage,
     graveyardPage: readGraveyardPage,
+    task: readTask,
     events,
   };
   return service;
@@ -1052,4 +1068,6 @@ export const rpcHandlers = {
     Effect.flatMap(BanneretRelayFeed, (feed) => feed.feedPage(input.cursor)),
   [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: (input: { readonly cursor: string }) =>
     Effect.flatMap(BanneretRelayFeed, (feed) => feed.graveyardPage(input.cursor)),
+  [BANNERET_RELAY_FEED_WS_METHODS.task]: (input: { readonly taskId: string }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) => feed.task(input.taskId)),
 };
