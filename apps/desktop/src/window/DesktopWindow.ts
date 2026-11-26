@@ -18,6 +18,7 @@ import {
   DEFAULT_CLIENT_SETTINGS,
 } from "@t3tools/contracts";
 
+import { installWorkspaceDownloadSaveDialog } from "../banneret/downloadSaveDialog.ts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopClerk from "../app/DesktopClerk.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -1058,6 +1059,7 @@ export const make = Effect.gen(function* () {
     // Desktop IPC only answers the main window, so register it before its renderer can call in.
     yield* electronWindow.setMain(window);
     remoteRequestHeaderOwner = window;
+    installWorkspaceDownloadSaveDialog(window.webContents.session);
     const detachRemoteRequestHeaders = installMainWindowRemoteRequestHeaderPolicy(
       window.webContents.session,
       {

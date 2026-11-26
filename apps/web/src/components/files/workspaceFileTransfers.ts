@@ -6,6 +6,7 @@ import type { EnvironmentId, WorkspaceFilesSignedUrlResult } from "@t3tools/cont
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 
+import { isElectron } from "~/env";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { readPreparedConnection } from "~/state/session";
 import { workspaceFilesEnvironment } from "~/state/workspaceFiles";
@@ -232,19 +233,81 @@ export async function uploadFiles(options: {
   return { uploaded, skipped, failed };
 }
 
-/** Saves a file, or a folder as .zip, through the browser's (or Electron's) download flow. */
+interface SaveFilePickerWindow {
+  showSaveFilePicker?: (options: { suggestedName: string }) => Promise<FileSystemFileHandle>;
+}
+
+/** The name the server gives a download: the entry's name, with `.zip` for a folder. */
+export function downloadName(cwd: string, relativePath: string, isDirectory: boolean): string {
+  const name = (relativePath || cwd).split(/[\\/]/).findLast(Boolean) ?? "download";
+  return isDirectory ? `${name}.zip` : name;
+}
+
+const errorName = (error: unknown) =>
+  typeof error === "object" && error !== null && "name" in error ? String(error.name) : "";
+
+/**
+ * Browser client only: asks where to save with the File System Access picker, then streams the
+ * signed URL into the chosen file. The picker opens before the URL is signed so the click's user
+ * activation is still fresh. Returns "unsupported" when the anchor download should run instead:
+ * no picker, the desktop shell (its main process shows the dialog), or activation was lost.
+ */
+export async function saveThroughFilePicker(options: {
+  readonly suggestedName: string;
+  readonly resolveUrl: () => Promise<string>;
+}): Promise<"saved" | "cancelled" | "unsupported"> {
+  const picker = (window as SaveFilePickerWindow).showSaveFilePicker;
+  if (isElectron || typeof picker !== "function") return "unsupported";
+  let handle: FileSystemFileHandle;
+  try {
+    handle = await picker.call(window, { suggestedName: options.suggestedName });
+  } catch (error) {
+    const name = errorName(error);
+    if (name === "AbortError") return "cancelled";
+    if (name === "SecurityError" || name === "NotAllowedError") return "unsupported";
+    throw error;
+  }
+  const writable = await handle.createWritable();
+  try {
+    const response = await fetch(await options.resolveUrl());
+    if (!response.ok || !response.body) {
+      throw failure((await response.text().catch(() => "")) || `HTTP ${response.status}`, "failed");
+    }
+    // pipeTo closes the file on success and aborts it on a stream error.
+    await response.body.pipeTo(writable);
+    return "saved";
+  } catch (error) {
+    await writable.abort().catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Saves a file, or a folder as .zip. The browser client asks where with the file picker; the
+ * desktop shell clicks a download link and its main process shows the Save As dialog.
+ */
 export async function downloadEntry(options: {
   readonly environmentId: EnvironmentId;
   readonly cwd: string;
   readonly relativePath: string;
+  readonly isDirectory: boolean;
 }): Promise<void> {
-  const signed = await runWorkspaceFilesCommand("createDownloadUrl", options.environmentId, {
-    cwd: options.cwd,
-    relativePath: options.relativePath,
+  const signUrl = async () => {
+    const signed = await runWorkspaceFilesCommand("createDownloadUrl", options.environmentId, {
+      cwd: options.cwd,
+      relativePath: options.relativePath,
+    });
+    return { url: absoluteUrl(options.environmentId, signed.relativeUrl), fileName: signed.fileName };
+  };
+  const picked = await saveThroughFilePicker({
+    suggestedName: downloadName(options.cwd, options.relativePath, options.isDirectory),
+    resolveUrl: async () => (await signUrl()).url,
   });
+  if (picked !== "unsupported") return;
+  const { url, fileName } = await signUrl();
   const anchor = document.createElement("a");
-  anchor.href = absoluteUrl(options.environmentId, signed.relativeUrl);
-  anchor.download = signed.fileName;
+  anchor.href = url;
+  anchor.download = fileName;
   anchor.rel = "noopener";
   anchor.style.display = "none";
   document.body.append(anchor);

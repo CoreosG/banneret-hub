@@ -302,7 +302,7 @@ export function useWorkspaceFileOperations(options: {
           options.tree().startRenaming(treePath);
           return true;
         case "banneret:download":
-          void downloadEntry({ environmentId, cwd, relativePath }).catch((error) =>
+          void downloadEntry({ environmentId, cwd, relativePath, isDirectory }).catch((error) =>
             reportError("Download failed", error),
           );
           return true;
