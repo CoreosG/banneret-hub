@@ -1,0 +1,94 @@
+/*
+ * Banneret Hub: the open tabs bar sits above every page, inside the area right of the sidebar.
+ *
+ * Every page renders its own SidebarInset with h-dvh, and its header is the window title bar (drag
+ * region, traffic-light and window-controls insets, fixed controls pinned to the top). These rules
+ * make the bar the title bar instead and push the page below it, without touching the pages.
+ *
+ * Unlayered on purpose: these beat Tailwind's layered utilities. Below md, when hidden and on
+ * /welcome the frame is display: contents, so the page lays out exactly as upstream's.
+ */
+[data-banneret-tabs-frame],
+[data-banneret-tabs-body] {
+  display: contents;
+}
+
+[data-banneret-tabs-bar] {
+  display: none;
+}
+
+@media (min-width: 48rem) {
+  [data-slot="sidebar-wrapper"]:has(> [data-banneret-tabs-frame="on"]) {
+    --banneret-tabs-height: 2.25rem;
+  }
+
+  /* Desktop and installed web apps: the bar is the title bar, as tall as the native controls. */
+  :is(.electron, .wco) [data-slot="sidebar-wrapper"]:has(> [data-banneret-tabs-frame="on"]) {
+    --banneret-tabs-height: var(--workspace-topbar-height);
+  }
+
+  [data-banneret-tabs-frame="on"] {
+    display: flex;
+    flex: 1 1 0%;
+    flex-direction: column;
+    min-width: 0;
+    height: 100dvh;
+  }
+
+  [data-banneret-tabs-frame="on"] > [data-banneret-tabs-bar] {
+    display: flex;
+    flex-shrink: 0;
+    height: var(--banneret-tabs-height);
+    padding-left: 0.5rem;
+    padding-right: max(0.5rem, var(--workspace-native-controls-inset));
+  }
+
+  /* Collapsed sidebar: the traffic lights sit over the bar (the same condition as the header gap). */
+  [data-slot="sidebar-wrapper"][data-sidebar-state="collapsed"]:not([data-sidebar-drag-state="expanded"])
+    > [data-banneret-tabs-frame="on"]
+    > [data-banneret-tabs-bar],
+  [data-slot="sidebar-wrapper"][data-sidebar-drag-state="collapsed"]
+    > [data-banneret-tabs-frame="on"]
+    > [data-banneret-tabs-bar] {
+    padding-left: var(--workspace-controls-left);
+  }
+
+  /* The page below the bar no longer meets the window edge or the native controls. */
+  [data-banneret-tabs-frame="on"] > [data-banneret-tabs-body] {
+    --workspace-native-controls-inset: 0px;
+    --workspace-controls-left: calc(env(safe-area-inset-left) + 0.75rem);
+    --workspace-titlebar-content-left: calc(
+      var(--workspace-controls-left) + var(--workspace-titlebar-control-size) +
+        var(--workspace-titlebar-control-gap)
+    );
+    display: flex;
+    flex: 1 1 0%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  [data-banneret-tabs-frame="on"] > [data-banneret-tabs-body] [data-slot="sidebar-inset"] {
+    height: auto;
+    min-height: 0;
+  }
+
+  /*
+   * Header controls pinned to the window top follow the header down. Only the fixed ones: absolute
+   * controls already sit inside the page, which now starts below the bar.
+   */
+  [data-banneret-tabs-frame="on"]
+    > [data-banneret-tabs-body]
+    .fixed:is([class*="--workspace-controls-top"], [class*="--workspace-controls-right"]) {
+    --workspace-controls-top: calc(env(titlebar-area-y, 0px) + var(--banneret-tabs-height));
+    --workspace-controls-right: calc(env(safe-area-inset-right) + 0.75rem);
+  }
+
+  /* The sidebar toggle of a collapsed sidebar moves down into the page header's gap. */
+  [data-slot="sidebar-wrapper"][data-sidebar-state="collapsed"]:not([data-sidebar-drag-state="expanded"]):has(> [data-banneret-tabs-frame="on"])
+    > [data-sidebar-control],
+  [data-slot="sidebar-wrapper"][data-sidebar-drag-state="collapsed"]:has(> [data-banneret-tabs-frame="on"])
+    > [data-sidebar-control] {
+    top: calc(env(titlebar-area-y, 0px) + var(--banneret-tabs-height));
+    left: calc(env(safe-area-inset-left) + 0.75rem);
+  }
+}
