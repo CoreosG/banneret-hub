@@ -20,6 +20,7 @@ import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS } from "./rpc.ts";
 import { WORKSPACE_FILES_WS_METHODS } from "./workspaceFiles.ts";
 import { BANNERET_PORTS_WS_METHODS } from "./banneretPorts.ts";
+import { BANNERET_WORKSPACES_WS_METHODS } from "./banneretWorkspaces.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
@@ -29,6 +30,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WORKSPACE_FILES_WS_METHODS.createUploadUrl]: AuthFilesystemWriteScope,
   [WORKSPACE_FILES_WS_METHODS.createDownloadUrl]: AuthFilesystemReadScope,
   [BANNERET_PORTS_WS_METHODS.list]: AuthOrchestrationReadScope,
+  [BANNERET_WORKSPACES_WS_METHODS.list]: AuthOrchestrationReadScope,
+  [BANNERET_WORKSPACES_WS_METHODS.put]: AuthOrchestrationOperateScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   // An MCP sign-in stores a credential for the agent, as an account sign-in does.
   [WS_METHODS.providerMcpSignInStart]: AuthProvidersManageScope,

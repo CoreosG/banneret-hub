@@ -4,7 +4,6 @@ import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { AuthFilesystemReadScope, AuthFilesystemWriteScope } from "@t3tools/contracts";
 import type { ContextMenuItem, EnvironmentId } from "@t3tools/contracts";
 import type { FileTree, FileTreeDropResult, FileTreeRenameEvent } from "@pierre/trees";
-import { useGT } from "gt-react";
 import { type DragEvent, useRef, useState } from "react";
 
 import { toastManager } from "~/components/ui/toast";
@@ -38,6 +37,7 @@ const parentOf = (path: string) => {
   return slash === -1 ? "" : path.slice(0, slash);
 };
 const baseName = (path: string) => stripSlash(path).split("/").at(-1) ?? path;
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 function itemPathFromEvent(event: DragEvent<HTMLElement>): string | null {
   for (const node of event.nativeEvent.composedPath()) {
@@ -60,7 +60,6 @@ export function useWorkspaceFileOperations(options: {
   readonly reload: (directories: readonly string[]) => Promise<void>;
   readonly tree: () => TreeHandle;
 }) {
-  const gt = useGT();
   const { environmentId, cwd } = options;
   const canWrite = useEnvironmentScope(environmentId, AuthFilesystemWriteScope) && options.enabled;
   const canRead = useEnvironmentScope(environmentId, AuthFilesystemReadScope) && options.enabled;
@@ -75,17 +74,17 @@ export function useWorkspaceFileOperations(options: {
     toastManager.add({
       type: "error",
       title,
-      description: thrownErrorMessage(error, m) ?? gt("An error occurred."),
+      description: thrownErrorMessage(error, m) ?? "An error occurred.",
     });
 
   const chooseConflict = async (): Promise<ConflictChoice | null> => {
     const api = readLocalApi();
     if (!api) return "skip";
     const items: ContextMenuItem<ConflictChoice | "title">[] = [
-      { id: "title", label: gt("Some items already exist here"), header: true },
-      { id: "replace", label: gt("Replace existing files") },
-      { id: "keep-both", label: gt("Keep both (rename the new files)") },
-      { id: "skip", label: gt("Skip existing files") },
+      { id: "title", label: "Some items already exist here", header: true },
+      { id: "replace", label: "Replace existing files" },
+      { id: "keep-both", label: "Keep both (rename the new files)" },
+      { id: "skip", label: "Skip existing files" },
     ];
     const clicked = await api.contextMenu.show(items, dropPointRef.current);
     return clicked === "title" ? null : clicked;
@@ -97,13 +96,10 @@ export function useWorkspaceFileOperations(options: {
   ) => {
     const { files, directories } = await collect();
     if (files.length === 0 && directories.length === 0) return;
-    const where = targetDirectory || gt("the workspace root");
+    const where = targetDirectory || "the workspace root";
     const toastId = toastManager.add({
       type: "loading",
-      title: gt("Uploading {count, plural, one {# file} other {# files}} to {where}", {
-        count: files.length,
-        where,
-      }),
+      title: `Uploading ${plural(files.length, "file")} to ${where}`,
       timeout: 0,
     });
     try {
@@ -123,9 +119,7 @@ export function useWorkspaceFileOperations(options: {
       if (result.failed.length > 0) {
         toastManager.add({
           type: "error",
-          title: gt("{count, plural, one {# upload} other {# uploads}} failed", {
-            count: result.failed.length,
-          }),
+          title: `${plural(result.failed.length, "upload")} failed`,
           description: result.failed
             .slice(0, 3)
             .map((failure) => `${failure.relativePath}: ${failure.message}`)
@@ -134,27 +128,18 @@ export function useWorkspaceFileOperations(options: {
       } else if (result.uploaded === 0) {
         toastManager.add({
           type: "info",
-          title: gt(
-            "Nothing uploaded: {count, plural, one {# file} other {# files}} already existed",
-            {
-              count: result.skipped,
-            },
-          ),
+          title: `Nothing uploaded: ${plural(result.skipped, "file")} already existed`,
         });
       } else {
         toastManager.add({
           type: "success",
-          title: gt("Uploaded {count, plural, one {# file} other {# files}}", {
-            count: result.uploaded,
-          }),
-          ...(result.skipped > 0
-            ? { description: gt("Skipped {count} existing", { count: result.skipped }) }
-            : {}),
+          title: `Uploaded ${plural(result.uploaded, "file")}`,
+          ...(result.skipped > 0 ? { description: `Skipped ${result.skipped} existing` } : {}),
         });
       }
     } catch (error) {
       toastManager.close(toastId);
-      reportError(gt("Upload failed"), error);
+      reportError("Upload failed", error);
     } finally {
       await options.reload([targetDirectory]);
     }
@@ -180,14 +165,14 @@ export function useWorkspaceFileOperations(options: {
     try {
       await runWorkspaceFilesCommand("move", environmentId, { cwd, fromPath, toPath });
     } catch (error) {
-      reportError(gt("Could not move {name}", { name: baseName(fromPath) }), error);
+      reportError(`Could not move ${baseName(fromPath)}`, error);
     }
   };
 
   const newFolder = async (parent: string) => {
-    let name = gt("New folder");
+    let name = "New folder";
     for (let index = 2; options.knownPaths.has(joinWorkspacePath(parent, name)); index++) {
-      name = `${gt("New folder")} ${index}`;
+      name = `$New folder ${index}`;
     }
     const relativePath = joinWorkspacePath(parent, name);
     try {
@@ -197,7 +182,7 @@ export function useWorkspaceFileOperations(options: {
       pendingRenameRef.current = `${relativePath}/`;
       await options.reload([parent]);
     } catch (error) {
-      reportError(gt("Could not create the folder"), error);
+      reportError("Could not create the folder", error);
     }
   };
 
@@ -205,17 +190,15 @@ export function useWorkspaceFileOperations(options: {
     const api = readLocalApi();
     const confirmed = await api?.dialogs.confirm(
       isDirectory
-        ? gt("Delete the folder “{name}” and everything in it? This cannot be undone.", {
-            name: baseName(relativePath),
-          })
-        : gt("Delete “{name}”? This cannot be undone.", { name: baseName(relativePath) }),
+        ? `Delete the folder “${baseName(relativePath)}” and everything in it? This cannot be undone.`
+        : `Delete “${baseName(relativePath)}”? This cannot be undone.`,
       { variant: "destructive" },
     );
     if (!confirmed) return;
     try {
       await runWorkspaceFilesCommand("delete", environmentId, { cwd, relativePath });
     } catch (error) {
-      reportError(gt("Could not delete {name}", { name: baseName(relativePath) }), error);
+      reportError(`Could not delete ${baseName(relativePath)}`, error);
     }
     await options.reload([parentOf(relativePath)]);
   };
@@ -229,9 +212,7 @@ export function useWorkspaceFileOperations(options: {
           role="status"
           className="shrink-0 border-t border-primary/40 bg-primary/10 px-3 py-1.5 text-xs text-foreground"
         >
-          {gt("Drop to upload into {folder}", {
-            folder: dropDirectory || gt("the workspace root"),
-          })}
+          Drop to upload into {dropDirectory || "the workspace root"}
         </div>
       ),
 
@@ -266,7 +247,7 @@ export function useWorkspaceFileOperations(options: {
         })();
       },
       onDropError: (message: string) =>
-        toastManager.add({ type: "error", title: gt("Could not move"), description: message }),
+        toastManager.add({ type: "error", title: "Could not move", description: message }),
     },
 
     renaming: {
@@ -278,7 +259,7 @@ export function useWorkspaceFileOperations(options: {
         void move(from, to).then(() => options.reload([parentOf(from), parentOf(to)]));
       },
       onError: (message: string) =>
-        toastManager.add({ type: "error", title: gt("Could not rename"), description: message }),
+        toastManager.add({ type: "error", title: "Could not rename", description: message }),
     },
 
     menuItems: (isDirectory: boolean): ContextMenuItem<WorkspaceFileMenuAction>[] => [
@@ -286,24 +267,24 @@ export function useWorkspaceFileOperations(options: {
         ? [
             {
               id: "banneret:new-folder" as const,
-              label: gt("New folder…"),
+              label: "New folder…",
               separatorBefore: true,
             },
-            { id: "banneret:upload" as const, label: gt("Upload files here…") },
-            { id: "banneret:rename" as const, label: gt("Rename…") },
+            { id: "banneret:upload" as const, label: "Upload files here…" },
+            { id: "banneret:rename" as const, label: "Rename…" },
           ]
         : []),
       ...(canRead
         ? [
             {
               id: "banneret:download" as const,
-              label: isDirectory ? gt("Download as .zip") : gt("Download"),
+              label: isDirectory ? "Download as .zip" : "Download",
               separatorBefore: !canWrite,
             },
           ]
         : []),
       ...(canWrite
-        ? [{ id: "banneret:delete" as const, label: gt("Delete…"), destructive: true }]
+        ? [{ id: "banneret:delete" as const, label: "Delete…", destructive: true }]
         : []),
     ],
 
@@ -322,7 +303,7 @@ export function useWorkspaceFileOperations(options: {
           return true;
         case "banneret:download":
           void downloadEntry({ environmentId, cwd, relativePath }).catch((error) =>
-            reportError(gt("Download failed"), error),
+            reportError("Download failed", error),
           );
           return true;
         case "banneret:delete":

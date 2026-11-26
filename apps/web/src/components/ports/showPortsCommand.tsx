@@ -2,7 +2,6 @@
 // in that view's right panel; with neither it opens the Ports dialog, asking which environment
 // first when more than one is connected (the same submenu shape as "Forwarded ports").
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { useGT } from "gt-react";
 import { CableIcon } from "lucide-react";
 
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -22,7 +21,6 @@ export function useCommandPaletteShowPortsItem(input: {
   /** The open thread's or draft's right panel; null when neither is open. */
   readonly panelRef: ScopedThreadRef | null;
 }): CommandPaletteActionItem | CommandPaletteSubmenuItem | null {
-  const gt = useGT();
   const { environments } = useEnvironments();
   const { panelRef } = input;
   if (panelRef !== null) {
@@ -30,7 +28,7 @@ export function useCommandPaletteShowPortsItem(input: {
       kind: "action",
       value: "action:open-ports",
       searchTerms: SEARCH_TERMS,
-      title: gt("Show ports"),
+      title: "Show ports",
       icon: <CableIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         useRightPanelStore.getState().open(panelRef, "ports");
@@ -47,7 +45,7 @@ export function useCommandPaletteShowPortsItem(input: {
       kind: "action",
       value: "action:open-ports",
       searchTerms: [...SEARCH_TERMS, only.label],
-      title: gt("Show ports"),
+      title: "Show ports",
       description: only.label,
       icon: <CableIcon className={ITEM_ICON_CLASS} />,
       run: async () => openPortsDialog(only.environmentId),
@@ -68,13 +66,13 @@ export function useCommandPaletteShowPortsItem(input: {
     kind: "submenu",
     value: "action:open-ports",
     searchTerms: SEARCH_TERMS,
-    title: gt("Show ports"),
+    title: "Show ports",
     icon: <CableIcon className={ITEM_ICON_CLASS} />,
     addonIcon: <CableIcon className={ADDON_ICON_CLASS} />,
     groups: [
       {
         value: "ports-environments",
-        label: gt("Environments"),
+        label: "Environments",
         items: connected.map(environmentItem),
       },
     ],
