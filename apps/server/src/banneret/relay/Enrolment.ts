@@ -37,6 +37,7 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import * as Workspaces from "../Workspaces.ts";
+import { BanneretFacts, factsRequestBody } from "./Facts.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
 import { RelayCallError, type RelayReply, relayFetch } from "./RelayClient.ts";
 import { type MachineKey, RelayCounter, keyFromSeed, waitBeforeSigning } from "./RelaySigning.ts";
@@ -73,6 +74,7 @@ const Persisted = Schema.Union([
     displayName: Schema.String,
     machineId: Schema.String,
     label: Schema.String,
+    kind: Schema.optional(BanneretMachineKind),
     startedAt: Schema.String,
     counterMark: Schema.optional(Schema.String),
   }),
@@ -82,6 +84,7 @@ const Persisted = Schema.Union([
     displayName: Schema.String,
     machineId: Schema.String,
     label: Schema.String,
+    kind: Schema.optional(BanneretMachineKind),
     me: Me,
     replacedLabel: Schema.optional(Schema.String),
     lastOkAt: Schema.optional(Schema.String),
@@ -149,7 +152,10 @@ const RepositoriesReply = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 });
 
+const FactsReply = Schema.Struct({ capabilitiesVersion: Schema.String });
+
 const decodeEnrolledCapabilities = Schema.decodeUnknownOption(EnrolledCapabilities);
+const decodeFactsReply = Schema.decodeUnknownOption(FactsReply);
 const decodePublicCapabilities = Schema.decodeUnknownEffect(PublicCapabilities);
 
 const decodeReply = <S extends Schema.Top>(schema: S, reply: RelayReply) =>
@@ -216,6 +222,7 @@ const machineFacts = (environmentId: string, label: string, kind: MachineKind) =
 
 export interface EnrolmentOptions {
   readonly pollFloorMs: number;
+  /** The heartbeat interval while configured. */
   readonly healthIntervalMs: number;
   readonly counterSaveMs: number;
   readonly maxBackoffMs: number;
@@ -226,7 +233,7 @@ export interface EnrolmentOptions {
 
 const DEFAULT_OPTIONS: EnrolmentOptions = {
   pollFloorMs: 1000,
-  healthIntervalMs: 60_000,
+  healthIntervalMs: 30_000,
   counterSaveMs: 5000,
   maxBackoffMs: 60_000,
   maxClockWaitMs: 120_000,
@@ -304,6 +311,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   const config = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
+  const facts = yield* BanneretFacts;
   const context = yield* Effect.context<
     ServerConfig.ServerConfig | FileSystem.FileSystem | Path.Path
   >();
@@ -572,9 +580,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   /** A call with the device token. `counter_reused` gets one retry with a fresh counter. */
   const signedCall = Effect.fn("BanneretEnrolment.signedCall")(function* (
     from: Enrolled,
-    method: "GET" | "DELETE",
+    method: "GET" | "DELETE" | "POST",
     target: string,
     ifNoneMatch?: string,
+    body?: unknown,
   ) {
     const credentials = yield* loadCredentials;
     yield* awaitClock.pipe(Effect.tapError(updateHealth));
@@ -586,6 +595,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           target,
           nowMs: now,
           ...(ifNoneMatch === undefined ? {} : { ifNoneMatch }),
+          ...(body === undefined ? {} : { body }),
           signer: {
             kind: "device",
             key: credentials.key,
@@ -680,6 +690,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
               displayName: from.displayName,
               machineId,
               label: from.label,
+              kind: from.kind,
               startedAt: from.startedAt,
             });
           }),
@@ -745,6 +756,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           displayName: from.displayName,
           machineId: from.machineId,
           label: from.label,
+          ...(from.kind === undefined ? {} : { kind: from.kind }),
           me,
           lastOkAt,
           ...(replacedLabel === undefined ? {} : { replacedLabel }),
@@ -760,14 +772,24 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     return options.healthIntervalMs;
   });
 
-  // Facts seam: the heartbeat (POST /facts) belongs here in a later slice. It will send activity
-  // facts only for threads in Enterprise projects, plus machine facts while enrolled. Until then
-  // health is this signed GET /capabilities.
-  const healthCheck = Effect.fn("BanneretEnrolment.health")(function* (from: Configured) {
+  const touchLastOk = Effect.fn("BanneretEnrolment.touchLastOk")(function* (from: Configured) {
+    const lastOkAt = yield* nowIso;
+    yield* whileStill(
+      from,
+      Effect.sync(() => {
+        if (current.state === "configured") current = { ...current, lastOkAt };
+      }),
+    );
+  });
+
+  // Refetched when the heartbeat's capabilitiesVersion moves, so `me` stays current.
+  const refreshCapabilities = Effect.fn("BanneretEnrolment.capabilities")(function* (
+    from: Configured,
+  ) {
     const outcome = yield* signedCall(from, "GET", "/relay/v1/capabilities", etag).pipe(
       Effect.result,
     );
-    if (Result.isFailure(outcome)) return options.healthIntervalMs;
+    if (Result.isFailure(outcome)) return;
     const reply = outcome.success;
     if (reply.etag !== undefined) etag = reply.etag;
     const lastOkAt = yield* nowIso;
@@ -786,12 +808,39 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         ),
       );
     } else {
-      yield* whileStill(
-        from,
-        Effect.sync(() => {
-          if (current.state === "configured") current = { ...current, lastOkAt };
-        }),
-      );
+      yield* touchLastOk(from);
+    }
+  });
+
+  // The heartbeat (P1-15): machine facts, plus activity facts for this relay's Enterprise projects
+  // only (Facts.ts). Its outcome is the machine's health; 401 token_revoked moves to revoked in
+  // signedCall. A failed send only reschedules, so nothing waits on it.
+  const heartbeat = Effect.fn("BanneretEnrolment.heartbeat")(function* (from: Configured) {
+    const collected = yield* facts.collect(from.relayOrigin);
+    const body = factsRequestBody(
+      machineFacts(environmentId, from.label, from.kind ?? "desktop"),
+      collected,
+    );
+    const outcome = yield* signedCall(from, "POST", "/relay/v1/facts", undefined, body).pipe(
+      Effect.result,
+    );
+    if (Result.isFailure(outcome)) {
+      const error = outcome.failure;
+      if (error.code === "token_revoked") return 0;
+      if (error.retryable || error.status === 0) {
+        return error.retryAfterMs === undefined ? nextBackoff() : clampDelay(error.retryAfterMs);
+      }
+      return options.healthIntervalMs;
+    }
+    backoffMs = 0;
+    const version = Option.map(
+      decodeFactsReply(outcome.success.body),
+      (reply) => reply.capabilitiesVersion,
+    );
+    if (Option.isSome(version) && `"${version.value}"` !== etag) {
+      yield* refreshCapabilities(from).pipe(Effect.ignore);
+    } else {
+      yield* touchLastOk(from);
     }
     return options.healthIntervalMs;
   });
@@ -808,7 +857,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       case "approved":
         return finishSetup(state);
       case "configured":
-        return healthCheck(state);
+        return heartbeat(state);
     }
   }).pipe(
     Effect.catchCause((cause) =>

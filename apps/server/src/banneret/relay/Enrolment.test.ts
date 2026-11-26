@@ -1,11 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off globalTimersInEffect:off globalJsonInEffect:off globalTimers:off globalFetch:off globalFetchInEffect:off - a real HTTP relay (the fake) behind a recording forwarder.
-import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { type FakeRelay, type PersonInput, startFakeRelay } from "@t3tools/banneret-relay-fake";
+import type { FakeRelay, PersonInput } from "@t3tools/banneret-relay-fake";
 import { type BanneretEnrolmentView, EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -21,113 +20,8 @@ import * as ServerConfig from "../../config.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import * as Workspaces from "../Workspaces.ts";
 import * as Enrolment from "./Enrolment.ts";
-
-interface Recorded {
-  readonly method: string;
-  readonly url: string;
-  readonly body: string;
-  readonly headers: NodeHttp.IncomingHttpHeaders;
-}
-
-interface Interception {
-  readonly status: number;
-  readonly headers?: Record<string, string>;
-  readonly body?: string;
-}
-
-/**
- * Sits in front of the fake and records every request. It can be closed and reopened on the same
- * port (the fake itself always restarts empty), answer a request itself, or rewrite an answer.
- */
-interface Forwarder {
-  readonly origin: string;
-  readonly requests: Recorded[];
-  intercept: ((request: Recorded) => Interception | undefined) | undefined;
-  rewrite: ((request: Recorded, body: string) => string) | undefined;
-  readonly close: () => Promise<void>;
-  readonly reopen: () => Promise<void>;
-}
-
-const startForwarder = async (target: string): Promise<Forwarder> => {
-  const targetUrl = new URL(target);
-  const forwarder: Forwarder = {
-    origin: "",
-    requests: [],
-    intercept: undefined,
-    rewrite: undefined,
-    close: async () => undefined,
-    reopen: async () => undefined,
-  };
-  const server = NodeHttp.createServer((request, response) => {
-    const chunks: Buffer[] = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("end", () => {
-      const recorded: Recorded = {
-        method: request.method ?? "GET",
-        url: request.url ?? "/",
-        body: Buffer.concat(chunks).toString("utf8"),
-        headers: request.headers,
-      };
-      forwarder.requests.push(recorded);
-      const intercepted = forwarder.intercept?.(recorded);
-      if (intercepted !== undefined) {
-        response.writeHead(intercepted.status, {
-          "content-type": "application/json",
-          ...intercepted.headers,
-        });
-        response.end(intercepted.body ?? "");
-        return;
-      }
-      const upstream = NodeHttp.request(
-        {
-          host: targetUrl.hostname,
-          port: targetUrl.port,
-          method: recorded.method,
-          path: recorded.url,
-          // The Host header passes through: the fake builds browserUrl from it.
-          headers: request.headers,
-        },
-        (reply) => {
-          const replyChunks: Buffer[] = [];
-          reply.on("data", (chunk: Buffer) => replyChunks.push(chunk));
-          reply.on("end", () => {
-            let text = Buffer.concat(replyChunks).toString("utf8");
-            if (forwarder.rewrite) text = forwarder.rewrite(recorded, text);
-            const headers = { ...reply.headers };
-            delete headers["content-length"];
-            delete headers["transfer-encoding"];
-            response.writeHead(reply.statusCode ?? 502, headers);
-            response.end(text);
-          });
-        },
-      );
-      upstream.on("error", () => {
-        response.writeHead(502);
-        response.end();
-      });
-      upstream.end(Buffer.concat(chunks));
-    });
-  });
-  const listen = (port: number) =>
-    new Promise<number>((resolve) => {
-      server.listen(port, "127.0.0.1", () => {
-        const address = server.address();
-        resolve(typeof address === "object" && address !== null ? address.port : 0);
-      });
-    });
-  const port = await listen(0);
-  return Object.assign(forwarder, {
-    origin: `http://127.0.0.1:${port}`,
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
-      }),
-    reopen: async () => {
-      await listen(port);
-    },
-  });
-};
+import * as Facts from "./Facts.ts";
+import { type Forwarder, type Recorded, withFake } from "./relayHarness.testkit.ts";
 
 const FAST: Partial<Enrolment.EnrolmentOptions> = {
   pollFloorMs: 20,
@@ -136,6 +30,16 @@ const FAST: Partial<Enrolment.EnrolmentOptions> = {
   counterSaveMs: 0,
 };
 const ADA: PersonInput = { login: "ada-example", role: "founder" };
+
+/** Machine facts only: these tests cover enrolment; Facts.test.ts covers what the heartbeat reports. */
+const noActivity = Facts.layerFromInputs({
+  environmentId: "env-test",
+  workspaces: Effect.succeed([]),
+  projects: Effect.succeed([]),
+  threads: () => Effect.succeed([]),
+  providers: Effect.succeed([]),
+  policyFingerprint: Effect.succeed(null),
+});
 
 const environmentLayer = (environmentId: string) =>
   Layer.succeed(ServerEnvironmentIdentity, {
@@ -149,7 +53,9 @@ const hubLayer = (
   environmentId = "env-test-1",
 ) =>
   Enrolment.layerWith({ ...FAST, ...options }).pipe(
-    Layer.provideMerge(Layer.mergeAll(ServerSecretStore.layer, environmentLayer(environmentId))),
+    Layer.provideMerge(
+      Layer.mergeAll(ServerSecretStore.layer, environmentLayer(environmentId), noActivity),
+    ),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
@@ -158,27 +64,6 @@ const makeBaseDir = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "banneret-enrol-" }));
 }).pipe(Effect.provide(NodeServices.layer));
-
-const withFake = <A, E, R>(
-  body: (fake: FakeRelay, relay: Forwarder) => Effect.Effect<A, E, R>,
-  options: Parameters<typeof startFakeRelay>[0] = {},
-) =>
-  Effect.acquireRelease(
-    Effect.promise(async () => {
-      const fake = await startFakeRelay({
-        port: 0,
-        autoApprove: false,
-        retryAfterMs: 20,
-        ...options,
-      });
-      const relay = await startForwarder(fake.url);
-      return { fake, relay };
-    }),
-    ({ fake, relay }) => Effect.promise(() => Promise.all([relay.close(), fake.close()])),
-  ).pipe(
-    Effect.flatMap(({ fake, relay }) => body(fake, relay)),
-    Effect.scoped,
-  );
 
 const onFreshHub =
   (options: Partial<Enrolment.EnrolmentOptions> = {}) =>
@@ -455,7 +340,7 @@ describe("BanneretEnrolment", () => {
       Effect.gen(function* () {
         yield* join(fake, relay);
         relay.intercept = (request) =>
-          request.url.startsWith("/relay/v1/capabilities")
+          request.url === "/relay/v1/facts"
             ? {
                 status: 401,
                 body: JSON.stringify({
@@ -848,7 +733,7 @@ describe("BanneretEnrolment", () => {
           );
         const hub = hubLayer(baseDir, { beforeWrite });
         const refuseSigned = (request: Recorded) =>
-          request.url.startsWith("/relay/v1/capabilities") &&
+          (request.url.startsWith("/relay/v1/capabilities") || request.url === "/relay/v1/facts") &&
           request.headers["x-banneret-device"] !== undefined
             ? {
                 status: 401,
