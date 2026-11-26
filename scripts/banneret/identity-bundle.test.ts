@@ -121,6 +121,11 @@ describe("the built command", () => {
     expect(cli(["--version"])).toMatch(/^banneret v\d/m);
   });
 
+  it("names its process banneret", () => {
+    const bin = NodeFS.readFileSync(NodePath.join(outDir, "bin.mjs"), "utf8");
+    expect(bin).toContain('process.title = "banneret";');
+  });
+
   it("ignores T3CODE_HOME and honours BANNERET_HOME", () => {
     const official = NodePath.join(scratch, ".t3");
     const custom = NodePath.join(scratch, "custom");

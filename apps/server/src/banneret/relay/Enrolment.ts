@@ -57,7 +57,13 @@ import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.t
 import * as Workspaces from "../Workspaces.ts";
 import { BanneretFacts, factsRequestBody } from "./Facts.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
-import { RelayCallError, type RelayReply, relayFetch } from "./RelayClient.ts";
+import {
+  isRelayApiCall,
+  notRelayApiError,
+  RelayCallError,
+  type RelayReply,
+  relayFetch,
+} from "./RelayClient.ts";
 import { type BoardTaskEntry, taskIdForLinks } from "./Snapshot.ts";
 import {
   type MachineKey,
@@ -635,8 +641,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     else if (error.status === 0 || error.retryable || error.code === "redirect") {
       if (health !== "unreachable") unreachableSince = yield* nowIso;
       health = "unreachable";
-    } else if (error.status === 401) health = "refused";
-    else if (error.status === 403) health = "forbidden";
+    } else if (error.status === 401) {
+      // `unauthenticated` on a token that worked: the relay no longer knows this machine at all.
+      health = error.code === "unauthenticated" ? "unknown_machine" : "refused";
+    } else if (error.status === 403) health = "forbidden";
   }, Effect.ensuring(notify));
 
   /** A call with the device token. `counter_reused` gets one retry with a fresh counter. */
@@ -1099,7 +1107,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         const joinAgain =
           before.state === "none" ||
           before.state === "revoked" ||
-          (before.state === "configured" && health === "refused");
+          (before.state === "configured" && (health === "refused" || health === "unknown_machine"));
         if (!joinAgain) {
           return yield* fail("This machine is already joining or joined to a company.");
         }
@@ -1180,25 +1188,31 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       if (health === "healthy" || health === undefined) {
         return yield* fail("Forgetting is offered only while the relay cannot be reached.");
       }
-    } else {
+    }
+    // A relay that no longer knows this machine (404, or 401 `unauthenticated`) did not see it
+    // leave: say so, so the person knows to join again rather than that they left.
+    let unknown = false;
+    if (mode === "revoke") {
       const outcome = yield* signedCall(
         from,
         "DELETE",
         `/relay/v1/machines/${encodeURIComponent(from.machineId)}`,
       ).pipe(Effect.result);
-      if (
-        Result.isFailure(outcome) &&
-        outcome.failure.status !== 404 &&
-        outcome.failure.code !== "token_revoked"
-      ) {
-        return yield* plainFailure(outcome.failure, from.displayName);
+      if (Result.isFailure(outcome)) {
+        const { status, code } = outcome.failure;
+        unknown = status === 404 || (status === 401 && code === "unauthenticated");
+        if (!unknown && code !== "token_revoked") {
+          return yield* plainFailure(outcome.failure, from.displayName);
+        }
       }
     }
     yield* locked(
       Effect.gen(function* () {
         if (isEnrolled(current) && current.machineId !== from.machineId) return;
         if (!isEnrolled(current) && current.state !== "revoked") return;
-        yield* toNone(mode === "revoke" ? "left" : "forgotten");
+        if (mode === "forget") yield* toNone("forgotten");
+        else if (unknown) yield* toNone("unknown_machine", unknownMachineMessage(from.displayName));
+        else yield* toNone("left");
         yield* tombstoneWorkspace(from.relayOrigin);
       }),
     );
@@ -1285,6 +1299,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
 
   const signStream = Effect.fn("BanneretEnrolment.signStream")(function* (target: string) {
     const from = yield* configuredNow;
+    if (!isRelayApiCall(from.relayOrigin, target)) return yield* notRelayApiError();
     const credentials = yield* loadCredentials;
     yield* awaitClock;
     const counterText = counter.next().toString();
@@ -1334,6 +1349,10 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   };
   return service;
 });
+
+/** What the Hub says when the relay no longer knows this machine. */
+const unknownMachineMessage = (displayName: string) =>
+  `${displayName} no longer knows this machine (the relay may have been reset). Join again.`;
 
 function originOf(url: string): string | null {
   try {

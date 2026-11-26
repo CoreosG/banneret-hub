@@ -12,6 +12,7 @@ import {
   type ConnectionCatalogEntry,
   type ConnectionRoute,
 } from "./catalog.ts";
+import { preferHttpsRoutes } from "./banneretRouteOrder.ts";
 import { BearerConnectionTarget, type ConnectionTarget } from "./model.ts";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
@@ -402,7 +403,7 @@ export function sendsTokenInClear(
 
 /** Routes a connect may use: none sends a paired token over plain HTTP it wasn't paired over. */
 export function usableRoutes(entry: ConnectionCatalogEntry): ReadonlyArray<ConnectionRoute> {
-  const routes = connectionRoutes(entry);
+  const routes = preferHttpsRoutes(connectionRoutes(entry));
   return routes.filter((route) => !sendsTokenInClear(routes, route));
 }
 

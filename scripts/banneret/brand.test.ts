@@ -7,7 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 
-import { ENV_RENAMES, SCHEME_RULES, rebrandText } from "./brand.mjs";
+import { ENV_RENAMES, SCHEME_RULES, rebrandText, titleServerEntry } from "./brand.mjs";
 
 const repoRoot = NodePath.resolve(import.meta.dirname, "../..");
 const read = (file: string) => NodeFS.readFileSync(NodePath.join(repoRoot, file), "utf8");
@@ -159,6 +159,25 @@ describe("app-link scheme", () => {
   });
 });
 
+describe("server process title", () => {
+  it("is set to banneret first thing in the real server entry, and nowhere else", () => {
+    const entry = read("apps/server/src/bin.ts");
+    const titled = titleServerEntry(entry, NodePath.join(repoRoot, "apps/server/src/bin.ts"));
+    expect(titled.match(/process\.title = "banneret";/g)).toHaveLength(1);
+    expect(titled).toContain(
+      '  process.title = "banneret";\n  process.stdout.on("error", ignoreOutputError);',
+    );
+    const other = read("apps/server/src/binMain.ts");
+    expect(titleServerEntry(other, "apps/server/src/binMain.ts")).toBe(other);
+  });
+
+  it("fails the build when upstream moves the anchor line", () => {
+    expect(() => titleServerEntry("export {};", "apps/server/src/bin.ts")).toThrow(
+      /SERVER_ENTRY_ANCHOR/,
+    );
+  });
+});
+
 describe("installers", () => {
   const outputDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "banneret-install-"));
   NodeChildProcess.execFileSync(
@@ -190,5 +209,24 @@ describe("installers", () => {
       });
     expect(resolve({ T3CODE_HOME: "/home/me/.t3" })).toBe("/home/me/.banneret");
     expect(resolve({ T3CODE_HOME: "/home/me/.t3", BANNERET_HOME: "/srv/hub" })).toBe("/srv/hub");
+  });
+
+  it("print Banneret Hub and the banneret command", () => {
+    expect(sh).toContain("printf '  %sInstalled Banneret Hub %s%s\\n\\n'");
+    expect(sh).toContain("printf '  Run %sbanneret%s to use Banneret Hub here, or %sbanneret up%s");
+    expect(ps1).toContain('WriteLine("  ${green}Installed Banneret Hub $version$reset`n")');
+    expect(ps1).toContain(
+      'Write-Host "  Run ${bold}banneret$reset to use Banneret Hub here, or ${bold}banneret up$reset',
+    );
+    // Messages name the banneret command; a path ending in /t3 is the runtime, which keeps it.
+    const message =
+      /\b(printf|fail|step|Fail|Step|Write-Host|WriteLine|Write-Warning|Write-Error)\b/;
+    for (const script of [sh, ps1]) {
+      const lines = script.split("\n").filter((line) => !/^\s*#/.test(line));
+      expect(lines.filter((line) => line.includes("T3 Code"))).toEqual([]);
+      expect(
+        lines.filter((line) => message.test(line) && /(?<![\w./\\'-])t3(?=[ %'$`])/.test(line)),
+      ).toEqual([]);
+    }
   });
 });

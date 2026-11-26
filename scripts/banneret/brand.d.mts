@@ -8,6 +8,7 @@ export declare const SCHEME_RULES: ReadonlyArray<
 >;
 export declare const CLI_NAME: string;
 export declare const ENV_RENAMES: Readonly<Record<string, string>>;
+export declare function titleServerEntry(code: string, file: string): string;
 export declare function rebrandText(text: string, options?: { readonly cli?: boolean }): string;
 export declare function hashCatalogSource(source: unknown, dataFormat: "ICU" | "JSX"): string;
 export declare function catalogKeyRenames(

@@ -18,7 +18,10 @@ import {
   DEFAULT_CLIENT_SETTINGS,
 } from "@t3tools/contracts";
 
-import { installWorkspaceDownloadSaveDialog } from "../banneret/downloadSaveDialog.ts";
+import {
+  downloadInsteadOfNavigating,
+  installWorkspaceDownloadSaveDialog,
+} from "../banneret/downloadSaveDialog.ts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopClerk from "../app/DesktopClerk.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -809,6 +812,7 @@ export const make = Effect.gen(function* () {
       }
 
       event.preventDefault();
+      if (downloadInsteadOfNavigating(window.webContents, url)) return;
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
       }

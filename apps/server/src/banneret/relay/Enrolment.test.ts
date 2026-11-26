@@ -426,6 +426,34 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("a relay that no longer knows the machine is not reported as leaving", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const enrolment = yield* Enrolment.BanneretEnrolment;
+        const joined = yield* join(fake, relay);
+        // A wiped relay store: every signed call meets an unknown token.
+        relay.intercept = (request) =>
+          request.headers["x-banneret-device"] !== undefined
+            ? {
+                status: 401,
+                body: JSON.stringify({
+                  error: { code: "unauthenticated", message: "Unknown token.", retryable: false },
+                }),
+              }
+            : undefined;
+        const view = yield* waitFor(status, (current) => current.health === "unknown_machine");
+        expect(view.state).toBe("configured");
+        expect(yield* enrolment.leave("revoke")).toEqual({
+          state: "none",
+          reason: "unknown_machine",
+          message: `${joined.displayName} no longer knows this machine (the relay may have been reset). Join again.`,
+        });
+        relay.intercept = undefined;
+        yield* noSecretsLeft;
+      }).pipe(onFreshHub()),
+    ),
+  );
+
   it.live("leave forget works while the relay is unreachable, then goes quiet", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {

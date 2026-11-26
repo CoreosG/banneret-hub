@@ -1,14 +1,18 @@
 // @effect-diagnostics nodeBuiltinImport:off - a synchronous Electron will-download callback builds the native dialog path.
-// Banneret Hub: file-explorer downloads ask where to save, like VS Code. The web client clicks an
-// <a download> on the server's signed workspace-download URL (local or remote environment); here
-// the main window's session catches it and shows the native Save As dialog. Other downloads keep
-// Electron's default handling; preview and browser sessions have their own handlers.
+// Banneret Hub: every download in the main window's session asks where to save, like VS Code:
+// workspace files and folders, a file viewer's blob: save, a remote https file. Preview and browser
+// sessions keep their own handlers (preview/Manager.ts).
+//
+// The file explorer's signed download URL is on the server's origin, never the renderer's
+// (banneret://app), so Chromium ignores its <a download> attribute and navigates instead. The main
+// window's will-navigate handler would hand that navigation to the OS browser, which saves to
+// Downloads without asking. `downloadInsteadOfNavigating` turns it into a download in this session.
 import * as NodePath from "node:path";
 
 import { WORKSPACE_FILES_DOWNLOAD_ROUTE_PREFIX } from "@t3tools/contracts";
 import * as Electron from "electron";
 
-const sessionsWithHandler = new WeakSet<Electron.Session>();
+const sessionsWithHandler = new WeakSet<object>();
 
 /**
  * The signed route is `<base>/api/workspace-files/download/<token>/<file name>` on any origin and
@@ -29,15 +33,18 @@ export function isWorkspaceDownloadUrl(rawUrl: string): boolean {
 }
 
 /**
- * Chromium's suggested name comes from Content-Disposition (a folder arrives as `<name>.zip`);
- * the last URL segment is the server's own file name if Chromium has none.
+ * Chromium's suggested name comes from Content-Disposition or the anchor's `download` attribute
+ * (a folder arrives as `<name>.zip`). Without one, an http(s) URL's last segment names the file;
+ * a blob: or data: URL has no file name in it.
  */
 export function downloadFileName(suggestedFileName: string, rawUrl: string): string {
   if (suggestedFileName.trim()) return suggestedFileName;
   try {
-    const segment = new URL(rawUrl).pathname.split("/").pop() ?? "";
-    const decoded = decodeURIComponent(segment);
-    if (decoded.trim()) return NodePath.basename(decoded);
+    const url = new URL(rawUrl);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      const decoded = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      if (decoded.trim()) return NodePath.basename(decoded);
+    }
   } catch {
     // Fall through to the generic name.
   }
@@ -48,32 +55,69 @@ export function saveDialogDefaultPath(downloadsDirectory: string, fileName: stri
   return NodePath.join(downloadsDirectory, fileName);
 }
 
-function onWillDownload(
-  _event: Electron.Event,
-  item: Electron.DownloadItem,
-  webContents: Electron.WebContents,
-) {
-  if (!isWorkspaceDownloadUrl(item.getURL())) return;
-  const options: Electron.SaveDialogOptions = {
-    defaultPath: saveDialogDefaultPath(
-      Electron.app.getPath("downloads"),
-      downloadFileName(item.getFilename(), item.getURL()),
-    ),
-  };
-  // The save path must be set before this handler returns, so the dialog is synchronous.
-  // Chromium writes to a temporary file until the path is known; cancel removes it.
-  const owner = Electron.BrowserWindow.fromWebContents(webContents);
-  const savePath = owner
-    ? Electron.dialog.showSaveDialogSync(owner, options)
-    : Electron.dialog.showSaveDialogSync(options);
-  if (savePath) item.setSavePath(savePath);
-  else item.cancel();
+export interface SaveDialogHost {
+  readonly downloadsDirectory: () => string;
+  readonly showSaveDialog: (
+    webContents: Electron.WebContents,
+    options: Electron.SaveDialogOptions,
+  ) => string | undefined;
 }
 
+const electronHost: SaveDialogHost = {
+  downloadsDirectory: () => Electron.app.getPath("downloads"),
+  showSaveDialog: (webContents, options) => {
+    const owner = Electron.BrowserWindow.fromWebContents(webContents);
+    return owner
+      ? Electron.dialog.showSaveDialogSync(owner, options)
+      : Electron.dialog.showSaveDialogSync(options);
+  },
+};
+
+type DownloadItem = Pick<
+  Electron.DownloadItem,
+  "getURL" | "getFilename" | "setSavePath" | "cancel"
+>;
+
+/** Asks where to save every download, whatever its URL; cancel removes Chromium's partial file. */
+export function makeWillDownloadHandler(host: SaveDialogHost = electronHost) {
+  return (_event: unknown, item: DownloadItem, webContents: Electron.WebContents) => {
+    const options: Electron.SaveDialogOptions = {
+      defaultPath: saveDialogDefaultPath(
+        host.downloadsDirectory(),
+        downloadFileName(item.getFilename(), item.getURL()),
+      ),
+    };
+    // The save path must be set before this handler returns, so the dialog is synchronous.
+    // Chromium writes to a temporary file until the path is known; cancel removes it.
+    const savePath = host.showSaveDialog(webContents, options);
+    if (savePath) item.setSavePath(savePath);
+    else item.cancel();
+  };
+}
+
+type DownloadSession = Pick<Electron.Session, "on">;
+
 /** Installs the handler once per session; later main windows share the default session. */
-export function installWorkspaceDownloadSaveDialog(session: Electron.Session): void {
+export function installWorkspaceDownloadSaveDialog(
+  session: DownloadSession,
+  host: SaveDialogHost = electronHost,
+): void {
   // Test doubles and non-Electron sessions have no event emitter; nothing to hook there.
   if (typeof session.on !== "function" || sessionsWithHandler.has(session)) return;
   sessionsWithHandler.add(session);
-  session.on("will-download", onWillDownload);
+  session.on("will-download", makeWillDownloadHandler(host) as never);
+}
+
+/**
+ * Called from the main window's will-navigate handler after it cancels a cross-origin navigation.
+ * A signed workspace download becomes a download in the main session (and so gets the dialog)
+ * instead of opening in the OS browser. Returns whether it took the URL.
+ */
+export function downloadInsteadOfNavigating(
+  webContents: Pick<Electron.WebContents, "downloadURL">,
+  url: string,
+): boolean {
+  if (!isWorkspaceDownloadUrl(url)) return false;
+  webContents.downloadURL(url);
+  return true;
 }

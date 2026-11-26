@@ -13,6 +13,7 @@ import {
   forgetNotice,
   isKnownSectionKind,
   isValidMachineLabel,
+  joinAgainNotice,
   lastResultMessage,
   letterAvatar,
   machineLabelFrom,
@@ -53,6 +54,7 @@ describe("wizardStep", () => {
     [{ state: "configured", health: "healthy" }, "connected"],
     [{ state: "configured", health: "unreachable" }, "connected"],
     [{ state: "configured", health: "refused" }, "address"],
+    [{ state: "configured", health: "unknown_machine" }, "address"],
     [{ state: "revoked" }, "revoked"],
   ] as const)("maps %j to %s", (view, step) => {
     expect(wizardStep(view)).toBe(step);
@@ -79,6 +81,15 @@ describe("lastResultMessage", () => {
     ["forgotten", "This machine was forgotten here. A founder must still remove it on the relay."],
   ])("says why for %s", (reason, message) => {
     expect(lastResultMessage({ state: "none", reason })).toBe(message);
+  });
+
+  it("says the company no longer knows the machine after a relay reset, not that you left", () => {
+    const message =
+      "Example Company no longer knows this machine (the relay may have been reset). Join again.";
+    expect(lastResultMessage({ state: "none", reason: "unknown_machine", message })).toBe(message);
+    expect(lastResultMessage({ state: "none", reason: "unknown_machine" })).toBe(
+      "The company no longer knows this machine (the relay may have been reset). Join again.",
+    );
   });
 
   it("falls back to the relay's words, then a generic line, for an unknown reason", () => {
@@ -130,6 +141,11 @@ describe("enrolmentLine", () => {
     [{ health: "unreachable" }, "warn", "Cannot reach relay.example.com"],
     [{ health: "clock_wrong" }, "warn", "This machine's clock is wrong"],
     [{ health: "refused" }, "error", "The relay refused this machine"],
+    [
+      { health: "unknown_machine" },
+      "error",
+      "Example Company no longer knows this machine (the relay may have been reset). Join again.",
+    ],
     [{ health: "forbidden" }, "error", "The relay does not allow this machine"],
     [{ health: "invalid_reply" }, "error", "The relay's answers do not match this version"],
     [{}, "muted", "Checking the connection…"],
@@ -175,13 +191,27 @@ describe("helpers", () => {
 
   it("offers Join again only after a 401 refusal", () => {
     expect(canJoinAgain(joined({ health: "refused" }))).toBe(true);
+    expect(canJoinAgain(joined({ health: "unknown_machine" }))).toBe(true);
     expect(canJoinAgain(joined({ health: "forbidden" }))).toBe(false);
     expect(canJoinAgain(joined({ state: "approved", health: "refused" }))).toBe(false);
     expect(canJoinAgain(null)).toBe(false);
   });
 
+  it("says why the wizard offers Join again", () => {
+    expect(joinAgainNotice(joined({ health: "unknown_machine" }))).toBe(
+      "Example Company no longer knows this machine (the relay may have been reset). Join again.",
+    );
+    expect(joinAgainNotice(joined({ health: "refused" }))).toBe(
+      "The relay refused this machine. Join again to replace it.",
+    );
+  });
+
   it.each([
     ["unreachable", "The relay cannot be reached."],
+    [
+      "unknown_machine",
+      "Example Company no longer knows this machine (the relay may have been reset), so it cannot confirm that it left.",
+    ],
     ["refused", "The relay refused this machine, so it cannot confirm that it left."],
     ["forbidden", "The relay does not allow this machine to remove itself."],
     ["clock_wrong", "This machine's clock is wrong, so the relay would reject its calls."],

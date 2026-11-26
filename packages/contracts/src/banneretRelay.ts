@@ -53,6 +53,8 @@ export const BanneretRelayHealth = Schema.Literals([
   "unreachable",
   "clock_wrong",
   "refused",
+  /** The relay knows neither this machine's token nor its id: its store was reset, or it was removed. */
+  "unknown_machine",
   "forbidden",
   "invalid_reply",
 ]);
