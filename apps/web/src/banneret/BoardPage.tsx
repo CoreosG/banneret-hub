@@ -1,74 +1,38 @@
 // Banneret Hub: the board for an Enterprise workspace, drawn from the relay's snapshot `board` file.
 // The relay computes columns, statuses and leases; this page only draws them. Read-only: a lease is
-// taken or released on the tracker, so a card links out to its issue.
-import type { BanneretBoardCard } from "@t3tools/contracts";
+// taken or released on the tracker. A card opens its Task tab.
+import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
 
-import { cn } from "../lib/utils";
-import { FeedStatus, useNowMs, When } from "./FeedParts";
-import { boardColumns, boardIncomplete, leaseChip, type LeaseTone, prLine } from "./board.logic";
-import { notMeasuredReason, offersSection, safeLinkOut } from "./relayFeed.logic";
+import { FeedStatus, LeaseChipView, useNowMs, When } from "./FeedParts";
+import { boardColumns, boardIncomplete, prLine } from "./board.logic";
+import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { StatusLegend, StatusMark } from "./StatusLegend";
 import { FeedPage, NotJoinedNote } from "./TodayPage";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
-
-const CHIP_TONE: Record<LeaseTone, string> = {
-  ok: "border-success/40 text-success-foreground",
-  warn: "border-warning/50 bg-warning/10 text-warning-foreground",
-  error: "border-destructive/50 bg-destructive/10 text-destructive-foreground",
-  muted: "border-border text-muted-foreground",
-};
-
-function LeaseChipView(props: { readonly card: BanneretBoardCard; readonly nowMs: number }) {
-  const lease = props.card.lease;
-  if (lease === undefined) return null;
-  const chip = leaseChip(lease, props.nowMs);
-  return (
-    <span
-      data-testid="lease-chip"
-      data-lease={lease.state}
-      className={cn(
-        "inline-flex max-w-full self-start truncate rounded-full border px-2 py-0.5 text-xs",
-        CHIP_TONE[chip.tone],
-      )}
-    >
-      {chip.label}
-    </span>
-  );
-}
+import { useOpenTask } from "./useOpenTask";
 
 function BoardCardView(props: {
   readonly card: BanneretBoardCard;
   readonly atWork: boolean;
   readonly leases: boolean;
   readonly nowMs: number;
+  readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { card } = props;
-  const href = safeLinkOut(card.task.ref.url);
   const pr = prLine(card);
-  const body = (
-    <>
-      <StatusMark status={card.status} why={card.statusWhy} atWork={props.atWork} />
-      <span className="break-words text-sm">{card.task.title}</span>
-      {pr === null ? null : <span className="text-muted-foreground text-xs">{pr}</span>}
-      {props.leases ? <LeaseChipView card={card} nowMs={props.nowMs} /> : null}
-    </>
-  );
-  const className =
-    "flex flex-col gap-1.5 rounded-md border bg-card p-2.5 text-card-foreground shadow-xs/5";
   return (
     <li data-task-id={card.task.id} data-at-work={props.atWork ? "" : undefined}>
-      {href === null ? (
-        <div className={className}>{body}</div>
-      ) : (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(className, "hover:bg-accent/50")}
-        >
-          {body}
-        </a>
-      )}
+      <button
+        type="button"
+        data-open-task={card.task.id}
+        className="flex w-full flex-col gap-1.5 rounded-md border bg-card p-2.5 text-start text-card-foreground shadow-xs/5 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={() => props.onOpen(card.task)}
+      >
+        <StatusMark status={card.status} why={card.statusWhy} atWork={props.atWork} />
+        <span className="break-words text-sm">{card.task.title}</span>
+        {pr === null ? null : <span className="text-muted-foreground text-xs">{pr}</span>}
+        {props.leases ? <LeaseChipView lease={card.lease} nowMs={props.nowMs} /> : null}
+      </button>
     </li>
   );
 }
@@ -76,6 +40,7 @@ function BoardCardView(props: {
 export function BoardPage() {
   const enterprise = useEnterpriseFeed();
   const nowMs = useNowMs();
+  const openTask = useOpenTask(enterprise?.environmentId ?? "");
   if (enterprise === null) {
     return (
       <FeedPage title="Board">
@@ -148,6 +113,7 @@ export function BoardPage() {
                         atWork={atWork.has(card.task.id)}
                         leases={read?.leases === true}
                         nowMs={nowMs}
+                        onOpen={openTask}
                       />
                     ))}
                   </ul>

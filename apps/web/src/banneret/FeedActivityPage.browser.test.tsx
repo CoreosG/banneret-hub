@@ -30,6 +30,8 @@ import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { FeedActivityPage } from "./FeedActivityPage";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
+import { TaskDialogHost } from "./TaskDialog";
+import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
 
 vi.mock("../state/environments", { spy: true });
@@ -142,6 +144,7 @@ function setup() {
   });
   useEnrolmentStore.setState({ views: {} });
   useRelayFeedStore.setState({ feeds: {} });
+  openTaskDialog(null);
   storeEnrolmentView(LOCAL, configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
   const listeners = new Set<(event: BanneretFeedState) => void>();
@@ -172,6 +175,7 @@ function Shell() {
         <EnterpriseSidebarRows />
       </nav>
       <Outlet />
+      <TaskDialogHost />
     </SidebarProvider>
   );
 }
@@ -247,13 +251,17 @@ describe("Enterprise feed", () => {
     const open = [...merged.querySelectorAll("a")].find((link) => link.textContent === "Open")!;
     expect(open.getAttribute("href")).toBe("https://github.com/example-org/example-app/pull/77");
     expect(open.getAttribute("rel")).toBe("noopener noreferrer");
-    // The task opens through the seam, today as a link out to its issue.
-    const taskLink = merged.querySelector('[data-task-link="t1"]')!;
+    // The task opens its Task tab; with no thread routed, in the Task dialog.
+    const taskLink = merged.querySelector<HTMLElement>('[data-task-link="t1"]')!;
     expect(taskLink.textContent).toBe("Rate limits");
-    expect(taskLink.getAttribute("href")).toBe(
-      "https://github.com/example-org/example-app/issues/t1",
-    );
-    expect(taskLink.getAttribute("target")).toBe("_blank");
+    expect(taskLink.tagName).toBe("BUTTON");
+    await userEvent.click(taskLink);
+    await expect
+      .element(page.getByRole("dialog").getByRole("heading", { name: "Rate limits" }))
+      .toBeVisible();
+    expect(document.querySelector('[data-task-panel="t1"]')).not.toBeNull();
+    await userEvent.keyboard("{Escape}");
+    await vi.waitFor(() => expect(document.querySelector("[data-task-panel]")).toBeNull());
 
     // An empty login leaves no name and no dangling separator; low importance only styles.
     const quiet = rowOf("e2")!;
@@ -343,9 +351,7 @@ describe("Enterprise feed", () => {
     expect(first.textContent).toContain("ruled dead");
     expect(first.textContent).toContain("by ada-example");
     expect(first.querySelector("time")?.getAttribute("datetime")).toBe(at(5));
-    expect(first.querySelector('[data-task-link="t1"]')?.getAttribute("href")).toBe(
-      "https://github.com/example-org/example-app/issues/t1",
-    );
+    expect(first.querySelector('[data-task-link="t1"]')?.tagName).toBe("BUTTON");
     // No ruler: the ruling line ends at its time.
     expect(document.querySelector('[data-task-id="t2"]')?.textContent).not.toMatch(/ by \S+$/);
 

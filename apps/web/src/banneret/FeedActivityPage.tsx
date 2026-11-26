@@ -20,13 +20,13 @@ import {
   type Importance,
   mergeFeedEntries,
   mergeGraveyardEntries,
-  openTaskTarget,
 } from "./feed.logic";
 import { type FeedProblem, loadOlder, olderCursor } from "./relayFeedStore";
 import { offersSection, safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
 import { FeedPage, NotJoinedNote } from "./TodayPage";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
+import { useOpenTask } from "./useOpenTask";
 
 type Tab = "feed" | "graveyard";
 
@@ -57,27 +57,27 @@ function LinkOut(props: { readonly url: string | undefined }) {
   );
 }
 
-/** A task's title; a click goes where `openTaskTarget` says (the Task tab, from slice D). */
-function TaskLink(props: { readonly task: BanneretBoardTask; readonly className?: string }) {
-  const href = openTaskTarget(props.task);
-  const className = cn("break-words", props.className);
-  if (href === null) {
-    return <span className={className}>{props.task.title}</span>;
-  }
+type OpenTask = (task: BanneretBoardTask) => void;
+
+/** A task's title; a click opens its Task tab. */
+function TaskLink(props: {
+  readonly task: BanneretBoardTask;
+  readonly onOpen: OpenTask;
+  readonly className?: string;
+}) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+    <button
+      type="button"
       data-task-link={props.task.id}
-      className={cn(className, "hover:underline")}
+      className={cn("break-words text-start hover:underline", props.className)}
+      onClick={() => props.onOpen(props.task)}
     >
       {props.task.title}
-    </a>
+    </button>
   );
 }
 
-function FeedEntryRow(props: { readonly entry: BanneretFeedEntry }) {
+function FeedEntryRow(props: { readonly entry: BanneretFeedEntry; readonly onOpenTask: OpenTask }) {
   const { entry } = props;
   const importance = importanceOf(entry.importance);
   const author = cleanLogin(entry.author?.login);
@@ -101,7 +101,9 @@ function FeedEntryRow(props: { readonly entry: BanneretFeedEntry }) {
         {entry.task === undefined && entry.status === undefined ? null : (
           <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
             {entry.status === undefined ? null : <StatusMark status={entry.status} />}
-            {entry.task === undefined ? null : <TaskLink task={entry.task} />}
+            {entry.task === undefined ? null : (
+              <TaskLink task={entry.task} onOpen={props.onOpenTask} />
+            )}
           </span>
         )}
       </div>
@@ -110,13 +112,16 @@ function FeedEntryRow(props: { readonly entry: BanneretFeedEntry }) {
   );
 }
 
-function GraveyardRow(props: { readonly entry: BanneretGraveyardEntry }) {
+function GraveyardRow(props: {
+  readonly entry: BanneretGraveyardEntry;
+  readonly onOpenTask: OpenTask;
+}) {
   const { entry } = props;
   const by = cleanLogin(entry.by?.login);
   return (
     <li className="flex items-start gap-3 py-2" data-task-id={entry.task.id}>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <TaskLink task={entry.task} className="text-sm" />
+        <TaskLink task={entry.task} onOpen={props.onOpenTask} className="text-sm" />
         <span className="break-words text-sm" data-testid="graveyard-cause">
           Cause: {entry.cause}
         </span>
@@ -193,6 +198,7 @@ const Loading = () => <p className="text-muted-foreground text-sm">Loading…</p
 
 export function FeedActivityPage() {
   const enterprise = useEnterpriseFeed();
+  const openTask = useOpenTask(enterprise?.environmentId ?? "");
   const [tab, setTab] = useState<Tab>("feed");
   if (enterprise === null) {
     return (
@@ -231,7 +237,7 @@ export function FeedActivityPage() {
           ) : (
             <ul aria-label="Feed entries" className="flex flex-col divide-y rounded-lg border px-4">
               {entries.map((entry) => (
-                <FeedEntryRow key={entry.id} entry={entry} />
+                <FeedEntryRow key={entry.id} entry={entry} onOpenTask={openTask} />
               ))}
             </ul>
           )}
@@ -262,7 +268,7 @@ export function FeedActivityPage() {
               className="flex flex-col divide-y rounded-lg border px-4"
             >
               {entries.map((entry) => (
-                <GraveyardRow key={entry.task.id} entry={entry} />
+                <GraveyardRow key={entry.task.id} entry={entry} onOpenTask={openTask} />
               ))}
             </ul>
           )}
