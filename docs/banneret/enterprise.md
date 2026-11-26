@@ -20,9 +20,9 @@ Enterprise is **Banneret-only for now**. The relay it talks to is Banneret's own
 A relay is a small server one company runs for its own staff. Banneret Hub talks to it through an open
 contract, `/relay/v1`. Anyone may build a compatible relay.
 
-- **Spec first.** The `/relay/v1` spec, and a small fake relay used by this repository's tests, will live
-  here under `docs/banneret/relay-v1/`. The fake is a test double and conformance suite, not a production
-  server.
+- **Spec first.** The canonical `/relay/v1` spec lives in [`relay-v1/`](relay-v1/README.md). A small
+  [fake relay](relay-v1/FAKE.md) runs this repository's conformance suite against it. The fake is a test double,
+  not a production server.
 - **Banneret's relay is published later.** Banneret runs its relay in Go. Once it has proven itself with a
   second person using it every day, it moves to its own public repository under the MIT licence. Until then
   there is no production relay you can download.
