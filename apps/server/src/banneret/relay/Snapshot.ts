@@ -9,7 +9,12 @@ import type {
   BanneretBoard,
   BanneretBoardCard,
   BanneretBoardLease,
+  BanneretBoardTask,
+  BanneretFeedEntry,
+  BanneretFeedEntryPage,
   BanneretFeedNotMeasured,
+  BanneretGraveyardEntry,
+  BanneretGraveyardPage,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
@@ -157,9 +162,9 @@ const lease = (value: unknown): BanneretBoardLease | undefined => {
   return { holder: { login }, state, since, lastSignalAt, staleAt, expiresAt };
 };
 
-const card = (value: unknown): BanneretBoardCard | undefined => {
-  const source = fields(value);
-  const task = fields(source?.task);
+/** A relay task `{id, title, ref}`; undefined when a required field is missing. */
+const boardTask = (value: unknown): BanneretBoardTask | undefined => {
+  const task = fields(value);
   const ref = fields(task?.ref);
   const id = text(task?.id, 64);
   const title = text(task?.title, 300);
@@ -167,23 +172,29 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
   const scope = text(ref?.scope, 200);
   const key = text(ref?.key, 100);
   const url = text(ref?.url, 2048);
-  const column = text(source?.column, 32);
-  const status = text(source?.status, 32);
-  const statusWhy = text(source?.statusWhy, 240);
   if (
     id === undefined ||
     title === undefined ||
     tracker === undefined ||
     scope === undefined ||
     key === undefined ||
-    url === undefined ||
-    column === undefined ||
-    status === undefined ||
-    statusWhy === undefined
+    url === undefined
   ) {
     return undefined;
   }
   const host = text(ref?.host, 255);
+  return { id, title, ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) } };
+};
+
+const card = (value: unknown): BanneretBoardCard | undefined => {
+  const source = fields(value);
+  const task = boardTask(source?.task);
+  const column = text(source?.column, 32);
+  const status = text(source?.status, 32);
+  const statusWhy = text(source?.statusWhy, 240);
+  if (task === undefined || column === undefined || status === undefined || statusWhy === undefined) {
+    return undefined;
+  }
   const held = lease(source?.lease);
   const pr = fields(source?.pr);
   const prNumber = pr?.number;
@@ -191,7 +202,7 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
   const prState = text(pr?.state, 32);
   const checks = text(fields(source?.checks)?.state, 32);
   return {
-    task: { id, title, ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) } },
+    task,
     column,
     status,
     statusWhy,
@@ -227,6 +238,75 @@ export function reshapeBoard(body: unknown): BanneretBoard | undefined {
     cards: defined(list(source.cards, 1000).map(card)),
   };
 }
+
+const person = (value: unknown) => {
+  const login = text(fields(value)?.login, 64);
+  return login === undefined ? undefined : { login };
+};
+
+const optional = <K extends string, V>(key: K, value: V | undefined) =>
+  (value === undefined ? {} : { [key]: value }) as Partial<Record<K, V>>;
+
+const feedEntry = (value: unknown): BanneretFeedEntry | undefined => {
+  const source = fields(value);
+  const id = text(source?.id, 64);
+  const type = text(source?.type, 64);
+  const at = text(source?.at, 64);
+  const importance = text(source?.importance, 32);
+  const summary = text(source?.summary, 240);
+  if (
+    id === undefined ||
+    type === undefined ||
+    at === undefined ||
+    importance === undefined ||
+    summary === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    id,
+    type,
+    at,
+    importance,
+    summary,
+    ...optional("author", person(source?.author)),
+    ...optional("link", text(source?.link, 2048)),
+    ...optional("task", boardTask(source?.task)),
+    ...optional("status", text(source?.status, 32)),
+  };
+};
+
+const graveyardEntry = (value: unknown): BanneretGraveyardEntry | undefined => {
+  const source = fields(value);
+  const task = boardTask(source?.task);
+  const cause = text(source?.cause, 500);
+  const ruledAt = text(source?.ruledAt, 64);
+  if (task === undefined || cause === undefined || ruledAt === undefined) return undefined;
+  return {
+    task,
+    cause,
+    ruledAt,
+    ...optional("by", person(source?.by)),
+    ...optional("link", text(source?.link, 2048)),
+  };
+};
+
+const entryPage = <T>(body: unknown, entry: (value: unknown) => T | undefined) => {
+  const source = fields(body);
+  if (source === undefined || !Array.isArray(source.entries)) return undefined;
+  return {
+    entries: defined(list(source.entries, 100).map(entry)),
+    nextCursor: text(source.nextCursor, 1024) ?? null,
+  };
+};
+
+/** The `feed` file or a `GET /feed` page (FeedPage); undefined when it is not one. */
+export const reshapeFeedPage = (body: unknown): BanneretFeedEntryPage | undefined =>
+  entryPage(body, feedEntry);
+
+/** The `graveyard` file or a `GET /graveyard` page (GraveyardPage); undefined when it is not one. */
+export const reshapeGraveyardPage = (body: unknown): BanneretGraveyardPage | undefined =>
+  entryPage(body, graveyardEntry);
 
 /** Live means an agent session is working or waiting; idle, stopped and unheard ones are not. */
 const LIVE_WORK = new Set(["working", "waiting"]);

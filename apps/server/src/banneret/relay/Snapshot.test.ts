@@ -520,6 +520,164 @@ describe("BanneretRelayFeed board from the snapshot", () => {
   });
 });
 
+const isPage = (url: string, path: "/feed" | "/graveyard") =>
+  url.startsWith(`/relay/v1${path}?`) || url === `/relay/v1${path}`;
+
+describe("BanneretRelayFeed feed and graveyard", () => {
+  it.live("an environment that has not joined pages nothing and calls no relay", () =>
+    withFake((_fake, relay) =>
+      Effect.gen(function* () {
+        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const events = yield* subscribe;
+        const first = yield* events.next(() => true, "the first state");
+        expect(first.feed).toBeNull();
+        expect(first.graveyard).toBeNull();
+        expect(yield* feed.feedPage("c_1")).toEqual({ joined: false, value: null, fetchedAt: null });
+        expect(yield* feed.graveyardPage("c_1")).toEqual({
+          joined: false,
+          value: null,
+          fetchedAt: null,
+        });
+        // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- proving silence needs a window; no event marks "no request was sent".
+        yield* Effect.sleep(400);
+        expect(relay.requests).toEqual([]);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("reads both files from the snapshot and pages older entries by cursor", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const events = yield* subscribe;
+        yield* join(fake, relay);
+        yield* control(fake, "/board/seed", SEED);
+        yield* control(fake, "/feed/seed", {
+          count: 105,
+          type: "pr_merged",
+          importance: "high",
+          taskId: "t_active",
+          by: "bo-example",
+        });
+        yield* control(fake, "/graveyard/seed", { count: 105, cause: "superseded by #12" });
+        const state = yield* events.next(
+          (event) =>
+            event.feed?.value?.entries.length === 100 &&
+            event.graveyard?.value?.entries.length === 100,
+          "the feed and graveyard files",
+        );
+        const feedFile = state.feed!.value!;
+        expect(state.feed!.problem).toBeUndefined();
+        expect(state.feed!.fetchedAt).not.toBeNull();
+        expect(feedFile.nextCursor).not.toBeNull();
+        const newest = feedFile.entries[0]!;
+        expect(newest.type).toBe("pr_merged");
+        expect(newest.importance).toBe("high");
+        expect(newest.summary).toBe("Feed entry 1 of 105.");
+        expect(newest.author).toEqual({ login: "bo-example" });
+        expect(newest.task?.id).toBe("t_active");
+        expect(newest.task?.title).toBe("Guild invites");
+        expect(newest.link).toBe(newest.task?.ref.url);
+        expect(newest.status).toBe("planned");
+        const graveyardFile = state.graveyard!.value!;
+        expect(graveyardFile.nextCursor).not.toBeNull();
+        expect(graveyardFile.entries[0]!.cause).toBe("superseded by #12");
+        expect(graveyardFile.entries[0]!.task.title).toBe("Ruled dead task 1");
+        expect(graveyardFile.entries[0]!.by).toBeUndefined();
+
+        const older = yield* feed.feedPage(feedFile.nextCursor!);
+        expect(older.joined).toBe(true);
+        expect(older.problem).toBeUndefined();
+        expect(older.value!.entries.map((entry) => entry.summary)).toEqual([
+          "Feed entry 101 of 105.",
+          "Feed entry 102 of 105.",
+          "Feed entry 103 of 105.",
+          "Feed entry 104 of 105.",
+          "Feed entry 105 of 105.",
+        ]);
+        expect(older.value!.nextCursor).toBeNull();
+        const olderGraves = yield* feed.graveyardPage(graveyardFile.nextCursor!);
+        expect(olderGraves.value!.entries).toHaveLength(5);
+        expect(olderGraves.value!.entries.every((entry) => entry.cause === "superseded by #12")).toBe(
+          true,
+        );
+        expect(olderGraves.value!.nextCursor).toBeNull();
+        const pages = relay.requests.filter(
+          (request) => isPage(request.url, "/feed") || isPage(request.url, "/graveyard"),
+        );
+        expect(pages.map((request) => request.url)).toEqual([
+          `/relay/v1/feed?limit=100&cursor=${encodeURIComponent(feedFile.nextCursor!)}`,
+          `/relay/v1/graveyard?limit=100&cursor=${encodeURIComponent(graveyardFile.nextCursor!)}`,
+        ]);
+
+        // A cursor the relay never issued is a problem on that page alone.
+        const refused = yield* feed.feedPage("not-a-cursor");
+        expect(refused.joined).toBe(true);
+        expect(refused.value).toBeNull();
+        expect(refused.problem?.message).toContain("answered 400");
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("reads the feed without a board section, and no graveyard without its flag", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        relay.rewrite = (request, body) => {
+          if (request.url !== "/relay/v1/capabilities") return body;
+          const capabilities = JSON.parse(body) as {
+            sections?: Array<{ kind: string; flags: string[] }>;
+          };
+          // Only the enrolled answer carries sections.
+          if (capabilities.sections === undefined) return body;
+          capabilities.sections = capabilities.sections
+            .filter((section) => section.kind !== "board")
+            .map((section) => (section.kind === "feed" ? { ...section, flags: [] } : section));
+          return JSON.stringify(capabilities);
+        };
+        const events = yield* subscribe;
+        yield* control(fake, "/feed/seed", { count: 2 });
+        yield* control(fake, "/graveyard/seed", { cause: "duplicate of #3" });
+        yield* join(fake, relay);
+        const state = yield* events.next(
+          (event) => event.feed?.value?.entries.length === 2,
+          "the feed file",
+        );
+        expect(state.sections).not.toContain("board");
+        expect(state.board).toBeNull();
+        expect(state.graveyard).toBeNull();
+        expect(state.feed!.value!.nextCursor).toBeNull();
+        expect(state.feed!.value!.entries[0]!.author).toBeUndefined();
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("keeps the last good feed with its age while the relay is away", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const events = yield* subscribe;
+        yield* control(fake, "/feed/seed", { count: 3 });
+        yield* control(fake, "/graveyard/seed", { cause: "superseded by #12" });
+        yield* join(fake, relay);
+        const good = yield* events.next(
+          (event) =>
+            event.feed?.value?.entries.length === 3 &&
+            event.graveyard?.value?.entries.length === 1,
+          "the feed",
+        );
+        yield* Effect.promise(() => relay.close());
+        const away = yield* events.next(
+          (event) => event.feed?.problem !== undefined && event.graveyard?.problem !== undefined,
+          "the relay away",
+        );
+        expect(away.feed!.problem!.message).toMatch(/^Cannot reach /);
+        expect(away.feed!.value).toEqual(good.feed!.value);
+        expect(away.feed!.fetchedAt).not.toBeNull();
+        expect(away.graveyard!.value).toEqual(good.graveyard!.value);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+});
+
 describe("snapshot reshaping", () => {
   it("joins the work file's live sessions by task id", () => {
     const work = {
