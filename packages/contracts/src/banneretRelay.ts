@@ -90,7 +90,6 @@ export type BanneretEnrolmentView = typeof BanneretEnrolmentView.Type;
 export const BanneretRelayProbeResult = Schema.Struct({
   origin: Schema.String,
   displayName: Schema.String,
-  protocol: Schema.String,
 });
 export type BanneretRelayProbeResult = typeof BanneretRelayProbeResult.Type;
 

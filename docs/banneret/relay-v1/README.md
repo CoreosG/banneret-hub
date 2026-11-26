@@ -21,7 +21,7 @@ All under `/relay/v1`.
 
 | Call | Purpose |
 |---|---|
-| `GET /capabilities` | Protocol version, display name, icon and enrolment entry point for anyone; sections, MCP tools, adapters and `me` for an enrolled caller. |
+| `GET /capabilities` | Display name, icon and enrolment entry point for anyone; sections, MCP tools, adapters and `me` for an enrolled caller. |
 | `POST /enroll/start` | Start enrolment with the machine's public key and facts; returns a pairing id, confirm code and browser URL. |
 | `POST /enroll/poll` | `pending`, `awaiting_approval`, `approved`, `refused` or `expired`; the device token once, on approval. |
 | `GET /machines` | The Team machines list, paged: every live machine for everyone, revoked ones for their owner and founders. |
@@ -31,8 +31,8 @@ All under `/relay/v1`.
 | `GET /needs` | Needs-you items, paged, most urgent first. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
 | `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
-| `GET /snapshot/head` | The caller's current snapshot head: the SHA-256 of each snapshot file. Added in 1.1. |
-| `GET /snapshot/files/{sha256}` | One immutable snapshot file, by hash. Added in 1.1. |
+| `GET /snapshot/head` | The caller's current snapshot head: the SHA-256 of each snapshot file. |
+| `GET /snapshot/files/{sha256}` | One immutable snapshot file, by hash. |
 
 ## Enrolment
 
@@ -245,20 +245,19 @@ Error `code` is an open set too. A client treats an unknown error code by its HT
 
 ## Snapshot
 
-Added in 1.1. `GET /snapshot/head` and `GET /snapshot/files/{sha256}` give the same facts as `GET /needs`,
+`GET /snapshot/head` and `GET /snapshot/files/{sha256}` give the same facts as `GET /needs`,
 `GET /today` (working, stuck, health), `GET /machines` and `GET /repositories`, packed as files a client can cache
 forever. They carry nothing those calls do not already return to the same caller.
 
 - **Per person.** The head belongs to the caller's person. Every machine of one person gets the same head. Files are
   stored once by hash, so two people with identical bytes share one stored file. A file is readable only while one
   of the caller's retained heads names it. Knowing a hash grants nothing.
-- **Shape.** The head is `{protocol, generatedAt, files}`. `files` maps `needs`, `health`, `work`, `machines` and,
+- **Shape.** The head is `{generatedAt, files}`. `files` maps `needs`, `health`, `work`, `machines` and,
   when the relay serves `GET /repositories`, `repositories` to `sha256:<hex>`. The path of a file uses the bare hex.
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
-  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board`, `map`, `feed` and `graveyard` (added
-  in 1.2) are `SnapshotBoard`, `SnapshotMap`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know, so
-  a 1.1 Hub ignores them.
+  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board`, `map`, `feed` and `graveyard`
+  are `SnapshotBoard`, `SnapshotMap`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know.
 - **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
   head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
   fetch its files.
@@ -292,19 +291,19 @@ What the files hold, and who sees what, is the same as the live calls:
 | work | `Today.working` and `Today.stuck` for the caller | role, in practice |
 | machines | `GET /machines` for the caller | person (revoked machines for owner and founders; `revocable`) |
 | repositories | `GET /repositories` | nothing (relay-wide) |
-| board | none (snapshot only, added in 1.2) | nothing (relay-wide) |
-| map | none (snapshot only, added in 1.2) | nothing (relay-wide) |
-| feed | `GET /feed` (added in 1.2) | nothing (relay-wide) |
-| graveyard | `GET /graveyard` (added in 1.2) | nothing (relay-wide) |
+| board | none (snapshot only) | nothing (relay-wide) |
+| map | none (snapshot only) | nothing (relay-wide) |
+| feed | `GET /feed` | nothing (relay-wide) |
+| graveyard | `GET /graveyard` | nothing (relay-wide) |
 
 "No titles" means no title, text or path that a Hub reported (a heartbeat never carries them). The tracker titles that
 `GET /needs` and `GET /today` already return to staff stay in the needs and work files.
 
 ## Board and leases
 
-Added in 1.2, all additive. A relay that serves the board advertises the section `{kind:"board", flags:["leases"]}`
+A relay that serves the board advertises the section `{kind:"board", flags:["leases"]}`
 (plus the flag `checked` when it applies the sign-off rule below)
-and names the `board` file in the snapshot head. A 1.1 Hub ignores the head key and the section. A Hub does not
+and names the `board` file in the snapshot head. A Hub does not
 read the board unless capabilities carry the section. The board is snapshot-only: the relay computes it, the Hub
 draws it. Writes (take, release, hand-off) are not part of this contract.
 
@@ -357,8 +356,8 @@ fails any of the three changes nothing. The `taskId` is an opaque id the Hub tak
 
 ## Map and the stage plan
 
-Added in 1.2, all additive. A relay that has a stage plan advertises the section `{kind:"map", flags:["rests_on"]}` and
-names the `map` file in the snapshot head. A 1.1 Hub ignores both. A Hub does not read the map unless capabilities carry
+A relay that has a stage plan advertises the section `{kind:"map", flags:["rests_on"]}` and
+names the `map` file in the snapshot head. A Hub does not read the map unless capabilities carry
 the section. Like the board, the map is snapshot-only: the relay computes it and the Hub draws it.
 
 **When it is advertised.**
@@ -436,7 +435,7 @@ the first failing rule. A file that cannot be read is `not_measured` with `reaso
 
 ## Feed and graveyard
 
-Added in 1.2, all additive. A relay that serves them advertises the section `{kind:"feed", flags:["graveyard"]}` and
+A relay that serves them advertises the section `{kind:"feed", flags:["graveyard"]}` and
 names the `feed` (and, with the flag, the `graveyard`) file in the snapshot head. A Hub does not read either file
 unless capabilities carry the section.
 
@@ -457,7 +456,7 @@ unless capabilities carry the section.
 
 ## Task
 
-Added in 1.2. A relay that serves it advertises the section `{kind:"task", flags:[]}`. `GET /tasks/{taskId}` is
+A relay that serves it advertises the section `{kind:"task", flags:[]}`. `GET /tasks/{taskId}` is
 signed and returns one board card (every field of `BoardCard`) plus two optional fields:
 
 - `preview?{state, url?}`: `state` is an open string, known values `building`, `ready`, `failed`; `url` is present
@@ -507,7 +506,7 @@ thread when the environment is its own, and otherwise says which machine holds i
 
 ## Capabilities
 
-- **Anonymous callers** get `protocol`, `displayName`, `iconUrl` (or null) and `enrolment` only.
+- **Anonymous callers** get `displayName`, `iconUrl` (or null) and `enrolment` only.
 - **Enrolled callers** also get the following, none of it secret:
   - `me {id, login, role}`, so no separate identity call is needed. `role` is an open set (`founder`,
     `limited_staff` today); a client treats an unknown role as `limited_staff`;
@@ -518,40 +517,11 @@ thread when the environment is its own, and otherwise says which machine holds i
   to refetch. The `GET /capabilities` `ETag` is the same value in double quotes: `capabilitiesVersion` `c-7f3a`
   is `ETag: "c-7f3a"`. [Orchestrator]
 
-## Versioning
+## Open sets
 
-- The major version is in the path (`/relay/v1`). Within v1 every change is additive: new optional response
-  fields, new endpoints, new section kinds, new needs-you kinds, new adapter kinds.
-- `protocol` (`1.<minor>`) and `info.version` grow by one minor per additive change.
-- Clients ignore response fields and enum values they do not know. Fields that grow within v1 (`Role`,
-  `NeedsItem.kind`, section and adapter kinds) are open strings with their known values documented, not closed
-  enums, so a validating client accepts new values. Request bodies stay closed: a new request
-  field is a new minor that the relay accepts as optional.
-- A breaking change is `/relay/v2`.
-
-### Changelog
-
-- **1.2.** Adds the board and leases (see "Board and leases"): the `board` head key and `SnapshotBoard` file, the
-  `board` section kind with flag `leases`, and the facts-as-heartbeat rule. A 1.1 Hub ignores unknown head keys and
-  section kinds, so nothing breaks. A client reads the board only when capabilities carry the `board` section.
-  Also in 1.2 (additive): the feed and graveyard (see "Feed and graveyard"): the `feed` and
-  `graveyard` head keys, `GET /feed` and `GET /graveyard`, the `feed` section with flag `graveyard`; the task read
-  (see "Task"): `GET /tasks/{taskId}` and the `task` section; and the `checked` rule (see "Checked") with the flag
-  `checked` on the `board` section.
-  Also in 1.2 (additive): the map (see "Map and the stage plan"): the `map` head key and `SnapshotMap` file, the `map`
-  section with flag `rests_on`, advertised only when a stage plan is configured; the stage plan file format (see "Stage
-  plan file"); and an optional `detail` sentence on `NotMeasured`.
-- **1.1.** Banneret Hub 0.1.1211 shipped with 1.0, so from here on every additive change bumps the minor. 1.1 adds:
-  - the `visit=1` flag on `GET /today`;
-  - `usage` in facts;
-  - the needs-you kinds `agent_message`, `persona_ask` and `other`;
-  - the snapshot endpoints (`GET /snapshot/head`, `GET /snapshot/files/{sha256}`), `snapshot` in capabilities and
-    `snapshotEtag` in the facts response.
-
-  A client treats all of these as optional when it talks to a 1.0 relay: it does not send `visit=1` or `usage`
-  unless the relay's `protocol` is 1.1 or later, it does not call the snapshot endpoints unless capabilities carry
-  `snapshot`, and it ignores a missing `snapshotEtag`.
-- **1.0.** The first release.
+Clients ignore response fields and enum values they do not know. `Role`, `NeedsItem.kind`, section kinds, adapter
+kinds and error codes are open strings with their known values documented, not closed enums, so a validating
+client accepts new values. Request bodies are closed.
 
 ## Ids and time
 

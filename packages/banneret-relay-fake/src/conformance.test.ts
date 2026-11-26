@@ -197,7 +197,7 @@ describe("capabilities", () => {
     expect(reply.status).toBe(200);
     expectSchema("Capabilities", reply.body);
     expect(Object.keys(reply.body as object).toSorted()).toEqual(
-      ["displayName", "enrolment", "iconUrl", "protocol"].toSorted(),
+      ["displayName", "enrolment", "iconUrl"].toSorted(),
     );
     expect(reply.headers.get("etag")).toMatch(/^"[^"]+"$/);
   });
@@ -1004,7 +1004,6 @@ describe("snapshot", () => {
   const json = (reply: RawReply): unknown => JSON.parse(reply.bytes.toString("utf8"));
 
   interface Head {
-    readonly protocol: string;
     readonly generatedAt: string;
     readonly files: Record<string, string>;
   }
@@ -1042,10 +1041,8 @@ describe("snapshot", () => {
     expect(reply.status).toBe(200);
     expectSchema("Capabilities", reply.body);
     const body = reply.body as {
-      protocol: string;
       snapshot?: { version: number; head: string };
     };
-    expect(body.protocol).toMatch(/^1\.[1-9][0-9]*$/);
     expect(body.snapshot?.version).toBeGreaterThanOrEqual(1);
     expect(body.snapshot?.head).toBe("/relay/v1/snapshot/head");
     const anonymous = await client.send(generateMachineKey(), "GET", "/relay/v1/capabilities", {
@@ -1273,19 +1270,17 @@ describe("board and leases", () => {
   };
   const id = () => `t_${randomText(5)}`;
 
-  it("advertises the board section and keeps the 1.1 fields", async () => {
+  it("advertises the board section beside the snapshot and the base sections", async () => {
     const machine = await enrol();
     const reply = await call(machine, "GET", "/relay/v1/capabilities");
     expectSchema("Capabilities", reply.body);
     const body = reply.body as {
-      protocol: string;
       snapshot?: { version: number; head: string };
       sections: Array<{ kind: string; flags: string[] }>;
       me: { login: string };
     };
     const board = body.sections.find((section) => section.kind === "board");
     expect(board?.flags).toContain("leases");
-    expect(body.protocol).toMatch(/^1\.([2-9]|[1-9][0-9]+)$/);
     expect(body.snapshot?.head).toBe("/relay/v1/snapshot/head");
     expect(body.me.login).toBe(machine.login);
     for (const kind of ["today", "needs", "machines"]) {

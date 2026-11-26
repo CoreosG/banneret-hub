@@ -22,11 +22,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../test/render";
-import {
-  migratePersistedRightPanelState,
-  selectThreadRightPanelState,
-  useRightPanelStore,
-} from "../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { useProjects, useServerConfigs } from "../state/entities";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
@@ -403,7 +399,6 @@ describe("Task tab in a thread's right panel", () => {
     const storageKey = "t3code:right-panel-state:v2";
     const before = localStorage.getItem(storageKey);
     try {
-      // Same version: the saved state loads as written.
       useRightPanelStore.setState({ byThreadKey: {} });
       localStorage.setItem(
         storageKey,
@@ -419,10 +414,6 @@ describe("Task tab in a thread's right panel", () => {
       else localStorage.setItem(storageKey, before);
       useRightPanelStore.setState({ byThreadKey: {} });
     }
-    // An older version migrates, and the migration keeps only registered kinds.
-    const migrated = migratePersistedRightPanelState({ byThreadKey: { [key]: saved } });
-    expect(migrated.byThreadKey[key]?.surfaces).toEqual([surface]);
-    expect(migrated.byThreadKey[key]?.activeSurfaceId).toBe(surface.id);
   });
 
   it("opens as a tab beside a routed thread", async () => {

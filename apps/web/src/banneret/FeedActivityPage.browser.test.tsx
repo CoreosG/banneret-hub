@@ -138,7 +138,6 @@ const state = (
 function setup() {
   useWorkspacesStore.setState({
     byEnvironment: {},
-    supported: new Set(),
     local: [enterprise],
     activeId: WORKSPACE_ID,
     dialog: null,

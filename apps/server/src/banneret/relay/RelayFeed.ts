@@ -309,14 +309,6 @@ const sectionFlags = (body: unknown, kind: string): ReadonlyArray<string> | null
     : defined(list(section.flags, 32).map((flag) => text(flag, 64)));
 };
 
-/** `visit=1` is a 1.1 addition; a 1.0 relay may refuse it (relay-v1 changelog). */
-export const protocolSupportsVisit = (protocol: string | undefined): boolean => {
-  const match = /^([0-9]{1,4})\.([0-9]{1,6})$/.exec(protocol ?? "");
-  if (match === null) return false;
-  const major = Number(match[1]);
-  return major > 1 || (major === 1 && Number(match[2]) >= 1);
-};
-
 const problemMessage = (error: RelayCallError, relay: string): string => {
   if (error.status === 0) return `Cannot reach ${relay}.`;
   if (error.code === "bad_response") return `${relay}'s answer did not match relay v1.`;
@@ -403,7 +395,6 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   let sectionsKnown = false;
   // Never reset, so a client can tell any two states apart.
   let revision = 0;
-  let protocol: string | undefined;
   let needsCount: number | null = null;
   let today: { readonly value: BanneretFeedToday; readonly fetchedAt: string } | null = null;
   let needsFirst: { readonly value: BanneretFeedNeedsPage; readonly fetchedAt: string } | null =
@@ -544,13 +535,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
 
   const readToday = Effect.fn("BanneretRelayFeed.today")(function* (open: boolean) {
     yield* adopt(joinedOf(yield* enrolment.status));
-    const key = joined?.key;
-    if (open && protocol === undefined && key !== undefined) yield* refreshSections(key);
-    const visit = open && protocolSupportsVisit(protocol);
-    const outcome = yield* read(
-      visit ? "/relay/v1/today?visit=1" : "/relay/v1/today",
-      reshapeToday,
-    );
+    const outcome = yield* read(open ? "/relay/v1/today?visit=1" : "/relay/v1/today", reshapeToday);
     if (outcome.ok) {
       if (stillJoined(outcome.key)) today = { value: outcome.value, fetchedAt: outcome.fetchedAt };
       return { joined: true, value: outcome.value, fetchedAt: outcome.fetchedAt };
@@ -590,7 +575,6 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
           sectionsKnown = true;
-          protocol = text(fields(reply.body)?.protocol, 16);
           boardFlags = sectionFlags(reply.body, "board");
           mapFlags = sectionFlags(reply.body, "map");
           feedFlags = sectionFlags(reply.body, "feed");
@@ -1064,7 +1048,6 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         since = null;
         sections = [];
         sectionsKnown = false;
-        protocol = undefined;
         needsCount = null;
         today = null;
         needsFirst = null;
