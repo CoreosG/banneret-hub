@@ -77,10 +77,17 @@ export const BanneretFeedWorkingItem = Schema.Struct({
   deepLink: Schema.optional(BanneretFeedDeepLink),
 });
 
+/** What a stuck item without a task is about: `owner/name`, and the CI run or job when there is one. */
+export const BanneretFeedStuckSubject = Schema.Struct({
+  repo: Schema.String,
+  run: Schema.optional(Schema.Struct({ name: Schema.String, url: Schema.String })),
+});
+
 export const BanneretFeedStuckItem = Schema.Struct({
   rules: Schema.Array(Schema.String),
   since: Schema.String,
   task: Schema.optional(BanneretFeedTask),
+  subject: Schema.optional(BanneretFeedStuckSubject),
   owner: Schema.optional(BanneretFeedPerson),
   deepLink: Schema.optional(BanneretFeedDeepLink),
 });

@@ -147,6 +147,22 @@ const task = (value: unknown) => {
   return { title, ...optional("url", text(source?.url, 2048)) };
 };
 
+// A stuck item has a task or a subject, never both; the task wins if a relay sends both.
+const stuckSubject = (value: unknown) => {
+  const source = fields(value);
+  const repo = text(source?.repo, 200);
+  if (repo === undefined) return undefined;
+  const run = fields(source?.run);
+  const runName = text(run?.name, 200);
+  const runUrl = text(run?.url, 2048);
+  return {
+    repo,
+    ...(runName === undefined || runUrl === undefined
+      ? {}
+      : { run: { name: runName, url: runUrl } }),
+  };
+};
+
 const deepLink = (value: unknown, labelFor: LabelFor): BanneretFeedDeepLink | undefined => {
   const source = fields(value);
   const environmentId = text(source?.environmentId, 128);
@@ -198,7 +214,7 @@ const block = <T>(value: unknown, item: (value: unknown) => T | undefined) => {
   };
 };
 
-const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedToday | undefined => {
+export const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedToday | undefined => {
   const source = fields(body);
   const generatedAt = text(source?.generatedAt, 64);
   if (generatedAt === undefined) return undefined;
@@ -255,10 +271,12 @@ const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedToday | un
       ];
       const since = text(item?.since, 64);
       if (rules.length === 0 || since === undefined) return undefined;
+      const stuckTask = task(item?.task);
       return {
         rules,
         since,
-        ...optional("task", task(item?.task)),
+        ...optional("task", stuckTask),
+        ...optional("subject", stuckTask === undefined ? stuckSubject(item?.subject) : undefined),
         ...optional("owner", person(item?.owner)),
         ...optional("deepLink", deepLink(item?.deepLink, labelFor)),
       };

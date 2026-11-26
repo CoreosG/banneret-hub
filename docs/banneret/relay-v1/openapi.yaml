@@ -1158,6 +1158,9 @@ components:
           items:
             type: object
             required: [rules, since]
+            not:
+              description: An item has either `task` or `subject`, never both.
+              required: [task, subject]
             properties:
               rules:
                 description: |
@@ -1171,6 +1174,24 @@ components:
                   enum: [dev_red, check_failed, deploy_failed, watched_job_down, unreviewed, claim_quiet, checks_queued]
               since: { $ref: "#/components/schemas/Timestamp" }
               task: { $ref: "#/components/schemas/TaskRef" }
+              subject:
+                description: |
+                  What an item without a `task` is about: a repository and, when a CI run or job is the cause, that run.
+                  An item has either `task` or `subject`, never both. Items without a task are one per repository and
+                  rule, never merged across repositories.
+                type: object
+                additionalProperties: false
+                required: [repo]
+                properties:
+                  repo: { description: "The `owner/name` display string. No other ids.", type: string, maxLength: 200 }
+                  run:
+                    description: The CI run or job, with its URL.
+                    type: object
+                    additionalProperties: false
+                    required: [name, url]
+                    properties:
+                      name: { type: string, maxLength: 200 }
+                      url: { type: string, format: uri }
               owner: { $ref: "#/components/schemas/PersonRef" }
               deepLink: { $ref: "#/components/schemas/DeepLink" }
         notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }

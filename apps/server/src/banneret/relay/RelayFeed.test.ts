@@ -331,3 +331,31 @@ describe("BanneretRelayFeed", () => {
     ),
   );
 });
+
+describe("reshapeToday stuck subject", () => {
+  const today = (item: unknown) =>
+    RelayFeed.reshapeToday(
+      { generatedAt: "2026-11-26T10:00:00Z", stuck: { state: "ok", items: [item] } },
+      () => undefined,
+    )?.stuck.items;
+  const base = { rules: ["dev_red"], since: "2026-11-26T08:00:00Z" };
+  const subject = {
+    repo: "example-org/example-app",
+    run: { name: "ci / test", url: "https://github.com/example-org/example-app/actions/runs/9" },
+  };
+
+  it("keeps a subject, with or without its run", () => {
+    expect(today({ ...base, subject })).toEqual([{ ...base, subject }]);
+    expect(today({ ...base, subject: { repo: "example-org/example-app" } })).toEqual([
+      { ...base, subject: { repo: "example-org/example-app" } },
+    ]);
+  });
+
+  it("drops a subject without a repo, and a subject next to a task", () => {
+    expect(today({ ...base, subject: { run: subject.run } })).toEqual([base]);
+    const task = { id: "t_1", title: "Profile blocks" };
+    expect(today({ ...base, task, subject })).toEqual([
+      { ...base, task: { title: "Profile blocks" } },
+    ]);
+  });
+});

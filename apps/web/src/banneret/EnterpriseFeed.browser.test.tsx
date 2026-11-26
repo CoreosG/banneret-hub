@@ -366,6 +366,17 @@ describe("Enterprise Today and Needs you", () => {
               since: "2026-11-26T03:00:00.000Z",
               task: { title: " ", url: "https://github.com/example-org/example-app/issues/12" },
             },
+            {
+              rules: ["dev_red"],
+              since: "2026-11-26T08:00:00.000Z",
+              subject: {
+                repo: "example-org/example-app",
+                run: {
+                  name: "ci / test",
+                  url: "https://github.com/example-org/example-app/actions/runs/9",
+                },
+              },
+            },
           ],
         },
       },
@@ -387,6 +398,15 @@ describe("Enterprise Today and Needs you", () => {
     await expect
       .element(page.getByText("Checks are waiting to run: no task or pull request named"))
       .toBeVisible();
+    // A task-less item with a subject shows "repo · run name", linked to the run.
+    await expect.element(page.getByText("example-org/example-app \u00b7 ci / test")).toBeVisible();
+    expect(
+      page
+        .getByText("example-org/example-app \u00b7 ci / test")
+        .element()
+        .closest("a")
+        ?.getAttribute("href"),
+    ).toBe("https://github.com/example-org/example-app/actions/runs/9");
     // A task with a blank title falls back to its number and repository.
     await expect
       .element(page.getByText("No activity on a claimed task: #12 in example-app"))
