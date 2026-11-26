@@ -115,6 +115,7 @@ const snapshot = (
   sections,
   needsCount,
   board: null,
+  map: null,
   feed: null,
   graveyard: null,
 });

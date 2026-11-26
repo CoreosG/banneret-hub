@@ -31,7 +31,7 @@ import * as Enrolment from "./Enrolment.ts";
 import * as Facts from "./Facts.ts";
 import * as RelayFeed from "./RelayFeed.ts";
 import { type Forwarder, withFake } from "./relayHarness.testkit.ts";
-import { liveTaskIds, reshapeBoard, taskIdForLinks } from "./Snapshot.ts";
+import { liveTaskIds, reshapeBoard, reshapeMap, taskIdForLinks } from "./Snapshot.ts";
 
 const ENVIRONMENT = "env-board-1";
 const EPOCH = Date.parse("2026-11-26T10:00:00Z");
@@ -879,5 +879,252 @@ describe("snapshot reshaping", () => {
     expect(taskIdForLinks(index, [link("GHE.example.com", "8")])).toBe("t_ghe");
     expect(taskIdForLinks(index, [link("github.com", "9"), link("github.com", "7")])).toBe("t_gh");
     expect(taskIdForLinks(index, [])).toBeUndefined();
+  });
+});
+
+const MAP_BOARD = {
+  tasks: [
+    { id: "t_signin", title: "Sign-in page", column: "shipped", status: "built" },
+    { id: "t_profile", title: "Profile blocks", status: "needs_you" },
+  ],
+};
+
+/** Stages listed out of order; the fake's board cards have keys "1", "2" in seed order. */
+const MAP_PLAN = {
+  version: 1,
+  generatedAt: "2026-11-26T09:00:00Z",
+  stages: [
+    { id: "s2", title: "Social", order: 20 },
+    { id: "s1", title: "Foundations", order: 10 },
+  ],
+  items: [
+    {
+      id: "profile-blocks",
+      stageId: "s2",
+      title: "Profile blocks",
+      task: { tracker: "github", scope: "example-org/example-app", key: "2" },
+    },
+    { id: "rate-limits", stageId: "s2", title: "Rate limits", restsOn: ["profile-blocks"] },
+    {
+      id: "sign-in",
+      stageId: "s1",
+      title: "Sign-in page",
+      task: { tracker: "github", scope: "example-org/example-app", key: "1" },
+    },
+  ],
+};
+
+const CYCLE_PLAN = {
+  version: 1,
+  generatedAt: "2026-11-26T09:00:00Z",
+  stages: [{ id: "s1", title: "One", order: 1 }],
+  items: [
+    { id: "a", stageId: "s1", title: "A", restsOn: ["b"] },
+    { id: "b", stageId: "s1", title: "B", restsOn: ["a"] },
+  ],
+};
+
+describe("BanneretRelayFeed map from the snapshot", () => {
+  it.live("an environment that has not joined reads no map, nor anything else", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        yield* control(fake, "/board/seed", MAP_BOARD);
+        yield* control(fake, "/map/seed", MAP_PLAN);
+        const events = yield* subscribe;
+        const first = yield* events.next(() => true, "the first state");
+        expect(first.joined).toBe(false);
+        expect(first.map).toBeNull();
+        // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- proving silence needs a window; no event marks "no request was sent".
+        yield* Effect.sleep(400);
+        expect(relay.requests).toEqual([]);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("reads the map with its stages, items, tasks and counters, and keeps it while away", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const events = yield* subscribe;
+        yield* control(fake, "/board/seed", MAP_BOARD);
+        yield* control(fake, "/map/seed", MAP_PLAN);
+        yield* join(fake, relay);
+        const state = yield* events.next(
+          (event) => (event.map?.value?.items.length ?? 0) === 3,
+          "the map",
+        );
+        expect(state.sections).toContain("map");
+        const read = state.map!;
+        expect(read.restsOn).toBe(true);
+        expect(read.problem).toBeUndefined();
+        expect(read.fetchedAt).not.toBeNull();
+        expect(read.atWork).toEqual([]);
+        const map = read.value!;
+        expect(map.state).toBe("ok");
+        expect(map.stages.map((stage) => stage.id)).toEqual(["s1", "s2"]);
+        expect(map.items.map((item) => item.id)).toEqual([
+          "sign-in",
+          "profile-blocks",
+          "rate-limits",
+        ]);
+        const item = (id: string) => map.items.find((candidate) => candidate.id === id)!;
+        expect(item("sign-in").status).toBe("built");
+        expect(item("sign-in").task?.id).toBe("t_signin");
+        expect(item("sign-in").task?.ref.key).toBe("1");
+        expect(item("profile-blocks").task?.title).toBe("Profile blocks");
+        expect(item("rate-limits").task).toBeUndefined();
+        expect(item("rate-limits").restsOn).toEqual(["profile-blocks"]);
+        expect(item("rate-limits").status).toBe("needs_you");
+        expect(item("rate-limits").statusWhy).toContain('"Profile blocks"');
+        expect(map.counters.byStatus).toEqual({ built: 1, needs_you: 2 });
+        expect(map.counters.byStage).toEqual({ s1: { built: 1 }, s2: { needs_you: 2 } });
+
+        yield* Effect.promise(() => relay.close());
+        const away = yield* events.next(
+          (event) => event.map?.problem !== undefined,
+          "the relay away",
+        );
+        expect(away.map!.problem!.message).toMatch(/^Cannot reach /);
+        expect(away.map!.value).toEqual(map);
+        expect(away.map!.fetchedAt).not.toBeNull();
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("shows the map when a plan appears after joining, and drops it when the plan goes", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const events = yield* subscribe;
+        yield* control(fake, "/board/seed", MAP_BOARD);
+        yield* join(fake, relay);
+        const before = yield* events.next(
+          (event) => event.sectionsKnown && (event.board?.value?.cards.length ?? 0) === 2,
+          "the board",
+        );
+        expect(before.sections).not.toContain("map");
+        expect(before.map).toBeNull();
+
+        yield* control(fake, "/map/seed", MAP_PLAN);
+        const shown = yield* events.next(
+          (event) => (event.map?.value?.items.length ?? 0) === 3,
+          "the map after capabilities.changed",
+        );
+        expect(shown.sections).toContain("map");
+
+        yield* control(fake, "/map/seed", { plan: null });
+        const gone = yield* events.next(
+          (event) => event.map === null && !event.sections.includes("map"),
+          "the map gone",
+        );
+        expect(gone.board?.value?.cards).toHaveLength(2);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("never fetches the map file while capabilities carry no map section", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const mapRefs = new Set<string>();
+        relay.rewrite = (request, body) => {
+          if (isHead(request.url)) {
+            // A 304 head has no body.
+            if (body === "") return body;
+            const ref = (JSON.parse(body) as { files?: Record<string, string> }).files?.map;
+            if (ref !== undefined) mapRefs.add(ref.replace(/^sha256:/, ""));
+            return body;
+          }
+          if (request.url !== "/relay/v1/capabilities") return body;
+          const capabilities = JSON.parse(body) as { sections?: Array<{ kind: string }> };
+          if (capabilities.sections === undefined) return body;
+          capabilities.sections = capabilities.sections.filter((section) => section.kind !== "map");
+          return JSON.stringify(capabilities);
+        };
+        const events = yield* subscribe;
+        yield* control(fake, "/board/seed", MAP_BOARD);
+        yield* control(fake, "/map/seed", MAP_PLAN);
+        yield* join(fake, relay);
+        const state = yield* events.next(
+          (event) => (event.board?.value?.cards.length ?? 0) === 2,
+          "the board",
+        );
+        // Let a few more polls of the head pass.
+        relay.requests.length = 0;
+        yield* untilEnrolment(
+          () => relay.requests.filter((request) => isHead(request.url)).length >= 2,
+          "two more heads",
+        );
+        expect(state.sections).not.toContain("map");
+        expect(state.map).toBeNull();
+        // The head names the map, but the Hub never asks for it.
+        expect(mapRefs.size).toBeGreaterThan(0);
+        const fetched = relay.requests
+          .filter((request) => isFile(request.url))
+          .map((request) => request.url.slice("/relay/v1/snapshot/files/".length));
+        for (const hex of mapRefs) expect(fetched).not.toContain(hex);
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+
+  it.live("passes a plan that is not measured through with its reason and detail", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const events = yield* subscribe;
+        yield* control(fake, "/map/seed", { plan: { unreadable: true } });
+        yield* join(fake, relay);
+        const unreadable = yield* events.next(
+          (event) => event.map?.value?.state === "not_measured",
+          "the unreadable map",
+        );
+        const first = unreadable.map!.value!;
+        expect(first.items).toEqual([]);
+        expect(first.stages).toEqual([]);
+        expect(first.notMeasured).toHaveLength(1);
+        expect(first.notMeasured[0]).toMatchObject({
+          source: "stage_plan",
+          reason: "unreachable",
+          detail: "The stage plan file could not be read.",
+        });
+
+        yield* control(fake, "/map/seed", { plan: CYCLE_PLAN });
+        const malformed = yield* events.next(
+          (event) => event.map?.value?.notMeasured[0]?.reason === "malformed",
+          "the malformed map",
+        );
+        const line = malformed.map!.value!.notMeasured[0]!;
+        expect(line.detail).toBeTypeOf("string");
+        expect(line.detail!.length).toBeGreaterThan(0);
+        expect(malformed.map!.problem).toBeUndefined();
+      }).pipe(onFreshHub({ threads: [], reads: 0 })),
+    ),
+  );
+});
+
+describe("reshapeMap", () => {
+  it("keeps whole counts and complete items, and drops the rest", () => {
+    const map = reshapeMap({
+      state: "ok",
+      notMeasured: [],
+      stages: [
+        { id: "s1", title: "One", order: 1 },
+        { id: "s2", title: "Two" },
+      ],
+      items: [
+        { id: "a", stageId: "s1", title: "A", status: "planned", statusWhy: "Open.", restsOn: [] },
+        { id: "b", stageId: "s1", title: "B", status: "planned", restsOn: [] },
+        { id: "c", stageId: "s1", title: "C", status: "planned", statusWhy: "Open.", task: {} },
+      ],
+      counters: {
+        byStatus: { planned: 2, built: -1, checked: 1.5, sent_back: "3" },
+        byStage: { s1: { planned: 2 }, s2: "nothing" },
+      },
+    });
+    expect(map?.stages.map((stage) => stage.id)).toEqual(["s1"]);
+    expect(map?.items.map((item) => item.id)).toEqual(["a", "c"]);
+    expect(map?.items[1]?.task).toBeUndefined();
+    expect(map?.items[1]?.restsOn).toEqual([]);
+    expect(map?.counters).toEqual({
+      byStatus: { planned: 2 },
+      byStage: { s1: { planned: 2 }, s2: {} },
+    });
+    expect(reshapeMap({ items: [] })).toBeUndefined();
   });
 });

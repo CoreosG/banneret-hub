@@ -151,6 +151,7 @@ const state = (sections: string[], board: BanneretFeedBoardRead | null): Bannere
   needsCount: null,
   revision: 1,
   board,
+  map: null,
   feed: null,
   graveyard: null,
 });

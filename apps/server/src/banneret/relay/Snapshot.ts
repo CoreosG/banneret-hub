@@ -15,6 +15,8 @@ import type {
   BanneretFeedNotMeasured,
   BanneretGraveyardEntry,
   BanneretGraveyardPage,
+  BanneretMap,
+  BanneretMapItem,
   BanneretTask,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -137,9 +139,10 @@ const notMeasured = (value: unknown): BanneretFeedNotMeasured | undefined => {
   const sourceName = text(source?.source, 64);
   const reason = text(source?.reason, 64);
   const since = text(source?.since, 64);
+  const detail = text(source?.detail, 240);
   return sourceName === undefined || reason === undefined || since === undefined
     ? undefined
-    : { source: sourceName, reason, since };
+    : { source: sourceName, reason, since, ...(detail === undefined ? {} : { detail }) };
 };
 
 const lease = (value: unknown): BanneretBoardLease | undefined => {
@@ -242,6 +245,78 @@ export function reshapeBoard(body: unknown): BanneretBoard | undefined {
       }),
     ),
     cards: defined(list(source.cards, 1000).map(card)),
+  };
+}
+
+const mapItem = (value: unknown): BanneretMapItem | undefined => {
+  const source = fields(value);
+  const id = text(source?.id, 64);
+  const stageId = text(source?.stageId, 64);
+  const title = text(source?.title, 300);
+  const status = text(source?.status, 32);
+  const statusWhy = text(source?.statusWhy, 240);
+  if (
+    id === undefined ||
+    stageId === undefined ||
+    title === undefined ||
+    status === undefined ||
+    statusWhy === undefined
+  ) {
+    return undefined;
+  }
+  const task = boardTask(source?.task);
+  return {
+    id,
+    stageId,
+    title,
+    status,
+    statusWhy,
+    ...(task === undefined ? {} : { task }),
+    restsOn: defined(list(source?.restsOn, 100).map((entry) => text(entry, 64))),
+  };
+};
+
+/** `{<status>: n}`: string keys (at most `max`), non-negative whole counts only. */
+const statusCounts = (value: unknown, max = 32): Record<string, number> => {
+  const counts: Record<string, number> = {};
+  for (const [key, count] of Object.entries(fields(value) ?? {}).slice(0, max)) {
+    if (key.length <= 64 && typeof count === "number" && Number.isInteger(count) && count >= 0) {
+      counts[key] = count;
+    }
+  }
+  return counts;
+};
+
+/** The `map` file (SnapshotMap); undefined when it is not one. */
+export function reshapeMap(body: unknown): BanneretMap | undefined {
+  const source = fields(body);
+  if (source === undefined || !Array.isArray(source.stages) || !Array.isArray(source.items)) {
+    return undefined;
+  }
+  const counters = fields(source.counters);
+  const byStage: Record<string, Record<string, number>> = {};
+  for (const [stageId, counts] of Object.entries(fields(counters?.byStage) ?? {}).slice(0, 200)) {
+    if (stageId.length <= 64) byStage[stageId] = statusCounts(counts);
+  }
+  return {
+    state: text(source.state, 32) ?? "not_measured",
+    notMeasured: defined(list(source.notMeasured, 32).map(notMeasured)),
+    stages: defined(
+      list(source.stages, 200).map((value) => {
+        const stage = fields(value);
+        const id = text(stage?.id, 64);
+        const title = text(stage?.title, 120);
+        const order = stage?.order;
+        return id === undefined ||
+          title === undefined ||
+          typeof order !== "number" ||
+          !Number.isFinite(order)
+          ? undefined
+          : { id, title, order };
+      }),
+    ),
+    items: defined(list(source.items, 2000).map(mapItem)),
+    counters: { byStatus: statusCounts(counters?.byStatus), byStage },
   };
 }
 

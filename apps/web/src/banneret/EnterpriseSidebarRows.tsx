@@ -1,8 +1,8 @@
-// Banneret Hub: the company rows above the thread list (Today, Needs you with its count, the Board
-// and the Feed), shown only for an Enterprise workspace this machine has joined, and only for sections the
+// Banneret Hub: the company rows above the thread list (Today, Needs you with its count, the Board,
+// the Map and the Feed), shown only for an Enterprise workspace this machine has joined, and only for sections the
 // relay offers.
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { ActivityIcon, InboxIcon, SquareKanbanIcon, SunIcon } from "lucide-react";
+import { ActivityIcon, InboxIcon, MapIcon, SquareKanbanIcon, SunIcon } from "lucide-react";
 
 import {
   SidebarGroup,
@@ -24,9 +24,10 @@ export function EnterpriseSidebarRows() {
   const showToday = offersSection(feed, "today");
   const showNeeds = offersSection(feed, "needs");
   const showBoard = offersSection(feed, "board");
+  const showMap = offersSection(feed, "map");
   const showFeed = offersSection(feed, "feed");
-  if (!showToday && !showNeeds && !showBoard && !showFeed) return null;
-  const go = (to: "/today" | "/needs" | "/board" | "/feed") => {
+  if (!showToday && !showNeeds && !showBoard && !showMap && !showFeed) return null;
+  const go = (to: "/today" | "/needs" | "/board" | "/map" | "/feed") => {
     if (isMobile) setOpenMobile(false);
     void navigate({ to });
   };
@@ -69,6 +70,14 @@ export function EnterpriseSidebarRows() {
             <SidebarMenuButton isActive={pathname === "/board"} onClick={() => go("/board")}>
               <SquareKanbanIcon />
               <span>Board</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
+        {showMap ? (
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={pathname === "/map"} onClick={() => go("/map")}>
+              <MapIcon />
+              <span>Map</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         ) : null}

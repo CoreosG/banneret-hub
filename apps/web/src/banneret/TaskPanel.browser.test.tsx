@@ -106,6 +106,7 @@ const state = (sections: string[], cards: BanneretBoardCard[] | null): BanneretF
           leases: true,
           checked: true,
         },
+  map: null,
   feed: null,
   graveyard: null,
 });

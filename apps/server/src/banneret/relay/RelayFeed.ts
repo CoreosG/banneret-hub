@@ -3,7 +3,7 @@
 // One event stream per environment, open only while the enrolment is `configured`; an environment
 // that has not joined makes no relay call. Relay answers are reshaped field by field (relay strings
 // stay plain data), and the last good answer is kept so a screen is never blank while the relay is
-// away. The board, the feed and the graveyard come from the snapshot (Snapshot.ts), each read only
+// away. The board, the map, the feed and the graveyard come from the snapshot (Snapshot.ts), each read only
 // when capabilities advertise the snapshot and its section; older feed and graveyard pages, and one
 // task for the Task tab, are read on request.
 import {
@@ -14,6 +14,7 @@ import {
   type BanneretFeedEntriesRead,
   type BanneretFeedEntryPage,
   type BanneretFeedEntryPageRead,
+  type BanneretFeedMapRead,
   type BanneretGraveyardPage,
   type BanneretGraveyardPageRead,
   type BanneretGraveyardRead,
@@ -46,6 +47,7 @@ import {
   liveTaskIds,
   makeSnapshotReader,
   reshapeBoard,
+  reshapeMap,
   reshapeFeedPage,
   reshapeGraveyardPage,
   reshapeTask,
@@ -96,6 +98,7 @@ const NOT_JOINED_SNAPSHOT: BanneretFeedState = {
   needsCount: null,
   revision: 0,
   board: null,
+  map: null,
   feed: null,
   graveyard: null,
 };
@@ -412,6 +415,10 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   let snapshotOffered = false;
   let board: BanneretFeedBoardRead | null = null;
   let boardSignature = "";
+  // The map: its section's flags (null when not advertised), the last read and what it was built from.
+  let mapFlags: ReadonlyArray<string> | null = null;
+  let mapRead: BanneretFeedMapRead | null = null;
+  let mapSignature = "";
   // The feed and graveyard: the feed section's flags (null when not advertised), each last read and
   // the file hash it was built from.
   let feedFlags: ReadonlyArray<string> | null = null;
@@ -443,6 +450,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     needsCount,
     revision,
     board,
+    map: mapRead,
     feed: feedRead,
     graveyard: graveyardRead,
   });
@@ -584,6 +592,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           sectionsKnown = true;
           protocol = text(fields(reply.body)?.protocol, 16);
           boardFlags = sectionFlags(reply.body, "board");
+          mapFlags = sectionFlags(reply.body, "map");
           feedFlags = sectionFlags(reply.body, "feed");
           snapshotOffered = fields(reply.body)?.snapshot !== undefined;
           wakeSnapshot();
@@ -722,7 +731,8 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
 
   /**
    * Rereads the snapshot head (and any changed file) for each surface whose section the relay
-   * advertises: the board (with the work file for the ring), the feed and the graveyard. A surface
+   * advertises: the board and the map (each with the work file for the ring), the feed and the
+   * graveyard. A surface
    * whose section went away is dropped. Publishes once, and only when a surface or a problem changed.
    */
   const refreshSnapshot = Effect.fn("BanneretRelayFeed.refreshSnapshot")(function* (
@@ -734,6 +744,9 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     const graveyardOffered = feedFlags?.includes("graveyard") === true;
     const leases = boardFlags?.includes("leases") === true;
     const checked = boardFlags?.includes("checked") === true;
+    const restsOn = mapFlags?.includes("rests_on") === true;
+    // The sign-off rule is flagged on the board section; a relay may flag the map too.
+    const mapChecked = checked || mapFlags?.includes("checked") === true;
     let changed = false;
     let boardChanged = false;
     if (boardFlags === null) {
@@ -741,6 +754,13 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       if (board !== null) {
         board = null;
         changed = boardChanged = true;
+      }
+    }
+    if (mapFlags === null) {
+      mapSignature = "";
+      if (mapRead !== null) {
+        mapRead = null;
+        changed = true;
       }
     }
     if (feedFlags === null) {
@@ -758,7 +778,9 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       }
     }
     const wanted = [
-      ...(boardFlags === null ? [] : ["board", "work"]),
+      ...(boardFlags === null ? [] : ["board"]),
+      ...(mapFlags === null ? [] : ["map"]),
+      ...(boardFlags === null && mapFlags === null ? [] : ["work"]),
       ...(feedFlags === null ? [] : ["feed"]),
       ...(graveyardOffered ? ["graveyard"] : []),
     ];
@@ -787,6 +809,23 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
       board = problemOn(base, message);
       changed = true;
     };
+    const mapProblem = (message: string) => {
+      if (
+        mapFlags === null ||
+        (mapRead?.problem?.message === message &&
+          mapRead.restsOn === restsOn &&
+          mapRead.checked === mapChecked)
+      ) {
+        return;
+      }
+      const base: BanneretFeedMapRead = {
+        ...(mapRead ?? { value: null, fetchedAt: null, atWork: [] }),
+        restsOn,
+        checked: mapChecked,
+      };
+      mapRead = problemOn(base, message);
+      changed = true;
+    };
     const feedProblem = (message: string) => {
       if (feedFlags === null || feedRead?.problem?.message === message) return;
       feedRead = problemOn(feedRead ?? { value: null, fetchedAt: null }, message);
@@ -800,6 +839,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
 
     if (wanted.length > 0 && !snapshotOffered) {
       boardProblem(notPublished("board"));
+      mapProblem(notPublished("build map"));
       feedProblem(notPublished("feed"));
       graveyardProblem(notPublished("graveyard"));
     } else if (wanted.length > 0) {
@@ -809,6 +849,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         if (outcome.failure.code === "not_configured") return;
         const message = problemMessage(outcome.failure, current.displayName);
         boardProblem(message);
+        mapProblem(message);
         feedProblem(message);
         graveyardProblem(message);
       } else {
@@ -828,6 +869,25 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
               boardSignature = signature;
               board = { value, fetchedAt: at, atWork, leases, checked };
               changed = boardChanged = true;
+            }
+          }
+        }
+        if (mapFlags !== null) {
+          const value = refs.map === undefined ? undefined : reshapeMap(files.map);
+          if (refs.map === undefined) mapProblem(notPublished("build map"));
+          else if (value === undefined) mapProblem(unreadable);
+          else {
+            const tasks = new Set(defined(value.items.map((item) => item.task?.id)));
+            const live = files.work === undefined ? [] : liveTaskIds(files.work);
+            const atWork = live.filter((id) => tasks.has(id));
+            // As for the board: the work file changes on every heartbeat; only the ring counts.
+            const signature = `${refs.map} ${atWork.join(",")} ${restsOn} ${mapChecked}`;
+            if (signature === mapSignature && mapRead !== null && mapRead.problem === undefined) {
+              mapRead = { ...mapRead, fetchedAt: at };
+            } else {
+              mapSignature = signature;
+              mapRead = { value, fetchedAt: at, atWork, restsOn, checked: mapChecked };
+              changed = true;
             }
           }
         }
@@ -988,6 +1048,9 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         snapshotOffered = false;
         board = null;
         boardSignature = "";
+        mapFlags = null;
+        mapRead = null;
+        mapSignature = "";
         feedFlags = null;
         feedRead = null;
         feedSignature = "";
