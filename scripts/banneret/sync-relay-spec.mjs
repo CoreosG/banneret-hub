@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-// Banneret Hub: copies the /relay/v1 contract from a banneret-platform checkout into docs/banneret/relay-v1/.
+// Banneret Hub: copies the /relay/v1 contract (openapi.yaml, README.md, examples/; never the Go files) from a
+// banneret-platform folder into docs/banneret/relay-v1/, recording <commit> in the README header.
 //   node scripts/banneret/sync-relay-spec.mjs <platform>/internal/hub/contract/relay-v1 <commit>
-// <commit> is the banneret-platform commit the folder comes from; the README header records it.
-// Copies openapi.yaml, README.md and examples/ (valid and invalid), never the Go files, and replaces the
-// examples so files removed upstream disappear here too. Running it twice gives the same tree.
+// Examples are replaced, so files removed upstream disappear here too.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
