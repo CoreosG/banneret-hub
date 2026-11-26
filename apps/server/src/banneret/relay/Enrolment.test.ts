@@ -308,6 +308,8 @@ describe("BanneretEnrolment", () => {
             ];
             const replies = JSON.stringify([requested, configured, yield* status]);
             const stateFile = yield* stateFileText;
+            // The configured write keeps the counter mark the setup calls saved.
+            expect(JSON.parse(stateFile).counterMark).toMatch(/^[1-9][0-9]{15,18}$/);
             for (const secret of secretsAsText) {
               expect(replies).not.toContain(secret);
               expect(stateFile).not.toContain(secret);
