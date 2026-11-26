@@ -130,6 +130,7 @@ const state = (
   needsCount: null,
   revision: 1,
   board: null,
+  map: null,
   feed,
   graveyard,
 });

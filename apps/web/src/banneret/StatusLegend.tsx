@@ -46,8 +46,22 @@ export function StatusMark(props: {
   );
 }
 
-/** `checked` is the board section's flag: without it the relay never applies the sign-off rule, so ● is left out. */
-export function StatusLegend(props: { readonly checked: boolean; readonly className?: string }) {
+const Count = (props: { readonly count: number }) => (
+  <span data-count className="text-foreground text-xs tabular-nums">
+    {props.count}
+  </span>
+);
+
+/**
+ * `checked` is the board section's flag: without it the relay never applies the sign-off rule, so ●
+ * is left out. With `counts` (the relay's `{<status>: n}`), each mark shows its count.
+ */
+export function StatusLegend(props: {
+  readonly checked: boolean;
+  readonly counts?: Readonly<Record<string, number>>;
+  readonly className?: string;
+}) {
+  const { counts } = props;
   return (
     <ul
       aria-label="Status legend"
@@ -55,8 +69,9 @@ export function StatusLegend(props: { readonly checked: boolean; readonly classN
     >
       {STATUS_VOCABULARY.filter((entry) => props.checked || entry.status !== "checked").map(
         (entry) => (
-          <li key={entry.status}>
+          <li key={entry.status} className="inline-flex items-center gap-1.5">
             <StatusMark status={entry.status} />
+            {counts === undefined ? null : <Count count={counts[entry.status] ?? 0} />}
           </li>
         ),
       )}
@@ -64,6 +79,28 @@ export function StatusLegend(props: { readonly checked: boolean; readonly classN
         <span aria-hidden className="inline-flex size-4 rounded-full ring-2 ring-primary" />
         agent at work
       </li>
+    </ul>
+  );
+}
+
+/** Counts by status, each with its mark and word; statuses with none are left out. */
+export function StatusCounts(props: {
+  readonly counts: ReadonlyArray<{ readonly status: string; readonly count: number }>;
+  readonly label: string;
+  readonly className?: string;
+}) {
+  if (props.counts.length === 0) return null;
+  return (
+    <ul
+      aria-label={props.label}
+      className={cn("flex flex-wrap items-center gap-x-3 gap-y-1", props.className)}
+    >
+      {props.counts.map((entry) => (
+        <li key={entry.status} className="inline-flex items-center gap-1.5">
+          <StatusMark status={entry.status} />
+          <Count count={entry.count} />
+        </li>
+      ))}
     </ul>
   );
 }

@@ -1,6 +1,6 @@
 // Banneret Hub: this client's copy of the relay feed for each environment. The server makes every
 // relay call; the client follows the `banneretRelay.feed` stream (Today and Needs you refetched on a
-// new revision; board, feed and graveyard ride on it) and reads older pages on request. A failed
+// new revision; board, map, feed and graveyard ride on it) and reads older pages on request. A failed
 // read keeps the last good copy, so screens show old data with its age rather than nothing.
 import {
   type AtomCommandResult,
@@ -14,6 +14,7 @@ import {
   type BanneretFeedEntriesRead,
   type BanneretFeedEntry,
   type BanneretFeedEntryPageRead,
+  type BanneretFeedMapRead,
   type BanneretFeedState,
   type BanneretGraveyardEntry,
   type BanneretGraveyardPageRead,
@@ -128,6 +129,8 @@ export interface EnvironmentFeed {
   readonly needsProblem: FeedProblem | null;
   /** The board from the relay's snapshot; null when the relay offers none or it is not read yet. */
   readonly board: BanneretFeedBoardRead | null;
+  /** The build map from the relay's snapshot; null when the relay offers none or it is not read yet. */
+  readonly map: BanneretFeedMapRead | null;
   /** The feed file; null when the relay offers no feed section or it is not read yet. */
   readonly activity: BanneretFeedEntriesRead | null;
   readonly activityOlder: OlderPages<BanneretFeedEntry> | null;
@@ -155,6 +158,7 @@ const EMPTY_FEED: EnvironmentFeed = {
   needsFetchedAt: null,
   needsProblem: null,
   board: null,
+  map: null,
   activity: null,
   activityOlder: null,
   activityOlderProblem: null,
@@ -328,6 +332,7 @@ function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
     sections: state.sections,
     needsCount: state.needsCount,
     board: state.board,
+    map: state.map,
   });
   const seen = seenRevisions.get(environmentId);
   seenRevisions.set(environmentId, state.revision);
