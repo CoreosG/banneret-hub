@@ -79,6 +79,7 @@ function JoinForm(props: {
   readonly environmentId: EnvironmentId;
   readonly initialOrigin: string | undefined;
   readonly notice: string | null;
+  readonly onStarted: (origin: string) => void;
 }) {
   const id = useId();
   const environments = useEnvironmentIdentities();
@@ -113,6 +114,7 @@ function JoinForm(props: {
       setError(result.message);
       return;
     }
+    props.onStarted(relay.origin);
     storeEnrolmentView(props.environmentId, result.value);
     openSignIn(result.value.browserUrl);
   };
@@ -410,8 +412,10 @@ export function EnterpriseWizard(props: {
   const environmentId = usePrimaryEnvironmentId();
   const view = useEnrolmentView(environmentId);
   const [joiningAgain, setJoiningAgain] = useState(false);
+  const [lastOrigin, setLastOrigin] = useState<string | undefined>(undefined);
   const step = joiningAgain && view?.state === "revoked" ? "address" : wizardStep(view);
-  const initialOrigin = props.initialOrigin ?? (step === "address" ? view?.relayOrigin : undefined);
+  const initialOrigin =
+    props.initialOrigin ?? (step === "address" ? (view?.relayOrigin ?? lastOrigin) : undefined);
   const notice =
     view?.state === "configured" && view.health === "refused"
       ? "The relay refused this machine. Join again to replace it."
@@ -437,6 +441,7 @@ export function EnterpriseWizard(props: {
               environmentId={environmentId}
               initialOrigin={initialOrigin}
               notice={notice}
+              onStarted={setLastOrigin}
             />
           ) : step === "code" || step === "awaiting" ? (
             <CodeStep environmentId={environmentId} view={view!} />
