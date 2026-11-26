@@ -1,5 +1,7 @@
 // Banneret Hub: the open tabs bar. Click activates, double-click keeps, middle-click closes, drag
-// reorders. A thread tab reads its live title from the quiet shell (one subscription per tab, at
+// reorders. Dragging uses pointer events (dnd-kit), not HTML5 drag and drop: the bar is the
+// window's drag region in the desktop app, and on Windows HTML5 drag events do not reach the page
+// over a drag region. A thread tab reads its live title from the quiet shell (one subscription per tab, at
 // most MAX_TABS, on data the client already holds).
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -7,7 +9,18 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 import { useRouter, type AnyRouter } from "@tanstack/react-router";
 import { EllipsisIcon, PinIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dnd-kit/modifiers";
+import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useEffect, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../../components/ui/menu";
@@ -31,7 +44,7 @@ import {
   useTabsStore,
 } from "./tabsStore";
 
-const TAB_DRAG_TYPE = "application/x-banneret-tab";
+const TAB_DRAG_MODIFIERS = [restrictToHorizontalAxis, restrictToFirstScrollableAncestor];
 
 /** Shows a tab: a page tab switches its workspace first; a thread tab's workspace follows itself. */
 async function activateTab(router: AnyRouter, tab: Tab) {
@@ -117,8 +130,6 @@ function TabItem(props: {
   active: boolean;
   offline: boolean;
   workspaceName: string | undefined;
-  onDragStart: (event: DragEvent, id: string) => void;
-  onDrop: (event: DragEvent, beforeId: string) => void;
 }) {
   const { tab, active } = props;
   const router = useRouter();
@@ -140,7 +151,8 @@ function TabItem(props: {
     ? readEnvironment(EnvironmentId.make(tab.threadRef.environmentId))?.label
     : undefined;
   const offlineNote = `On ${machine ?? "a machine"}, not connected`;
-  const itemRef = useRef<HTMLDivElement>(null);
+  const itemRef = useRef<HTMLDivElement | null>(null);
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- brings the active tab into view in a bar that scrolls sideways
   useEffect(() => {
     if (active) itemRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -153,15 +165,19 @@ function TabItem(props: {
       <TooltipTrigger
         render={
           <div
-            ref={itemRef}
+            ref={(node: HTMLDivElement | null) => {
+              itemRef.current = node;
+              setNodeRef(node);
+            }}
             role="tab"
             tabIndex={active ? 0 : -1}
             aria-selected={active}
-            draggable
             data-tab-id={tab.id}
             data-preview={tab.kept ? undefined : ""}
             data-pinned={tab.pinned ? "" : undefined}
             data-offline={props.offline ? "" : undefined}
+            data-dragging={isDragging ? "" : undefined}
+            style={{ transform: CSS.Translate.toString(transform), transition }}
             className={cn(
               "group/tab relative flex h-7 max-w-52 min-w-0 shrink-0 cursor-default select-none items-center gap-1 rounded-md border border-transparent ps-2 pe-1 text-xs [-webkit-app-region:no-drag]",
               active
@@ -169,7 +185,9 @@ function TabItem(props: {
                 : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
               !tab.kept && "italic",
               props.offline && "opacity-50",
+              isDragging && "z-10",
             )}
+            {...listeners}
             onClick={() => void activateTab(router, tab)}
             onDoubleClick={() => keep(tab.id)}
             onMouseDown={(event) => {
@@ -187,11 +205,6 @@ function TabItem(props: {
                 void activateTab(router, tab);
               }
             }}
-            onDragStart={(event) => props.onDragStart(event, tab.id)}
-            onDragOver={(event) => {
-              if (event.dataTransfer.types.includes(TAB_DRAG_TYPE)) event.preventDefault();
-            }}
-            onDrop={(event) => props.onDrop(event, tab.id)}
           />
         }
       >
@@ -245,16 +258,14 @@ export function TabsBar() {
   const workspaces = useWorkspaces();
   const workspaceNames = new Map(workspaces.map((workspace) => [workspace.id, workspace.name]));
 
-  const onDragStart = (event: DragEvent, id: string) => {
-    event.dataTransfer.setData(TAB_DRAG_TYPE, id);
-    event.dataTransfer.effectAllowed = "move";
-  };
-  const onDrop = (event: DragEvent, beforeId: string | null) => {
-    const id = event.dataTransfer.getData(TAB_DRAG_TYPE);
-    if (id === "") return;
-    event.preventDefault();
-    event.stopPropagation();
-    move(id, beforeId);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (over === null || active.id === over.id) return;
+    const from = tabs.findIndex((tab) => tab.id === active.id);
+    const to = tabs.findIndex((tab) => tab.id === over.id);
+    if (from === -1 || to === -1) return;
+    // Dropped on a tab to its right: it lands after that tab; to its left: before it.
+    move(String(active.id), from < to ? (tabs[to + 1]?.id ?? null) : tabs[to]!.id);
   };
 
   return (
@@ -263,12 +274,15 @@ export function TabsBar() {
         role="tablist"
         aria-label="Open tabs"
         className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]"
-        onDragOver={(event) => {
-          if (event.dataTransfer.types.includes(TAB_DRAG_TYPE)) event.preventDefault();
-        }}
-        onDrop={(event) => onDrop(event, null)}
       >
-        {tabs.map((tab) => (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={TAB_DRAG_MODIFIERS}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext items={tabs.map((tab) => tab.id)} strategy={horizontalListSortingStrategy}>
+            {tabs.map((tab) => (
           <TabItem
             key={tab.id}
             tab={tab}
@@ -280,10 +294,10 @@ export function TabsBar() {
             workspaceName={
               tab.workspaceId === null ? undefined : workspaceNames.get(tab.workspaceId)
             }
-            onDragStart={onDragStart}
-            onDrop={onDrop}
           />
-        ))}
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
       <Menu>
         <MenuTrigger
