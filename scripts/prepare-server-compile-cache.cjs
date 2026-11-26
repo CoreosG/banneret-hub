@@ -49,10 +49,10 @@ module.exports = async ({ appOutDir, electronPlatformName, arch, packager }) => 
   );
   const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
   for (const name of Object.keys(env)) {
-    if (name.startsWith("NODE_") || name.startsWith("T3CODE_")) delete env[name];
+    if (/^(NODE_|T3CODE_|BANNERET_)/.test(name)) delete env[name];
   }
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "t3-release-cache-"));
-  env.T3CODE_HOME = state;
+  env.BANNERET_HOME = state;
   let result;
   try {
     // Run a script file, not -e: -e defines a global __filename of "[eval]", which

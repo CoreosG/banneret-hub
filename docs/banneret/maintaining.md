@@ -10,24 +10,52 @@ Banneret Hub is upstream T3 Code plus a thin layer of our own commits. Keep that
 - **Installers are generated, not edited.** `scripts/banneret/make-install-scripts.mjs` derives `install.sh` / `install.ps1` from upstream's at release time. If it fails after a sync, upstream changed the text it rewrites; adjust its rules.
 - **Hooks are counted.** `node scripts/banneret/hook-budget.mjs` diffs `HEAD` against the upstream tag in `UPSTREAM_TAG` and counts the files and lines we changed in upstream files, leaving out the paths we overwrite or generate on purpose (brand assets, our own workflows, docs and scripts, lock files, `routeTree.gen.ts`). The release fails, and the sync opens its PR, when either total grows past `hook-budget.json`. A PR that adds a hook runs it with `--update` in the same PR; nothing checks it on PRs, so a missed update fails the next release instead.
 - **The route tree is regenerated, not merged.** `node scripts/banneret/generate-route-tree.mjs` rewrites `apps/web/src/routeTree.gen.ts` with the TanStack router plugin's generator (needs `vp install --filter=@t3tools/web`). The sync runs it after every merge, so conflicts in that file resolve themselves.
-- **Identity is guarded.** `node scripts/banneret/check-identity.mjs` fails when shipped source names official T3 Code identity (`~/.t3`, `com.t3tools.*`, `pingdotgg/t3code`, the `t3` launcher, official hosts) beyond the reviewed baseline in `identity-baseline.json`. Rename the new hit, or review it and run with `--update`.
+- **Identity is guarded.** `node scripts/banneret/check-identity.mjs` fails when shipped source names official T3 Code identity (`~/.t3`, `com.t3tools.*`, `pingdotgg/t3code`, the `t3` launcher, `t3code://`, official hosts) beyond the reviewed baseline in `identity-baseline.json`. Bundled source is checked as shipped, after the build's rewrite (below), so it also fails when a rewrite rule stops matching or server copy still names the `t3` command. Rename the new hit, or review it and run with `--update`. `scripts/banneret/brand.test.ts` checks the rewrite rules, and `identity-bundle.test.ts` the built server.
 
 ## Identity
 
-|                               | Value                                                                                                                                   |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| App name                      | Banneret Hub                                                                                                                            |
-| App id                        | `com.coreosg.banneret-hub`                                                                                                              |
-| Home                          | `~/.banneret` (still overridable with `T3CODE_HOME`)                                                                                    |
-| Command                       | `banneret` (the executable inside `~/.banneret/runtime/versions/<v>/` keeps upstream's `t3` name)                                       |
-| Default port                  | 3793                                                                                                                                    |
-| Deep-link scheme              | `t3code://`, shared with T3 Code on purpose (pairing links work with the official mobile app; links open whichever app registered last) |
-| T3 Connect, product analytics | off (no relay or Clerk keys at build time; analytics key and host blank)                                                                |
+|                               | Value                                                                                                                             |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| App name                      | Banneret Hub                                                                                                                      |
+| App id                        | `com.coreosg.banneret-hub`                                                                                                        |
+| Home                          | `~/.banneret`, overridable with `BANNERET_HOME`                                                                                   |
+| Command                       | `banneret` (the executable inside `~/.banneret/runtime/versions/<v>/` keeps upstream's `t3` name)                                 |
+| Default port                  | 3793                                                                                                                              |
+| Deep-link scheme              | `banneret://` (`banneret-dev://` in development), so official T3 Code never opens our links                                       |
+| Background service            | systemd user unit `banneret-hub.service`, launchd `com.coreosg.banneret-hub.service`, Windows task `banneret-hub-<domain>-<user>` |
+| T3 Connect, product analytics | off (no relay or Clerk keys at build time; analytics key and host blank)                                                          |
 
 UI copy still says "T3 Code" in source. `scripts/banneret/brand.mjs` rewrites it to "Banneret Hub" in
 production bundles only (web, server and desktop `vite.config.ts`), and re-keys the translation
 catalogs to match, because General Translation keys each string by a hash of its English source. Tests
-and dev servers keep upstream's text. If the build fails with "cannot reproduce translation key",
+and dev servers keep upstream's text.
+
+The same rewrite renames the environment variables that would point Banneret Hub at official T3
+state (`ENV_RENAMES`: `T3CODE_HOME` becomes `BANNERET_HOME`, and likewise the install bin dir, CLI
+shim path, agent thread id, LAN switch, installer knobs, and the service's own
+`T3_BOOT_SERVICE_UNIT` and `T3_SERVICE_LAUNCHER_CONTEXT`). Official T3 sets these in its agent
+shells, so a Banneret command run there would otherwise use T3's home and take T3's service for its
+own. Every reader and writer is in a rewritten bundle, and `make-install-scripts.mjs` renames every
+`T3CODE_*` in the installers.
+
+It also renames the app-link scheme (`SCHEME_RULES`): `t3code://` becomes `banneret://` in pair
+links, prompt links, the Codex sign-in handoff, provider auth return URLs, the desktop's registered
+scheme and the server's CORS origins. Each rule is anchored on upstream's exact text. The scheme is
+also registered outside bundles, by hand: electron-builder `protocols` in
+`scripts/build-desktop-artifact.ts`, the dev launcher, and `apps/desktop/resources/installer.nsh`
+(electron-builder registers schemes on macOS and Linux only). Dev web servers keep `t3code-dev://`.
+
+Source and tests keep upstream's names. `scripts/banneret/identity-bundle.test.ts` builds the server
+with the plugin and runs it to prove the shipped values, and `check-identity.mjs` scans bundled
+source after the rewrite, so a rule that stops matching after a sync fails the check. The service
+names (`banneret-hub.service`, `com.coreosg.banneret-hub.service`, `banneret-hub-<domain>-<user>`)
+are plain source edits in `bootService.ts`, `serviceLauncher.ts` and `cli/update.ts`.
+
+The server build also passes `cli: true`, which renames the command: `Command.make("t3")` (help,
+usage and the `--version` banner), quoted commands such as `` `t3 up` ``, the `t3@<version>` status
+line, prose such as "Another t3 at", and the launcher lookups on PATH and in the install bin dir. The runtime executable, the npm package (`npx t3@...`) and
+the hidden `t3 checkpoint` commit messages keep `t3`. Web and desktop copy that names the command
+is not rewritten yet. If the build fails with "cannot reproduce translation key",
 General Translation changed its hashing: update `hashCatalogSource` to match `hashSource` in the
 `generaltranslation` package.
 

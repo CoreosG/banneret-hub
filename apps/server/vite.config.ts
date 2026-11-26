@@ -99,7 +99,7 @@ export default mergeConfig(
     },
     pack: {
       plugins: [
-        banneretBrandPlugin(),
+        banneretBrandPlugin({ cli: true }),
         {
           // Every server module reads its version from this manifest import.
           name: "t3code:build-version",

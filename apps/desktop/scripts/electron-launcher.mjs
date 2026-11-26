@@ -17,7 +17,7 @@ const APP_DISPLAY_NAME = isDevelopment ? "Banneret Hub (Dev)" : "Banneret Hub";
 const APP_BUNDLE_ID = isDevelopment
   ? `com.coreosg.banneret-hub.dev.${devBundleIdSuffix || "local"}`
   : "com.coreosg.banneret-hub";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["banneret-dev"] : ["banneret"];
 const LAUNCHER_VERSION = 20;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,

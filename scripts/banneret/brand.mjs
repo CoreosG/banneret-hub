@@ -1,8 +1,7 @@
-// Build-time product-name rewrite: shipped bundles say "Banneret Hub" where upstream source says
-// "T3 Code", without editing upstream files (which would conflict on every sync).
-//
-// UI text is translated through General Translation catalogs keyed by a hash of the English
-// source, so renaming source text also re-keys every catalog entry that mentions the name.
+// Build-time identity rewrite, so upstream files stay unedited: "T3 Code" becomes "Banneret Hub",
+// official T3CODE_* / T3_* variables become BANNERET_* ones, the t3code:// app-link scheme becomes
+// banneret://, and (`cli: true`) the `t3` command `banneret`. Source and tests keep upstream's values.
+// Catalogs are keyed by a hash of the English source, so changed entries are re-keyed too.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -14,8 +13,95 @@ const NAME_PATTERN = /\bT3 Code(?=s?\b)/g;
 const CATALOG_PATTERN = /[\\/]i18n[\\/]translations[\\/]([A-Za-z-]+)\.json$/;
 const SOURCE_PATTERN = /\.(?:[cm]?[jt]sx?)$/;
 
-export function rebrandText(text) {
-  return text.replace(NAME_PATTERN, BRAND_NAME);
+/**
+ * Official T3 Code variables that would point Banneret Hub at official state, and the names shipped
+ * bundles use instead. Renamed on both sides of every handoff (service units, desktop shims, agent
+ * shells, the WSL probe), since every producer and reader is in a rewritten bundle or installer.
+ */
+export const ENV_RENAMES = Object.freeze({
+  T3CODE_HOME: "BANNERET_HOME",
+  T3CODE_INSTALL_BIN_DIR: "BANNERET_INSTALL_BIN_DIR",
+  T3CODE_CLI_PATH: "BANNERET_CLI_PATH",
+  T3CODE_THREAD_ID: "BANNERET_THREAD_ID",
+  T3CODE_LAN: "BANNERET_LAN",
+  // The installer's knobs, which the server's hints and update path also name.
+  T3CODE_RELEASE_BASE_URL: "BANNERET_RELEASE_BASE_URL",
+  T3CODE_VERSION: "BANNERET_VERSION",
+  T3CODE_CHANNEL: "BANNERET_CHANNEL",
+  // The background service's own variables. Official T3's service sets them in its agent shells, so
+  // a Banneret command run there would take T3's unit and launcher for its own.
+  T3_BOOT_SERVICE_UNIT: "BANNERET_BOOT_SERVICE_UNIT",
+  T3_SERVICE_LAUNCHER_CONTEXT: "BANNERET_SERVICE_LAUNCHER_CONTEXT",
+});
+const ENV_PATTERN = new RegExp(`\\b(?:${Object.keys(ENV_RENAMES).join("|")})\\b`, "g");
+
+export const SCHEME = "banneret";
+/**
+ * The app-link scheme, so official T3 Code never opens our links, nor we its. Rules are anchored on
+ * upstream's exact text, never a bare "t3code" (it also names attribution and user agents).
+ * `[pattern, replacement, files]`: brand.test.ts fails when a rule stops matching one of `files`.
+ */
+export const SCHEME_RULES = [
+  // Pair links, CORS origins: `t3code://pair`, "t3code-dev://app".
+  [
+    /\bt3code(-dev)?:\/\//g,
+    `${SCHEME}$1://`,
+    ["apps/server/src/httpCors.ts", "packages/shared/src/remote.ts"],
+  ],
+  // The desktop's registered scheme, and the prompt-link default.
+  [
+    /(_SCHEME = |scheme = )"t3code(-dev)?"/g,
+    `$1"${SCHEME}$2"`,
+    ["apps/desktop/src/electron/ElectronProtocol.ts", "packages/shared/src/promptLinks.ts"],
+  ],
+  // URL.protocol comparisons: "t3code:", "t3code-dev:".
+  [
+    /"t3code(-dev)?:"/g,
+    `"${SCHEME}$1:"`,
+    ["packages/shared/src/providerAuthReturnUrl.ts", "packages/shared/src/codexAuthHandoff.ts"],
+  ],
+  // Any-channel matchers: /^t3code(?:-[a-z]+)?:$/.
+  [
+    /\^t3code(?=\(\?:-\[a-z\]\+\)\?:\$)/g,
+    `^${SCHEME}`,
+    ["packages/shared/src/remote.ts", "packages/shared/src/promptLinks.ts"],
+  ],
+  // `${development ? "t3code-dev" : "t3code"}://auth/codex`.
+  [
+    /\? "t3code-dev" : "t3code"\}:\/\//g,
+    `? "${SCHEME}-dev" : "${SCHEME}"}://`,
+    ["packages/shared/src/codexAuthHandoff.ts"],
+  ],
+];
+
+export const CLI_NAME = "banneret";
+/**
+ * Where upstream's server names its command `t3` to the user: the CLI definition (help, usage and
+ * the `--version` banner), quoted commands in messages, the `t3@<version>` status line, and prose.
+ * The runtime executable (`runtime/versions/<v>/t3`), the npm package `t3` (`npx t3@...`) and the
+ * hidden `t3 checkpoint` commit messages keep upstream's name.
+ */
+const CLI_RULES = [
+  [/\b(Command\.make\(|commandPath: \[)"t3"/g, `$1"${CLI_NAME}"`],
+  // The installed launcher, looked up on PATH and in the install bin dir.
+  [/\bresolveCommandPath\("t3"\)/g, `resolveCommandPath("${CLI_NAME}")`],
+  [/(path\.join\((?:installBinDir|directory \|\| cwd), )"t3"\)/g, `$1"${CLI_NAME}")`],
+  // `t3 ...` and `t3` in messages, also as \`t3 ...\` inside template literals.
+  [/(\\?`)t3(?= |\\?`)(?! checkpoint|\\?` npm)/g, `$1${CLI_NAME}`],
+  [/(["'])t3(?= [a-z./-])/g, `$1${CLI_NAME}`],
+  // `t3@${version}` in messages; `t3@${spec}` alone is an npm package spec.
+  [/(?<=[ (])(?<!npx )t3@(?=\$\{)|(?<=`)t3@(?=\$\{[^}]*\} )/g, `${CLI_NAME}@`],
+  [/(?<=\.local[\\/]bin[\\/])t3(?=[\s`"'])/g, CLI_NAME],
+  // Prose: "Another t3 at", "so t3 did not", "(t3 service protect)", "Installed t3 ${version}".
+  [/(?<=[A-Za-z0-9:,] |\()(?<!npx |-g )t3(?= [a-zA-Z(]| \$\{|\\?`)(?! checkpoint)/g, CLI_NAME],
+];
+
+export function rebrandText(text, { cli = false } = {}) {
+  let result = text.replace(NAME_PATTERN, BRAND_NAME).replace(ENV_PATTERN, (n) => ENV_RENAMES[n]);
+  for (const [pattern, replacement] of SCHEME_RULES) result = result.replace(pattern, replacement);
+  if (cli)
+    for (const [pattern, replacement] of CLI_RULES) result = result.replace(pattern, replacement);
+  return result;
 }
 
 function rebrandValue(value) {
@@ -82,7 +168,7 @@ export function hashCatalogSource(source, dataFormat) {
 export function catalogKeyRenames(englishCatalog) {
   const renames = new Map();
   for (const [key, source] of Object.entries(englishCatalog)) {
-    if (!JSON.stringify(source).includes(OFFICIAL_NAME)) continue;
+    if (JSON.stringify(rebrandValue(source)) === JSON.stringify(source)) continue;
     const format = ["ICU", "JSX"].find((f) => hashCatalogSource(source, f) === key);
     if (format === undefined) {
       throw new Error(
@@ -102,11 +188,12 @@ export function rebrandCatalog(catalog, renames) {
 }
 
 /**
- * Vite / Rolldown plugin. Rewrites the product name in first-party sources and re-keys the
- * translation catalogs next to them. Pass `vite: true` from Vite configs so it only runs in builds
- * (tests keep asserting upstream's copy).
+ * Vite / Rolldown plugin. Rewrites the product name, environment variables and scheme in first-party
+ * sources and re-keys the translation catalogs next to them. Pass `vite: true` from Vite configs so
+ * it only runs in builds (tests keep asserting upstream's copy), and `cli: true` from the server
+ * build to also rename the command.
  */
-export function banneretBrandPlugin({ vite = false } = {}) {
+export function banneretBrandPlugin({ vite = false, cli = false } = {}) {
   const renamesByDir = new Map();
   const renamesFor = (dir) => {
     let renames = renamesByDir.get(dir);
@@ -136,8 +223,8 @@ export function banneretBrandPlugin({ vite = false } = {}) {
     transform(code, id) {
       const file = id.split("?")[0];
       if (!SOURCE_PATTERN.test(file) || file.includes("node_modules")) return null;
-      if (!code.includes(OFFICIAL_NAME)) return null;
-      return { code: rebrandText(code), map: null };
+      const rebranded = rebrandText(code, { cli });
+      return rebranded === code ? null : { code: rebranded, map: null };
     },
   };
 }

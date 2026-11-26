@@ -1,6 +1,7 @@
 # Banneret Hub: runs the fork-owned server tests (relay enrolment, workspaces, the real-server wiring
-# check), the contracts they share with the web app, the web app's fork-owned unit tests, and the web
-# and server typechecks. Upstream's CI stays disabled in this repository, so this is the only check
+# check), the identity check and brand rewrite tests (including the built server's identity), the
+# contracts they share with the web app, the web app's fork-owned unit tests, and the web and server
+# typechecks. Upstream's CI stays disabled in this repository, so this is the only check
 # these files get. Browser tests run in banneret-web-tests.yml.
 name: Banneret server tests
 
@@ -13,6 +14,8 @@ on:
       - packages/contracts/**
       - packages/banneret-relay-fake/**
       - packages/shared/**
+      - packages/ssh/**
+      - scripts/banneret/**
       - pnpm-lock.yaml
       - .github/workflows/banneret-server-tests.yml
   push:
@@ -23,6 +26,8 @@ on:
       - packages/contracts/**
       - packages/banneret-relay-fake/**
       - packages/shared/**
+      - packages/ssh/**
+      - scripts/banneret/**
       - pnpm-lock.yaml
       - .github/workflows/banneret-server-tests.yml
 
@@ -68,6 +73,12 @@ jobs:
       - name: Server relay and workspace tests
         working-directory: apps/server
         run: vp test run src/banneret/
+
+      - name: Identity check
+        run: node scripts/banneret/check-identity.mjs
+
+      - name: Brand rewrite tests
+        run: vp test run --project root scripts/banneret/
 
       - name: Web fork-owned unit tests
         working-directory: apps/web
