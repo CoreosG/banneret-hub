@@ -130,6 +130,37 @@ const call = (machine: Enrolled, method: string, target: string, body?: unknown)
     ...(body === undefined ? {} : { body }),
   });
 
+interface ListedMachine {
+  readonly id: string;
+  readonly connected: boolean;
+  readonly revocable?: boolean;
+  readonly revokedAt?: string;
+}
+
+/** Every machine the caller sees, through every page. */
+const listMachines = async (machine: Enrolled): Promise<ListedMachine[]> => {
+  const seen: ListedMachine[] = [];
+  let target: string | null = "/relay/v1/machines?limit=100";
+  while (target !== null) {
+    const reply: Reply = await call(machine, "GET", target);
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    expectSchema("MachinesPage", reply.body);
+    const body = reply.body as { items: ListedMachine[]; nextCursor: string | null };
+    seen.push(...body.items);
+    target =
+      body.nextCursor === null
+        ? null
+        : `/relay/v1/machines?limit=100&cursor=${encodeURIComponent(body.nextCursor)}`;
+  }
+  return seen;
+};
+
+const factsFor = (machine: Enrolled, name = "facts-request.json") => {
+  const body = readExample(name) as { machine: { environmentId: string } };
+  body.machine.environmentId = machine.environmentId;
+  return body;
+};
+
 const openEvents = async (machine: Enrolled, lastEventId?: string) => {
   const response = await client.raw(machine.key, "GET", "/relay/v1/events", {
     token: machine.token,
@@ -147,6 +178,7 @@ const EVENT_SCHEMAS: Record<string, string> = {
   "bundle.changed": "BundleChangedEvent",
   "staff.removed": "StaffRemovedEvent",
   "capabilities.changed": "CapabilitiesChangedEvent",
+  reset: "ResetEvent",
 };
 
 const nextEvent = async (reader: SseReader) => {
@@ -167,7 +199,18 @@ describe("capabilities", () => {
     expect(Object.keys(reply.body as object).toSorted()).toEqual(
       ["displayName", "enrolment", "iconUrl", "protocol"].toSorted(),
     );
-    expect(reply.headers.get("etag")).toBeTruthy();
+    expect(reply.headers.get("etag")).toMatch(/^"[^"]+"$/);
+  });
+
+  it("sends the ETag as capabilitiesVersion in double quotes", async () => {
+    const machine = await enrol();
+    const facts = await call(machine, "POST", "/relay/v1/facts", factsFor(machine));
+    expect(facts.status, JSON.stringify(facts.body)).toBe(200);
+    const version = (facts.body as { capabilitiesVersion: string }).capabilitiesVersion;
+    expect(version.startsWith('"')).toBe(false);
+    const reply = await call(machine, "GET", "/relay/v1/capabilities");
+    expect(reply.status).toBe(200);
+    expect(reply.headers.get("etag")).toBe(`"${version}"`);
   });
 
   it("adds me, sections, tools and adapters for an enrolled caller", async () => {
@@ -190,7 +233,7 @@ describe("capabilities with a failing token", () => {
       device: machine.machineId,
       unsigned: true,
     });
-    expectError(reply, 401, "unauthenticated");
+    expectError(reply, 401, "bad_signature");
   });
 
   it("refuses an unknown token", async () => {
@@ -251,7 +294,7 @@ describe("enrolment", () => {
     expect(await poll(started)).toMatchObject({ state: "expired", reason: "approval_expired" });
   });
 
-  it("expires a pairing after 5 wrong codes", async () => {
+  it("expires a pairing on the 5th wrong code, with expiresAt the time of that attempt", async () => {
     const started = await startPairing();
     const person = { login: newLogin(), role: "founder" };
     const wrong = started.confirmCode === "AAAAAAAA" ? "BBBBBBBB" : "AAAAAAAA";
@@ -261,7 +304,14 @@ describe("enrolment", () => {
     }
     expect(states).toEqual(["pending", "pending", "pending", "pending", "expired"]);
     await confirm(started, person);
-    expect(await poll(started)).toMatchObject({ state: "expired", reason: "too_many_attempts" });
+    const expired = await poll(started);
+    expect(expired).toMatchObject({ state: "expired", reason: "too_many_attempts" });
+    // Measured on the relay's own clock: the start was 10 minutes before the code's expiry, and the 5th
+    // attempt came within seconds of it, so expiresAt sits just after the start, not at the code's expiry.
+    const startedAt = Date.parse(started.expiresAt) - 10 * 60 * 1000;
+    const expiresAt = Date.parse(expired.expiresAt);
+    expect(expiresAt).toBeGreaterThanOrEqual(startedAt - 1000);
+    expect(expiresAt).toBeLessThan(startedAt + 60 * 1000);
   });
 
   it("refuses an environment that another person already enrolled", async () => {
@@ -289,6 +339,15 @@ describe("enrolment", () => {
       body: { pairingId: `pr_${randomText(6)}` },
     });
     expectError(reply, 404, "not_found");
+  });
+
+  it("refuses an enrolment call with a non-zero counter as bad_signature", async () => {
+    const key = generateMachineKey();
+    const reply = await client.send(key, "POST", "/relay/v1/enroll/start", {
+      body: { publicKey: key.publicKey, machine: machineFacts(`env_${NodeCrypto.randomUUID()}`) },
+      counter: "1",
+    });
+    expectError(reply, 401, "bad_signature");
   });
 
   it("refuses a poll signed with a key other than the pairing's", async () => {
@@ -343,7 +402,7 @@ describe("request signing", () => {
     expect(inside.status).toBe(200);
   });
 
-  it("refuses a counter among the last 256 accepted or below the lowest of them", async () => {
+  it("keeps the 256 highest counters: refuses a repeat or one below them, accepts the rest", async () => {
     const machine = await enrol();
     const options = { token: machine.token, device: machine.machineId };
     const counter = BigInt(client.nextCounter());
@@ -351,16 +410,62 @@ describe("request signing", () => {
       client.send(machine.key, "GET", "/relay/v1/today", { ...options, counter: value.toString() });
     expect((await send(counter)).status).toBe(200);
     expectError(await send(counter), 401, "counter_reused");
+    // Fewer than 256 seen: anything that is not a repeat is accepted, even below the lowest.
+    expect((await send(counter - 1n)).status).toBe(200);
     expectError(await send(counter - 1n), 401, "counter_reused");
     expect((await send(counter + 10n)).status).toBe(200);
-    // Out of order but above the lowest accepted: concurrent requests may arrive like this.
+    // Out of order: concurrent requests may arrive like this.
     expect((await send(counter + 5n)).status).toBe(200);
     expectError(await send(counter + 5n), 401, "counter_reused");
-    // 254 more make 257 accepted, so `counter` leaves the window and the lowest becomes counter + 5.
+    // 252 more make 256 accepted: counter - 1, counter, counter + 5, counter + 10 .. counter + 262.
     const statuses = new Set<number>();
-    for (let step = 11n; step < 265n; step += 1n) statuses.add((await send(counter + step)).status);
+    for (let step = 11n; step <= 262n; step += 1n)
+      statuses.add((await send(counter + step)).status);
     expect([...statuses]).toEqual([200]);
-    expectError(await send(counter + 3n), 401, "counter_reused");
+    // Full: the 256th highest is counter - 1, so anything below it is refused.
+    expectError(await send(counter - 2n), 401, "counter_reused");
+    // A gap above the lowest is accepted, and pushes the lowest (counter - 1) out of the window.
+    expect((await send(counter + 1n)).status).toBe(200);
+    expectError(await send(counter - 1n), 401, "counter_reused");
+    expect((await send(counter + 2n)).status).toBe(200);
+    // Now the lowest is counter + 1, so counter is below the window.
+    expectError(await send(counter), 401, "counter_reused");
+    expect((await send(counter + 3n)).status).toBe(200);
+  });
+
+  it("accepts the int64 maximum counter and refuses one above it as bad_signature", async () => {
+    const machine = await enrol();
+    const options = { token: machine.token, device: machine.machineId };
+    const over = await client.send(machine.key, "GET", "/relay/v1/today", {
+      ...options,
+      counter: "9223372036854775808",
+    });
+    expectError(over, 401, "bad_signature");
+    const twenty = await client.send(machine.key, "GET", "/relay/v1/today", {
+      ...options,
+      counter: "10000000000000000000",
+    });
+    expectError(twenty, 401, "bad_signature");
+    const max = await client.send(machine.key, "GET", "/relay/v1/today", {
+      ...options,
+      counter: "9223372036854775807",
+    });
+    expect(max.status, JSON.stringify(max.body)).toBe(200);
+  });
+
+  it.each([
+    ["a malformed sending time", { sentAt: "2026-11-26 10:00:00" }],
+    ["a malformed signature", { headers: { "X-Banneret-Signature": "not-a-signature" } }],
+    ["a missing signature", { headers: { "X-Banneret-Signature": "" } }],
+    ["a malformed counter", { counter: "01" }],
+  ])("refuses %s as bad_signature", async (_name, override) => {
+    const machine = await enrol();
+    const reply = await client.send(machine.key, "GET", "/relay/v1/today", {
+      token: machine.token,
+      device: machine.machineId,
+      ...override,
+    });
+    expectError(reply, 401, "bad_signature");
   });
 
   it("refuses a call without a device token", async () => {
@@ -384,11 +489,7 @@ describe("request signing", () => {
 });
 
 describe("facts", () => {
-  const facts = (machine: Enrolled, name = "facts-request.json") => {
-    const body = readExample(name) as { machine: { environmentId: string } };
-    body.machine.environmentId = machine.environmentId;
-    return body;
-  };
+  const facts = factsFor;
 
   it("accepts a heartbeat and shows it in the machines list", async () => {
     const machine = await enrol();
@@ -402,6 +503,30 @@ describe("facts", () => {
     ).items.find((item) => item.id === machine.machineId);
     expect(own).toMatchObject({ label: "Ada server", connected: true });
     expect(own?.lastHeardAt).not.toBeNull();
+  });
+
+  it("forbids an environmentId other than the token's machine", async () => {
+    const machine = await enrol();
+    const other = await enrol({ login: machine.login });
+    const body = facts(machine);
+    body.machine.environmentId = other.environmentId;
+    expectError(await call(machine, "POST", "/relay/v1/facts", body), 403, "forbidden");
+  });
+
+  it("accepts a body of exactly 1 MiB and refuses one byte more with too_large", async () => {
+    const machine = await enrol();
+    const json = JSON.stringify(facts(machine));
+    const sized = (bytes: number) =>
+      Buffer.from(json + " ".repeat(bytes - Buffer.byteLength(json, "utf8")), "utf8");
+    const send = (rawBody: Buffer) =>
+      client.send(machine.key, "POST", "/relay/v1/facts", {
+        token: machine.token,
+        device: machine.machineId,
+        rawBody,
+      });
+    const limit = await send(sized(1024 * 1024));
+    expect(limit.status, JSON.stringify(limit.body)).toBe(200);
+    expectError(await send(sized(1024 * 1024 + 1)), 413, "too_large");
   });
 
   it.each(listExamples("invalid/").filter((file) => file.startsWith("facts-")))(
@@ -483,6 +608,38 @@ describe("paging", () => {
     );
   });
 
+  it("orders needs-you by class, then oldest first, in GET /needs and Today", async () => {
+    const machine = await enrol();
+    for (const kind of [
+      "thread_approval",
+      "suggestion",
+      "mention",
+      "pull_request",
+      "thread_question",
+    ]) {
+      await client.control("/needs", { machineId: machine.machineId, count: 1, kind });
+    }
+    const expected = [
+      "thread_approval",
+      "thread_question",
+      "pull_request",
+      "mention",
+      "suggestion",
+    ];
+    const needs = await call(machine, "GET", "/relay/v1/needs");
+    expectSchema("NeedsPage", needs.body);
+    const items = (needs.body as { items: Array<{ kind: string; createdAt: string }> }).items;
+    expect(items.map((item) => item.kind)).toEqual(expected);
+    // Within class 1 the older item comes first.
+    expect(Date.parse(items[0]?.createdAt ?? "")).toBeLessThanOrEqual(
+      Date.parse(items[1]?.createdAt ?? ""),
+    );
+    const today = await call(machine, "GET", "/relay/v1/today");
+    expectSchema("Today", today.body);
+    const block = (today.body as { needsYou: { items: Array<{ kind: string }> } }).needsYou;
+    expect(block.items.map((item) => item.kind)).toEqual(expected);
+  });
+
   it.each(["limit=0", "limit=101", "limit=two", "cursor=not-a-cursor"])(
     "refuses %s",
     async (query) => {
@@ -519,12 +676,43 @@ describe("events", () => {
     await resumed.cancel();
   });
 
-  it("asks the client to refetch when it cannot resume", async () => {
+  it("is live only without Last-Event-ID", async () => {
+    const machine = await enrol();
+    await client.control("/needs", { machineId: machine.machineId, count: 1 });
+    const reader = await openEvents(machine);
+    await client.control("/needs", { machineId: machine.machineId, count: 1 });
+    const first = await nextEvent(reader);
+    expect(first.event).toBe("needs.changed");
+    expect(first.data).toMatchObject({ count: 2 });
+    await reader.cancel();
+  });
+
+  it("sends one reset for an unknown Last-Event-ID, then continues live", async () => {
     const machine = await enrol();
     const reader = await openEvents(machine, "unknown-event-id");
-    const names = [(await nextEvent(reader)).event, (await nextEvent(reader)).event];
-    expect(names).toEqual(["needs.changed", "capabilities.changed"]);
+    expect((await nextEvent(reader)).event).toBe("reset");
+    await client.control("/needs", { machineId: machine.machineId, count: 1 });
+    const next = await nextEvent(reader);
+    expect(next.event).toBe("needs.changed");
+    expect(next.data).toMatchObject({ count: 1 });
     await reader.cancel();
+  });
+
+  it("sends reset when the resume point is more than 1000 events back", async () => {
+    const machine = await enrol();
+    const reader = await openEvents(machine);
+    await client.control("/needs", { machineId: machine.machineId, count: 1 });
+    const first = await nextEvent(reader);
+    await reader.cancel();
+    // 1001 mention events for this person, then needs.changed.
+    await client.control("/needs", { machineId: machine.machineId, count: 1001, kind: "mention" });
+    const resumed = await openEvents(machine, first.id);
+    expect((await nextEvent(resumed)).event).toBe("reset");
+    await client.control("/needs", { machineId: machine.machineId, count: 1 });
+    const next = await nextEvent(resumed);
+    expect(next.event).toBe("needs.changed");
+    expect(next.data).toMatchObject({ count: 1003 });
+    await resumed.cancel();
   });
 });
 
@@ -538,9 +726,6 @@ describe("revocation", () => {
     expect(await reader.next()).toBeNull();
     expectError(await call(machine, "GET", "/relay/v1/machines"), 401, "token_revoked");
     expectError(await call(machine, "GET", "/relay/v1/capabilities"), 401, "token_revoked");
-    const listed = await call(await enrol(), "GET", "/relay/v1/machines?limit=100");
-    const ids = (listed.body as { items: Array<{ id: string }> }).items.map((item) => item.id);
-    expect(ids).not.toContain(machine.machineId);
   });
 
   it("lets a founder revoke another's machine, answers 204 again, and forbids limited staff", async () => {
@@ -568,6 +753,82 @@ describe("revocation", () => {
       "not_found",
     );
   });
+
+  it.each(["bad.id", "x".repeat(65)])(
+    "answers not_found, never 400, for malformed id %s",
+    async (id) => {
+      const founder = await enrol();
+      expectError(await call(founder, "DELETE", `/relay/v1/machines/${id}`), 404, "not_found");
+    },
+  );
+});
+
+describe("machine visibility", () => {
+  it("shows every live machine to everyone, and a revoked one only to its owner and founders", async () => {
+    const owner = await enrol({ role: "limited_staff" });
+    const ownerOther = await enrol({ login: owner.login, role: "limited_staff" });
+    const founderMachine = await enrol({ role: "founder" });
+    const staff = await enrol({ role: "limited_staff" });
+
+    const staffView = await listMachines(staff);
+    for (const live of [owner, ownerOther, founderMachine]) {
+      expect(staffView.find((item) => item.id === live.machineId)).toMatchObject({
+        revocable: false,
+      });
+    }
+    expect(staffView.find((item) => item.id === owner.machineId)?.revokedAt).toBeUndefined();
+
+    expect((await call(owner, "DELETE", `/relay/v1/machines/${owner.machineId}`)).status).toBe(204);
+
+    const ids = (view: ListedMachine[]) => view.map((item) => item.id);
+    expect(ids(await listMachines(staff))).not.toContain(owner.machineId);
+    for (const viewer of [ownerOther, founderMachine]) {
+      const view = await listMachines(viewer);
+      const revoked = view.find((item) => item.id === owner.machineId);
+      expect(revoked).toMatchObject({ connected: false, revocable: false });
+      expect(revoked?.revokedAt).toMatch(/Z$/);
+      // Revoked machines follow every live one.
+      const index = view.findIndex((item) => item.id === owner.machineId);
+      expect(view.slice(index).every((item) => item.revokedAt !== undefined)).toBe(true);
+    }
+  });
+});
+
+describe("event retention", () => {
+  // The 24-hour bound cannot be waited out; only the fake can shorten it.
+  it.skipIf(external !== undefined)(
+    "sends reset when the resume point is over 24 hours old",
+    async () => {
+      let eventTime = 0;
+      const short = await startFakeRelay({
+        autoApprove: false,
+        retryAfterMs: 0,
+        eventClock: () => eventTime,
+      });
+      const original = client;
+      try {
+        client = new RelayClient(short.url);
+        const machine = await enrol();
+        const reader = await openEvents(machine);
+        await client.control("/needs", { machineId: machine.machineId, count: 1 });
+        const first = await nextEvent(reader);
+        await reader.cancel();
+        await client.control("/needs", { machineId: machine.machineId, count: 1 });
+        // Exactly 24 hours later the replay still works; a millisecond more and it resets.
+        eventTime = 24 * 60 * 60 * 1000;
+        const replay = await openEvents(machine, first.id);
+        expect((await nextEvent(replay)).event).toBe("needs.changed");
+        await replay.cancel();
+        eventTime += 1;
+        const late = await openEvents(machine, first.id);
+        expect((await nextEvent(late)).event).toBe("reset");
+        await late.cancel();
+      } finally {
+        client = original;
+        await short.close();
+      }
+    },
+  );
 });
 
 describe("empty store", () => {

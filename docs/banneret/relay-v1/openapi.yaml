@@ -42,8 +42,10 @@ paths:
           description: The capabilities document.
           headers:
             ETag:
-              description: Changes whenever the document changes; equals `capabilitiesVersion` in facts responses.
-              schema: { type: string }
+              description: |
+                Changes whenever the document changes. It is the strong entity tag form, `capabilitiesVersion` from
+                facts responses in double quotes: `capabilitiesVersion` `c-7f3a` is sent as `ETag: "c-7f3a"`.
+              schema: { type: string, pattern: '^"[^"]{1,128}"$' }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Capabilities" }
@@ -63,7 +65,9 @@ paths:
         organisation members by default) and types the code shown by the Hub; the code is never placed in the URL.
         The code expires after 10 minutes, or after 5 wrong codes typed for this pairing. The browser rules
         (machine details shown, the recognition tick, the optional network identity check) are in README.md,
-        "Enrolment"; their outcome is reported by `POST /enroll/poll`, never as an error here.
+        "Enrolment"; their outcome is reported by `POST /enroll/poll`, never as an error here. Error responses mean
+        only a malformed request (400), a missing, malformed or failing signature (401), a body over 1 MiB (413),
+        rate limiting (429) or an unavailable relay (503).
       security: []
       parameters:
         - $ref: "#/components/parameters/Counter"
@@ -91,8 +95,9 @@ paths:
       operationId: pollEnrolment
       summary: Read the state of a pairing; on approval, receive the device token once.
       description: |
-        Refused and expired pairings are reported here as a 200 `state` with a `reason`; error responses mean only
-        an unknown pairing id (404 `not_found`), a malformed one (400) or a bad signature (401).
+        Refused and expired pairings are reported here as a 200 `state` with a `reason`. Error responses mean only
+        a malformed request (400), a missing, malformed or failing signature (401), an unknown pairing id
+        (404 `not_found`), a body over 1 MiB (413), rate limiting (429) or an unavailable relay (503).
         No `Authorization` and no `X-Banneret-Device` header. Signed with the pairing's key, counter `0`. Poll no
         sooner than `retryAfterMs`. The token is returned on the first poll after approval and never again; a later
         poll of the same pairing answers `approved` without `token`. A Hub that lost the token enrols again.
@@ -115,6 +120,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /machines:
@@ -122,7 +128,11 @@ paths:
       tags: [machines]
       operationId: listMachines
       summary: The Team machines list.
-      description: Every enrolled machine the caller may see, newest heartbeat first. Revoked machines are not listed.
+      description: |
+        Every enrolled person sees every live (not revoked) machine of the relay, whoever owns it. A revoked machine
+        is listed only to its owner and to founders, with `revokedAt` set; everyone else never sees it. Live machines
+        come first, newest heartbeat first (machines never heard from last); revoked machines follow, most recently
+        revoked first.
       parameters:
         - $ref: "#/components/parameters/Device"
         - $ref: "#/components/parameters/Counter"
@@ -148,13 +158,16 @@ paths:
       summary: Revoke a machine.
       description: |
         Allowed for the machine's owner and for a founder. The machine's token is refused within 1 minute, open
-        event streams from it are closed, and it leaves the Machines list. Revoking is final; the machine enrols
-        again to return. Revoking an already revoked machine answers 204.
+        event streams from it are closed, and it leaves the Machines list of everyone except its owner and
+        founders. Revoking is final; the machine enrols again to return. Revoking an already revoked machine
+        answers 204. A `machineId` that is malformed (not an `Id`) or unknown answers 404 `not_found`; this call
+        never answers 400.
       parameters:
         - name: machineId
           in: path
           required: true
-          schema: { $ref: "#/components/schemas/Id" }
+          description: The machine's id. Not validated as an `Id` up front; a malformed value is 404 `not_found`.
+          schema: { type: string }
         - $ref: "#/components/parameters/Device"
         - $ref: "#/components/parameters/Counter"
         - $ref: "#/components/parameters/SentAt"
@@ -175,7 +188,9 @@ paths:
         Sent every 30 seconds and on any change. Each heartbeat carries the full current set of the machine's
         sessions; a session missing from a heartbeat has ended. A machine is "not heard from" after 90 seconds
         without a heartbeat. The body is closed: unknown fields are refused with `malformed`. It never carries
-        prompts, replies, code, command text, titles, local paths or file contents.
+        prompts, replies, code, command text, titles, local paths or file contents. A `machine.environmentId` other
+        than the environment the token's machine enrolled is refused with 403 `forbidden`. A body over 1 MiB is
+        refused with 413 `too_large`.
       parameters:
         - $ref: "#/components/parameters/Device"
         - $ref: "#/components/parameters/Counter"
@@ -229,7 +244,16 @@ paths:
       summary: Needs-you items for the caller.
       description: |
         Pending questions and approvals in the caller's threads, pull requests waiting on a human, questions for a
-        founder, mentions and dispatcher suggestions. Most urgent first, then oldest first.
+        founder, mentions and dispatcher suggestions. Most urgent first: ordered by class, then oldest `createdAt`
+        first within a class (ties in the order the relay recorded them). The classes, most urgent first, and the
+        kinds in each:
+          1. an agent blocked on the caller: `thread_question`, `thread_approval`;
+          2. something waiting on the caller's review or decision: `pull_request`, `promotion`, `founder_question`,
+             `health`;
+          3. a mention: `mention`;
+          4. a dispatcher suggestion: `suggestion`;
+          5. any kind not listed here.
+        Today's needs-you block uses the same order, so its `nextCursor` continues it here.
       parameters:
         - $ref: "#/components/parameters/Device"
         - $ref: "#/components/parameters/Counter"
@@ -255,9 +279,11 @@ paths:
       summary: Server-sent events for the caller.
       description: |
         `text/event-stream`. Each event has an `id:` line, an `event:` line naming one of `x-sse-events` below, and
-        one `data:` line holding the JSON payload. Send `Last-Event-ID` to resume; when the relay cannot resume it
-        sends `needs.changed` and `capabilities.changed` first so the client refetches. A comment line (`:`) is
-        sent every 25 seconds. Events say what changed, never the content; the client refetches through the
+        one `data:` line holding the JSON payload. Without `Last-Event-ID` the stream is live only: it starts with
+        the next event. With `Last-Event-ID` the relay replays the caller's events after that id, reaching back
+        over the smaller of the last 1000 events and the last 24 hours. When the relay no longer holds every event
+        after that id, or does not know the id, it sends one `reset` event instead of a replay, then continues live; on `reset` the client refetches
+        `GET /today`, `GET /needs` and `GET /capabilities`. A comment line (`:`) is sent every 25 seconds. Events say what changed, never the content; the client refetches through the
         normal calls, except `mention`, which carries the needs-you item. The stream is closed when the machine is
         revoked or its person is removed.
       parameters:
@@ -275,6 +301,7 @@ paths:
         bundle.changed: { $ref: "#/components/schemas/BundleChangedEvent" }
         staff.removed: { $ref: "#/components/schemas/StaffRemovedEvent" }
         capabilities.changed: { $ref: "#/components/schemas/CapabilitiesChangedEvent" }
+        reset: { $ref: "#/components/schemas/ResetEvent" }
       responses:
         "200":
           description: The event stream.
@@ -305,16 +332,20 @@ components:
       in: header
       required: true
       description: |
-        Decimal unsigned 64-bit integer. `0` on enrolment calls. Otherwise time-based: the Hub's Unix time in
+        Decimal integer of 1–19 digits, at most 9223372036854775807 (the int64 maximum); anything else is
+        refused with `bad_signature`. `0` on enrolment calls. Otherwise time-based: the Hub's Unix time in
         milliseconds times 1000, plus a sequence number 0–999 that resets each millisecond, strictly increasing per
-        machine, so a restarted Hub never reuses one. The relay keeps the last 256 counters it accepted from the
-        machine and refuses, with `counter_reused`, a counter among them or below the lowest of them.
-      schema: { type: string, pattern: "^(0|[1-9][0-9]{0,19})$" }
+        machine, so a restarted Hub never reuses one. The relay keeps the 256 highest counters it accepted from
+        the machine. It refuses, with `counter_reused`, a counter equal to one of them or below the lowest of them,
+        and accepts any other. While it holds fewer than 256, it accepts any counter that is not a repeat.
+      schema: { type: string, pattern: "^(0|[1-9][0-9]{0,18})$" }
     SentAt:
       name: X-Banneret-Sent-At
       in: header
       required: true
-      description: RFC 3339 UTC time of sending; refused with `clock_skew` when more than 2 minutes from the relay's clock.
+      description: |
+        RFC 3339 UTC time of sending; refused with `clock_skew` when more than 2 minutes from the relay's clock, and
+        with `bad_signature` when missing or malformed.
       schema: { $ref: "#/components/schemas/Timestamp" }
     Signature:
       name: X-Banneret-Signature
@@ -326,7 +357,9 @@ components:
         where TARGET is the request target exactly as sent by the Hub (path and, when there is one, `?` and the
         query, byte for byte; proxies, including Tailscale Serve path mounts, must not rewrite it), DEVICE is the
         `X-Banneret-Device` value (empty on enrolment calls), COUNTER and SENT_AT are the header values as sent,
-        and BODY is the exact request body bytes (empty when there is none).
+        and BODY is the exact request body bytes (empty when there is none). A missing or malformed signature
+        header, like a missing or malformed counter or sending time, is refused with 401 `bad_signature`; a
+        well-formed signature that does not verify is refused with `signature_invalid`.
       schema: { type: string, pattern: "^[A-Za-z0-9+/]{86}==$" }
     Cursor:
       name: cursor
@@ -342,8 +375,8 @@ components:
   responses:
     Error:
       description: |
-        Any failure. 400 malformed; 401 unauthenticated, token_revoked, signature_invalid, clock_skew,
-        counter_reused; 403 forbidden, network_identity_mismatch; 404 not_found; 413 too_large; 429 rate_limited,
+        Any failure. 400 malformed; 401 unauthenticated, token_revoked, bad_signature, signature_invalid,
+        clock_skew, counter_reused; 403 forbidden, network_identity_mismatch; 404 not_found; 413 too_large; 429 rate_limited,
         capacity (with `Retry-After`); 503 unavailable (with `Retry-After`); 500 internal.
       headers:
         Retry-After:
@@ -371,9 +404,11 @@ components:
       type: string
       pattern: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
     Role:
+      description: |
+        Open set. Known values: `founder`, `limited_staff`. New roles may be added within v1, so this is not a
+        closed enum; clients treat an unknown role as `limited_staff` and never fail on it.
       type: string
-      description: "`founder` or `limited_staff`; clients treat an unknown role as `limited_staff`."
-      enum: [founder, limited_staff]
+      pattern: "^[a-z][a-z0-9_]{0,31}$"
     Error:
       type: object
       required: [error]
@@ -389,6 +424,7 @@ components:
                 - too_large
                 - unauthenticated
                 - token_revoked
+                - bad_signature
                 - signature_invalid
                 - clock_skew
                 - counter_reused
@@ -559,8 +595,11 @@ components:
           enum: [pending, awaiting_approval, approved, refused, expired]
         expiresAt:
           description: |
-            When the pairing expires in its current state: the confirm code's expiry while `pending`, the approval
-            deadline (7 days after confirmation) while `awaiting_approval`, and the last of those once final.
+            The deadline of the current state: the confirm code's expiry (10 minutes after start) while `pending`,
+            the approval deadline (7 days after confirmation) while `awaiting_approval`. Once `expired`, the time it
+            expired: the code's expiry for `code_expired`, the approval deadline for `approval_expired`, and the time
+            of the 5th wrong code for `too_many_attempts` (the 5th wrong code expires the pairing at once). Once
+            `approved` or `refused`, the deadline that was current when it became final.
           allOf: [{ $ref: "#/components/schemas/Timestamp" }]
         retryAfterMs: { type: integer, minimum: 0 }
         machineId: { $ref: "#/components/schemas/Id" }
@@ -611,8 +650,11 @@ components:
         lastHeardAt:
           description: When the relay last accepted a heartbeat, or null before the first.
           oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }]
-        connected: { type: boolean, description: "False after 90 seconds without a heartbeat (\"not heard from\")." }
-        revocable: { type: boolean, description: True when the caller may revoke it. }
+        connected: { type: boolean, description: "False after 90 seconds without a heartbeat (\"not heard from\") and once revoked." }
+        revocable: { type: boolean, description: True when the caller may revoke it; false once revoked. }
+        revokedAt:
+          description: When the machine was revoked. Present only on a revoked machine, which only its owner and founders see.
+          allOf: [{ $ref: "#/components/schemas/Timestamp" }]
     MachinesPage:
       type: object
       required: [items, nextCursor]
@@ -696,7 +738,10 @@ components:
       properties:
         acceptedAt: { $ref: "#/components/schemas/Timestamp" }
         heartbeatSeconds: { type: integer, minimum: 5 }
-        capabilitiesVersion: { type: string, maxLength: 128, description: Refetch capabilities when this changes. }
+        capabilitiesVersion:
+          description: Refetch capabilities when this changes. Unquoted; the capabilities `ETag` is this value in double quotes.
+          type: string
+          maxLength: 128
     DeepLink:
       description: Where the item opens in a Hub. Present only when the item belongs to a thread on a known machine.
       type: object
@@ -716,9 +761,12 @@ components:
       properties:
         id: { $ref: "#/components/schemas/Id" }
         kind:
-          description: New kinds may be added within v1; clients show an unknown kind as a plain item.
+          description: |
+            Open set. Known values: `thread_question`, `thread_approval`, `pull_request`, `founder_question`,
+            `promotion`, `health`, `mention`, `suggestion`. New kinds may be added within v1, so this is not a closed
+            enum; a client shows an unknown kind as a generic item and never fails on it.
           type: string
-          enum: [thread_question, thread_approval, pull_request, founder_question, promotion, health, mention, suggestion]
+          pattern: "^[a-z][a-z0-9_]{0,63}$"
         title: { type: string, maxLength: 300 }
         recommendation: { type: string, maxLength: 500 }
         from: { $ref: "#/components/schemas/PersonRef" }
@@ -875,3 +923,12 @@ components:
       properties:
         at: { $ref: "#/components/schemas/Timestamp" }
         capabilitiesVersion: { type: string, maxLength: 128 }
+    ResetEvent:
+      description: |
+        The relay cannot replay from the client's `Last-Event-ID`: it no longer holds every event after that id
+        (the reach is the smaller of the last 1000 events and 24 hours), or does not know the id. Sent once, instead of a replay; the client refetches `GET /today`, `GET /needs` and
+        `GET /capabilities`.
+      type: object
+      required: [at]
+      properties:
+        at: { $ref: "#/components/schemas/Timestamp" }

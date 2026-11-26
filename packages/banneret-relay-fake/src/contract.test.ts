@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - reads the vendored README and signs with node:crypto.
+// @effect-diagnostics nodeBuiltinImport:off - reads the canonical README and signs with node:crypto.
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 
@@ -15,7 +15,7 @@ import {
   specDirectory,
 } from "./spec.ts";
 
-// The vendored contract itself: schemas, examples and signing vectors. No relay needed.
+// The canonical contract itself: schemas, examples and signing vectors. No relay needed.
 const spec = loadSpec();
 
 const vectorSeed = Uint8Array.from({ length: 32 }, (_, index) => index);
@@ -46,6 +46,22 @@ describe("relay v1 contract", () => {
 
   it.each(listExamples("invalid/"))("refuses invalid example %s", (file) => {
     expect(spec.check(invalidExampleSchema(file), readExample(`invalid/${file}`))).not.toBeNull();
+  });
+
+  it("accepts unknown values in the open sets: needs-you kinds and roles", () => {
+    const needs = readExample("needs.json") as { items: Array<{ kind: string }> };
+    for (const item of needs.items) item.kind = "kind_added_in_v1_9";
+    expect(spec.check("NeedsPage", needs)).toBeNull();
+    const capabilities = readExample("capabilities.json") as {
+      me: { role: string };
+      mcpTools: Array<{ role: string }>;
+    };
+    capabilities.me.role = "auditor";
+    for (const tool of capabilities.mcpTools) tool.role = "auditor";
+    expect(spec.check("Capabilities", capabilities)).toBeNull();
+    // Open, not free text: the value is still a lowercase token.
+    for (const item of needs.items) item.kind = "Not a kind";
+    expect(spec.check("NeedsPage", needs)).not.toBeNull();
   });
 
   it("derives the README's public key from the vector seed", () => {
