@@ -148,6 +148,8 @@ const state = (sections: string[], board: BanneretFeedBoardRead | null): Bannere
   needsCount: null,
   revision: 1,
   board,
+  feed: null,
+  graveyard: null,
 });
 
 function setup() {

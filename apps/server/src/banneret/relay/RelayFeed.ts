@@ -3,12 +3,20 @@
 // One event stream per environment, open only while the enrolment is `configured`; an environment
 // that has not joined makes no relay call. Relay answers are reshaped field by field (relay strings
 // stay plain data), and the last good answer is kept so a screen is never blank while the relay is
-// away. The board comes from the snapshot (Snapshot.ts), read only when capabilities advertise both.
+// away. The board, the feed and the graveyard come from the snapshot (Snapshot.ts), each read only
+// when capabilities advertise the snapshot and its section; older feed and graveyard pages are read
+// on request.
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
   type BanneretEnrolmentView,
   type BanneretFeedBoardRead,
   type BanneretFeedDeepLink,
+  type BanneretFeedEntriesRead,
+  type BanneretFeedEntryPage,
+  type BanneretFeedEntryPageRead,
+  type BanneretGraveyardPage,
+  type BanneretGraveyardPageRead,
+  type BanneretGraveyardRead,
   type BanneretFeedState,
   type BanneretFeedNeedsItem,
   type BanneretFeedNeedsPage,
@@ -37,6 +45,8 @@ import {
   liveTaskIds,
   makeSnapshotReader,
   reshapeBoard,
+  reshapeFeedPage,
+  reshapeGraveyardPage,
   unquoteEtag,
 } from "./Snapshot.ts";
 
@@ -65,6 +75,10 @@ const DEFAULT_OPTIONS: RelayFeedOptions = {
 interface FeedService {
   readonly today: (visit: boolean) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (cursor: string | undefined) => Effect.Effect<BanneretFeedNeedsRead>;
+  /** An older feed page, from a `nextCursor`. */
+  readonly feedPage: (cursor: string) => Effect.Effect<BanneretFeedEntryPageRead>;
+  /** An older graveyard page, from a `nextCursor`. */
+  readonly graveyardPage: (cursor: string) => Effect.Effect<BanneretGraveyardPageRead>;
   readonly events: Stream.Stream<BanneretFeedState>;
 }
 
@@ -78,6 +92,8 @@ const NOT_JOINED_SNAPSHOT: BanneretFeedState = {
   needsCount: null,
   revision: 0,
   board: null,
+  feed: null,
+  graveyard: null,
 };
 
 /** A reference, so a server built without the feed layer answers as an environment that never joined. */
@@ -87,12 +103,15 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
     defaultValue: () => ({
       today: () => Effect.succeed(NOT_JOINED),
       needs: () => Effect.succeed(NOT_JOINED),
+      feedPage: () => Effect.succeed(NOT_JOINED),
+      graveyardPage: () => Effect.succeed(NOT_JOINED),
       events: Stream.concat(Stream.make(NOT_JOINED_SNAPSHOT), Stream.never),
     }),
   },
 ) {}
 
 type Fields = Readonly<Record<string, unknown>>;
+type Problem = { readonly message: string; readonly since: string };
 type LabelFor = (environmentId: string) => string | undefined;
 
 const fields = (value: unknown): Fields | undefined =>
@@ -388,6 +407,13 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   let snapshotOffered = false;
   let board: BanneretFeedBoardRead | null = null;
   let boardSignature = "";
+  // The feed and graveyard: the feed section's flags (null when not advertised), each last read and
+  // the file hash it was built from.
+  let feedFlags: ReadonlyArray<string> | null = null;
+  let feedRead: BanneretFeedEntriesRead | null = null;
+  let feedSignature = "";
+  let graveyardRead: BanneretGraveyardRead | null = null;
+  let graveyardSignature = "";
   let lastHint: string | undefined;
   let snapshotWake: Queue.Queue<void> | undefined;
   let snapshotReader: ReturnType<typeof makeSnapshotReader> | undefined;
@@ -412,6 +438,8 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     needsCount,
     revision,
     board,
+    feed: feedRead,
+    graveyard: graveyardRead,
   });
   const publishSnapshot = Effect.suspend(() => PubSub.publish(changes, snapshot()));
   /** Today or Needs you may have changed: clients refetch. */
@@ -551,6 +579,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           sectionsKnown = true;
           protocol = text(fields(reply.body)?.protocol, 16);
           boardFlags = sectionFlags(reply.body, "board");
+          feedFlags = sectionFlags(reply.body, "feed");
           snapshotOffered = fields(reply.body)?.snapshot !== undefined;
           wakeSnapshot();
           return publishSnapshot;
@@ -686,70 +715,183 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     if (snapshotWake !== undefined) Queue.offerUnsafe(snapshotWake, undefined);
   };
 
-  const setBoard = Effect.fn("BanneretRelayFeed.setBoard")(function* (
-    next: BanneretFeedBoardRead | null,
-  ) {
-    board = next;
-    yield* enrolment.setBoardTasks(next?.value == null ? [] : boardTaskIndex(next.value));
-    yield* publishSnapshot;
-  });
-
-  const boardProblem = Effect.fn("BanneretRelayFeed.boardProblem")(function* (
-    message: string,
-    leases: boolean,
-  ) {
-    if (board?.problem?.message === message && board.leases === leases) return;
-    const at = yield* nowIso;
-    board = {
-      ...(board ?? { value: null, fetchedAt: null, atWork: [] }),
-      leases,
-      problem: { message, since: board?.problem?.since ?? at },
-    };
-    yield* publishSnapshot;
-  });
-
   /**
-   * Rereads the snapshot head (and any changed file) when the relay advertises the board section
-   * and the snapshot. Publishes only when the board, the ring or a problem changed.
+   * Rereads the snapshot head (and any changed file) for each surface whose section the relay
+   * advertises: the board (with the work file for the ring), the feed and the graveyard. A surface
+   * whose section went away is dropped. Publishes once, and only when a surface or a problem changed.
    */
-  const refreshBoard = Effect.fn("BanneretRelayFeed.refreshBoard")(function* (
+  const refreshSnapshot = Effect.fn("BanneretRelayFeed.refreshSnapshot")(function* (
     key: string,
     reader: ReturnType<typeof makeSnapshotReader>,
   ) {
     const current = joined;
     if (!stillJoined(key) || current === null || !sectionsKnown) return;
+    const graveyardOffered = feedFlags?.includes("graveyard") === true;
+    const leases = boardFlags?.includes("leases") === true;
+    let changed = false;
+    let boardChanged = false;
     if (boardFlags === null) {
       boardSignature = "";
-      if (board !== null) yield* setBoard(null);
-      return;
+      if (board !== null) {
+        board = null;
+        changed = boardChanged = true;
+      }
     }
-    const leases = boardFlags.includes("leases");
-    const notPublished = `${current.displayName} does not publish its board yet.`;
-    if (!snapshotOffered) return yield* boardProblem(notPublished, leases);
-    const outcome = yield* reader.read(["board", "work"]).pipe(Effect.result);
-    if (!stillJoined(key)) return;
-    if (Result.isFailure(outcome)) {
-      if (outcome.failure.code === "not_configured") return;
-      return yield* boardProblem(problemMessage(outcome.failure, current.displayName), leases);
+    if (feedFlags === null) {
+      feedSignature = "";
+      if (feedRead !== null) {
+        feedRead = null;
+        changed = true;
+      }
     }
-    const { refs, files } = outcome.success;
-    if (refs.board === undefined) return yield* boardProblem(notPublished, leases);
-    const value = reshapeBoard(files.board);
-    if (value === undefined) {
-      return yield* boardProblem(problemMessage(badResponse(200), current.displayName), leases);
+    if (!graveyardOffered) {
+      graveyardSignature = "";
+      if (graveyardRead !== null) {
+        graveyardRead = null;
+        changed = true;
+      }
     }
-    const atWork = files.work === undefined ? [] : liveTaskIds(files.work);
-    const fetchedAt = yield* nowIso;
-    // The work file changes on every heartbeat; only the ring it yields counts.
-    const signature = `${refs.board} ${atWork.join(",")} ${leases}`;
-    if (signature === boardSignature && board !== null && board.problem === undefined) {
-      // Unchanged: keep the newer age for the next publish without sending the board again.
-      board = { ...board, fetchedAt };
-      return;
+    const wanted = [
+      ...(boardFlags === null ? [] : ["board", "work"]),
+      ...(feedFlags === null ? [] : ["feed"]),
+      ...(graveyardOffered ? ["graveyard"] : []),
+    ];
+    const at = yield* nowIso;
+    const notPublished = (what: string) =>
+      `${current.displayName} does not publish its ${what} yet.`;
+    const unreadable = problemMessage(badResponse(200), current.displayName);
+    const problemOn = <R extends { readonly problem?: Problem | undefined }>(
+      read: R,
+      message: string,
+    ): R => ({ ...read, problem: { message, since: read.problem?.since ?? at } });
+    const boardProblem = (message: string) => {
+      if (boardFlags === null || (board?.problem?.message === message && board.leases === leases)) {
+        return;
+      }
+      const base: BanneretFeedBoardRead = {
+        ...(board ?? { value: null, fetchedAt: null, atWork: [] }),
+        leases,
+      };
+      board = problemOn(base, message);
+      changed = true;
+    };
+    const feedProblem = (message: string) => {
+      if (feedFlags === null || feedRead?.problem?.message === message) return;
+      feedRead = problemOn(feedRead ?? { value: null, fetchedAt: null }, message);
+      changed = true;
+    };
+    const graveyardProblem = (message: string) => {
+      if (!graveyardOffered || graveyardRead?.problem?.message === message) return;
+      graveyardRead = problemOn(graveyardRead ?? { value: null, fetchedAt: null }, message);
+      changed = true;
+    };
+
+    if (wanted.length > 0 && !snapshotOffered) {
+      boardProblem(notPublished("board"));
+      feedProblem(notPublished("feed"));
+      graveyardProblem(notPublished("graveyard"));
+    } else if (wanted.length > 0) {
+      const outcome = yield* reader.read(wanted).pipe(Effect.result);
+      if (!stillJoined(key)) return;
+      if (Result.isFailure(outcome)) {
+        if (outcome.failure.code === "not_configured") return;
+        const message = problemMessage(outcome.failure, current.displayName);
+        boardProblem(message);
+        feedProblem(message);
+        graveyardProblem(message);
+      } else {
+        const { refs, files } = outcome.success;
+        if (boardFlags !== null) {
+          const value = refs.board === undefined ? undefined : reshapeBoard(files.board);
+          if (refs.board === undefined) boardProblem(notPublished("board"));
+          else if (value === undefined) boardProblem(unreadable);
+          else {
+            const atWork = files.work === undefined ? [] : liveTaskIds(files.work);
+            // The work file changes on every heartbeat; only the ring it yields counts.
+            const signature = `${refs.board} ${atWork.join(",")} ${leases}`;
+            if (signature === boardSignature && board !== null && board.problem === undefined) {
+              // Unchanged: keep the newer age for the next publish without sending it again.
+              board = { ...board, fetchedAt: at };
+            } else {
+              boardSignature = signature;
+              board = { value, fetchedAt: at, atWork, leases };
+              changed = boardChanged = true;
+            }
+          }
+        }
+        if (feedFlags !== null) {
+          const value = refs.feed === undefined ? undefined : reshapeFeedPage(files.feed);
+          if (refs.feed === undefined) feedProblem(notPublished("feed"));
+          else if (value === undefined) feedProblem(unreadable);
+          else if (refs.feed === feedSignature && feedRead?.problem === undefined && feedRead) {
+            feedRead = { ...feedRead, fetchedAt: at };
+          } else {
+            feedSignature = refs.feed;
+            feedRead = { value, fetchedAt: at };
+            changed = true;
+          }
+        }
+        if (graveyardOffered) {
+          const value =
+            refs.graveyard === undefined ? undefined : reshapeGraveyardPage(files.graveyard);
+          if (refs.graveyard === undefined) graveyardProblem(notPublished("graveyard"));
+          else if (value === undefined) graveyardProblem(unreadable);
+          else if (
+            refs.graveyard === graveyardSignature &&
+            graveyardRead?.problem === undefined &&
+            graveyardRead
+          ) {
+            graveyardRead = { ...graveyardRead, fetchedAt: at };
+          } else {
+            graveyardSignature = refs.graveyard;
+            graveyardRead = { value, fetchedAt: at };
+            changed = true;
+          }
+        }
+      }
     }
-    boardSignature = signature;
-    yield* setBoard({ value, fetchedAt, atWork, leases });
+    if (boardChanged) {
+      yield* enrolment.setBoardTasks(board?.value == null ? [] : boardTaskIndex(board.value));
+    }
+    if (changed) yield* publishSnapshot;
   });
+
+  /** An older feed or graveyard page. A failure says why without touching Today's problem. */
+  const readPage = Effect.fn("BanneretRelayFeed.page")(function* <T>(
+    target: string,
+    reshape: (body: unknown) => T | undefined,
+  ) {
+    yield* adopt(joinedOf(yield* enrolment.status));
+    const current = joined;
+    if (current === null) return NOT_JOINED;
+    const outcome = yield* enrolment.signedGet(target).pipe(
+      Effect.flatMap((reply) => {
+        const value = reshape(reply.body);
+        return value === undefined ? Effect.fail(badResponse(reply.status)) : Effect.succeed(value);
+      }),
+      Effect.result,
+    );
+    const at = yield* nowIso;
+    if (Result.isFailure(outcome)) {
+      if (outcome.failure.code === "not_configured" || !stillJoined(current.key)) return NOT_JOINED;
+      return {
+        joined: true,
+        value: null,
+        fetchedAt: null,
+        problem: { message: problemMessage(outcome.failure, current.displayName), since: at },
+      };
+    }
+    return { joined: true, value: outcome.success, fetchedAt: at };
+  });
+
+  const pageQuery = (cursor: string) => `?limit=100&cursor=${encodeURIComponent(cursor)}`;
+  const readFeedPage = (cursor: string): Effect.Effect<BanneretFeedEntryPageRead> =>
+    readPage<BanneretFeedEntryPage>(`/relay/v1/feed${pageQuery(cursor)}`, reshapeFeedPage);
+  const readGraveyardPage = (cursor: string): Effect.Effect<BanneretGraveyardPageRead> =>
+    readPage<BanneretGraveyardPage>(
+      `/relay/v1/graveyard${pageQuery(cursor)}`,
+      reshapeGraveyardPage,
+    );
 
   /** One snapshot reader per joined key: reads on a wake (hint, event, capabilities) or a poll. */
   const watchSnapshot = Effect.fn("BanneretRelayFeed.watchSnapshot")(function* (
@@ -759,7 +901,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     const reader = makeSnapshotReader((target, request) => enrolment.signedGet(target, request));
     snapshotReader = reader;
     for (;;) {
-      yield* refreshBoard(key, reader);
+      yield* refreshSnapshot(key, reader);
       yield* Queue.take(wake).pipe(
         Effect.timeoutOrElse({
           duration: Duration.millis(options.snapshotPollMs),
@@ -824,6 +966,11 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         snapshotOffered = false;
         board = null;
         boardSignature = "";
+        feedFlags = null;
+        feedRead = null;
+        feedSignature = "";
+        graveyardRead = null;
+        graveyardSignature = "";
         lastHint = undefined;
         yield* enrolment.setBoardTasks([]);
         joined = next;
@@ -878,7 +1025,13 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     { bufferSize: 64, strategy: "sliding" },
   );
 
-  const service: FeedService = { today: readToday, needs: readNeeds, events };
+  const service: FeedService = {
+    today: readToday,
+    needs: readNeeds,
+    feedPage: readFeedPage,
+    graveyardPage: readGraveyardPage,
+    events,
+  };
   return service;
 });
 
@@ -895,4 +1048,8 @@ export const rpcHandlers = {
     Effect.flatMap(BanneretRelayFeed, (feed) => feed.needs(input.cursor)),
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: () =>
     Stream.unwrap(Effect.map(BanneretRelayFeed, (feed) => feed.events)),
+  [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: (input: { readonly cursor: string }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) => feed.feedPage(input.cursor)),
+  [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: (input: { readonly cursor: string }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) => feed.graveyardPage(input.cursor)),
 };

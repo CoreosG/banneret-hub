@@ -1,7 +1,7 @@
-// Banneret Hub: this client's copy of Today and Needs you for each environment. The server makes
-// every relay call; the client reads `banneretRelay.today` / `banneretRelay.needs` and follows the
-// `banneretRelay.feed` stream, refetching when it says something changed. A failed read keeps the
-// last good copy, so the screens show old data with its age rather than nothing.
+// Banneret Hub: this client's copy of the relay feed for each environment. The server makes every
+// relay call; the client follows the `banneretRelay.feed` stream (Today and Needs you refetched on a
+// new revision; board, feed and graveyard ride on it) and reads older pages on request. A failed
+// read keeps the last good copy, so screens show old data with its age rather than nothing.
 import {
   type AtomCommandResult,
   createEnvironmentRpcCommand,
@@ -11,7 +11,13 @@ import {
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
   type BanneretFeedBoardRead,
+  type BanneretFeedEntriesRead,
+  type BanneretFeedEntry,
+  type BanneretFeedEntryPageRead,
   type BanneretFeedState,
+  type BanneretGraveyardEntry,
+  type BanneretGraveyardPageRead,
+  type BanneretGraveyardRead,
   type BanneretFeedNeedsItem,
   type BanneretFeedNeedsRead,
   type BanneretFeedToday,
@@ -31,6 +37,14 @@ const todayCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
 const needsCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret-relay:needs",
   tag: BANNERET_RELAY_FEED_WS_METHODS.needs,
+});
+const feedPageCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret-relay:feed-page",
+  tag: BANNERET_RELAY_FEED_WS_METHODS.feedPage,
+});
+const graveyardPageCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret-relay:graveyard-page",
+  tag: BANNERET_RELAY_FEED_WS_METHODS.graveyardPage,
 });
 const feedAtom = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "environment-data:banneret-relay:feed",
@@ -62,6 +76,18 @@ export const feedRpc = {
         input: cursor === undefined ? {} : { cursor },
       }),
     ),
+  feedPage: (
+    environmentId: EnvironmentId,
+    cursor: string,
+  ): Promise<BanneretFeedEntryPageRead | null> =>
+    settled(runAtomCommand(appAtomRegistry, feedPageCommand, { environmentId, input: { cursor } })),
+  graveyardPage: (
+    environmentId: EnvironmentId,
+    cursor: string,
+  ): Promise<BanneretGraveyardPageRead | null> =>
+    settled(
+      runAtomCommand(appAtomRegistry, graveyardPageCommand, { environmentId, input: { cursor } }),
+    ),
   /** Calls `listener` with each feed state; returns the unsubscribe. */
   subscribe: (environmentId: EnvironmentId, listener: (event: BanneretFeedState) => void) =>
     appAtomRegistry.subscribe(
@@ -76,6 +102,12 @@ export const feedRpc = {
 export interface FeedProblem {
   readonly message: string;
   readonly since: string;
+}
+
+/** Pages loaded past the snapshot file, oldest last; `nextCursor` null when nothing is older. */
+export interface OlderPages<T> {
+  readonly entries: ReadonlyArray<T>;
+  readonly nextCursor: string | null;
 }
 
 export interface EnvironmentFeed {
@@ -96,6 +128,14 @@ export interface EnvironmentFeed {
   readonly needsProblem: FeedProblem | null;
   /** The board from the relay's snapshot; null when the relay offers none or it is not read yet. */
   readonly board: BanneretFeedBoardRead | null;
+  /** The feed file; null when the relay offers no feed section or it is not read yet. */
+  readonly activity: BanneretFeedEntriesRead | null;
+  readonly activityOlder: OlderPages<BanneretFeedEntry> | null;
+  readonly activityOlderProblem: FeedProblem | null;
+  /** The graveyard file; null when the feed section has no graveyard flag or it is not read yet. */
+  readonly graveyard: BanneretGraveyardRead | null;
+  readonly graveyardOlder: OlderPages<BanneretGraveyardEntry> | null;
+  readonly graveyardOlderProblem: FeedProblem | null;
   /** A read that failed without any answer from this environment. */
   readonly unreachable: boolean;
 }
@@ -115,6 +155,12 @@ const EMPTY_FEED: EnvironmentFeed = {
   needsFetchedAt: null,
   needsProblem: null,
   board: null,
+  activity: null,
+  activityOlder: null,
+  activityOlderProblem: null,
+  graveyard: null,
+  graveyardOlder: null,
+  graveyardOlderProblem: null,
   unreachable: false,
 };
 
@@ -195,12 +241,86 @@ export async function loadMoreNeeds(environmentId: EnvironmentId) {
   });
 }
 
+type OlderKind = "activity" | "graveyard";
+
+/** Where "Load older" continues: the last older page, or the snapshot file before any was loaded. */
+export function olderCursor(feed: EnvironmentFeed, kind: OlderKind): string | null {
+  const older = kind === "activity" ? feed.activityOlder : feed.graveyardOlder;
+  if (older !== null) return older.nextCursor;
+  const file = kind === "activity" ? feed.activity : feed.graveyard;
+  return file?.value?.nextCursor ?? null;
+}
+
+/** The environment's feed when "Load older" still continues from `cursor`; else the list restarted. */
+function stillAt(environmentId: EnvironmentId, kind: OlderKind, cursor: string) {
+  const latest = useRelayFeedStore.getState().feeds[environmentId];
+  return latest !== undefined && olderCursor(latest, kind) === cursor ? latest : null;
+}
+
+const pageProblem = (read: { readonly problem?: FeedProblem | undefined } | null): FeedProblem =>
+  read?.problem ?? {
+    message: "This machine's Banneret Hub cannot be reached.",
+    since: new Date().toISOString(),
+  };
+
+/** Reads the next older feed or graveyard page and appends it. */
+export async function loadOlder(environmentId: EnvironmentId, kind: OlderKind) {
+  const current = useRelayFeedStore.getState().feeds[environmentId];
+  const cursor = current === undefined ? null : olderCursor(current, kind);
+  if (cursor === null) return;
+  if (kind === "activity") {
+    const read = await feedRpc.feedPage(environmentId, cursor);
+    const latest = stillAt(environmentId, kind, cursor);
+    if (latest === null) return;
+    if (read?.value == null) {
+      update(environmentId, { activityOlderProblem: pageProblem(read) });
+      return;
+    }
+    update(environmentId, {
+      activityOlder: {
+        entries: [...(latest.activityOlder?.entries ?? []), ...read.value.entries],
+        nextCursor: read.value.nextCursor,
+      },
+      activityOlderProblem: null,
+    });
+    return;
+  }
+  const read = await feedRpc.graveyardPage(environmentId, cursor);
+  const latest = stillAt(environmentId, kind, cursor);
+  if (latest === null) return;
+  if (read?.value == null) {
+    update(environmentId, { graveyardOlderProblem: pageProblem(read) });
+    return;
+  }
+  update(environmentId, {
+    graveyardOlder: {
+      entries: [...(latest.graveyardOlder?.entries ?? []), ...read.value.entries],
+      nextCursor: read.value.nextCursor,
+    },
+    graveyardOlderProblem: null,
+  });
+}
+
 // The revision each watched environment's copies were read at.
 const seenRevisions = new Map<EnvironmentId, number>();
 
 function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
   const before = useRelayFeedStore.getState().feeds[environmentId];
+  // Joining (or a new company), a list that went away, or a file that now holds the whole list:
+  // older pages belong to the old list.
+  const joinedNow = state.joined && before?.joined !== true;
+  const dropActivity =
+    joinedNow || !state.joined || state.feed === null || state.feed.value?.nextCursor === null;
+  const dropGraveyard =
+    joinedNow ||
+    !state.joined ||
+    state.graveyard === null ||
+    state.graveyard.value?.nextCursor === null;
   update(environmentId, {
+    activity: state.feed,
+    graveyard: state.graveyard,
+    ...(dropActivity ? { activityOlder: null, activityOlderProblem: null } : {}),
+    ...(dropGraveyard ? { graveyardOlder: null, graveyardOlderProblem: null } : {}),
     joined: state.joined,
     live: state.live,
     liveSince: state.since,
@@ -212,7 +332,6 @@ function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
   const seen = seenRevisions.get(environmentId);
   seenRevisions.set(environmentId, state.revision);
   // Joining (or a new company), or a change since the copies were read: read them again.
-  const joinedNow = state.joined && before?.joined !== true;
   if (joinedNow || (seen !== undefined && seen !== state.revision)) {
     void refreshToday(environmentId);
     void refreshNeeds(environmentId);
@@ -245,6 +364,12 @@ export function watchFeed(environmentId: EnvironmentId): () => void {
     if (entry.count === 0) {
       watchers.delete(environmentId);
       seenRevisions.delete(environmentId);
+      update(environmentId, {
+        activityOlder: null,
+        activityOlderProblem: null,
+        graveyardOlder: null,
+        graveyardOlderProblem: null,
+      });
       entry.stop();
     }
   };

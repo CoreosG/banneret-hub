@@ -1,5 +1,5 @@
-// Banneret Hub: Today and Needs you from the company relay (docs/banneret/relay-v1: GET /today,
-// GET /needs, GET /events, GET /capabilities). The server makes every relay call and reshapes the
+// Banneret Hub: Today, Needs you, the board and the feed from the company relay (docs/banneret/relay-v1:
+// GET /today, GET /needs, GET /events, GET /capabilities, the snapshot, GET /feed, GET /graveyard). The server makes every relay call and reshapes the
 // answers into the views below; clients never see the token or key. Relay failures are data, not
 // errors, so a screen always has the last good answer and its age to show.
 import * as Rpc from "effect/rpc/Rpc";
@@ -11,6 +11,8 @@ export const BANNERET_RELAY_FEED_WS_METHODS = {
   today: "banneretRelay.today",
   needs: "banneretRelay.needs",
   feed: "banneretRelay.feed",
+  feedPage: "banneretRelay.feedPage",
+  graveyardPage: "banneretRelay.graveyardPage",
 } as const;
 
 /** Where an item opens: a thread on a machine. `machineLabel` is the relay's label for that machine. */
@@ -186,6 +188,74 @@ export const BanneretFeedBoardRead = Schema.Struct({
 });
 export type BanneretFeedBoardRead = typeof BanneretFeedBoardRead.Type;
 
+/** A task as the relay names it (relay-v1 `BoardTask`). */
+export const BanneretBoardTask = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  ref: BanneretBoardTaskRef,
+});
+export type BanneretBoardTask = typeof BanneretBoardTask.Type;
+
+/**
+ * One derived feed entry. `type`, `importance` and `status` are open strings; an unknown `type` is
+ * shown generically and `importance` only styles.
+ */
+export const BanneretFeedEntry = Schema.Struct({
+  id: Schema.String,
+  type: Schema.String,
+  at: Schema.String,
+  author: Schema.optional(BanneretFeedPerson),
+  importance: Schema.String,
+  summary: Schema.String,
+  link: Schema.optional(Schema.String),
+  task: Schema.optional(BanneretBoardTask),
+  status: Schema.optional(Schema.String),
+});
+export type BanneretFeedEntry = typeof BanneretFeedEntry.Type;
+
+/** The relay's `feed` snapshot file or one `GET /feed` page, newest first. */
+export const BanneretFeedEntryPage = Schema.Struct({
+  entries: Schema.Array(BanneretFeedEntry),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export type BanneretFeedEntryPage = typeof BanneretFeedEntryPage.Type;
+
+/** One task ruled dead, always with its cause. */
+export const BanneretGraveyardEntry = Schema.Struct({
+  task: BanneretBoardTask,
+  cause: Schema.String,
+  ruledAt: Schema.String,
+  by: Schema.optional(BanneretFeedPerson),
+  link: Schema.optional(Schema.String),
+});
+export type BanneretGraveyardEntry = typeof BanneretGraveyardEntry.Type;
+
+/** The relay's `graveyard` snapshot file or one `GET /graveyard` page, newest ruling first. */
+export const BanneretGraveyardPage = Schema.Struct({
+  entries: Schema.Array(BanneretGraveyardEntry),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export type BanneretGraveyardPage = typeof BanneretGraveyardPage.Type;
+
+/** A snapshot file as last read, kept with its age when the relay is away. */
+const snapshotRead = <S extends Schema.Top>(value: S) =>
+  Schema.Struct({
+    value: Schema.NullOr(value),
+    fetchedAt: Schema.NullOr(Schema.String),
+    problem: Schema.optional(Schema.Struct({ message: Schema.String, since: Schema.String })),
+  });
+
+export const BanneretFeedEntriesRead = snapshotRead(BanneretFeedEntryPage);
+export type BanneretFeedEntriesRead = typeof BanneretFeedEntriesRead.Type;
+export const BanneretGraveyardRead = snapshotRead(BanneretGraveyardPage);
+export type BanneretGraveyardRead = typeof BanneretGraveyardRead.Type;
+
+/** An older page through `GET /feed` or `GET /graveyard`; `joined` false means nothing was asked. */
+export const BanneretFeedEntryPageRead = read(BanneretFeedEntryPage);
+export type BanneretFeedEntryPageRead = typeof BanneretFeedEntryPageRead.Type;
+export const BanneretGraveyardPageRead = read(BanneretGraveyardPage);
+export type BanneretGraveyardPageRead = typeof BanneretGraveyardPageRead.Type;
+
 /**
  * The live feed: the whole state each time, so a client that only keeps the latest value misses
  * nothing. `revision` moves whenever Today or Needs you may have changed (`needs.changed`,
@@ -205,6 +275,10 @@ export const BanneretFeedState = Schema.Struct({
   revision: Schema.Number,
   /** Null while the relay advertises no board section, or before it was looked at. */
   board: Schema.NullOr(BanneretFeedBoardRead),
+  /** Null while the relay advertises no feed section, or before it was looked at. */
+  feed: Schema.NullOr(BanneretFeedEntriesRead),
+  /** Null while the feed section lacks the `graveyard` flag, or before it was looked at. */
+  graveyard: Schema.NullOr(BanneretGraveyardRead),
 });
 export type BanneretFeedState = typeof BanneretFeedState.Type;
 
@@ -228,20 +302,39 @@ const WsBanneretRelayFeedRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.feed, {
   stream: true,
 });
 
+const WsBanneretRelayFeedPageRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.feedPage, {
+  /** The `nextCursor` of the feed file or of the previous page. */
+  payload: Schema.Struct({ cursor: Schema.String }),
+  success: BanneretFeedEntryPageRead,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsBanneretRelayGraveyardPageRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.graveyardPage, {
+  payload: Schema.Struct({ cursor: Schema.String }),
+  success: BanneretGraveyardPageRead,
+  error: EnvironmentAuthorizationError,
+});
+
 export const BANNERET_RELAY_FEED_RPCS = [
   WsBanneretRelayTodayRpc,
   WsBanneretRelayNeedsRpc,
   WsBanneretRelayFeedRpc,
+  WsBanneretRelayFeedPageRpc,
+  WsBanneretRelayGraveyardPageRpc,
 ] as const;
 
 export const BANNERET_RELAY_FEED_RPC_SCOPES = {
   [BANNERET_RELAY_FEED_WS_METHODS.today]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: AuthOrchestrationOperateScope,
+  [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: AuthOrchestrationOperateScope,
+  [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: AuthOrchestrationOperateScope,
 } as const;
 
 export const BANNERET_RELAY_FEED_RPC_AGGREGATES = {
   [BANNERET_RELAY_FEED_WS_METHODS.today]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: "banneret-relay",
+  [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: "banneret-relay",
+  [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: "banneret-relay",
 } as const;
