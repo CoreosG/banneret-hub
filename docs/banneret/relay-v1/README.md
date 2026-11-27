@@ -1243,3 +1243,9 @@ POST `{action:"approve",requestId}` to reserve a workspace within effective capa
 Repeating approval succeeds while reserved. Keep approval visible until host facts
 report the seat. The host administrator chooses an unused login, UID and port and
 runs the seat command by hand. The relay never provisions an account.
+
+The Pool view includes `sandboxes` (the configured sandbox policy, or null)
+and `bookings` (the authenticated owner's retained sandbox and host ID pairs).
+The Hub polls each visible booking by ID. Each non-null offer includes
+`publicKey`, the standard-base64 raw Ed25519 key of the enrolled signing
+machine, supplied by the authenticated relay from its machine record.

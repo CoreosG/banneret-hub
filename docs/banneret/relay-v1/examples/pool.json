@@ -124,5 +124,33 @@
         }
       }
     ]
-  }
+  },
+  "sandboxes": {
+    "sizes": {
+      "small": {
+        "cpu": 2,
+        "memory": "4G",
+        "disk": "10G"
+      },
+      "large": {
+        "cpu": 4,
+        "memory": "8G",
+        "disk": "20G"
+      }
+    },
+    "time_limit": "2h",
+    "idle_limit": "20m",
+    "extend": "1h",
+    "per_person": {
+      "running": 1,
+      "waiting": 1
+    },
+    "images": [
+      {
+        "name": "default",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  "bookings": []
 }

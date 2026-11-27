@@ -57,7 +57,46 @@ export const WorkspaceReceipt = S.Struct({
   hostId: S.String,
   state: S.Literals(["asked", "approved", "ready_to_join", "active", "suspended", "removed"]),
 });
+export const SandboxReceipt = S.Struct({
+  id: S.String,
+  state: S.Literals([
+    "waiting",
+    "offered",
+    "starting",
+    "running",
+    "ending",
+    "ended",
+    "cleanup_failed",
+  ]),
+  place: nullableNumber,
+  waitSeconds: nullableNumber,
+  machineId: S.NullOr(S.String),
+  endsAt: S.NullOr(S.String),
+  reason: S.NullOr(S.String),
+});
+export const SandboxAction = S.Union([
+  S.Struct({
+    kind: S.Literal("launch"),
+    hostId: S.String,
+    size: S.Literals(["small", "large"]),
+    image: S.String,
+    taskId: S.optional(S.String),
+  }),
+  S.Struct({
+    kind: S.Literals(["read", "cancel", "extend"]),
+    id: S.String.check(S.isPattern(/^[a-zA-Z0-9_-]+$/)),
+  }),
+]);
 export const PoolResources = S.Struct({
+  sandboxes: S.NullOr(
+    S.Struct({
+      time_limit: S.String,
+      idle_limit: S.String,
+      extend: S.String,
+      images: S.Array(S.Struct({ name: S.String, digest: S.String })),
+    }),
+  ),
+  bookings: S.Array(S.Struct({ id: S.String, hostId: S.String })),
   hosts: S.Array(
     S.Struct({
       hostId: S.String,

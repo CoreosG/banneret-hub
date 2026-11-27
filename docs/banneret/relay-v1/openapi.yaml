@@ -2367,8 +2367,16 @@ components:
     PoolView:
       type: object
       additionalProperties: false
-      required: [hosts, me]
+      required: [hosts, me, sandboxes, bookings]
       properties:
+        sandboxes: {anyOf: [{$ref: '#/components/schemas/PoolConfig/properties/sandboxes'}, {type: 'null'}]}
+        bookings:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, hostId]
+            properties: {id: {$ref: '#/components/schemas/Id'}, hostId: {$ref: '#/components/schemas/Id'}}
         hosts:
           type: array
           items:
@@ -2468,8 +2476,9 @@ components:
       anyOf:
       - type: object
         additionalProperties: false
-        required: [offerId, id, personId, machineId, deadline, counter, sentAt, signature, bodyBase64]
+        required: [offerId, id, personId, machineId, publicKey, deadline, counter, sentAt, signature, bodyBase64]
         properties:
+          publicKey: {type: string, pattern: '^[A-Za-z0-9+/]{43}=$', description: Enrolled requesting machine Ed25519 public key in standard base64.}
           offerId: {$ref: '#/components/schemas/Id'}
           id: {$ref: '#/components/schemas/Id'}
           personId: {$ref: '#/components/schemas/Id'}

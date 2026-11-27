@@ -14,6 +14,8 @@ import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { ResourceBar, bytes, usePoolResources } from "./ui/MachineResources";
 import { PageHeader } from "./ui/PageHeader";
 
+import { SandboxControls } from "./SandboxControls";
+
 const labels = {
   asked: "Requested",
   approved: "Approved",
@@ -26,8 +28,12 @@ const labels = {
 function HostCard({
   host,
   seat,
+  pool,
+  taskId,
   target,
 }: {
+  pool: PoolResources;
+  taskId?: string | undefined;
   host: PoolResources["hosts"][number];
   seat: PoolResources["me"]["workspaces"][number] | undefined;
   target: RelayTarget;
@@ -101,11 +107,12 @@ function HostCard({
           Request a workspace on a shared machine
         </Button>
       )}
+      <SandboxControls {...{ pool, taskId, target }} hostId={host.hostId} enabled={canRequest} />
       {error && <p role="alert">{error}</p>}
     </section>
   );
 }
-export function PoolPage() {
+export function PoolPage({ taskId }: { taskId?: string | undefined } = {}) {
   const enterprise = useEnterpriseFeed();
   const enabled = enterprise?.feed.sections.includes("pool") ?? false;
   const pool = usePoolResources(enterprise?.target ?? null, enabled);
@@ -130,6 +137,8 @@ export function PoolPage() {
                 enterprise.enrolment.me?.login,
                 host.hostId,
               ])}
+              taskId={taskId}
+              pool={pool}
               host={host}
               target={enterprise.target}
               seat={pool.me.workspaces.find((w) => w.hostId === host.hostId)}

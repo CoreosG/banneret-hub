@@ -13,7 +13,7 @@ Each subcommand previews its action by default. Add `--apply` to execute it.
    ```sh
    install -d /opt/banneret-pool
    install -m 755 scripts/banneret/pool/banneret /opt/banneret-pool/
-   install -m 644 scripts/banneret/pool/{facts,provision,relay}.py /opt/banneret-pool/
+   install -m 644 scripts/banneret/pool/{facts,provision,relay,sandbox}.py /opt/banneret-pool/
    install -m 644 scripts/banneret/pool/banneret-pool.service /etc/systemd/system/
    jq --arg origin https://relay.example.org --arg host dev --arg version 0.1.1300 \
      '{origin:$origin,hubVersion:$version,limits:(.hosts[]|select(.id==$host)),sizes:.sandboxes.sizes,warnings}' \
@@ -46,7 +46,7 @@ Each subcommand previews its action by default. Add `--apply` to execute it.
    Then run `systemctl daemon-reload` and `systemctl enable --now banneret-pool.service`.
    The agent sends full snapshots every 30 seconds. Host memory totals come from
    /proc/meminfo and user.slice. A workspace row contains quota meters and warning flags.
-   The agent advertises zero free sandbox slots until a sandbox runner is available.
+   The agent advertises zero free sandbox slots until the sandbox runner is configured.
 
 5. After the founder approves a workspace request, install the verified Banneret Hub runtime for this host's architecture
    in a root-owned directory under /opt and link its executable (t3 in the release archive)
@@ -68,3 +68,35 @@ Each subcommand previews its action by default. Add `--apply` to execute it.
 To exercise the kit in a checkout, install workspace dependencies and run
 `/usr/bin/python3 scripts/banneret/pool/test_pool.py`. The tests inject the OS command runner,
 use temporary Linux fixture trees and enrol against the loopback fake relay.
+
+## Sandbox runner
+
+Enable the runner only on a host validated by the M5 runtime spike. Install
+`sandbox.py` alongside the agent. Each participating member needs a provisioned
+seat, a running systemd user manager, rootless Podman with runsc, subordinate UID
+and GID ranges, and a quota-capable container store inside their own home.
+Preload the approved image by digest into each participating member's store.
+It must contain the Banneret Hub executable and Node with node:sqlite support.
+
+In the root-owned host config, set `runner.images` to a map from approved SHA-256
+digests to fully qualified repository names. Copy `runner.time_limit` and
+`runner.idle_limit` from the relay's sandbox configuration. The agent checks the
+signed request against that local image map. It uses the member's systemd user
+manager to run the container and publishes the Hub on a loopback port. Each
+booking has its own writable container layer. No host home is mounted inside.
+The idle timer uses only the presence of an active sandbox turn. It sends no
+activity sample to the relay. A cleanup failure reserves the slot for inspection.
+
+From the member's SSH login, find the container with
+`podman ps --filter label=banneret.sandbox=SANDBOX_ID`. Use
+`podman port CONTAINER 3793/tcp` to find the host loopback port. Forward
+desktop port 3793 to that host port, then run `podman exec CONTAINER banneret pair`
+and open its link on the desktop. Join the sandbox environment to the same
+company and sign in as the requesting member during the three-minute startup
+window. The Pool card shows its machine ID when enrolment completes.
+
+For members without managed workspace seats, set `runner.accounts` to a map
+from relay person IDs to their dedicated OS logins on this host. After correcting
+a cleanup failure, stop the agent and run `banneret pool cleanup SANDBOX_ID
+OFFER_ID --apply` using the kit executable. Restart the agent. Cleanup verifies
+container removal before releasing the slot.

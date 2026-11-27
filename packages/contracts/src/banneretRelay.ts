@@ -2,6 +2,8 @@
 // The server holds the machine key and device token and makes every relay call; clients see only
 // the view below, which never carries either.
 import {
+  SandboxAction,
+  SandboxReceipt,
   WorkspaceReceipt,
   FolderSizes,
   PoolResources,
@@ -39,6 +41,7 @@ export * from "./leaseProtocol.ts";
 export const BANNERET_RELAY_WS_METHODS = {
   resources: "banneret.resources",
   folders: "banneret.resourceFolders",
+  sandbox: "banneret.sandbox",
   requestWorkspace: "banneret.requestWorkspace",
   poolFounder: "banneret.poolFounder",
   pool: "banneret.poolResources",
@@ -238,6 +241,11 @@ export const BANNERET_RELAY_RPCS = [
     success: FolderSizes,
     error: RelayRpcError,
   }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.sandbox, {
+    payload: Schema.Struct({ ...RelayTarget, action: SandboxAction }),
+    success: SandboxReceipt,
+    error: RelayRpcError,
+  }),
   Rpc.make(BANNERET_RELAY_WS_METHODS.requestWorkspace, {
     payload: Schema.Struct({ ...RelayTarget, hostId: Schema.String }),
     success: WorkspaceReceipt,
@@ -271,6 +279,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.folders]: AuthFilesystemReadScope,
   [BANNERET_RELAY_WS_METHODS.poolFounder]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.pool]: AuthOrchestrationOperateScope,
+  [BANNERET_RELAY_WS_METHODS.sandbox]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.requestWorkspace]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.probe]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.status]: AuthOrchestrationReadScope,
@@ -290,6 +299,7 @@ export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.folders]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.poolFounder]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.pool]: "banneret-relay",
+  [BANNERET_RELAY_WS_METHODS.sandbox]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.requestWorkspace]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.probe]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.status]: "banneret-relay",

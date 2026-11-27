@@ -31,11 +31,15 @@ class NoRedirect(request.HTTPRedirectHandler):
 
 
 def post(state, path, body, enrolled=False):
+    return pool_post(state, "hosts/" + path, body, enrolled)
+
+
+def pool_post(state, path, body, enrolled=True):
     origin = urlsplit(state["origin"])
     if (origin.scheme != "https" and not (origin.scheme == "http" and origin.hostname in
             ("localhost", "127.0.0.1", "::1"))) or origin.path or origin.query or origin.fragment or origin.username:
         raise ValueError("Use an HTTPS relay origin, or HTTP loopback for tests")
-    target = "/relay/v1/pool/hosts/" + path
+    target = "/relay/v1/pool/" + path
     data = json.dumps(body, separators=(",", ":")).encode()
     counter = str(time.time_ns() // 1000) if enrolled else "0"
     device = state["machineId"] if enrolled else ""

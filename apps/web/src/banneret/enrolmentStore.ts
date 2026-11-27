@@ -8,6 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   BANNERET_RELAY_WS_METHODS,
+  type SandboxAction,
   type WarningPolicy,
   type PoolFounderAction,
   type BanneretEnrolmentList,
@@ -31,6 +32,10 @@ const resourcesCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
 const foldersCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:folders",
   tag: BANNERET_RELAY_WS_METHODS.folders,
+});
+const sandboxCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:sandbox",
+  tag: BANNERET_RELAY_WS_METHODS.sandbox,
 });
 const requestWorkspaceCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:request-workspace",
@@ -119,6 +124,13 @@ export const enrolmentRpc = {
     ),
   folders: (environmentId: EnvironmentId) =>
     outcome(runAtomCommand(appAtomRegistry, foldersCommand, { environmentId, input: {} })),
+  sandbox: ({ environmentId, relayOrigin }: RelayTarget, action: typeof SandboxAction.Type) =>
+    outcome(
+      runAtomCommand(appAtomRegistry, sandboxCommand, {
+        environmentId,
+        input: { relayOrigin, action },
+      }),
+    ),
   requestWorkspace: ({ environmentId, relayOrigin }: RelayTarget, hostId: string) =>
     outcome(
       runAtomCommand(appAtomRegistry, requestWorkspaceCommand, {
