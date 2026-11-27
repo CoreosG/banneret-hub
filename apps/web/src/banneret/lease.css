@@ -1,4 +1,7 @@
 /* Banneret Hub: the take's read-back bar fills once over the 10 s wait, then stops. */
+/* Declares the app's layer order first: Vite can load this chunk's CSS before index.css, and the first
+   statement fixes the order. Without it `components` ranks below Tailwind's base reset. */
+@layer properties, theme, base, clerk, components, utilities;
 @layer components {
   [data-lease-readback] {
     animation: banneret-lease-readback 10s linear forwards;
