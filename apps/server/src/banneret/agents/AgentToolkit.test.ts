@@ -691,6 +691,47 @@ describe("agent lease tools against the fake relay", () => {
       ),
   );
 
+  it.live(
+    "offers the tools once the relay names them, though the Hub missed capabilities.changed",
+    () =>
+      withFake((fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            // The relay does not name the toolkit yet when this machine joins.
+            let named = false;
+            relay.rewrite = (request, body) =>
+              named || !request.url.startsWith("/relay/v1/capabilities")
+                ? body
+                : JSON.stringify({ ...JSON.parse(body), mcpTools: [] });
+            yield* joinWithBoard(fake, relay);
+            const feed = yield* RelayFeed.BanneretRelayFeed;
+            expect(yield* feed.mcpTools(relay.origin)).toEqual([]);
+
+            // Redeployed with the toolkit while the stream is down: the event reaches nobody, and
+            // only the heartbeat's capabilitiesVersion says the document changed.
+            yield* Effect.promise(() => relay.close());
+            named = true;
+            fake.bumpCapabilities();
+            yield* Effect.promise(() => relay.reopen());
+            yield* feed.events(relay.origin).pipe(
+              Stream.mapEffect(() => feed.mcpTools(relay.origin)),
+              Stream.filter((tools) => (tools?.length ?? 0) > 0),
+              Stream.runHead,
+              Effect.timeoutOrElse({
+                duration: 5000,
+                orElse: () => Effect.die(new Error("the feed never reread capabilities")),
+              }),
+            );
+            const relays = yield* AgentRelays.BanneretAgentRelays;
+            expect([...(yield* relays.offered(COMPANY_THREAD))].sort()).toEqual(
+              [...BANNERET_AGENT_TOOLS].sort(),
+            );
+          }),
+        ),
+      ),
+  );
+
   it.live("a machine that has not joined makes no relay call, and the tools refuse", () =>
     withFake((_fake, relay) =>
       onHub(

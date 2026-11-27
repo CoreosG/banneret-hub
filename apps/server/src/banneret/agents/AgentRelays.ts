@@ -112,7 +112,9 @@ export const layer = Layer.effect(
         return tools === null ? new Set<string>() : offeredTools(tools, relay.me.role);
       },
       // A failed offer must hide the tools, never fail the list request that asked.
-      Effect.catchCause(() => Effect.succeed(new Set<string>())),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Banneret agent offer failed", cause).pipe(Effect.as(new Set<string>())),
+      ),
     );
     const offers = yield* Cache.make({
       capacity: 1_000,

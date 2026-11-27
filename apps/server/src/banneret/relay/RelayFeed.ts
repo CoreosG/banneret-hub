@@ -494,6 +494,9 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   let sections: ReadonlyArray<string> = [];
   let sectionsKnown = false;
   let mcpTools: ReadonlyArray<RelayMcpTool> = [];
+  // The `ETag` of the capabilities last read: a heartbeat whose `capabilitiesVersion` differs means
+  // the document changed, even when the stream missed `capabilities.changed` or the read failed.
+  let sectionsVersion: string | undefined;
   // Never reset, so a client can tell any two states apart.
   let revision = 0;
   let needsCount: number | null = null;
@@ -676,6 +679,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
           sectionsKnown = true;
+          sectionsVersion = reply.etag;
           mcpTools = mcpToolsOf(reply.body);
           boardFlags = sectionFlags(reply.body, "board");
           mapFlags = sectionFlags(reply.body, "map");
@@ -1097,6 +1101,25 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     if (hint !== snapshotReader?.currentEtag()) wakeSnapshot();
   });
 
+  /** A heartbeat's `capabilitiesVersion` that is not the one read: reread capabilities, once at a time. */
+  let sectionsReader: Fiber.Fiber<void> | undefined;
+  const noticeCapabilities = Effect.gen(function* () {
+    const version = yield* enrolment.capabilitiesVersion;
+    const key = joined?.key;
+    if (key === undefined || version === undefined || sectionsReader !== undefined) return;
+    if (`"${version}"` === sectionsVersion) return;
+    sectionsReader = yield* Effect.forkIn(
+      refreshSections(key).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            sectionsReader = undefined;
+          }),
+        ),
+      ),
+      layerScope,
+    );
+  });
+
   /** Keeps the stream open for one joined key until the key changes (this fiber is interrupted). */
   const follow = Effect.fn("BanneretRelayFeed.follow")(function* (key: string) {
     let delay = 0;
@@ -1135,6 +1158,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         if (next?.key === joined?.key) return;
         if (follower !== undefined) yield* Fiber.interrupt(follower);
         if (snapshotFiber !== undefined) yield* Fiber.interrupt(snapshotFiber);
+        if (sectionsReader !== undefined) yield* Fiber.interrupt(sectionsReader);
         follower = undefined;
         snapshotFiber = undefined;
         snapshotWake = undefined;
@@ -1159,6 +1183,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         since = null;
         sections = [];
         sectionsKnown = false;
+        sectionsVersion = undefined;
         mcpTools = [];
         needsCount = null;
         today = null;
@@ -1187,6 +1212,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         const changed = yield* enrolment.nextChange;
         yield* adopt(joinedOf(yield* enrolment.status));
         yield* noticeHint;
+        yield* noticeCapabilities;
         yield* changed;
       }),
     ),

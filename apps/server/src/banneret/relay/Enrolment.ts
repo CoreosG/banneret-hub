@@ -323,6 +323,8 @@ export interface RelayEnrolment {
   ) => Effect.Effect<RelayReply, RelayCallError>;
   /** RelayFeed seam: the last heartbeat's `snapshotEtag` (unquoted), the hint to reread the head. */
   readonly snapshotEtag: Effect.Effect<string | undefined>;
+  /** RelayFeed seam: the last heartbeat's `capabilitiesVersion`, the hint to reread capabilities. */
+  readonly capabilitiesVersion: Effect.Effect<string | undefined>;
   /** RelayFeed seam: the board's tasks, so a heartbeat can name a thread's linked task. */
   readonly setBoardTasks: (tasks: ReadonlyArray<BoardTaskEntry>) => Effect.Effect<void>;
   /** RelayFeed seam: the signed headers for one GET of the event stream, only while configured. */
@@ -509,6 +511,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
   let unreachableSince: string | undefined;
   let etag: string | undefined;
   let snapshotEtag: string | undefined;
+  let capabilitiesVersion: string | undefined;
   let boardTasks: ReadonlyArray<BoardTaskEntry> = [];
   let backoffMs = 0;
   let lastMarkSaveMs = 0;
@@ -1074,6 +1077,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     const reply = decodeFactsReply(outcome.success.body);
     snapshotEtag = Option.getOrUndefined(reply)?.snapshotEtag;
     const version = Option.map(reply, (decoded) => decoded.capabilitiesVersion);
+    capabilitiesVersion = Option.getOrUndefined(version);
     if (Option.isSome(version) && `"${version.value}"` !== etag) {
       yield* refreshCapabilities(from).pipe(Effect.ignore);
     } else {
@@ -1445,6 +1449,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
         signedCall(from, "GET", target, options.ifNoneMatch, undefined, options.maxResponseBytes),
       ),
     snapshotEtag: Effect.sync(() => snapshotEtag),
+    capabilitiesVersion: Effect.sync(() => capabilitiesVersion),
     setBoardTasks: (tasks) =>
       Effect.sync(() => {
         boardTasks = tasks;

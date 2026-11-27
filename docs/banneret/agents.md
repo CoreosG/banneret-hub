@@ -61,4 +61,6 @@ workspace, so a machine that joined two companies keeps them apart.
 
 **For relay builders.** List the tool names above in `mcpTools` to switch them on, each with the lowest role
 that may call it. The Hub keeps its own descriptions and schemas. See the
-[capabilities section of the spec](relay-v1/README.md#capabilities).
+[capabilities section of the spec](relay-v1/README.md#capabilities). The Hub rereads capabilities whenever a
+heartbeat answer carries a new `capabilitiesVersion`, so a change reaches new threads within one heartbeat, even
+when the Hub missed `capabilities.changed`. A thread that is already running keeps the tools it listed at start.
