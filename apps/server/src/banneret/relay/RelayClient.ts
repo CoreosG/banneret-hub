@@ -46,6 +46,7 @@ export interface RelayRequest {
   readonly target: string;
   readonly body?: unknown;
   readonly signer?: RelaySigner;
+  readonly relayLogin?: string;
   readonly ifNoneMatch?: string;
   /** Snapshot files may be larger than other answers. */
   readonly maxResponseBytes?: number;
@@ -222,10 +223,20 @@ export const relayFetch = Effect.fn("BanneretRelay.fetch")(function* (request: R
   // Unknown codes are handled by their HTTP status alone.
   const retryable = status === 429 || status >= 500;
   const retryAfter = retryAfterMs(response.headers.get("retry-after"));
+  const message = fields.message ?? `The relay answered ${status}.`;
+  const details = fields.details;
+  const login =
+    request.relayLogin ??
+    (typeof details === "object" &&
+    details !== null &&
+    "login" in details &&
+    typeof details.login === "string"
+      ? details.login
+      : "Not available");
   return yield* new RelayCallError({
     status,
     code: fields.code ?? `http_${status}`,
-    message: fields.message ?? `The relay answered ${status}.`,
+    message: status === 401 || status === 403 ? `${message} Relay account: ${login}.` : message,
     retryable,
     ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
     ...(fields.details === undefined ? {} : { details: fields.details }),

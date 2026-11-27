@@ -1,3 +1,4 @@
+import { useGitHubLogin } from "./accountIdentity";
 import appCss from "../index.css?inline";
 import {
   EnvironmentId,
@@ -36,6 +37,10 @@ import {
 
 const state = vi.hoisted(() => ({ openExternal: vi.fn() }));
 
+vi.mock("./accountIdentity", async (load) => ({
+  ...(await load<typeof import("./accountIdentity")>()),
+  useGitHubLogin: vi.fn(() => null),
+}));
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
 vi.mock(import("../localApi"), async (original) => ({
@@ -96,6 +101,7 @@ function setup(displayName = "Example Company") {
     dialog: null,
   });
   useEnrolmentStore.setState({ views: {}, machines: {}, missingStatusRpc: {} });
+  vi.mocked(useGitHubLogin).mockReturnValue(null);
   state.openExternal.mockReset().mockResolvedValue(undefined);
   let stored: BanneretWorkspace[] = [];
   vi.spyOn(workspacesRpc, "list").mockImplementation(async () => ({ workspaces: stored }));
@@ -386,7 +392,7 @@ describe("EnterpriseWizard", () => {
       replacedLabel: "Old laptop",
       health: "healthy",
     });
-    await expect.element(page.getByText("Connected as ada-example · Founder")).toBeVisible();
+    await expect.element(page.getByText("Signed in as ada-example · Founder")).toBeVisible();
     await expect.element(page.getByText("This replaced Old laptop")).toBeVisible();
     // The project whose remote is in the company's list comes pre-ticked; the other does not.
     await expect
@@ -408,17 +414,19 @@ describe("EnterpriseWizard", () => {
     );
     expect(useWorkspacesStore.getState().activeId).toBe(WORKSPACE_ID);
 
+    vi.mocked(useGitHubLogin).mockReturnValue("tracker-example");
     // The switcher row shows this machine's status.
     await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
     await expect
-      .element(page.getByRole("menu").getByText("Connected as ada-example · Founder"))
+      .element(page.getByRole("menu").getByText("Signed in as ada-example · Founder"))
       .toBeVisible();
+    await expect.element(page.getByText("· GitHub: tracker-example")).toBeVisible();
     await expect.element(page.getByRole("menuitem", { name: "Machines…" })).toBeVisible();
     await expect.element(page.getByRole("menuitem", { name: "Leave…" })).toBeVisible();
   });
 
   it.each([
-    ["declined", "A founder declined this machine."],
+    ["declined", "A founder declined this machine. Relay sign-in: Not available."],
     ["code_expired", "The code expired before it was confirmed. Join again."],
   ])("returns to the address with the reason after %s", async (reason, message) => {
     using stack = new DisposableStack();
@@ -523,7 +531,11 @@ describe("EnterpriseWizard", () => {
     expect(page.getByRole("button", { name: "Forget this machine here" }).query()).toBeNull();
 
     await server.setView({ ...approved, health: "forbidden" });
-    await expect.element(page.getByText("The relay does not allow this machine")).toBeVisible();
+    await expect
+      .element(
+        page.getByText("The relay does not allow this machine. Relay account: Not available."),
+      )
+      .toBeVisible();
     await userEvent.click(page.getByRole("button", { name: "Forget this machine here" }));
     expect(server.spies.leave).toHaveBeenCalledWith(TARGET, "forget", false);
     // The stub's leave does not change what status answers; make the server agree.
@@ -580,7 +592,11 @@ describe("EnterpriseWizard", () => {
     await userEvent.click(page.getByRole("menuitem", { name: "Join again…" }));
     await expect.element(page.getByLabelText("Relay address")).toHaveValue(ORIGIN);
     await expect
-      .element(page.getByText("The relay refused this machine. Join again to replace it."))
+      .element(
+        page.getByText(
+          "The relay refused this machine. Join again to replace it. Relay account: ada-example.",
+        ),
+      )
       .toBeVisible();
   });
 
@@ -628,7 +644,7 @@ describe("EnterpriseWizard", () => {
     await userEvent.click(page.getByRole("menuitem", { name: "New workspace…" }));
     await userEvent.click(page.getByRole("button", { name: "Enterprise" }));
     await expect.element(page.getByLabelText("Relay address")).toHaveValue("");
-    expect(page.getByText("Connected as ada-example · Founder").query()).toBeNull();
+    expect(page.getByText("Signed in as ada-example · Founder").query()).toBeNull();
 
     server.spies.probe.mockImplementation(async () => ({
       ok: true,
@@ -669,7 +685,7 @@ describe("EnterpriseWizard", () => {
     // Each Enterprise row has its own status line; Machines acts on the active workspace's relay.
     await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
     const menu = page.getByRole("menu");
-    await expect.element(menu.getByText("Connected as ada-example · Founder")).toBeVisible();
+    await expect.element(menu.getByText("Signed in as ada-example · Founder")).toBeVisible();
     await expect.element(menu.getByText("Waiting for a founder to approve")).toBeVisible();
     await userEvent.click(page.getByRole("menuitem", { name: "Machines…" }));
     await vi.waitFor(() => expect(server.spies.machines).toHaveBeenCalledWith(TARGET));

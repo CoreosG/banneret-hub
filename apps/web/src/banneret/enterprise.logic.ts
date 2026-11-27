@@ -46,17 +46,20 @@ export function wizardStep(view: BanneretEnrolmentView | null): WizardStep {
 /** Why the last enrolment ended (state `none`), in plain words. */
 export function lastResultMessage(view: BanneretEnrolmentView | null): string | null {
   if (view === null || view.state !== "none" || view.reason === undefined) return null;
+  const account = `Relay sign-in: ${view.refusedLogin ?? "Not available"}.`;
   switch (view.reason) {
     case "cancelled":
       return "Joining was cancelled.";
     case "declined":
-      return "A founder declined this machine.";
+      return `A founder declined this machine. ${account}`;
+    case "not_org_member":
+      return `The account is not an organization member. ${account}`;
     case "not_staff":
-      return "That account is not on the company's staff list.";
+      return `That account is not on the company's staff list. ${account}`;
     case "network_identity_mismatch":
-      return "The sign-in did not come from your registered network.";
+      return `The sign-in did not come from your registered network. ${account}`;
     case "environment_enrolled":
-      return "Another person has already joined this machine. They must remove it first.";
+      return `Another person has already joined this machine. They must remove it first. ${account}`;
     case "code_expired":
       return "The code expired before it was confirmed. Join again.";
     case "too_many_attempts":
@@ -87,7 +90,7 @@ const unknownMachineText = (displayName: string | undefined) =>
 export function joinAgainNotice(view: BanneretEnrolmentView): string {
   return view.health === "unknown_machine"
     ? unknownMachineText(view.displayName)
-    : "The relay refused this machine. Join again to replace it.";
+    : `The relay refused this machine. Join again to replace it. Relay account: ${view.me?.login ?? "Not available"}.`;
 }
 
 export function revokedMessage(view: BanneretEnrolmentView): string {
@@ -201,11 +204,17 @@ export function healthLine(view: BanneretEnrolmentView): EnrolmentLine {
     case "clock_wrong":
       return { tone: "warn", text: "This machine's clock is wrong" };
     case "refused":
-      return { tone: "error", text: "The relay refused this machine" };
+      return {
+        tone: "error",
+        text: `The relay refused this machine. Relay account: ${view.me?.login ?? "Not available"}.`,
+      };
     case "unknown_machine":
       return { tone: "error", text: unknownMachineText(view.displayName) };
     case "forbidden":
-      return { tone: "error", text: "The relay does not allow this machine" };
+      return {
+        tone: "error",
+        text: `The relay does not allow this machine. Relay account: ${view.me?.login ?? "Not available"}.`,
+      };
     case "invalid_reply":
       return { tone: "error", text: "The relay's answers do not match this version" };
     default:
@@ -236,11 +245,11 @@ export function forgetNotice(view: BanneretEnrolmentView | null): string | null 
     "You can forget this machine here instead; a founder must then remove it on the relay.";
   switch (view?.health) {
     case "refused":
-      return `The relay refused this machine, so it cannot confirm that it left. ${then}`;
+      return `The relay refused this machine, so it cannot confirm that it left. Relay account: ${view.me?.login ?? "Not available"}. ${then}`;
     case "unknown_machine":
-      return `${view.displayName ?? "The company"} no longer knows this machine (the relay may have been reset), so it cannot confirm that it left. ${then}`;
+      return `${view.displayName ?? "The company"} no longer knows this machine (the relay may have been reset), so it cannot confirm that it left. Relay account: ${view.me?.login ?? "Not available"}. ${then}`;
     case "forbidden":
-      return `The relay does not allow this machine to remove itself. ${then}`;
+      return `The relay does not allow this machine to remove itself. Relay account: ${view.me?.login ?? "Not available"}. ${then}`;
     case "clock_wrong":
       return `This machine's clock is wrong, so the relay would reject its calls. Fix the clock and try again, or forget it. ${then}`;
     case "invalid_reply":
@@ -278,13 +287,13 @@ export function loginSuffix(label: string, login: string | undefined): string {
   return clean === "" ? "" : ` \u00b7 ${label} ${clean}`;
 }
 
-/** "Connected as ada · Founder"; drops the login or the role when the relay sent none. */
+/** "Signed in as ada · Founder"; drops the login or the role when the relay sent none. */
 export function connectedLine(
   me: { login?: string | undefined; role?: string | undefined } | undefined,
 ): string {
   const login = cleanLogin(me?.login);
   const role = me?.role?.trim() ? roleLabel(me.role) : "";
-  const head = login === "" ? "Connected" : `Connected as ${login}`;
+  const head = login === "" ? "Connected" : `Signed in as ${login}`;
   return role === "" ? head : `${head} \u00b7 ${role}`;
 }
 

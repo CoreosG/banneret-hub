@@ -27,6 +27,7 @@
 // | approved                     | any other 401                                      | approved, health `refused`; back off |
 // | approved, configured         | 401 `token_revoked`                                | revoked                          |
 import * as NodeCrypto from "node:crypto";
+import { readTailscaleLogin } from "./tailscaleLogin.ts";
 import * as NodeOS from "node:os";
 
 import {
@@ -122,6 +123,7 @@ const Persisted = Schema.Union([
   Schema.Struct({
     state: Schema.Literal("none"),
     relayOrigin: Schema.String,
+    refusedLogin: Schema.optional(Schema.String),
     reason: Schema.optional(Schema.String),
     message: Schema.optional(Schema.String),
   }),
@@ -182,6 +184,7 @@ const PollReply = Schema.Struct({
   retryAfterMs: Schema.Number,
   machineId: Schema.optional(Schema.String),
   token: Schema.optional(Schema.String),
+  login: Schema.optional(Schema.String),
   reason: Schema.optional(Schema.String),
 });
 const PublicCapabilities = Schema.Struct({
@@ -468,10 +471,6 @@ const plainFailure = (error: RelayCallError, relay: string): BanneretRelayError 
   if (error.status === 0) return new BanneretRelayError({ message: `Cannot reach ${relay}.` });
   if (error.code === "redirect")
     return new BanneretRelayError({ message: `${relay} redirects; Banneret Hub does not follow.` });
-  if (error.status === 401)
-    return new BanneretRelayError({ message: "The relay refused this machine." });
-  if (error.status === 403)
-    return new BanneretRelayError({ message: "The relay does not allow this." });
   if (error.retryable)
     return new BanneretRelayError({ message: `${relay} is unavailable. Try again later.` });
   return new BanneretRelayError({ message: error.message });
@@ -639,10 +638,12 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
   const toNone = Effect.fn("BanneretEnrolment.toNone")(function* (
     reason: string,
     message?: string,
+    refusedLogin?: string,
   ) {
     yield* persist({
       state: "none",
       relayOrigin: origin,
+      ...(refusedLogin ? { refusedLogin } : {}),
       reason,
       ...(message === undefined ? {} : { message }),
     });
@@ -820,6 +821,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       Effect.flatMap(nowMs(), (now) =>
         relayFetch({
           origin: from.relayOrigin,
+          ...(from.state === "configured" ? { relayLogin: from.me.login } : {}),
           method,
           target,
           nowMs: now,
@@ -939,7 +941,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       }
       case "refused":
       case "expired":
-        yield* whileStill(from, toNone(reply.reason ?? reply.state));
+        yield* whileStill(from, toNone(reply.reason ?? reply.state, undefined, reply.login));
         return 0;
     }
   });
@@ -997,7 +999,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       }
       case "refused":
       case "expired":
-        yield* whileStill(from, toNone(reply.reason ?? reply.state));
+        yield* whileStill(from, toNone(reply.reason ?? reply.state, undefined, reply.login));
         return 0;
       case "pending":
       case "awaiting_approval":
@@ -1172,6 +1174,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       case "none":
         return {
           ...noneView(origin),
+          ...(state.refusedLogin ? { refusedLogin: state.refusedLogin } : {}),
           ...(state.reason === undefined ? {} : { reason: state.reason }),
           ...(state.message === undefined ? {} : { message: state.message }),
         };
@@ -1772,6 +1775,7 @@ export const poolResources = Effect.fn("BanneretEnrolment.pool")(function* (inpu
 });
 
 export const rpcHandlers = {
+  [BANNERET_RELAY_WS_METHODS.tailscaleLogin]: () => Effect.promise(() => readTailscaleLogin()),
   [BANNERET_RELAY_WS_METHODS.resources]: Effect.fn("BanneretEnrolment.resources")(
     function* (input: { readonly policy?: WarningPolicy | undefined }) {
       const { cwd } = yield* ServerConfig.ServerConfig;

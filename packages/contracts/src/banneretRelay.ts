@@ -43,6 +43,7 @@ export * from "./taskLeases.ts";
 export * from "./leaseProtocol.ts";
 
 export const BANNERET_RELAY_WS_METHODS = {
+  tailscaleLogin: "banneret.tailscaleLogin",
   resources: "banneret.resources",
   folders: "banneret.resourceFolders",
   sandbox: "banneret.sandbox",
@@ -126,6 +127,7 @@ export const BanneretEnrolmentView = Schema.Struct({
   browserUrl: Schema.optional(Schema.String),
   expiresAt: Schema.optional(Schema.String),
   /** Why the last enrolment ended, or why this machine was revoked: a relay reason code. */
+  refusedLogin: Schema.optional(Schema.String),
   reason: Schema.optional(Schema.String),
   /** The same in plain words. */
   message: Schema.optional(Schema.String),
@@ -290,6 +292,11 @@ export const BANNERET_RELAY_RPCS = [
     success: PoolResources,
     error: RelayRpcError,
   }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.tailscaleLogin, {
+    payload: Schema.Struct({}),
+    success: Schema.NullOr(Schema.String),
+    error: EnvironmentAuthorizationError,
+  }),
   WsBanneretRelayProbeRpc,
   WsBanneretRelayStatusRpc,
   WsBanneretRelayStartRpc,
@@ -306,6 +313,7 @@ export const BANNERET_RELAY_RPCS = [
 
 /** Spread into `CLIENT_GUARDED_RPC_SCOPES`. Probing dials an address the user typed. */
 export const BANNERET_RELAY_RPC_SCOPES = {
+  [BANNERET_RELAY_WS_METHODS.tailscaleLogin]: AuthDiagnosticsReadScope,
   [BANNERET_RELAY_WS_METHODS.resources]: AuthDiagnosticsReadScope,
   [BANNERET_RELAY_WS_METHODS.folders]: AuthFilesystemReadScope,
   [BANNERET_RELAY_WS_METHODS.officeEdit]: AuthEnvironmentMaintainScope,
@@ -330,6 +338,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
 
 /** Spread into the server's `RPC_AGGREGATES`. */
 export const BANNERET_RELAY_RPC_AGGREGATES = {
+  [BANNERET_RELAY_WS_METHODS.tailscaleLogin]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.resources]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.folders]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.officeEdit]: "banneret-relay",

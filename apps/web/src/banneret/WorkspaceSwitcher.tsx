@@ -31,9 +31,11 @@ import {
   enrolmentLine,
   type EnrolmentTone,
   joinLine,
+  roleLabel,
   pendingJoins,
 } from "./enterprise.logic";
 import { useEnrolmentViews } from "./enrolmentStore";
+import { useGitHubLogin, accountMatch } from "./accountIdentity";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
   openWorkspaceDialog,
@@ -246,6 +248,9 @@ function WorkspaceRadioItem(props: {
     props.workspace?.relay !== undefined
       ? enrolmentLine(props.workspace, props.enrolment ?? null)
       : null;
+  const primary = usePrimaryEnvironmentId();
+  const login = useGitHubLogin(props.enrolment?.me ? primary : null);
+  const mismatch = accountMatch(login, props.enrolment?.me?.login) === false;
   return (
     <MenuRadioItem value={props.value} closeOnClick>
       <span className="flex min-w-0 items-center gap-2">
@@ -255,7 +260,19 @@ function WorkspaceRadioItem(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate">{props.name}</span>
           {line !== null ? (
-            <span className="truncate text-muted-foreground text-xs">{line.text}</span>
+            <span className="text-muted-foreground text-xs">
+              <span>
+                {props.enrolment?.health === "healthy" && props.enrolment.me?.login.trim() ? (
+                  <>
+                    Signed in as <strong>{props.enrolment.me.login.trim()}</strong>
+                    {props.enrolment.me.role.trim() && ` · ${roleLabel(props.enrolment.me.role)}`}
+                  </>
+                ) : (
+                  line.text
+                )}
+              </span>
+              {mismatch && <span className="text-warning"> · GitHub: {login}</span>}
+            </span>
           ) : null}
         </span>
         <MenuRadioItemIndicator />

@@ -1,3 +1,4 @@
+import { AccountsSettings } from "./AccountsSettings";
 import { MemoryImportSetting } from "./MemoryTransfer";
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
@@ -72,10 +73,13 @@ export function MemorySettings() {
   if ((scope.kind !== "all" && scope.kind !== "environment") || !connectedEnvironments.length)
     return null;
   return (
-    <SettingsSection id="memory" title="Memory">
-      {connectedEnvironments.map(({ environmentId, label }) => (
-        <MemoryRow key={environmentId} environmentId={environmentId} label={label} />
-      ))}
-    </SettingsSection>
+    <>
+      <AccountsSettings machines={connectedEnvironments} />
+      <SettingsSection id="memory" title="Memory">
+        {connectedEnvironments.map(({ environmentId, label }) => (
+          <MemoryRow key={environmentId} environmentId={environmentId} label={label} />
+        ))}
+      </SettingsSection>
+    </>
   );
 }

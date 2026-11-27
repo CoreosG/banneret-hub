@@ -308,7 +308,13 @@ describe("BanneretEnrolment", () => {
       Effect.gen(function* () {
         const requested = yield* start(relay.origin);
         const id = yield* pairingId;
-        if (how === "refuse") fake.refusePairing(id, reason as "declined" | "not_staff");
+        if (how === "refuse") {
+          fake.confirmPairing(id, requested.confirmCode!, {
+            login: "newcomer",
+            awaitFounder: true,
+          });
+          fake.refusePairing(id, reason);
+        }
         if (how === "expire") fake.expirePairing(id);
         if (how === "expire-awaiting") {
           fake.confirmPairing(id, requested.confirmCode!, {
@@ -323,6 +329,7 @@ describe("BanneretEnrolment", () => {
         }
         const none = yield* waitForState("none");
         expect(none.reason).toBe(reason);
+        if (how === "refuse") expect(none.refusedLogin).toBe("newcomer");
         yield* noSecretsLeft;
       }).pipe(onFreshHub()),
     ),

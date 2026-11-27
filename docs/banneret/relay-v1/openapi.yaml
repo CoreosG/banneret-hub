@@ -4194,6 +4194,9 @@ components:
           type: string
           minLength: 32
           maxLength: 256
+        login:
+          description: The browser sign-in login when the relay knows which account it refused.
+          type: string
         reason:
           description: |
             Why a pairing is `refused` (`declined`, `not_staff`, `network_identity_mismatch`,
