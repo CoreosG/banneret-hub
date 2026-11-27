@@ -21,6 +21,7 @@ import {
   useProjects,
   useQuietThreadShells,
   useThreadShell,
+  useServerConfigs,
 } from "../state/entities";
 import type { Project } from "../types";
 import { enrolmentRpc, refreshEnrolment, useEnrolmentStore } from "./enrolmentStore";
@@ -94,7 +95,7 @@ function setup(displayName = "Example Company") {
     activeId: null,
     dialog: null,
   });
-  useEnrolmentStore.setState({ views: {}, machines: {} });
+  useEnrolmentStore.setState({ views: {}, machines: {}, missingStatusRpc: {} });
   state.openExternal.mockReset().mockResolvedValue(undefined);
   let stored: BanneretWorkspace[] = [];
   vi.spyOn(workspacesRpc, "list").mockImplementation(async () => ({ workspaces: stored }));
@@ -241,7 +242,14 @@ describe("EnterpriseWizard", () => {
     const remote = EnvironmentId.make("banneret-old");
     const pending = EnvironmentId.make("banneret-dev");
     const revoked = EnvironmentId.make("removed-server");
-    const connected = [LOCAL, remote, pending, revoked];
+    const legacy = EnvironmentId.make("older-mac");
+    const missing = EnvironmentId.make("missing-rpc");
+    const connected = [LOCAL, remote, pending, revoked, legacy, missing];
+    vi.mocked(useServerConfigs).mockReturnValue(
+      new Map([[legacy, { environment: { serverVersion: "0.1.1218" } }]]) as unknown as ReturnType<
+        typeof useServerConfigs
+      >,
+    );
     vi.mocked(useConnectedEnvironmentIds).mockReturnValue(connected);
     const joined = { ...server.pending, state: "configured" } as const;
     const records = new Map<EnvironmentId, BanneretEnrolmentView[]>([
@@ -251,18 +259,32 @@ describe("EnterpriseWizard", () => {
       [revoked, [{ ...joined, state: "revoked" }]],
     ]);
     server.serverWritesWorkspace();
-    server.spies.status.mockImplementation(async (id) => ({
-      ok: true,
-      value: {
-        machine: { environmentId: id, hostname: id, hubVersion: "1.0" },
-        enrolments: records.get(id) ?? [],
-      },
-    }));
+    server.spies.status.mockImplementation(async (id) =>
+      id === missing
+        ? { ok: false, message: "Unknown request tag: banneretRelay.status" }
+        : {
+            ok: true,
+            value: {
+              machine: { environmentId: id, hostname: id, hubVersion: "1.0" },
+              enrolments: records.get(id) ?? [],
+            },
+          },
+    );
     await using _screen = await render(<Harness />);
     const machines = async () => {
       await act(() => openWorkspaceDialog({ kind: "machines", origin: ORIGIN }));
     };
     await machines();
+    await expect
+      .element(page.getByRole("listitem", { name: legacy }))
+      .toHaveTextContent(
+        "older-macUpdate needed to read its status (v0.1.1218)Update Banneret Hub on older-mac.",
+      );
+    await expect
+      .element(page.getByRole("listitem", { name: missing }))
+      .toHaveTextContent(
+        "missing-rpcUpdate needed to read its statusUpdate Banneret Hub on missing-rpc.",
+      );
     const row = page.getByRole("listitem", { name: pending });
     await expect.element(row.getByText(/ABCD2345/)).toBeVisible();
     const copied = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);

@@ -77,10 +77,7 @@ it("reads only the matching v2 user slice and measures five minutes of throttlin
   }
 });
 
-it.each([
-  ["darwin", "macos"],
-  ["win32", "windows"],
-])("marks %s as not measured", async (platform, reason) => {
+it.each([["darwin", "macos"]])("marks %s as not measured", async (platform, reason) => {
   const report = await createResourceReader({
     platform,
     uid: 123,
@@ -91,5 +88,32 @@ it.each([
   })();
   expect(report.own.notMeasured).toBe(reason);
   expect(report.own.disk).toBeNull();
+  expect(report.host.pressure.cpu).toBeNull();
+});
+
+it("reads Windows host memory, sampled CPU and the workspace drive without Linux counters", async () => {
+  const fs = await NodeFSP.statfs(process.cwd());
+  let total = 100;
+  const read = createResourceReader(
+    {
+      platform: "win32",
+      uid: -1,
+      home: "",
+      proc: "",
+      cgroups: "",
+      now: () => 0,
+    },
+    () => ({ count: 4, total, idle: 25 }),
+  );
+  total += 40;
+  const report = await read(undefined, process.cwd());
+  expect(report.own.notMeasured).toBe("windows");
+  expect(report.windowsHost?.memory.limit).toBe(NodeOS.totalmem());
+  expect(report.windowsHost?.memory.used).toBe(NodeOS.totalmem() - report.host.memAvailableBytes!);
+  expect(report.own.disk?.limit).toBe((fs.blocks - fs.bfree + fs.bavail) * fs.bsize);
+  expect(report.windowsHost?.diskFreeBytes).toBeGreaterThan(0);
+  expect(report.coreLimit).toBe(4);
+  expect(report.cpuCores).toBe(4);
+  expect(report.own.inodes).toBeNull();
   expect(report.host.pressure.cpu).toBeNull();
 });

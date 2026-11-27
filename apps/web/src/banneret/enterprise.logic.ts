@@ -7,7 +7,14 @@ import {
   type BanneretWorkspace,
 } from "@t3tools/contracts";
 
+import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import type { Project } from "../types";
+
+export function peerUpdateMessage(version: string | undefined, missingRpc: boolean) {
+  const older = version && parseSemver(version) && compareSemverVersions(version, "0.1.1224") < 0;
+  if (!older && !missingRpc) return null;
+  return "Update needed to read its status" + (version ? ` (v${version.replace(/^v/, "")})` : "");
+}
 
 export type EnrolmentTone = "ok" | "warn" | "error" | "muted";
 

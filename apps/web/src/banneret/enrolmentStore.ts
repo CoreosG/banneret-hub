@@ -88,6 +88,7 @@ export type RelayOutcome<T> =
 
 const messageOf = (cause: Cause.Cause<unknown>) => {
   const error = Cause.squash(cause);
+  if (typeof error === "string") return error;
   return typeof error === "object" && error !== null && "message" in error
     ? String(error.message)
     : "This environment could not do that.";
@@ -212,13 +213,18 @@ export const enrolmentRpc = {
 };
 
 interface EnrolmentState {
+  readonly missingStatusRpc: Readonly<Record<EnvironmentId, boolean>>;
   /** Per environment, its enrolment with each relay it has tried, in origin order. */
   readonly views: Readonly<Record<EnvironmentId, ReadonlyArray<BanneretEnrolmentView>>>;
   /** Per environment, what it tells every relay about itself; from the last successful read. */
   readonly machines: Readonly<Record<EnvironmentId, BanneretEnrolmentMachine>>;
 }
 
-export const useEnrolmentStore = create<EnrolmentState>(() => ({ views: {}, machines: {} }));
+export const useEnrolmentStore = create<EnrolmentState>(() => ({
+  views: {},
+  machines: {},
+  missingStatusRpc: {},
+}));
 
 const EMPTY_VIEWS: ReadonlyArray<BanneretEnrolmentView> = [];
 
@@ -241,12 +247,21 @@ export async function refreshEnrolment(environmentId: EnvironmentId) {
   const result = await enrolmentRpc.status(environmentId);
   if (result.ok) {
     useEnrolmentStore.setState((state) => ({
+      missingStatusRpc: { ...state.missingStatusRpc, [environmentId]: false },
       views: { ...state.views, [environmentId]: result.value.enrolments },
       machines: { ...state.machines, [environmentId]: result.value.machine },
     }));
-  } else if (useEnrolmentStore.getState().views[environmentId] === undefined) {
+  } else {
     useEnrolmentStore.setState((state) => ({
-      views: { ...state.views, [environmentId]: EMPTY_VIEWS },
+      missingStatusRpc: {
+        ...state.missingStatusRpc,
+        [environmentId]: result.message.includes(
+          "Unknown request tag: " + BANNERET_RELAY_WS_METHODS.status,
+        ),
+      },
+      views: state.views[environmentId]
+        ? state.views
+        : { ...state.views, [environmentId]: EMPTY_VIEWS },
     }));
   }
   return result.ok ? result.value.enrolments : null;

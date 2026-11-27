@@ -53,6 +53,8 @@ export interface BubbleDot {
 }
 
 export interface StageBubble {
+  readonly labelLines: ReadonlyArray<string>;
+  readonly labelInside: boolean;
   readonly id: string;
   readonly title: string;
   /** The stage's place in plan order, from 1. */
@@ -105,6 +107,25 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const bubbleRadius = (count: number) =>
   count === 0 ? 26 : Math.min(96, Math.round(32 + 8 * Math.sqrt(count)));
 
+function wrapStageName(text: string, capacity: number) {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.trim().split(/\s+/u)) {
+    if (line && line.length + 1 + word.length > capacity) {
+      lines.push(line);
+      line = "";
+    }
+    for (const char of (line ? " " : "") + word) {
+      if (line.length >= capacity) {
+        lines.push(line);
+        line = "";
+      }
+      line += char;
+    }
+  }
+  return [...lines, line];
+}
+
 /** Items as dots on a sunflower spiral, grouped by status from the centre out. */
 function bubbleDots(
   items: ReadonlyArray<BanneretMapItem>,
@@ -145,11 +166,17 @@ export function stageLayout(map: BanneretMap): StageLayout {
   const stages = mapStages(map);
   const progress = stages.map((stage) => stageProgress(stage.counts));
   const spine = spineStates(progress);
-  const sized = stages.map((stage, index) => ({
-    stage,
-    index,
-    r: bubbleRadius(stage.items.length),
-  }));
+  const sized = stages.map((stage, index) => {
+    const r = bubbleRadius(stage.items.length);
+    const name = `${index + 1}. ${stage.title}`;
+    const glyphWidth = /^[ -~]+$/.test(name) ? 8 : 14;
+    const inside = wrapStageName(name, Math.max(1, Math.floor((r * 1.3) / glyphWidth)));
+    const labelInside = r >= 40 && inside.length <= 2;
+    const labelLines = labelInside
+      ? inside
+      : wrapStageName(name, Math.floor(Math.max(2 * r, 132) / glyphWidth));
+    return { stage, index, r, labelInside, labelLines };
+  });
 
   const rows: Array<Array<(typeof sized)[number]>> = [];
   let row: Array<(typeof sized)[number]> = [];
@@ -182,9 +209,8 @@ export function stageLayout(map: BanneretMap): StageLayout {
       return { entry, x };
     });
     if (rowIndex % 2 === 1) {
-      const xs = placed.map((place) => place.x).toReversed();
-      placed.forEach((place, column) => {
-        place.x = xs[column]!;
+      placed.forEach((place) => {
+        place.x = STAGE_VIEW_WIDTH - place.x;
       });
     }
     for (const [column, { entry, x }] of placed.entries()) {
@@ -192,6 +218,8 @@ export function stageLayout(map: BanneretMap): StageLayout {
       const y = top + wave + tallest + (column % 2 === 0 ? -wave : wave);
       const { built, total } = progress[index]!;
       bubbles.push({
+        labelInside: entry.labelInside,
+        labelLines: entry.labelLines,
         id: stage.id,
         title: stage.title,
         number: index + 1,
@@ -207,7 +235,12 @@ export function stageLayout(map: BanneretMap): StageLayout {
         ...bubbleDots(stage.items, r),
       });
     }
-    top += 2 * tallest + 2 * wave + STAGE_LABEL + ROW_GAP;
+    top +=
+      2 * tallest +
+      2 * wave +
+      Math.max(...entries.map((e) => (e.labelInside ? 0 : e.labelLines.length - 1))) * 16 +
+      STAGE_LABEL +
+      ROW_GAP;
   });
 
   const spinePaths = bubbles.slice(1).map((bubble, index) => {
