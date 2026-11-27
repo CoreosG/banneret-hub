@@ -630,7 +630,9 @@ describe("Task dialog facts", () => {
         .find((term) => term.textContent === label)
         ?.nextElementSibling?.querySelector("[data-fact-empty]")?.textContent;
     expect(empty("Closed")).toBe("Still open");
-    expect(empty("Preview")).toBe("None");
+    // The relay served no task read here, so it has not said whether there is a preview.
+    expect(empty("Preview")).toBe("Not known");
+    expect(empty("Rests on")).toBe("None");
     expect(panel().querySelector('[data-slot="lease-chip"]')?.textContent).toBe(
       "bo-examplequiet 7 h",
     );

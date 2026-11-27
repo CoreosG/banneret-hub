@@ -201,6 +201,14 @@ describe("BanneretEnrolment", () => {
             expect(new URL(requested.browserUrl!).origin).toBe(relay.origin);
             expect(requested.browserUrl).not.toContain(requested.confirmCode!);
             expect(requested.workspaceId).toMatch(/^ent-[0-9a-f]{16}$/);
+            // Support matches the join to the relay's `pairings list` by these.
+            expect(requested.pairingId).toBe(yield* pairingId);
+            const machine = yield* Effect.flatMap(
+              Enrolment.BanneretEnrolment,
+              (enrolment) => enrolment.machine,
+            );
+            expect(machine.environmentId).not.toBe("");
+            expect(machine.hostname).toMatch(/^[A-Za-z0-9]/);
 
             expect(fake.confirmPairing(yield* pairingId, requested.confirmCode!, ADA)).toBe(
               "approved",

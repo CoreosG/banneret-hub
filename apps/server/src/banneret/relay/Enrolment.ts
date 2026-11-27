@@ -34,6 +34,7 @@ import {
   BANNERET_RELAY_WS_METHODS,
   BanneretMachineKind,
   BanneretRelayError,
+  type BanneretEnrolmentMachine,
   type BanneretEnrolmentView,
   type BanneretMachineKind as MachineKind,
   type BanneretRelayHealth,
@@ -239,11 +240,8 @@ const sanitize = (
   return pattern.test(cleaned) ? cleaned : fallback;
 };
 
-/** Machine facts for `enroll/start`, sanitised to the contract's patterns. Never a path. */
-const machineFacts = (environmentId: string, label: string, kind: MachineKind) => ({
-  environmentId,
-  label,
-  kind,
+/** The hostname and Hub version this machine reports, as the relay's `pairings list` shows them. */
+const hostFacts = () => ({
   hostname: sanitize(
     NodeOS.hostname(),
     /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/,
@@ -251,18 +249,26 @@ const machineFacts = (environmentId: string, label: string, kind: MachineKind) =
     "hub",
     253,
   ),
-  os: sanitize(
-    `${NodeOS.type()} ${NodeOS.release()}`,
-    /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,63}$/,
-    /[^A-Za-z0-9 ._()-]+/g,
-    "unknown",
-    64,
-  ),
   hubVersion: sanitize(
     packageJson.version,
     /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/,
     /[^0-9A-Za-z.+-]+/g,
     "0",
+    64,
+  ),
+});
+
+/** Machine facts for `enroll/start`, sanitised to the contract's patterns. Never a path. */
+const machineFacts = (environmentId: string, label: string, kind: MachineKind) => ({
+  environmentId,
+  label,
+  kind,
+  ...hostFacts(),
+  os: sanitize(
+    `${NodeOS.type()} ${NodeOS.release()}`,
+    /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,63}$/,
+    /[^A-Za-z0-9 ._()-]+/g,
+    "unknown",
     64,
   ),
   policyFingerprint: null,
@@ -332,6 +338,8 @@ interface EnrolmentService {
   readonly probe: (origin: string) => Effect.Effect<BanneretRelayProbeResult, BanneretRelayError>;
   /** Every relay this environment has a state file for, in origin order. */
   readonly list: Effect.Effect<ReadonlyArray<BanneretEnrolmentView>>;
+  /** What this machine tells every relay about itself, for support to match `pairings list`. */
+  readonly machine: Effect.Effect<BanneretEnrolmentMachine>;
   /** One relay's view; `none` when this environment never tried that relay. */
   readonly status: (relayOrigin: string) => Effect.Effect<BanneretEnrolmentView>;
   /** One relay's instance, if this environment has one. Never creates one, so never calls a relay. */
@@ -400,6 +408,7 @@ export class BanneretEnrolment extends Context.Reference<EnrolmentService>(
     defaultValue: () => ({
       probe: () => notRunning,
       list: Effect.succeed([]),
+      machine: Effect.sync(() => ({ environmentId: "", ...hostFacts() })),
       status: (relayOrigin) =>
         Effect.succeed(noneView(normalizeOrigin(relayOrigin) ?? relayOrigin)),
       relay: () => Effect.undefined,
@@ -1129,6 +1138,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           workspaceId: enterpriseWorkspaceId(state.relayOrigin),
           relayOrigin: state.relayOrigin,
           displayName: state.displayName,
+          pairingId: state.pairingId,
           label: state.label,
           confirmCode: state.confirmCode,
           browserUrl: state.browserUrl,
@@ -1140,6 +1150,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           workspaceId: enterpriseWorkspaceId(state.relayOrigin),
           relayOrigin: state.relayOrigin,
           displayName: state.displayName,
+          pairingId: state.pairingId,
           machineId: state.machineId,
           label: state.label,
           ...(health === undefined ? {} : { health }),
@@ -1533,6 +1544,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         (relay) => relay.status,
       ),
     ),
+    machine: Effect.sync(() => ({ environmentId: shared.environmentId, ...hostFacts() })),
     status: (relayOrigin) =>
       Effect.flatMap(lookup(relayOrigin), (relay) =>
         relay === undefined
@@ -1597,7 +1609,10 @@ export const rpcHandlers = {
     Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.probe(input.origin)),
   [BANNERET_RELAY_WS_METHODS.status]: () =>
     Effect.flatMap(BanneretEnrolment, (enrolment) =>
-      Effect.map(enrolment.list, (enrolments) => ({ enrolments })),
+      Effect.map(Effect.all([enrolment.list, enrolment.machine]), ([enrolments, machine]) => ({
+        enrolments,
+        machine,
+      })),
     ),
   [BANNERET_RELAY_WS_METHODS.start]: (input: {
     readonly origin: string;

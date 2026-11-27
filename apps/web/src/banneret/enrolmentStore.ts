@@ -9,6 +9,7 @@ import {
 import {
   BANNERET_RELAY_WS_METHODS,
   type BanneretEnrolmentList,
+  type BanneretEnrolmentMachine,
   type BanneretEnrolmentView,
   type BanneretMachineKind,
   type BanneretRelayMachinesPage,
@@ -151,9 +152,11 @@ export const enrolmentRpc = {
 interface EnrolmentState {
   /** Per environment, its enrolment with each relay it has tried, in origin order. */
   readonly views: Readonly<Record<EnvironmentId, ReadonlyArray<BanneretEnrolmentView>>>;
+  /** Per environment, what it tells every relay about itself; from the last successful read. */
+  readonly machines: Readonly<Record<EnvironmentId, BanneretEnrolmentMachine>>;
 }
 
-export const useEnrolmentStore = create<EnrolmentState>(() => ({ views: {} }));
+export const useEnrolmentStore = create<EnrolmentState>(() => ({ views: {}, machines: {} }));
 
 const EMPTY_VIEWS: ReadonlyArray<BanneretEnrolmentView> = [];
 
@@ -177,6 +180,7 @@ export async function refreshEnrolment(environmentId: EnvironmentId) {
   if (result.ok) {
     useEnrolmentStore.setState((state) => ({
       views: { ...state.views, [environmentId]: result.value.enrolments },
+      machines: { ...state.machines, [environmentId]: result.value.machine },
     }));
   } else if (useEnrolmentStore.getState().views[environmentId] === undefined) {
     useEnrolmentStore.setState((state) => ({
@@ -206,6 +210,15 @@ export function useEnrolmentView(
       : ((state.views[environmentId] ?? EMPTY_VIEWS).find(
           (view) => view.relayOrigin === relayOrigin,
         ) ?? null),
+  );
+}
+
+/** What the environment tells relays about itself; null until its first read answers. */
+export function useEnrolmentMachine(
+  environmentId: EnvironmentId | null,
+): BanneretEnrolmentMachine | null {
+  return useEnrolmentStore((state) =>
+    environmentId === null ? null : (state.machines[environmentId] ?? null),
   );
 }
 

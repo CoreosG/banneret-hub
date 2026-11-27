@@ -1,6 +1,5 @@
 import appCss from "../index.css?inline";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { minuteTick } from "@t3tools/client-runtime/clock";
 import {
   EnvironmentId,
   ProjectId,
@@ -22,7 +21,7 @@ import {
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
-import { act, render } from "../../test/render";
+import { act, fakeTimers, render } from "../../test/render";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { useProjects, useServerConfigs } from "../state/entities";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -50,8 +49,11 @@ const RELAY = { environmentId: LOCAL, relayOrigin: "https://relay.example.com" }
 const HOSTILE = '<img src=x onerror="window.__pwned=1">';
 const MINUTE = 60_000;
 
-const minuteStart = () => Date.parse(`${minuteTick.getSnapshot()}:00.000Z`);
-const ago = (ms: number) => new Date(minuteStart() - ms).toISOString();
+/** The fixtures' clock, on a minute boundary. A test that reads relative times pins the page's clock here. */
+const NOW = Date.parse("2026-11-26T10:00:00.000Z");
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
+/** Holds the page's clock at `NOW`, so "12 min ago" cannot turn into "13 min ago" mid-test. */
+const pinClock = () => fakeTimers({ now: NOW });
 
 const founder: BanneretEnrolmentView = {
   state: "configured",
@@ -218,6 +220,7 @@ const headerLinkOut = () =>
 
 describe("Task tab", () => {
   it("draws the header from the board card, with the preview and sign-off from the task read", async () => {
+    using _clock = pinClock();
     const { emit, read } = setup();
     const shown = card("2", "Guild invites", {
       restsOn: ["t_1", "t_gone"],
