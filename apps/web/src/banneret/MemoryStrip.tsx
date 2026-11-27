@@ -137,7 +137,9 @@ export function MemoryStrip({
           Search notes{" "}
           <input type="search" value={query} onChange={(e) => setMemoryCard(ref, e.target.value)} />
         </label>
-        {writable && <MemoryTransfer {...ref} refresh={() => refresh((n) => n + 1)} />}
+        {writable && (
+          <MemoryTransfer {...ref} revision={revision} refresh={() => refresh((n) => n + 1)} />
+        )}
         {notes.error && <p role="alert">{notes.error}</p>}
         {notes.value && (
           <MemoryNotes

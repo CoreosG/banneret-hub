@@ -24,6 +24,7 @@ const reviewAction = Schema.Union([
 ]);
 export type MemoryReviewAction = typeof reviewAction.Type;
 const reviewNote = Schema.Struct({
+  alternative: Schema.optional(Schema.String),
   key: Schema.String,
   text: Schema.String,
   kind: Schema.String,
@@ -44,6 +45,30 @@ export const memoryReviewInput = Schema.Struct({
   action: reviewAction,
 });
 export const MEMORY_RPCS = [
+  Rpc.make("memory.repoSetting", {
+    payload: Schema.Struct({ threadId: ThreadId }),
+    success: Schema.Struct({
+      url: Schema.String,
+      projects: Schema.Boolean,
+      enterprise: Schema.Boolean,
+      status: Schema.String,
+    }),
+    error,
+  }),
+  Rpc.make("memory.setRepo", {
+    payload: Schema.Struct({
+      threadId: ThreadId,
+      url: Schema.String.check(Schema.isMaxLength(2048)),
+      projects: Schema.Boolean,
+    }),
+    success: Schema.String,
+    error,
+  }),
+  Rpc.make("memory.sync", {
+    payload: Schema.Struct({ threadId: ThreadId }),
+    success: Schema.String,
+    error,
+  }),
   Rpc.make("memory.confirmImport", {
     payload: Schema.Struct({
       threadId: ThreadId,
@@ -95,6 +120,9 @@ export const MEMORY_RPCS = [
 ] as const;
 
 export const MEMORY_RPC_SCOPES = {
+  "memory.repoSetting": AuthSettingsWriteScope,
+  "memory.setRepo": AuthSettingsWriteScope,
+  "memory.sync": AuthSettingsWriteScope,
   "memory.confirmImport": AuthSettingsWriteScope,
   "memory.importFile": AuthSettingsWriteScope,
   "memory.exportFiles": AuthSettingsWriteScope,
@@ -107,6 +135,9 @@ export const MEMORY_RPC_SCOPES = {
 } as const;
 
 export const MEMORY_RPC_AGGREGATES = {
+  "memory.repoSetting": "leases",
+  "memory.setRepo": "leases",
+  "memory.sync": "leases",
   "memory.confirmImport": "leases",
   "memory.importFile": "leases",
   "memory.exportFiles": "leases",

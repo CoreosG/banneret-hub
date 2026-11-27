@@ -147,3 +147,12 @@ import before enabling provider memory replacement. Choose the receiving orchest
 Import reads directly selected files or the top-level Markdown files in a selected folder.
 It skips existing keys and refuses suspected credentials. Imported notes are proposals.
 Review them individually or explicitly confirm an import batch in the command card.
+
+For a Git backup, open **Import or sync memory** in the environment's Memory settings,
+choose an orchestrator, and save the HTTPS URL of a private GitHub repository you own.
+Hub uses that machine's GitHub login. Copies are unencrypted. The workspace syncs after
+note changes, and **Sync now** in the `/memory` card also checks for remote changes.
+Enterprise workspaces copy personal notes by default. You can include project notes if
+your company allows Git copies. Review conflicting edits in the card before syncing
+your choice. Clear the saved URL to stop future copies. Existing Git history stays in
+the repository.
