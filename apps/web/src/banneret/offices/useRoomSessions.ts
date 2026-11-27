@@ -5,7 +5,7 @@ import { feedRpc } from "../relayFeedStore";
 
 export function useRoomSessions(
   { environmentId, relayOrigin }: RelayTarget,
-  board: string,
+  board: string | null,
   revision: string | undefined,
   enabled: boolean,
 ) {
@@ -40,5 +40,25 @@ export function useRoomSessions(
       cancelled = true;
     };
   }, [enabled, current, revision, board, environmentId, relayOrigin]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- expire stopped sessions even if the next snapshot is delayed
+  useEffect(() => {
+    if (!enabled || !current?.sessions) return;
+    const expiresAt = (s: OfficeRoomPage["sessions"][number]) =>
+      s.state === "stopped" ? Date.parse(s.since) + 3600000 : Infinity;
+    const next = Math.min(...current.sessions.map(expiresAt));
+    if (!Number.isFinite(next)) return;
+    const timer = setTimeout(
+      () => {
+        const now = Date.now();
+        setRead((previous) =>
+          previous === current && previous.sessions
+            ? { ...previous, sessions: previous.sessions.filter((s) => expiresAt(s) > now) }
+            : previous,
+        );
+      },
+      Math.max(0, next - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [current, enabled]);
   return { sessions: current?.sessions, retry: () => setRead(undefined) };
 }

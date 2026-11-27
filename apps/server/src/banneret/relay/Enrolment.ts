@@ -33,6 +33,10 @@ import {
   BANNERET_MACHINE_LABEL_PATTERN,
   BANNERET_RELAY_WS_METHODS,
   PoolResources,
+  type OfficeEdit,
+  OfficeHeartbeats,
+  OfficeSharing,
+  officeMeetingUrlValid,
   PoolFounderView,
   type PoolFounderAction,
   SandboxReceipt,
@@ -141,6 +145,7 @@ const Persisted = Schema.Union([
     machineId: Schema.String,
     label: Schema.String,
     kind: BanneretMachineKind,
+    sharing: Schema.optional(OfficeSharing),
     me: Me,
     replacedLabel: Schema.optional(Schema.String),
     lastOkAt: Schema.optional(Schema.String),
@@ -335,6 +340,10 @@ export interface RelayEnrolment {
     path: string,
     body?: unknown,
   ) => Effect.Effect<RelayReply, RelayCallError>;
+  readonly officeEdit: (action: OfficeEdit) => Effect.Effect<void, BanneretRelayError>;
+  readonly officeHeard: (
+    ids: readonly string[],
+  ) => Effect.Effect<OfficeHeartbeats, BanneretRelayError>;
   readonly poolFounder: (
     action?: PoolFounderAction,
   ) => Effect.Effect<PoolFounderView, BanneretRelayError>;
@@ -1089,7 +1098,10 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     const collected = yield* facts.collect(from.relayOrigin, (links) =>
       taskIdForLinks(tasks, links),
     );
-    const body = factsRequestBody(machineFacts(environmentId, from.label, from.kind), collected);
+    const body = factsRequestBody(
+      { ...machineFacts(environmentId, from.label, from.kind), ...from.sharing },
+      collected,
+    );
     const outcome = yield* signedCall(from, "POST", "/relay/v1/facts", undefined, body).pipe(
       Effect.result,
     );
@@ -1196,6 +1208,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           displayName: state.displayName,
           machineId: state.machineId,
           label: state.label,
+          ...(state.sharing && { sharing: state.sharing }),
           me: { login: state.me.login, role: state.me.role },
           ...(state.replacedLabel === undefined ? {} : { replacedLabel: state.replacedLabel }),
           ...(health === undefined ? {} : { health }),
@@ -1487,6 +1500,55 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           body,
         ),
       ),
+    officeHeard: Effect.fn("BanneretEnrolment.officeHeard")(function* (ids) {
+      const from = yield* requireConfigured;
+      if (!ids.length || ids.length > 50 || ids.some((id) => !/^[a-zA-Z0-9_-]{1,64}$/.test(id)))
+        return yield* fail("Invalid session selection.");
+      return yield* signedCall(
+        from,
+        "GET",
+        "/relay/v1/team/heartbeats?sessions=" + encodeURIComponent(ids.join(",")),
+      ).pipe(
+        Effect.flatMap((reply) => decodeReply(OfficeHeartbeats, reply)),
+        Effect.mapError((error) => plainFailure(error, from.displayName)),
+      );
+    }),
+    officeEdit: Effect.fn("BanneretEnrolment.officeEdit")(function* (action) {
+      if (action.kind === "sharing") {
+        yield* locked(
+          Effect.gen(function* () {
+            const from = yield* requireConfigured;
+            yield* persist({
+              ...from,
+              sharing: { share: action.share, shareUsage: action.shareUsage },
+            });
+          }),
+        );
+        yield* wake;
+        return;
+      }
+      const from = yield* requireConfigured;
+      let path = "/relay/v1/team/me";
+      let body;
+      if (action.kind === "meeting") {
+        if (from.me.role !== "founder") return yield* fail("Only founders can edit meeting links.");
+        if (action.meetingUrl !== null && !officeMeetingUrlValid(action.meetingUrl))
+          return yield* fail("Enter a valid HTTPS meeting link.");
+        if (action.board !== null && !/^[a-zA-Z0-9_-]{1,64}$/.test(action.board))
+          return yield* fail("Invalid room.");
+        path =
+          "/relay/v1/team/" +
+          (action.board === null ? "office" : "rooms/" + encodeURIComponent(action.board));
+        body = { meetingUrl: action.meetingUrl };
+      } else {
+        if (action.status && Buffer.byteLength(action.status.text) > 80)
+          return yield* fail("Status exceeds 80 bytes.");
+        body = { presence: action.presence, status: action.status };
+      }
+      yield* signedCall(from, "PUT", path, undefined, body).pipe(
+        Effect.mapError((error) => plainFailure(error, from.displayName)),
+      );
+    }),
     poolFounder: (action) =>
       configuredNow.pipe(
         Effect.flatMap((from) =>
@@ -1724,6 +1786,20 @@ export const rpcHandlers = {
       try: biggestFolders,
       catch: () => new BanneretRelayError({ message: "Home folder sizes could not be read." }),
     }),
+  [BANNERET_RELAY_WS_METHODS.officeEdit]: Effect.fn("BanneretEnrolment.officeEditRpc")(
+    function* (input: { relayOrigin: string; action: OfficeEdit }) {
+      const relay = yield* (yield* BanneretEnrolment).relay(input.relayOrigin);
+      if (!relay) return yield* fail("This machine has not joined the company.");
+      return yield* relay.officeEdit(input.action);
+    },
+  ),
+  [BANNERET_RELAY_WS_METHODS.officeHeard]: Effect.fn("BanneretEnrolment.officeHeardRpc")(
+    function* (input: { relayOrigin: string; ids: readonly string[] }) {
+      const relay = yield* (yield* BanneretEnrolment).relay(input.relayOrigin);
+      if (!relay) return yield* fail("This machine has not joined the company.");
+      return yield* relay.officeHeard(input.ids);
+    },
+  ),
   [BANNERET_RELAY_WS_METHODS.poolFounder]: Effect.fn("BanneretEnrolment.poolFounder")(
     function* (input: { relayOrigin: string; action?: PoolFounderAction | undefined }) {
       const service = yield* BanneretEnrolment;

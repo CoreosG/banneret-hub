@@ -41,6 +41,7 @@ import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
 import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { TeamPage } from "./TeamPage";
 import { useWorkspacesStore } from "./workspacesStore";
 
@@ -297,6 +298,9 @@ function Shell() {
   return (
     <SidebarProvider>
       <nav aria-label="Sidebar">
+        <WorkspaceSwitcher homeLabel="Home" onBackdrop={false}>
+          Workspace
+        </WorkspaceSwitcher>
         <EnterpriseSidebarRows />
       </nav>
       <Outlet />
@@ -740,6 +744,66 @@ describe("Team page", () => {
     await expect.element(page.getByRole("button", { name: /Platform.*desks/ })).toBeVisible();
   });
 
+  it("reminds only the signed-in person and writes only on Save", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openTeam(stack);
+    await using _screen = screen;
+    const edit = vi
+      .spyOn(enrolmentRpc, "officeEdit")
+      .mockResolvedValue({ ok: true, value: undefined });
+    const people = TEAM().people.map((p) => ({
+      ...p,
+      presence: p.login === "ada-example" ? "away" : "off",
+    }));
+    await emit(state(ALL, teamRead({ people })));
+    await expect.element(page.getByText("You're shown as Away. Change?")).toBeVisible();
+    if (import.meta.env.VITE_OFFICE_SCREENSHOTS)
+      await page.screenshot({ path: import.meta.env.VITE_OFFICE_SCREENSHOTS + "/reminder.png" });
+    await page.getByRole("button", { name: "Change", exact: true }).click();
+    await userEvent.selectOptions(page.getByRole("dialog").getByRole("combobox"), "focusing");
+    await userEvent.fill(page.getByLabelText("Status line"), "Design review");
+    expect(edit).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Save presence" }).click();
+    expect(edit.mock.lastCall?.[1]).toEqual({
+      kind: "presence",
+      presence: "focusing",
+      status: { text: "Design review" },
+    });
+    await userEvent.fill(page.getByLabelText("Status line"), "");
+    await page.getByRole("button", { name: "Save presence" }).click();
+    expect(edit.mock.lastCall?.[1]).toMatchObject({ status: null });
+  });
+
+  it("previews all machine sharing choices before saving and omits person ages", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openTeam(stack);
+    await using _screen = screen;
+    const edit = vi
+      .spyOn(enrolmentRpc, "officeEdit")
+      .mockResolvedValue({ ok: true, value: undefined });
+    await emit(state(ALL, teamRead(TEAM())));
+    await page.getByRole("button", { name: "Office", exact: true }).click();
+    const sharing = page.getByLabelText("Machine sharing");
+    await expect.element(sharing).toHaveValue("agents_only");
+    await expect.element(page.getByText("Agents without the machine name")).toBeVisible();
+    await userEvent.selectOptions(sharing, "agents_and_name");
+    await expect.element(page.getByText("Agents and machine name: Ada server")).toBeVisible();
+    if (import.meta.env.VITE_OFFICE_SCREENSHOTS)
+      await page.screenshot({ path: import.meta.env.VITE_OFFICE_SCREENSHOTS + "/office.png" });
+    await userEvent.selectOptions(sharing, "hidden");
+    await expect.element(page.getByText("No agents or machine name")).toBeVisible();
+    await expect.element(page.getByText("Claims: ada-example/private")).toBeVisible();
+    expect(edit).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Save sharing" }).click();
+    expect(edit.mock.lastCall?.[1]).toEqual({
+      kind: "sharing",
+      share: "hidden",
+      shareUsage: false,
+    });
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    for (const row of page.getByRole("listitem").elements())
+      expect(row.textContent).not.toMatch(/ago|last seen|heard/i);
+  });
   it("says when nobody is here yet", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openTeam(stack);

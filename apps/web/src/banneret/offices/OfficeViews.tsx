@@ -1,3 +1,6 @@
+import { AgentDetails, Hallway, MachineHeard } from "./AgentDetails";
+import { MeetingEditor, PresenceForm, SharingForm } from "./OfficeSettings";
+import { officeMeetingUrlValid } from "@t3tools/contracts";
 import { MachineResources, usePoolResources } from "../ui/MachineResources";
 import type {
   PoolResources,
@@ -74,7 +77,7 @@ function PersonSprite({ login }: { login: string }) {
 }
 
 function Meeting({ url }: { url?: string | undefined }) {
-  if (!url || !/^https:\/\/[^/@?#\\\s]+(?:[/?#][^\s\\]*)?$/.test(url)) return null;
+  if (!url || !officeMeetingUrlValid(url)) return null;
   return (
     <a
       className="text-sm underline"
@@ -114,6 +117,7 @@ function SharedMachine({
       onToggle={(e) => setExpanded(e.currentTarget.open)}
     >
       <summary className="cursor-pointer">{machine.label}</summary>
+      {expanded && visible && machine.lastHeardAt && <MachineHeard at={machine.lastHeardAt} />}
       {expanded && visible && (
         <MachineResources
           target={target}
@@ -183,6 +187,7 @@ function Room({
   board,
   people,
   initialOpen,
+  founder,
   index,
   revision,
   seatFor,
@@ -195,6 +200,7 @@ function Room({
   board: BanneretBoardEntry | undefined;
   people: readonly Person[];
   initialOpen: boolean;
+  founder: boolean;
   index: AgentIndex;
   revision: string | undefined;
   seatFor: (p: Person, board: string) => string | undefined;
@@ -232,10 +238,9 @@ function Room({
     const seated =
       (p.presence === "available" || p.presence === "focusing") &&
       seatFor(p, room.board) === room.board;
-    if (!seated && !agents.some((a) => a.state !== "stopped")) return [];
     const counts = indexState.byPerson.get(p.id)?.counts;
     if (state && !counts?.[state as keyof Counts]) return [];
-    return [{ p, counts, cards }];
+    return [{ p, counts, cards, agents, seated }];
   });
   const needed =
     visible &&
@@ -266,7 +271,12 @@ function Room({
             {countText(room.counts) && " · " + countText(room.counts)}
           </span>
         </button>
-        {flags.includes("meeting_links") && <Meeting url={room.meetingUrl} />}
+        {flags.includes("meeting_links") && (
+          <>
+            <Meeting url={room.meetingUrl} />
+            {founder && <MeetingEditor target={target} board={room.board} url={room.meetingUrl} />}
+          </>
+        )}
       </header>
       {open && (
         <div className="border-t p-3">
@@ -279,13 +289,13 @@ function Room({
           ) : (
             <>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {desks.slice(0, 12).map(({ p, counts, cards }) => (
+                {desks.slice(0, 12).map(({ p, counts, cards, agents, seated }) => (
                   <article
                     key={p.id}
                     data-person={p.login}
                     className="min-w-0 space-y-1 rounded-md border p-3 text-sm"
                   >
-                    <PersonSprite login={p.login} />
+                    {seated && <PersonSprite login={p.login} />}
                     <strong>{p.displayName ?? p.login}</strong>
                     {flags.includes("presence") && (
                       <span className="ml-2 text-muted-foreground">{p.presence}</span>
@@ -294,6 +304,9 @@ function Room({
                     <div className="my-1">
                       <AgentCounts counts={counts} />
                     </div>
+                    {agents.map((session) => (
+                      <AgentDetails key={session.id} session={session} target={target} />
+                    ))}
                     {p.machines.map((m) => (
                       <SharedMachine
                         key={m.id}
@@ -312,6 +325,7 @@ function Room({
                       >
                         {card.task.title}
                         <LeaseChip
+                          holder={card.lease!.claim ?? p.login + "/private"}
                           state={
                             ["active", "paused"].includes(card.lease!.state)
                               ? card.lease!.state
@@ -416,7 +430,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
             <button
               type="button"
               key={name}
-              aria-pressed={name === (list ? "List" : "Floor")}
+              aria-pressed={raw.view !== "office" && name === (list ? "List" : "Floor")}
               className="px-3 py-1 text-sm aria-pressed:bg-accent"
               onClick={() => {
                 scroll({ selection, start: 0 });
@@ -426,101 +440,134 @@ export function OfficeViews({ enterprise, office, people }: Props) {
               {name}
             </button>
           ))}
-          <button type="button" disabled className="px-3 py-1 text-muted-foreground text-sm">
+          <button
+            type="button"
+            aria-pressed={raw.view === "office"}
+            onClick={() => set({ view: "office" })}
+            className="px-3 py-1 text-sm aria-pressed:bg-accent"
+          >
             Office
           </button>
         </div>
-        {flags.includes("meeting_links") && <Meeting url={summary.office.meetingUrl} />}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <FilterBox
-          placeholder="Find a person"
-          label="Find a person"
-          value={filters.q}
-          onChange={(q) => update({ q })}
-        />
-        <Select
-          label="Boards"
-          selected={filters.board}
-          options={summary.rooms.map((r) => [r.board, boardById.get(r.board)?.title ?? r.board])}
-          change={(board) => update({ board })}
-        />
-        <Select
-          label="Agent states"
-          selected={filters.state}
-          options={states.map((k) => [k, labels[k]])}
-          change={(state) => update({ state })}
-        />
-        {flags.includes("presence") && (
-          <Select
-            label="Presence"
-            selected={filters.presence}
-            options={["available", "focusing", "away", "off"].map((k) => [k, k])}
-            change={(presence) => update({ presence })}
-          />
+        {flags.includes("meeting_links") && (
+          <>
+            <Meeting url={summary.office.meetingUrl} />
+            {enterprise.enrolment.me?.role === "founder" && (
+              <MeetingEditor
+                target={enterprise.target}
+                board={null}
+                url={summary.office.meetingUrl}
+              />
+            )}
+          </>
         )}
       </div>
-      {error && <button onClick={() => index.retry()}>Retry agent counts</button>}
-      {!people.length ? (
-        <QuietLine fact="Nobody is here yet." />
-      ) : list ? (
-        <div
-          key={selection}
-          role="list"
-          aria-label="Team members"
-          className="max-h-[1008px] min-h-0 flex-1 overflow-auto"
-          onScroll={(e) => {
-            const next = Math.max(0, Math.floor(e.currentTarget.scrollTop / 48) - 2);
-            if (next !== start) scroll({ selection, start: next });
-          }}
-        >
-          <div style={{ height: matches.length * 48, position: "relative" }}>
-            {matches.slice(start, start + 25).map((p, i) => (
-              <div
-                key={p.id}
-                role="listitem"
-                data-person={p.login}
-                className="absolute flex h-12 w-full items-center gap-3 border-b px-3 text-sm"
-                style={{ top: (start + i) * 48 }}
-              >
-                <strong>{p.displayName ?? p.login}</strong>
-                {flags.includes("presence") && p.presence}
-                {flags.includes("status") && <span className="truncate">{p.status?.text}</span>}
-                <span className="ml-auto">
-                  <AgentCounts counts={byPerson.get(p.id)?.counts} />
-                </span>
-              </div>
-            ))}
-          </div>
-          {!matches.length && <QuietLine fact="No matching people." />}
-        </div>
+      {raw.view === "office" && me ? (
+        <section className="grid min-h-0 w-full max-w-xl gap-4 overflow-auto">
+          <h2 className="text-lg font-semibold">My office</h2>
+          {flags.some((f) => f === "presence" || f === "status") && (
+            <PresenceForm enterprise={enterprise} person={me} />
+          )}
+          {flags.includes("sharing") && <SharingForm enterprise={enterprise} />}
+        </section>
       ) : (
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-          {roomList.map((room) => (
-            <Room
-              pool={pool}
-              key={room.board}
-              revision={office.files["team.room." + room.board]}
-              index={index}
-              seatFor={seatFor}
-              room={room}
-              board={boardById.get(room.board)}
-              flags={flags}
-              target={enterprise.target}
-              people={candidates}
-              state={filters.state}
-              initialOpen={Boolean(
-                filters.q ||
-                filters.presence ||
-                filters.board ||
-                filters.state ||
-                byPerson.get(me?.id ?? "")?.rooms.some((r) => r.board === room.board) ||
-                claims.some((c) => c.board === room.board && c.login === me?.login),
-              )}
+        <>
+          <div className="flex flex-wrap gap-2">
+            <FilterBox
+              placeholder="Find a person"
+              label="Find a person"
+              value={filters.q}
+              onChange={(q) => update({ q })}
             />
-          ))}
-          {!roomList.length && <QuietLine fact="No matching rooms." />}
-        </div>
+            <Select
+              label="Boards"
+              selected={filters.board}
+              options={summary.rooms.map((r) => [
+                r.board,
+                boardById.get(r.board)?.title ?? r.board,
+              ])}
+              change={(board) => update({ board })}
+            />
+            <Select
+              label="Agent states"
+              selected={filters.state}
+              options={states.map((k) => [k, labels[k]])}
+              change={(state) => update({ state })}
+            />
+            {flags.includes("presence") && (
+              <Select
+                label="Presence"
+                selected={filters.presence}
+                options={["available", "focusing", "away", "off"].map((k) => [k, k])}
+                change={(presence) => update({ presence })}
+              />
+            )}
+          </div>
+          {error && <button onClick={() => index.retry()}>Retry agent counts</button>}
+          {!people.length ? (
+            <QuietLine fact="Nobody is here yet." />
+          ) : list ? (
+            <div
+              key={selection}
+              role="list"
+              aria-label="Team members"
+              className="max-h-[1008px] min-h-0 flex-1 overflow-auto"
+              onScroll={(e) => {
+                const next = Math.max(0, Math.floor(e.currentTarget.scrollTop / 48) - 2);
+                if (next !== start) scroll({ selection, start: next });
+              }}
+            >
+              <div style={{ height: matches.length * 48, position: "relative" }}>
+                {matches.slice(start, start + 25).map((p, i) => (
+                  <div
+                    key={p.id}
+                    role="listitem"
+                    data-person={p.login}
+                    className="absolute flex h-12 w-full items-center gap-3 border-b px-3 text-sm"
+                    style={{ top: (start + i) * 48 }}
+                  >
+                    <strong>{p.displayName ?? p.login}</strong>
+                    {flags.includes("presence") && p.presence}
+                    {flags.includes("status") && <span className="truncate">{p.status?.text}</span>}
+                    <span className="ml-auto">
+                      <AgentCounts counts={byPerson.get(p.id)?.counts} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {!matches.length && <QuietLine fact="No matching people." />}
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+              <Hallway target={enterprise.target} revision={office.files["team.hallway"]} />
+              {roomList.map((room) => (
+                <Room
+                  founder={enterprise.enrolment.me?.role === "founder"}
+                  pool={pool}
+                  key={room.board}
+                  revision={office.files["team.room." + room.board]}
+                  index={index}
+                  seatFor={seatFor}
+                  room={room}
+                  board={boardById.get(room.board)}
+                  flags={flags}
+                  target={enterprise.target}
+                  people={candidates}
+                  state={filters.state}
+                  initialOpen={Boolean(
+                    filters.q ||
+                    filters.presence ||
+                    filters.board ||
+                    filters.state ||
+                    byPerson.get(me?.id ?? "")?.rooms.some((r) => r.board === room.board) ||
+                    claims.some((c) => c.board === room.board && c.login === me?.login),
+                  )}
+                />
+              ))}
+              {!roomList.length && <QuietLine fact="No matching rooms." />}
+            </div>
+          )}
+        </>
       )}
     </>
   );

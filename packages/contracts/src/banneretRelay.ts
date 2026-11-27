@@ -11,6 +11,8 @@ import {
   ResourceReport,
   WarningPolicy,
 } from "./banneretResources.ts";
+import { OfficeEdit, OfficeSharing, OfficeHeartbeats } from "./banneretOffice.ts";
+export * from "./banneretOffice.ts";
 import { PoolFounderAction, PoolFounderView } from "./banneretPoolFounder.ts";
 export * from "./banneretPoolFounder.ts";
 export * from "./banneretResources.ts";
@@ -45,6 +47,8 @@ export const BANNERET_RELAY_WS_METHODS = {
   folders: "banneret.resourceFolders",
   sandbox: "banneret.sandbox",
   requestWorkspace: "banneret.requestWorkspace",
+  officeEdit: "banneret.officeEdit",
+  officeHeard: "banneret.officeHeard",
   poolFounder: "banneret.poolFounder",
   pool: "banneret.poolResources",
   probe: "banneretRelay.probe",
@@ -116,6 +120,7 @@ export const BanneretEnrolmentView = Schema.Struct({
   /** The relay's id for this join, while it is pending or approved: what `pairings list` shows. */
   pairingId: Schema.optional(Schema.String),
   machineId: Schema.optional(Schema.String),
+  sharing: Schema.optional(OfficeSharing),
   label: Schema.optional(Schema.String),
   confirmCode: Schema.optional(Schema.String),
   browserUrl: Schema.optional(Schema.String),
@@ -265,6 +270,16 @@ export const BANNERET_RELAY_RPCS = [
     success: WorkspaceReceipt,
     error: RelayRpcError,
   }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.officeEdit, {
+    payload: Schema.Struct({ ...RelayTarget, action: OfficeEdit }),
+    success: Schema.Void,
+    error: RelayRpcError,
+  }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.officeHeard, {
+    payload: Schema.Struct({ ...RelayTarget, ids: Schema.Array(Schema.String) }),
+    success: OfficeHeartbeats,
+    error: RelayRpcError,
+  }),
   Rpc.make(BANNERET_RELAY_WS_METHODS.poolFounder, {
     payload: Schema.Struct({ ...RelayTarget, action: Schema.optional(PoolFounderAction) }),
     success: PoolFounderView,
@@ -293,6 +308,8 @@ export const BANNERET_RELAY_RPCS = [
 export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.resources]: AuthDiagnosticsReadScope,
   [BANNERET_RELAY_WS_METHODS.folders]: AuthFilesystemReadScope,
+  [BANNERET_RELAY_WS_METHODS.officeEdit]: AuthEnvironmentMaintainScope,
+  [BANNERET_RELAY_WS_METHODS.officeHeard]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.poolFounder]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.pool]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.sandbox]: AuthOrchestrationOperateScope,
@@ -315,6 +332,8 @@ export const BANNERET_RELAY_RPC_SCOPES = {
 export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.resources]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.folders]: "banneret-relay",
+  [BANNERET_RELAY_WS_METHODS.officeEdit]: "banneret-relay",
+  [BANNERET_RELAY_WS_METHODS.officeHeard]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.poolFounder]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.pool]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.sandbox]: "banneret-relay",
