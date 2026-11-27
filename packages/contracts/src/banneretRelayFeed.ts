@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 
 import { AuthOrchestrationOperateScope, EnvironmentAuthorizationError } from "./auth.ts";
 
-import { ChannelAction, ChannelResult } from "./banneretChat.ts";
+import { ChatRead, ChatNotice, ChannelAction, ChannelResult } from "./banneretChat.ts";
 
 export const BANNERET_RELAY_FEED_WS_METHODS = {
   chat: "banneretRelay.chat",
@@ -36,6 +36,7 @@ export const BanneretFeedTask = Schema.Struct({
 
 /** `kind` is an open set; an unknown kind is shown as a generic item. */
 export const BanneretFeedNeedsItem = Schema.Struct({
+  chatRead: Schema.optional(ChatRead),
   id: Schema.String,
   kind: Schema.String,
   title: Schema.String,
@@ -558,6 +559,7 @@ export const BanneretFeedState = Schema.Struct({
   /** The open needs-you count from the last `needs.changed`, if one arrived. */
   needsCount: Schema.NullOr(Schema.Number),
   chatFlags: Schema.optional(Schema.Array(Schema.String)),
+  chatNotice: Schema.optional(ChatNotice),
   chatRevision: Schema.optional(Schema.Number),
   revision: Schema.Number,
   /** Null while the relay advertises no board section, or before it was looked at. */

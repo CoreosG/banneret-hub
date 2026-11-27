@@ -172,9 +172,17 @@ export const ChatChange = Schema.Union([
 ]);
 export type ChatChange = typeof ChatChange.Type;
 
+export const ChatNotice = Schema.Struct({
+  messageId: Schema.String,
+  author: Schema.String,
+  text: Schema.String,
+});
+export type ChatNotice = typeof ChatNotice.Type;
+
 export const ChatChangedEvent = Schema.Struct({
   seq: Schema.Int,
   change: Schema.optionalKey(ChatChange),
+  notice: Schema.optionalKey(ChatNotice),
 });
 export type ChatChangedEvent = typeof ChatChangedEvent.Type;
 
@@ -361,6 +369,8 @@ export const ChannelAction = Schema.Union([
     emoji: Schema.String,
     add: Schema.Boolean,
   }),
+  Schema.Struct({ kind: Schema.Literal("dm"), members: Schema.Array(Id) }),
+  Schema.Struct({ kind: Schema.Literal("notifications"), id: Id, settings: ChatNotifications }),
   Schema.Struct({ kind: Schema.Literal("list"), ...Page }),
   Schema.Struct({
     kind: Schema.Literals(["messages", "thread", "members", "replyPreview"]),
@@ -432,6 +442,10 @@ export function callChannel<A>(
         text: action.text,
         key: action.key,
       });
+    case "dm":
+      return call("POST", "conversations", { kind: "dm", members: action.members });
+    case "notifications":
+      return call("PUT", "conversations/" + action.id + "/settings", action.settings);
     case "create":
       return call("POST", "conversations", {
         kind: "channel",

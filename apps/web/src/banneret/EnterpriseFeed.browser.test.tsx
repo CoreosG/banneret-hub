@@ -27,6 +27,7 @@ import { useThreadShell } from "../state/entities";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { relayKey, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
+import { getClientSettings, __setClientSettingsForTests } from "../hooks/useSettings";
 import { NeedsPage } from "./NeedsPage";
 import { feedRpc, refreshToday, useRelayFeedStore } from "./relayFeedStore";
 import { FILTER_MEMORY_KEY } from "./filterMemory";
@@ -251,6 +252,40 @@ async function prepareScreen(stack: DisposableStack) {
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
 
 describe("Enterprise Today and Needs you", () => {
+  it("presents live chat notices through the desktop renderer", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const { emit, spies } = setup();
+    const router = createFeedRouter();
+    await using _screen = await render(<RouterProvider router={router} />, { router: false });
+    await vi.waitFor(() => expect(spies.subscribe).toHaveBeenCalled());
+    const settings = getClientSettings();
+    stack.defer(() => __setClientSettingsForTests(settings));
+    __setClientSettingsForTests({ ...settings, notificationMode: "notifications" });
+    const show = vi.fn();
+    vi.stubGlobal(
+      "Notification",
+      class {
+        static permission = "granted";
+        constructor(title: string, options: NotificationOptions) {
+          show(title, options);
+        }
+      },
+    );
+    vi.stubGlobal("desktopBridge", { revealWindow: vi.fn() });
+    stack.defer(() => vi.unstubAllGlobals());
+    const state = snapshot(["today", "needs", "chat"]);
+    await emit({
+      ...state,
+      chatNotice: { author: "leo", text: "@ada review this", messageId: "m_1" },
+    });
+    await emit(state);
+    expect(show).toHaveBeenCalledExactlyOnceWith("leo", {
+      body: "@ada review this",
+      tag: "m_1",
+      silent: true,
+    });
+  });
   it("shows the rows only for a configured Enterprise workspace, for sections the relay offers", async () => {
     using stack = new DisposableStack();
     await prepareScreen(stack);
@@ -380,6 +415,14 @@ describe("Enterprise Today and Needs you", () => {
     await expect.element(list).toBeVisible();
     const rows = [...list.element().querySelectorAll("li")].map((row) => row.dataset.kind);
     expect(rows).toEqual(["thread_question", "thread_approval", "mention", "zz_new_kind"]);
+    for (const [name, kind] of [
+      ["Mentions", "mention"],
+      ["Reviews", "thread_approval"],
+      ["Questions", "thread_question"],
+    ] as const) {
+      await page.getByRole("button", { name, exact: true }).click();
+      await expect.element(list.getByRole("listitem")).toHaveAttribute("data-kind", kind);
+    }
   });
 
   it("explains the two repository approval items", async () => {

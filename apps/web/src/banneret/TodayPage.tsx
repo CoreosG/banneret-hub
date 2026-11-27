@@ -236,7 +236,7 @@ export function TodayPage() {
             >
               <ul aria-label="Needs you items">
                 {today.needsYou.items.map((item) => (
-                  <NeedsRow key={item.id} item={item} />
+                  <NeedsRow target={enterprise.target} key={item.id} item={item} />
                 ))}
               </ul>
             </Block>

@@ -2948,6 +2948,15 @@ components:
           minimum: 0
         change:
           $ref: '#/components/schemas/ChatChange'
+        notice:
+          description: Live desktop alert for this recipient only, including on an oversized change.
+          type: object
+          additionalProperties: false
+          required: [messageId, author, text]
+          properties:
+            messageId: { $ref: '#/components/schemas/Id' }
+            author: { type: string }
+            text: { type: string, maxLength: 240 }
     ChatDeliveryEvent:
       type: object
       additionalProperties: false
@@ -3918,6 +3927,7 @@ components:
           pattern: "^[a-z][a-z0-9_]{0,63}$"
         title: { type: string, maxLength: 300 }
         recommendation: { type: string, maxLength: 500 }
+        chatRead: { $ref: "#/components/schemas/ChatRead" }
         ask: { $ref: "#/components/schemas/ChatAsk" }
         from: { $ref: "#/components/schemas/PersonRef" }
         url:

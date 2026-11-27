@@ -913,6 +913,8 @@ database and is never published to the work tracker.
 
 ## Chat
 
+A live `chat.changed` event can include a recipient-specific `notice` with the message ID, author's display name and up to 240 characters of text. The relay sends it for new DMs, addressed asks, eligible channel mentions and followed replies, or all new channel messages when selected. It suppresses alerts for the sender on every machine. Notices are absent from change history. A chat inbox item carries `chatRead`, the conversation, optional thread root and sequence to pass to the private read call.
+
 
 Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf of an agent supplies the `asHandle` query parameter. The relay verifies the active handle, owner and signing machine before applying the same read filter to every result. An agent request must never fall back to the person’s authority. Paged with `cursor` and `limit` (1–100) like today.
 

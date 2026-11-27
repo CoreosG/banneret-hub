@@ -239,3 +239,28 @@
   border-radius: 4px;
   padding: 0.15rem 0.22rem;
 }
+[data-chat-dm-picker] {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+}
+[data-chat-dm-picker] fieldset {
+  max-height: 13rem;
+  overflow: auto;
+}
+[data-chat-dm-picker] label {
+  display: block;
+  padding: 0.25rem;
+}
+[data-chat-dm-picker] button,
+[data-chat-notifications] select {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--card);
+  padding: 0.25rem 0.5rem;
+}
+[data-chat-notifications] {
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+}

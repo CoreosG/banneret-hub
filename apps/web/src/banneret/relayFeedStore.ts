@@ -28,6 +28,8 @@ import {
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { create } from "zustand";
 
+import { getClientSettings } from "../hooks/useSettings";
+import { hasDesktopNotifications } from "../threadNotifications";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { type RelayTarget, relayKey } from "./enrolmentStore";
@@ -358,6 +360,30 @@ export async function loadOlder(target: RelayTarget, kind: OlderKind) {
 const seenRevisions = new Map<string, number>();
 
 function applyState(target: RelayTarget, state: BanneretFeedState) {
+  if (
+    state.joined &&
+    state.chatNotice &&
+    typeof window !== "undefined" &&
+    window.desktopBridge &&
+    hasDesktopNotifications(getClientSettings().notificationMode) &&
+    typeof Notification !== "undefined" &&
+    Notification.permission === "granted"
+  ) {
+    const { author, text, messageId } = state.chatNotice;
+    try {
+      const notification = new Notification(author, {
+        body: text,
+        tag: messageId,
+        silent: true,
+      });
+      notification.onclick = () => {
+        notification.close();
+        void window.desktopBridge?.revealWindow().catch(() => undefined);
+      };
+    } catch {
+      /* OS presentation can be denied after permission was granted. */
+    }
+  }
   const before = useRelayFeedStore.getState().feeds[relayKey(target)];
   // Joining (or a new company), a list that went away, or a file that now holds the whole list:
   // older pages belong to the old list.

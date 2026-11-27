@@ -3,6 +3,7 @@ import {
   BANNERET_RELAY_FEED_WS_METHODS,
   type ChannelAction,
   ChatConversations,
+  type ChatConversation,
   ChatMembers,
   ChatMessages,
   ChatThread,
@@ -32,17 +33,23 @@ export const chatRpc = {
     return result.value.value;
   },
 };
-export async function channels(target: RelayTarget) {
+export async function conversations(target: RelayTarget) {
   const result = [];
   let cursor: string | null = null;
   do {
     const page = decodeChatConversations(
       await chatRpc.run(target, { kind: "list", ...(cursor ? { cursor } : {}) }),
     );
-    result.push(...page.items.filter((c) => c.kind === "channel"));
+    result.push(...page.items);
     cursor = page.nextCursor;
   } while (cursor);
   return result;
+}
+export function conversationTitle(c: ChatConversation, login?: string) {
+  if (c.kind === "channel") return "#" + c.name;
+  return c.members
+    .flatMap((m) => (m.kind === "agent" ? [m.handle] : m.login === login ? [] : [m.login]))
+    .join(", ");
 }
 export async function replyAuthors(target: RelayTarget, root: string) {
   const page = decodeChatThread(await chatRpc.run(target, { kind: "replyPreview", id: root }));
