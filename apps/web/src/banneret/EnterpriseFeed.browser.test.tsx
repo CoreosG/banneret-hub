@@ -28,7 +28,7 @@ import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { relayKey, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { NeedsPage } from "./NeedsPage";
-import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
+import { feedRpc, refreshToday, useRelayFeedStore } from "./relayFeedStore";
 import { FILTER_MEMORY_KEY } from "./filterMemory";
 import { TodayPage } from "./TodayPage";
 import { useWorkspacesStore } from "./workspacesStore";
@@ -102,7 +102,6 @@ const NEEDS: ReadonlyArray<BanneretFeedNeedsItem> = [
 const block = { state: "ok", items: [], notMeasured: [] };
 const TODAY: BanneretFeedToday = {
   generatedAt: "2026-11-26T10:00:00.000Z",
-  lastVisitAt: null,
   needsYou: { ...block, items: NEEDS, nextCursor: null },
   shipped: {
     state: "not_measured",
@@ -346,7 +345,7 @@ describe("Enterprise Today and Needs you", () => {
     await vi.waitFor(() =>
       expect(spies.today).toHaveBeenCalledWith(
         { environmentId: LOCAL, relayOrigin: OTHER_ORIGIN },
-        true,
+        undefined,
       ),
     );
     await emit(snapshot(["today", "needs"], 1), OTHER_ORIGIN);
@@ -374,7 +373,7 @@ describe("Enterprise Today and Needs you", () => {
     await expect.element(screen.getByTestId("needs-count")).toHaveTextContent("7");
     await vi.waitFor(() => expect(spies.needs.mock.calls.length).toBeGreaterThan(needsCalls));
     // A refetch is never a visit.
-    expect(spies.today.mock.calls.every(([, visit]) => visit === false)).toBe(true);
+    expect(spies.today.mock.calls.every(([, since]) => since === undefined)).toBe(true);
 
     await userEvent.click(sidebar().getByRole("button", { name: /Needs you/ }));
     const list = page.getByRole("list", { name: "Needs you items" });
@@ -430,6 +429,25 @@ describe("Enterprise Today and Needs you", () => {
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
+  it("sends the previous local open on a new visit and reuses the cutoff on refresh", async () => {
+    const { spies } = setup();
+    const key = `banneret.today.visit.${relayKey(RELAY)}`;
+    const opened = Date.parse("2020-01-01T00:00:00Z");
+    localStorage.setItem(key, JSON.stringify({ opened, since: null }));
+    try {
+      await refreshToday(RELAY, true);
+      const saved = localStorage.getItem(key);
+      await refreshToday(RELAY);
+      expect(spies.today.mock.calls.slice(-2)).toEqual([
+        [RELAY, new Date(opened).toISOString()],
+        [RELAY, new Date(opened).toISOString()],
+      ]);
+      expect(localStorage.getItem(key)).toBe(saved);
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
   it("opens a known thread here, and names the machine for one elsewhere", async () => {
     using stack = new DisposableStack();
     await prepareScreen(stack);
@@ -439,8 +457,7 @@ describe("Enterprise Today and Needs you", () => {
     await emit(snapshot(["today", "needs"]));
 
     // Opening Today is the one read that counts as a visit.
-    await vi.waitFor(() => expect(spies.today).toHaveBeenCalledWith(RELAY, true));
-    expect(spies.today.mock.calls.filter(([, visit]) => visit).length).toBe(1);
+    await vi.waitFor(() => expect(spies.today).toHaveBeenCalledWith(RELAY, undefined));
 
     await expect.element(page.getByText("Should invites expire?")).toBeVisible();
     await expect.element(page.getByText("Recommended: After 7 days")).toBeVisible();
@@ -459,7 +476,7 @@ describe("Enterprise Today and Needs you", () => {
       .element(page.getByText("Work tracker: not set up on this relay for", { exact: false }))
       .toBeVisible();
     // Empty blocks collapse into one quiet line each.
-    await expect.element(page.getByText("Nobody is working right now.")).toBeVisible();
+    await expect.element(page.getByText("No agent sessions to show.")).toBeVisible();
     expect(page.getByRole("region", { name: "Working now" }).elements()).toHaveLength(0);
     // The header counts what needs you, what is stuck and what shipped.
     await expect.element(page.getByText("4 need you", { exact: true })).toBeVisible();

@@ -61,9 +61,11 @@ relay last said, with its age.
 
 ### Today and Needs you
 
-**Today** lists what needs you, what shipped since your last visit, who is working now, what is stuck and how
+**Today** lists what needs you, what shipped since your last visit, which agents are working, what is stuck and how
 things are. **Needs you** is the full list of items waiting on you, most urgent first. An item that belongs to a
 thread opens it when that thread is on a machine this app knows. Otherwise it tells you which machine holds it.
+
+The Hub never records or shows human activity times or last-seen status. It shows agent session state and machine connectivity. Today keeps its previous visit boundary only on this device, per workspace. The relay filters shipped work using that timestamp and never stores it.
 
 A stuck item can have several reasons. They are shown most important first.
 
@@ -86,7 +88,7 @@ many of your claims expired. It stays on when you switch boards.
 When one of your claims has expired or stopped half way, a strip says so. **Review your expired claims** shows
 only those, each with its Release button (or Finish and Withdraw for one that stopped half way).
 
-A claim is a **lease**. It stays active while its holder works: pushes, comments and their own running agent
+A claim is a **lease**. Its chip says **live** while the latest signal is within the stale window, **quiet** when stale, or **paused** for a paused lease. Expiry and conflicting claims have their own warning. It stays active while its holder works: pushes, comments and their own running agent
 sessions all count. By default a lease turns **stale after 6 hours** without a signal, and the card moves to Stuck. It
 **expires after 24 hours**. Operators can change both clocks in the relay config. An expired lease stays in Stuck. It is not shown as Free until the claim is released
 on the work tracker. A coworker's agent on the same task never refreshes someone else's lease.

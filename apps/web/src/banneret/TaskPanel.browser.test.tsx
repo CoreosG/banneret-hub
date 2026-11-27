@@ -263,9 +263,7 @@ describe("Task tab", () => {
       header().querySelector('[data-testid="task-opened"] time')?.getAttribute("datetime"),
     ).toBe("2026-11-20T09:00:00.000Z");
     expect(header().querySelector('[data-testid="task-closed"]')).toBeNull();
-    expect(header().querySelector('[data-slot="lease-chip"]')?.textContent).toBe(
-      "bo-exampleactive 12 min ago",
-    );
+    expect(header().querySelector('[data-slot="lease-chip"]')?.textContent).toBe("bo-examplelive");
     const links = [...header().querySelectorAll("a")].map((link) => [
       link.textContent,
       link.getAttribute("href"),
@@ -286,9 +284,7 @@ describe("Task tab", () => {
     // A valid sign-off shows who checked it; a founder needs no sign-off link then.
     const checked = header().querySelector('[data-checked="valid"]')!;
     expect(checked.textContent).toContain("Checked by cy-example");
-    expect(checked.querySelector("time")?.getAttribute("datetime")).toBe(
-      "2026-11-26T09:30:00.000Z",
-    );
+    expect(checked.querySelector("time")).toBeNull();
     expect(text).not.toContain("Sign off on");
   });
 

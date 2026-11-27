@@ -33,8 +33,9 @@ const WORKING_STATES: Readonly<Record<string, string>> = {
   waiting: "waiting for you",
   idle: "idle",
   stopped: "stopped",
+  not_heard_from: "not heard from",
 };
-/** `not_heard_from` is told with its time by the caller (P2-6); unknown states say nothing. */
+/** Unknown agent states have no label. */
 export const workingStateLabel = (state: string | undefined) =>
   state === undefined ? null : (WORKING_STATES[state] ?? null);
 

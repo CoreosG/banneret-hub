@@ -2,6 +2,31 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { parseBanneretRelayAddress } from "./banneretRelay.ts";
 
+import {
+  BanneretFeedPerson,
+  BanneretFeedWorkingItem,
+  BanneretTeamPerson,
+} from "./banneretRelayFeed.ts";
+
+it("keeps activity timestamps out of Hub person and working row schemas", () => {
+  expect(Object.keys(BanneretFeedPerson.fields).toSorted()).toEqual(["login"]);
+  expect(Object.keys(BanneretTeamPerson.fields).toSorted()).toEqual([
+    "id",
+    "login",
+    "machines",
+    "role",
+    "sessions",
+  ]);
+  expect(Object.keys(BanneretFeedWorkingItem.fields).toSorted()).toEqual([
+    "branch",
+    "deepLink",
+    "person",
+    "sessions",
+    "state",
+    "task",
+  ]);
+});
+
 describe("parseBanneretRelayAddress", () => {
   it.each([
     ["relay.example.com", "https://relay.example.com"],

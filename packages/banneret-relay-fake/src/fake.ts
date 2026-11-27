@@ -179,9 +179,6 @@ const nextTeamStates = (
   return next;
 };
 
-/** A visit read this close to the previous one continues the same visit. */
-const VISIT_GAP_MS = 30 * 60 * 1000;
-
 interface ActivityFact {
   readonly sessionId: string;
   readonly parentSessionId?: string;
@@ -687,8 +684,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const machines = new Map<string, Machine>();
   const machinesByToken = new Map<string, Machine>();
   const needs = new Map<string, NeedsItem[]>();
-  /** Per person: the reported last visit, and the time of the last `visit=1` read. */
-  const visits = new Map<string, { lastVisitAt: number | null; lastReadAt: number }>();
   const events: RelayEvent[] = [];
   const streams = new Set<Stream>();
   const eventClock = options.eventClock ?? (() => Date.now());
@@ -1213,11 +1208,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ...(first.branch === undefined ? {} : { branch: first.branch }),
           sessions: live.length,
           state: heard ? first.state : "not_heard_from",
-          lastActivityAt:
-            live
-              .map((session) => session.lastSeenAt)
-              .toSorted()
-              .at(-1) ?? first.lastSeenAt,
           deepLink: { environmentId: machine.facts.environmentId, threadId: first.threadId },
         },
       ];
@@ -1240,11 +1230,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   // README, Shipped: one item per merged pull request since the last visit (all of them before a first visit),
   // newest first. Each carries its own `pr` and the task's `ref`, so a client never joins Shipped to the board.
-  const shippedBlock = (lastVisitAt: number | null) => {
+  const shippedBlock = (since: number | null) => {
     const items = boardTasks
       .flatMap((task, index) =>
         task.prs.flatMap((pr) =>
-          pr.mergedAt === null || (lastVisitAt !== null && pr.mergedAt <= lastVisitAt)
+          pr.mergedAt === null || (since !== null && pr.mergedAt <= since)
             ? []
             : [{ task, index, pr, mergedAt: pr.mergedAt }],
         ),
@@ -1265,26 +1255,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return { state: "ok", items, notMeasured: [] };
   };
 
-  const today = (caller: Caller, visit: boolean) => {
+  const today = (caller: Caller, since: number | null) => {
     const now = Date.now();
     const blocks = todayBlocks(caller.person);
-    let state = visits.get(caller.person.id);
-    if (visit) {
-      if (state === undefined) {
-        state = { lastVisitAt: null, lastReadAt: now };
-      } else if (now - state.lastReadAt >= VISIT_GAP_MS) {
-        state = { lastVisitAt: state.lastReadAt, lastReadAt: now };
-      } else {
-        state = { lastVisitAt: state.lastVisitAt, lastReadAt: now };
-      }
-      visits.set(caller.person.id, state);
-    }
-    const lastVisitAt = state?.lastVisitAt ?? null;
     return {
       generatedAt: iso(now),
-      lastVisitAt: lastVisitAt === null ? null : iso(lastVisitAt),
       needsYou: blocks.needsYou,
-      shipped: boardSeeded ? shippedBlock(lastVisitAt) : notConfigured("work_tracker"),
+      shipped: boardSeeded ? shippedBlock(since) : notConfigured("work_tracker"),
       working: blocks.working,
       stuck: blocks.stuck,
       health: blocks.health,
@@ -2300,11 +2277,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     if (method === "GET" && route === "/today") {
-      const visit = query.get("visit");
-      if (visit !== null && visit !== "1") {
-        throw new RelayError("malformed", "visit accepts only the value 1.", { field: "visit" });
+      const since = query.get("since");
+      if (
+        [...query.keys()].some((key) => key !== "since") ||
+        query.getAll("since").length > 1 ||
+        (since !== null && spec.check("Timestamp", since) !== null)
+      ) {
+        throw new RelayError("malformed", "Expected one optional UTC since timestamp.");
       }
-      sendJson(response, 200, "Today", today(caller, visit === "1"));
+      sendJson(response, 200, "Today", today(caller, since === null ? null : Date.parse(since)));
       return;
     }
 
@@ -2534,29 +2515,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
     if (request.method === "POST" && route === "/bundle") {
       publishBundle(String(input.bundleSha));
-      reply({});
-      return;
-    }
-    if (request.method === "POST" && route === "/visits/read") {
-      const person = peopleByLogin.get(String(input.login));
-      const state = person === undefined ? undefined : visits.get(person.id);
-      reply({
-        lastVisitAt: state?.lastVisitAt == null ? null : iso(state.lastVisitAt),
-        lastReadAt: state === undefined ? null : iso(state.lastReadAt),
-      });
-      return;
-    }
-    if (request.method === "POST" && route === "/visits/age") {
-      const person = peopleByLogin.get(String(input.login));
-      const state = person === undefined ? undefined : visits.get(person.id);
-      if (person === undefined || state === undefined) {
-        throw new RelayError("not_found", "That person has no visit yet.");
-      }
-      const shift = Number(input.minutes) * 60_000;
-      visits.set(person.id, {
-        lastVisitAt: state.lastVisitAt === null ? null : state.lastVisitAt - shift,
-        lastReadAt: state.lastReadAt - shift,
-      });
       reply({});
       return;
     }

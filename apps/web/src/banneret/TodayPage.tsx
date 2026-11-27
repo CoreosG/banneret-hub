@@ -15,7 +15,6 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { isElectron } from "../env";
-import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -38,7 +37,6 @@ import { readLocalApi } from "../localApi";
 import { HealthTile } from "./ui/HealthTile";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
-import { RelativeTime } from "./ui/RelativeTime";
 import { Section } from "./ui/Section";
 import { humanizeWord } from "./ui/status";
 import { LAYOUT_HEALTH_TILES, LAYOUT_TODAY_COLUMNS, TYPE } from "./ui/tokens";
@@ -270,8 +268,8 @@ export function TodayPage() {
               items={today.working.items}
               notMeasured={today.working.notMeasured}
               empty={{
-                fact: "Nobody is working right now.",
-                hint: "People and their agents show here while they work.",
+                fact: "No agent sessions to show.",
+                hint: "Sessions appear here when a machine reports them.",
               }}
             >
               <ul aria-label="Working now items">
@@ -289,21 +287,12 @@ export function TodayPage() {
               items={today.shipped.items}
               notMeasured={today.shipped.notMeasured}
               empty={
-                today.lastVisitAt === null
+                !feed.sinceVisit
                   ? { fact: "Nothing shipped yet.", hint: "Merged pull requests show here." }
                   : {
                       fact: "Nothing shipped since your last visit.",
                       hint: "Merged pull requests show here.",
                     }
-              }
-              action={
-                today.lastVisitAt === null ? undefined : (
-                  <RelativeTime
-                    at={today.lastVisitAt}
-                    prefix="last visit"
-                    className={cn(TYPE.meta, "whitespace-nowrap")}
-                  />
-                )
               }
             >
               <ul aria-label="Shipped items">
@@ -344,7 +333,11 @@ export function TodayPage() {
     <FeedFrame title="Today" company={workspace.name}>
       <PageHeader
         title="Today"
-        summary={today === null ? undefined : <Summary counts={todayCounts(today, feed)} />}
+        summary={
+          today === null ? undefined : (
+            <Summary counts={todayCounts(today, feed, feed.sinceVisit)} />
+          )
+        }
       >
         <RefreshButton target={enterprise.target} />
       </PageHeader>

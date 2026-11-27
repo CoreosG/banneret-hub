@@ -2,12 +2,10 @@ import type { BanneretBoard, BanneretBoardCard, BanneretBoardLease } from "@t3to
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  agoLabel,
   boardColumns,
   columnCountsLine,
   heldBy,
   isMine,
-  leaseChip,
   mineSummary,
   needsRelease,
   prLine,
@@ -35,37 +33,6 @@ describe("board words", () => {
     expect(statusWord("blocked")).toEqual({ mark: "⊘", word: "blocked" });
     expect(statusWord("ruled_dead").mark).toBe("†");
     expect(statusWord("brand_new_state")).toEqual({ mark: "·", word: "brand new state" });
-  });
-
-  it("labels each lease state, with its tone", () => {
-    expect(leaseChip(lease("active", 12 * 60_000), NOW)).toEqual({
-      label: "ada · active 12 min ago",
-      tone: "ok",
-    });
-    expect(leaseChip(lease("stale", 7 * 3_600_000 + 5 * 60_000), NOW)).toEqual({
-      label: "ada · quiet 7 h",
-      tone: "warn",
-    });
-    expect(leaseChip(lease("expired", 25 * 3_600_000), NOW)).toEqual({
-      label: "ada · expired, should be released",
-      tone: "error",
-    });
-    expect(leaseChip(lease("paused", 0), NOW).tone).toBe("muted");
-    expect(leaseChip(lease("conflict", 0), NOW).tone).toBe("error");
-    expect(leaseChip(lease("brand_new", 0), NOW)).toEqual({
-      label: "ada · brand new",
-      tone: "muted",
-    });
-  });
-
-  it("drops an empty holder login without leaving a separator", () => {
-    expect(leaseChip(lease("expired", 0, "  "), NOW).label).toBe("expired, should be released");
-  });
-
-  it("tells time in plain units", () => {
-    expect(agoLabel(ago(10_000), NOW)).toBe("just now");
-    expect(agoLabel(ago(3 * 3_600_000), NOW)).toBe("3 h ago");
-    expect(agoLabel(ago(50 * 3_600_000), NOW)).toBe("2 d ago");
   });
 
   it("gives a linked PR its line, with its checks when the relay read them", () => {

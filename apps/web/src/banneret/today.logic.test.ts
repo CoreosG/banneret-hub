@@ -23,7 +23,6 @@ describe("today blocks", () => {
   it("counts needs as the sidebar does, and says since the last visit only when it is known", () => {
     const today: BanneretFeedToday = {
       generatedAt: "2026-11-26T10:00:00.000Z",
-      lastVisitAt: null,
       needsYou: {
         ...block,
         items: [{ id: "n1", kind: "mention", title: "t", createdAt: "x" }],
@@ -36,7 +35,7 @@ describe("today blocks", () => {
     };
     const none = { needsCount: null, needs: null, needsNextCursor: null };
     // The relay's own count wins.
-    expect(todayCounts(today, { ...none, needsCount: 7 })).toEqual({
+    expect(todayCounts(today, { ...none, needsCount: 7 }, false)).toEqual({
       needs: "7",
       stuck: 0,
       shipped: 0,
@@ -46,7 +45,7 @@ describe("today blocks", () => {
     expect(needsFigure({ ...none, needs: [1, 2, 3, 4], needsNextCursor: "c2" }, today)).toBe("4+");
     expect(needsFigure({ ...none, needs: [1, 2, 3, 4] }, today)).toBe("4");
     // Else Today's own block, which may be cut short too.
-    expect(todayCounts({ ...today, lastVisitAt: "2026-11-25T10:00:00.000Z" }, none)).toEqual({
+    expect(todayCounts(today, none, true)).toEqual({
       needs: "1+",
       stuck: 0,
       shipped: 0,

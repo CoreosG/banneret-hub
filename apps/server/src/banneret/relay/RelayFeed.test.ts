@@ -104,7 +104,7 @@ const waitForState = (state: string, origin = focus.origin) =>
 
 /** The feed of the relay under test (the one `withFake` started last). */
 const focusedFeed = Effect.map(RelayFeed.BanneretRelayFeed, (service) => ({
-  today: (visit: boolean) => service.today(focus.origin, visit),
+  today: (since?: string) => service.today(focus.origin, since),
   needs: (cursor: string | undefined) => service.needs(focus.origin, cursor),
   feedPage: (cursor: string) => service.feedPage(focus.origin, cursor),
   graveyardPage: (cursor: string) => service.graveyardPage(focus.origin, cursor),
@@ -165,7 +165,7 @@ describe("BanneretRelayFeed", () => {
           const client = yield* subscribe;
           const first = yield* client.next(() => true, "snapshot");
           expect(first).toMatchObject({ joined: false, live: false });
-          expect(yield* (yield* feed).today(true)).toEqual({
+          expect(yield* (yield* feed).today()).toEqual({
             joined: false,
             value: null,
             fetchedAt: null,
@@ -182,7 +182,7 @@ describe("BanneretRelayFeed", () => {
           // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- proving silence needs a window; no event marks "no request was sent".
           yield* Effect.sleep(500);
           expect(relay.requests).toEqual([]);
-          expect((yield* (yield* feed).today(false)).joined).toBe(false);
+          expect((yield* (yield* feed).today()).joined).toBe(false);
           expect(relay.requests).toEqual([]);
         }),
       ),
@@ -198,7 +198,7 @@ describe("BanneretRelayFeed", () => {
           yield* control(fake, "/needs", { machineId, count: 1, kind: "zz_new_kind" });
           yield* control(fake, "/needs", { machineId, count: 55, kind: "thread_question" });
 
-          const today = yield* (yield* feed).today(false);
+          const today = yield* (yield* feed).today();
           expect(today.joined).toBe(true);
           expect(today.value?.needsYou.items).toHaveLength(20);
           expect(today.value?.needsYou.nextCursor).not.toBeNull();
@@ -231,28 +231,20 @@ describe("BanneretRelayFeed", () => {
     ),
   );
 
-  it.live("sends visit=1 only for an explicit open of Today", () =>
+  it.live("forwards the device cutoff only as a since query", () =>
     withFake((fake, relay) =>
       onFreshHub(
         Effect.gen(function* () {
           yield* join(fake, relay);
           const service = yield* feed;
-          yield* service.today(false);
-          yield* service.today(false);
-          expect(yield* control(fake, "/visits/read", { login: "ada-example" })).toEqual({
-            lastVisitAt: null,
-            lastReadAt: null,
-          });
-          yield* service.today(true);
-          const after = yield* control(fake, "/visits/read", { login: "ada-example" });
-          expect(after.lastReadAt).toEqual(expect.any(String));
+          yield* service.today();
+          yield* service.today("2026-11-26T10:00:00Z");
           const todayTargets = relay.requests
             .map((request) => request.url)
             .filter((url) => url.startsWith("/relay/v1/today"));
           expect(todayTargets).toEqual([
             "/relay/v1/today",
-            "/relay/v1/today",
-            "/relay/v1/today?visit=1",
+            "/relay/v1/today?since=2026-11-26T10%3A00%3A00Z",
           ]);
         }),
       ),
@@ -331,10 +323,10 @@ describe("BanneretRelayFeed", () => {
           const machineId = yield* join(fake, relay);
           yield* control(fake, "/needs", { machineId, count: 3 });
           const service = yield* feed;
-          const good = yield* service.today(false);
+          const good = yield* service.today();
           const goodNeeds = yield* service.needs(undefined);
           yield* Effect.promise(() => relay.close());
-          const away = yield* service.today(false);
+          const away = yield* service.today();
           expect(away.value).toEqual(good.value);
           expect(away.fetchedAt).toBe(good.fetchedAt);
           expect(away.problem?.message).toBe("Cannot reach Example Company.");
@@ -492,11 +484,8 @@ describe("reshapeToday shipped", () => {
             const service = yield* RelayFeed.BanneretRelayFeed;
             const kindsOf = (read: { readonly value: BanneretFeedTodayRead["value"] }) =>
               read.value?.needsYou.items.map((item) => item.kind);
-            expect(kindsOf(yield* service.today(relayA.origin, false))).toEqual([
-              "mention",
-              "mention",
-            ]);
-            expect(kindsOf(yield* service.today(relayB.origin, false))).toEqual([
+            expect(kindsOf(yield* service.today(relayA.origin))).toEqual(["mention", "mention"]);
+            expect(kindsOf(yield* service.today(relayB.origin))).toEqual([
               "thread_question",
               "thread_question",
               "thread_question",
@@ -511,10 +500,10 @@ describe("reshapeToday shipped", () => {
             const enrolment = yield* Enrolment.BanneretEnrolment;
             yield* enrolment.leave(relayA.origin, "revoke");
             yield* clientA.next((event) => !event.joined, "A not joined after leave");
-            expect((yield* service.today(relayA.origin, false)).joined).toBe(false);
-            expect((yield* service.today(relayB.origin, false)).joined).toBe(true);
+            expect((yield* service.today(relayA.origin)).joined).toBe(false);
+            expect((yield* service.today(relayB.origin)).joined).toBe(true);
             // A relay this machine never tried answers as not joined.
-            expect((yield* service.today("https://unknown.example", false)).joined).toBe(false);
+            expect((yield* service.today("https://unknown.example")).joined).toBe(false);
           }),
         ),
       ),
