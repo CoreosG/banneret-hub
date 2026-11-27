@@ -1,0 +1,14 @@
+[Unit]
+Description=Banneret pool host facts
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/banneret-homes
+
+[Service]
+ExecStart=/opt/banneret-pool/banneret pool agent --apply
+Restart=on-failure
+RestartSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
