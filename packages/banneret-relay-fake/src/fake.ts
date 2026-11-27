@@ -239,14 +239,23 @@ type StagePlanSource =
       readonly since: number;
     };
 
+interface LinkedPr {
+  readonly number: number;
+  readonly state: string;
+  readonly checks: string | null;
+  readonly mergedAt: number | null;
+}
+
 interface BoardTask {
   readonly id: string;
   readonly title: string;
   column: string;
   status: string;
   holder: { readonly id: string; readonly login: string } | null;
-  pr: { readonly number: number; readonly state: string } | null;
-  checks: string | null;
+  /** Linked pull requests, oldest first. `mergedAt` is internal: it feeds Today's Shipped block. */
+  prs: Array<LinkedPr>;
+  readonly openedAt: number;
+  closedAt: number | null;
   preview: { readonly state: string; readonly url?: string } | null;
   checked: CheckedRecord | null;
   readonly forcedLeaseState: "paused" | "conflict" | null;
@@ -330,6 +339,7 @@ const STATUS_WHY: Readonly<Record<string, string>> = {
   checked: "A sign-off role holder checked it after the merge.",
   sent_back: "The work was sent back after review or merge.",
   needs_you: "Something on it needs a person.",
+  blocked: "It waits on a task that is blocked.",
   built: "The pull request merged and nobody has checked it yet.",
   planned: "Open and none of the other statuses apply.",
 };
@@ -520,6 +530,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const snapshotHeads = new Map<string, SnapshotHeadRecord[]>();
   /** Board tasks in seeding order. Relay-wide. */
   let boardTasks: BoardTask[] = [];
+  // The fake has a work tracker once a board is seeded; until then Today's Shipped block is not configured.
+  let boardSeeded = false;
   /** Derived entries, newest first. Relay-wide. */
   let feedRecords: FeedRecord[] = [];
   let graveyardRecords: GraveyardRecord[] = [];
@@ -967,6 +979,33 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     };
   };
 
+  // README, Shipped: one item per merged pull request since the last visit (all of them before a first visit),
+  // newest first. Each carries its own `pr` and the task's `ref`, so a client never joins Shipped to the board.
+  const shippedBlock = (lastVisitAt: number | null) => {
+    const items = boardTasks
+      .flatMap((task, index) =>
+        task.prs.flatMap((pr) =>
+          pr.mergedAt === null || (lastVisitAt !== null && pr.mergedAt <= lastVisitAt)
+            ? []
+            : [{ task, index, pr, mergedAt: pr.mergedAt }],
+        ),
+      )
+      .toSorted((a, b) => b.mergedAt - a.mergedAt)
+      .slice(0, TODAY_BLOCK_MAX)
+      .map(({ task, index, pr, mergedAt }) => {
+        const ref = taskRefView(task, index).ref;
+        return {
+          task: { id: task.id, title: task.title, url: ref.url },
+          pr: { number: pr.number, url: prUrl(pr.number), repo: ref.scope },
+          ref,
+          summary: `${task.title} merged.`.slice(0, 300),
+          mergedAt: iso(mergedAt),
+          live: "no_deploy",
+        };
+      });
+    return { state: "ok", items, notMeasured: [] };
+  };
+
   const today = (caller: Caller, visit: boolean) => {
     const now = Date.now();
     const blocks = todayBlocks(caller.person);
@@ -981,11 +1020,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       visits.set(caller.person.id, state);
     }
+    const lastVisitAt = state?.lastVisitAt ?? null;
     return {
       generatedAt: iso(now),
-      lastVisitAt: state?.lastVisitAt == null ? null : iso(state.lastVisitAt),
+      lastVisitAt: lastVisitAt === null ? null : iso(lastVisitAt),
       needsYou: blocks.needsYou,
-      shipped: notConfigured("work_tracker"),
+      shipped: boardSeeded ? shippedBlock(lastVisitAt) : notConfigured("work_tracker"),
       working: blocks.working,
       stuck: blocks.stuck,
       health: blocks.health,
@@ -1012,7 +1052,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return { id, login };
   };
 
-  const taskRefView = (task: { readonly id: string; readonly title: string }, index: number) => ({
+  const taskRefView = (
+    task: {
+      readonly id: string;
+      readonly title: string;
+      readonly openedAt: number;
+      readonly closedAt: number | null;
+    },
+    index: number,
+  ) => ({
     id: task.id,
     title: task.title,
     ref: {
@@ -1021,10 +1069,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       key: String(index + 1),
       url: `https://github.com/example-org/example-app/issues/${index + 1}`,
     },
+    openedAt: iso(task.openedAt),
+    closedAt: task.closedAt === null ? null : iso(task.closedAt),
   });
+  const prUrl = (number: number) => `https://github.com/example-org/example-app/pull/${number}`;
 
   // No board card: the task comes from the plan ref. The id is derived from the ref, so it is stable and opaque.
-  // The fake cannot read an issue, so the title is the plan item's title.
+  // The fake cannot read an issue, so the title is the plan item's title, the issue counts as opened when the fake
+  // started, and it is open.
   const refOnlyTask = (ref: NonNullable<StagePlan["items"][number]["task"]>, title: string) => ({
     id: `ref_${sha256Hex(Buffer.from(JSON.stringify([ref.tracker, ref.host ?? null, ref.scope, ref.key]))).slice(0, 24)}`,
     title,
@@ -1035,6 +1087,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       key: ref.key,
       url: `https://${ref.host ?? "github.com"}/${ref.scope}/issues/${ref.key}`,
     },
+    openedAt: iso(startedAt),
+    closedAt: null,
   });
 
   const cardView = (task: BoardTask, index: number, now: number) => {
@@ -1070,16 +1124,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       status,
       statusWhy,
       ...(lease === undefined ? {} : { lease }),
-      ...(task.pr === null
-        ? {}
-        : {
-            pr: {
-              number: task.pr.number,
-              url: `https://github.com/example-org/example-app/pull/${task.pr.number}`,
-              state: task.pr.state,
-            },
-          }),
-      ...(task.checks === null ? {} : { checks: { state: task.checks } }),
+      prs: task.prs.map((pr) => ({
+        number: pr.number,
+        url: prUrl(pr.number),
+        state: pr.state,
+        ...(pr.checks === null ? {} : { checks: { state: pr.checks } }),
+      })),
       restsOn: task.restsOn,
     };
   };
@@ -1091,12 +1141,17 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
 
   // README, Map and the stage plan.
-  const BLOCKING = new Set(["needs_you", "sent_back", "ruled_dead"]);
+  const BLOCKING = new Set(["needs_you", "sent_back", "ruled_dead", "blocked"]);
   const STATUS_WORD: Readonly<Record<string, string>> = {
     needs_you: "needs you",
     sent_back: "was sent back",
     ruled_dead: "was ruled dead",
+    blocked: "is blocked",
   };
+  // README, Map: a card's `blocked` comes from the board's own rests-on row; the map applies its own `restsOn`, so
+  // the item starts from the status the card has without that row. A seeded `blocked` is treated the same way.
+  const unblocked = (status: string, merged: boolean) =>
+    status === "blocked" ? (merged ? "built" : "planned") : status;
   const mapView = () => {
     if (stagePlan === null)
       throw new Error("the map is built only when a stage plan is configured");
@@ -1135,41 +1190,49 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               item.task.host === undefined,
           );
     const planned = new Map(plan.items.map((item) => [item.id, item] as const));
-    const resolved = new Map<string, { status: string; statusWhy: string }>();
-    const resolve = (id: string): { status: string; statusWhy: string } => {
+    type Resolved = { status: string; statusWhy: string; blockedBy: ReadonlyArray<string> };
+    const resolved = new Map<string, Resolved>();
+    const resolve = (id: string): Resolved => {
       const known = resolved.get(id);
       if (known !== undefined) return known;
       const item = planned.get(id);
       if (item === undefined) throw new Error(`unknown item ${id}`);
       const card = findCard(item);
+      const ownOf = (status: string) => ({
+        status,
+        statusWhy: STATUS_WHY[status] ?? STATUS_WHY.planned ?? "",
+      });
       let own: { status: string; statusWhy: string } =
         card !== undefined
-          ? { status: card.view.status, statusWhy: card.view.statusWhy }
+          ? card.view.status === "blocked"
+            ? ownOf(
+                unblocked(
+                  "blocked",
+                  card.view.prs.some((pr) => pr.state === "merged"),
+                ),
+              )
+            : { status: card.view.status, statusWhy: card.view.statusWhy }
           : item.task !== undefined
             ? { status: "planned", statusWhy: "The tracker issue is not on the board yet." }
-            : {
-                status: statuses.get(item.id) ?? "planned",
-                statusWhy:
-                  STATUS_WHY[statuses.get(item.id) ?? "planned"] ?? STATUS_WHY.planned ?? "",
-              };
-      if (own.status === "built" || own.status === "planned") {
-        for (const target of item.restsOn ?? []) {
-          const blocker = resolve(target);
-          if (BLOCKING.has(blocker.status)) {
-            own = {
-              status: "needs_you",
-              statusWhy:
-                `It rests on "${planned.get(target)?.title ?? target}", which ${STATUS_WORD[blocker.status] ?? "is blocked"}.`.slice(
-                  0,
-                  240,
-                ),
-            };
-            break;
-          }
-        }
+            : ownOf(unblocked(statuses.get(item.id) ?? "planned", false));
+      // Direct blockers only: each dependency's own final status, never the root cause behind it.
+      const blockedBy = [...new Set(item.restsOn ?? [])].filter((target) =>
+        BLOCKING.has(resolve(target).status),
+      );
+      const first = blockedBy[0];
+      if (first !== undefined && (own.status === "built" || own.status === "planned")) {
+        own = {
+          status: "blocked",
+          statusWhy:
+            `Blocked by "${planned.get(first)?.title ?? first}", which ${STATUS_WORD[resolve(first).status] ?? "is blocked"}.`.slice(
+              0,
+              240,
+            ),
+        };
       }
-      resolved.set(id, own);
-      return own;
+      const result = { ...own, blockedBy };
+      resolved.set(id, result);
+      return result;
     };
     const stages = plan.stages.toSorted((a, b) => a.order - b.order);
     const stageRank = new Map(stages.map((stage, index) => [stage.id, index] as const));
@@ -1181,7 +1244,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           a.position - b.position,
       )
       .map(({ item }) => {
-        const { status, statusWhy } = resolve(item.id);
+        const { status, statusWhy, blockedBy } = resolve(item.id);
         const card = findCard(item);
         return {
           id: item.id,
@@ -1194,6 +1257,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             ? {}
             : { task: card?.ref ?? refOnlyTask(item.task, item.title) }),
           restsOn: [...(item.restsOn ?? [])],
+          blockedBy: [...blockedBy],
         };
       });
     const byStatus: Record<string, number> = {};
@@ -1255,7 +1319,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
   const graveyardEntryView = (record: GraveyardRecord) => {
     const index = boardTasks.findIndex((candidate) => candidate.id === record.taskId);
-    const task = taskRefView({ id: record.taskId, title: record.title }, index < 0 ? 99 : index);
+    const seeded = index < 0 ? undefined : boardTasks[index];
+    const task = taskRefView(
+      seeded ?? {
+        id: record.taskId,
+        title: record.title,
+        openedAt: record.ruledAt - 24 * 3_600_000,
+        closedAt: record.ruledAt,
+      },
+      index < 0 ? 99 : index,
+    );
     return {
       task,
       cause: record.cause,
@@ -1926,6 +1999,33 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
     if (request.method === "POST" && route === "/board/seed") {
       const list = input.tasks;
+      let nextPr = 100;
+      const seedTime = (value: unknown, name: string) => {
+        const at = typeof value === "string" ? Date.parse(value) : Number.NaN;
+        if (!Number.isFinite(at)) throw new RelayError("malformed", `${name} must be a timestamp.`);
+        return at;
+      };
+      const seedPrs = (value: unknown, now: number): Array<LinkedPr> => {
+        if (value === undefined) return [];
+        if (!Array.isArray(value)) throw new RelayError("malformed", "prs must be a list.");
+        return value.map((entry: Record<string, unknown>) => {
+          const state = String(entry.state ?? "open");
+          const number = entry.number === undefined ? nextPr++ : Number(entry.number);
+          if (!Number.isInteger(number) || number < 1)
+            throw new RelayError("malformed", "A pull request number is a whole number from 1.");
+          return {
+            number,
+            state,
+            checks: entry.checks === undefined ? null : String(entry.checks),
+            mergedAt:
+              state !== "merged"
+                ? null
+                : entry.mergedAt === undefined
+                  ? now
+                  : seedTime(entry.mergedAt, "mergedAt"),
+          };
+        });
+      };
       if (!Array.isArray(list)) throw new RelayError("malformed", "tasks must be a list.");
       const now = Date.now();
       boardTasks = list.map((raw: Record<string, unknown>) => {
@@ -1948,8 +2048,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           column: String(raw.column ?? "free"),
           status: String(raw.status ?? "planned"),
           holder: login === null || holderId === null ? null : { id: holderId, login },
-          pr: null,
-          checks: null,
+          prs: seedPrs(raw.prs, now),
+          openedAt: raw.openedAt === undefined ? now : seedTime(raw.openedAt, "openedAt"),
+          closedAt:
+            raw.closedAt === undefined || raw.closedAt === null
+              ? null
+              : seedTime(raw.closedAt, "closedAt"),
           preview:
             typeof raw.preview === "object" && raw.preview !== null
               ? (raw.preview as { state: string; url?: string })
@@ -1963,6 +2067,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           lastSignalAt: now,
         };
       });
+      boardSeeded = true;
       refreshAllHeads();
       reply({ tasks: boardTasks.length });
       return;
@@ -2069,8 +2174,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           : undefined;
       const valid = ignoredReason === undefined;
       task.holder = null;
-      task.pr = { number: 100 + boardTasks.indexOf(task), state: "merged" };
-      task.checks = "passing";
+      task.prs = [
+        {
+          number: 100 + boardTasks.indexOf(task),
+          state: "merged",
+          checks: "passing",
+          mergedAt: Date.now(),
+        },
+      ];
+      task.closedAt ??= Date.now();
       task.status = valid ? "checked" : "built";
       task.column = valid ? "shipped" : "validating";
       task.checked = {

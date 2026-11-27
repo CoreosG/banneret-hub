@@ -7,7 +7,7 @@ import { type ReactNode, useState } from "react";
 
 import { cn } from "../lib/utils";
 import { FeedStatus, When } from "./FeedParts";
-import { mapNotMeasured, mapStages, orderedCounts, restsOnView } from "./map.logic";
+import { blockedByLabel, mapNotMeasured, mapStages, orderedCounts, restsOnView } from "./map.logic";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { StatusCounts, StatusLegend, StatusMark } from "./StatusLegend";
 import { FeedPage, NotJoinedNote } from "./TodayPage";
@@ -23,20 +23,45 @@ const PLAN_REASONS: Readonly<Record<string, string>> = {
 };
 const planReason = (reason: string) => PLAN_REASONS[reason] ?? notMeasuredReason(reason);
 
-/** One item: its status mark and word, its title and the relay's reason. A task makes it a button. */
+/**
+ * One item: its status mark and word, its title and the relay's reason. A blocked item names its
+ * first direct blocker instead, and the reason moves to the mark's hover. A task makes it a button.
+ * `blocksSelected` marks an entry of the Rests-on tab that blocks the selected item.
+ */
 function MapItemView(props: {
+  readonly map: BanneretMap;
   readonly item: BanneretMapItem;
   readonly atWork: boolean;
   readonly onOpen: OpenTask;
+  readonly blocksSelected?: boolean;
 }) {
   const { item } = props;
+  const blockedBy = blockedByLabel(props.map, item);
   const content = (
     <>
-      <StatusMark status={item.status} atWork={props.atWork} />
+      <StatusMark
+        status={item.status}
+        atWork={props.atWork}
+        why={blockedBy === null ? undefined : item.statusWhy}
+      />
       <span className="break-words text-sm">{item.title}</span>
-      <span data-status-why className="break-words text-muted-foreground text-xs">
-        {item.statusWhy}
-      </span>
+      {blockedBy === null ? (
+        <span data-status-why className="break-words text-muted-foreground text-xs">
+          {item.statusWhy}
+        </span>
+      ) : (
+        <span
+          data-blocked-by={item.blockedBy[0]}
+          className="break-words text-muted-foreground text-xs"
+        >
+          {blockedBy}
+        </span>
+      )}
+      {props.blocksSelected === true ? (
+        <span data-blocks-selected className="text-foreground text-xs">
+          Blocks it
+        </span>
+      ) : null}
     </>
   );
   const box = "flex w-full flex-col gap-1 rounded-md border p-2.5 text-start";
@@ -97,6 +122,7 @@ function BuildMapView(props: {
               {stage.items.map((item) => (
                 <MapItemView
                   key={item.id}
+                  map={props.map}
                   item={item}
                   atWork={item.task !== undefined && props.atWork.has(item.task.id)}
                   onOpen={props.onOpen}
@@ -111,8 +137,11 @@ function BuildMapView(props: {
 }
 
 function RestsOnList(props: {
+  readonly map: BanneretMap;
   readonly label: string;
   readonly entries: ReadonlyArray<{ readonly id: string; readonly item: BanneretMapItem | null }>;
+  /** Ids among the entries that block the selected item directly. */
+  readonly blockers: ReadonlySet<string>;
   readonly atWork: ReadonlySet<string>;
   readonly onOpen: OpenTask;
 }) {
@@ -135,9 +164,11 @@ function RestsOnList(props: {
             ) : (
               <MapItemView
                 key={entry.id}
+                map={props.map}
                 item={entry.item}
                 atWork={entry.item.task !== undefined && props.atWork.has(entry.item.task.id)}
                 onOpen={props.onOpen}
+                blocksSelected={props.blockers.has(entry.id)}
               />
             ),
           )}
@@ -177,6 +208,7 @@ function RestsOnTab(props: {
       </label>
       <ul aria-label="Selected item" className="max-w-md">
         <MapItemView
+          map={map}
           item={selected}
           atWork={selected.task !== undefined && props.atWork.has(selected.task.id)}
           onOpen={props.onOpen}
@@ -184,14 +216,18 @@ function RestsOnTab(props: {
       </ul>
       <div className="grid gap-4 md:grid-cols-2">
         <RestsOnList
+          map={map}
           label="It rests on"
           entries={view.restsOn}
+          blockers={new Set(selected.blockedBy)}
           atWork={props.atWork}
           onOpen={props.onOpen}
         />
         <RestsOnList
+          map={map}
           label="Rests on it"
           entries={view.dependants.map((item) => ({ id: item.id, item }))}
+          blockers={new Set()}
           atWork={props.atWork}
           onOpen={props.onOpen}
         />

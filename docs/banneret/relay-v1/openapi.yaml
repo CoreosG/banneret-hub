@@ -1103,10 +1103,15 @@ components:
               type: array
               maxItems: 20
               items:
+                description: |
+                  One merged pull request. `pr` is the pull request that shipped, so a client needs no board to
+                  name or link it. `ref` is where the task lives in its tracker, present when the relay knows it.
                 type: object
-                required: [task, summary, mergedAt, live]
+                required: [task, pr, summary, mergedAt, live]
                 properties:
                   task: { $ref: "#/components/schemas/TaskRef" }
+                  pr: { $ref: "#/components/schemas/ShippedPr" }
+                  ref: { $ref: "#/components/schemas/BoardTaskRef" }
                   summary: { type: string, maxLength: 300 }
                   mergedAt: { $ref: "#/components/schemas/Timestamp" }
                   live: { type: string, enum: [live, not_live_yet, deploy_failed, no_deploy] }
@@ -1114,6 +1119,15 @@ components:
         working: { $ref: "#/components/schemas/WorkingBlock" }
         stuck: { $ref: "#/components/schemas/StuckBlock" }
         health: { $ref: "#/components/schemas/HealthBlock" }
+    ShippedPr:
+      description: The pull request behind a shipped item. `repo` is the `owner/name` display string.
+      type: object
+      additionalProperties: false
+      required: [number, url, repo]
+      properties:
+        number: { type: integer, minimum: 1 }
+        url: { type: string, format: uri }
+        repo: { type: string, minLength: 1, maxLength: 200 }
     NeedsBlock:
       description: The needs-you block, as in Today.
       type: object
@@ -1306,32 +1320,38 @@ components:
         version of this schema.
       type: object
       additionalProperties: false
-      required: [task, column, status, statusWhy, restsOn]
+      required: [task, column, status, statusWhy, prs, restsOn]
       properties:
         task: { $ref: "#/components/schemas/BoardTask" }
         column: { description: "A `columns[].id`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
         status:
           description: |
             One status vocabulary for Board, Map and Feed. Open string; known values `ruled_dead` (†), `checked` (●),
-            `sent_back` (✕), `needs_you` (◆), `built` (◐) and `planned` (○). See README, "Board and leases".
+            `sent_back` (✕), `needs_you` (◆), `blocked` (⊘), `built` (◐) and `planned` (○). See README, "Board and
+            leases".
           allOf: [{ $ref: "#/components/schemas/OpenToken" }]
         statusWhy: { description: "One plain sentence that says why the card has this status.", type: string, minLength: 1, maxLength: 240 }
         lease: { $ref: "#/components/schemas/BoardLease" }
-        pr: { $ref: "#/components/schemas/BoardPr" }
-        checks: { $ref: "#/components/schemas/BoardChecks" }
+        prs: { $ref: "#/components/schemas/BoardPrs" }
         restsOn:
           description: Ids of the tasks this one rests on.
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/Id" }
     BoardTask:
+      description: |
+        A task as the relay names it, wherever it appears: board cards, map items, TaskRead, feed and graveyard
+        entries. `openedAt` is when the tracker issue was opened; `closedAt` is when it was closed, or null while
+        it is open. A relay that builds a task without a board card fills both from its own read of the issue.
       type: object
       additionalProperties: false
-      required: [id, title, ref]
+      required: [id, title, ref, openedAt, closedAt]
       properties:
         id: { $ref: "#/components/schemas/Id" }
         title: { type: string, maxLength: 300 }
         ref: { $ref: "#/components/schemas/BoardTaskRef" }
+        openedAt: { $ref: "#/components/schemas/Timestamp" }
+        closedAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
     BoardTaskRef:
       description: Where the task lives in its tracker; the fields of a Hub issue target.
       type: object
@@ -1358,6 +1378,13 @@ components:
         lastSignalAt: { description: "The last heartbeat, push or comment.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
         staleAt: { description: "`lastSignalAt` plus 6 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
         expiresAt: { description: "`lastSignalAt` plus 24 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+    BoardPrs:
+      description: |
+        Every pull request linked to the task, oldest first; empty when none is linked. The board status rules read
+        this list (README, "Board and leases").
+      type: array
+      maxItems: 20
+      items: { $ref: "#/components/schemas/BoardPr" }
     BoardPr:
       type: object
       additionalProperties: false
@@ -1366,6 +1393,9 @@ components:
         number: { type: integer, minimum: 1 }
         url: { type: string, format: uri }
         state: { description: "Open string; known: `open`, `merged`, `closed`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+        checks:
+          description: The required checks on the pull request's head, when the relay has read them.
+          allOf: [{ $ref: "#/components/schemas/BoardChecks" }]
     BoardChecks:
       type: object
       additionalProperties: false
@@ -1409,9 +1439,17 @@ components:
       type: string
       pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
     MapItem:
+      description: |
+        A `blocked` item always has a non-empty `blockedBy`. `blockedBy` may also be non-empty on an item whose own
+        status outranks `blocked` (README, "Map and the stage plan").
       type: object
       additionalProperties: false
-      required: [id, stageId, title, status, statusWhy, restsOn]
+      required: [id, stageId, title, status, statusWhy, restsOn, blockedBy]
+      if:
+        required: [status]
+        properties: { status: { const: blocked } }
+      then:
+        properties: { blockedBy: { minItems: 1 } }
       properties:
         id: { $ref: "#/components/schemas/MapId" }
         stageId: { description: "A `stages[].id`.", allOf: [{ $ref: "#/components/schemas/MapId" }] }
@@ -1419,12 +1457,12 @@ components:
         status:
           description: |
             The board's vocabulary: open string; known values `ruled_dead`, `checked`, `sent_back`, `needs_you`,
-            `built` and `planned`. An item whose task has a board card takes the card's computed status. Without a card,
+            `blocked`, `built` and `planned`. An item whose task has a board card takes the card's computed status,
+            except that a card's `blocked` counts as the status the card has without its rests-on row. Without a card,
             a closed-completed issue is `built`, a not-planned one `ruled_dead`, an open one `planned`. An item without a
-            `task` is `planned`. An item that rests on one that is `needs_you`, `sent_back` or `ruled_dead` shows `needs_you`
-            unless it already has a status that ranks higher.
+            `task` is `planned`. An item that is `built` or `planned` and has a non-empty `blockedBy` is `blocked`.
           allOf: [{ $ref: "#/components/schemas/OpenToken" }]
-        statusWhy: { description: "One plain sentence. For a blocked item it names the blocker.", type: string, minLength: 1, maxLength: 240 }
+        statusWhy: { description: "One plain sentence. For a `blocked` item it names the first entry of `blockedBy`.", type: string, minLength: 1, maxLength: 240 }
         task:
           description: The task behind the item. Always present when the plan item has a `task` ref, card or no card; absent only when it has none. Without a board card the relay builds it from the ref, and `GET /tasks/{taskId}` may answer 404 for its id.
           allOf: [{ $ref: "#/components/schemas/BoardTask" }]
@@ -1432,6 +1470,15 @@ components:
           description: Ids of the items this one rests on (item ids, not task ids).
           type: array
           maxItems: 100
+          items: { $ref: "#/components/schemas/MapId" }
+        blockedBy:
+          description: |
+            The direct blockers: the entries of `restsOn` whose final status is `needs_you`, `sent_back`,
+            `ruled_dead` or `blocked`, in `restsOn` order, without repeats. Only direct dependencies, never the root
+            cause further down. Empty when nothing blocks the item.
+          type: array
+          maxItems: 100
+          uniqueItems: true
           items: { $ref: "#/components/schemas/MapId" }
     MapCounters:
       description: Every item counted once by its final status.
@@ -1516,15 +1563,14 @@ components:
         when they exist. Closed.
       type: object
       additionalProperties: false
-      required: [task, column, status, statusWhy, restsOn]
+      required: [task, column, status, statusWhy, prs, restsOn]
       properties:
         task: { $ref: "#/components/schemas/BoardTask" }
         column: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
         status: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
         statusWhy: { type: string, minLength: 1, maxLength: 240 }
         lease: { $ref: "#/components/schemas/BoardLease" }
-        pr: { $ref: "#/components/schemas/BoardPr" }
-        checks: { $ref: "#/components/schemas/BoardChecks" }
+        prs: { $ref: "#/components/schemas/BoardPrs" }
         restsOn:
           type: array
           maxItems: 100

@@ -64,6 +64,8 @@ const task = (id: string, title: string, key: string) => ({
     key,
     url: `https://github.com/example-org/example-app/issues/${key}`,
   },
+  openedAt: "2026-11-20T09:00:00.000Z",
+  closedAt: null,
 });
 
 const item = (
@@ -73,7 +75,16 @@ const item = (
   status: string,
   statusWhy: string,
   extra: Partial<BanneretMapItem> = {},
-): BanneretMapItem => ({ id, stageId, title, status, statusWhy, restsOn: [], ...extra });
+): BanneretMapItem => ({
+  id,
+  stageId,
+  title,
+  status,
+  statusWhy,
+  restsOn: [],
+  blockedBy: [],
+  ...extra,
+});
 
 /** One item per status; stages listed out of order, and one stage with nothing in it. */
 const MAP = (): BanneretMap => ({
@@ -103,19 +114,30 @@ const MAP = (): BanneretMap => ({
       "rate-limits",
       "s2",
       "Rate limits",
-      "needs_you",
-      'It rests on "Profile blocks", which needs you.',
-      { restsOn: ["profile"] },
+      "blocked",
+      'Blocked by "Profile blocks", which needs you.',
+      { restsOn: ["profile"], blockedBy: ["profile"] },
     ),
-    item("polish", "s2", "Polish", "planned", "In the stage plan.", {
+    // Propagation: Polish names the blocked item it rests on, not the root cause.
+    item("polish", "s2", "Polish", "blocked", 'Blocked by "Rate limits", which is blocked.', {
       restsOn: ["rate-limits", "sign-in"],
+      blockedBy: ["rate-limits"],
     }),
+    item("docs", "s2", "Docs", "planned", "In the stage plan."),
   ],
   counters: {
-    byStatus: { checked: 1, built: 1, ruled_dead: 1, sent_back: 1, needs_you: 2, planned: 1 },
+    byStatus: {
+      checked: 1,
+      built: 1,
+      ruled_dead: 1,
+      sent_back: 1,
+      needs_you: 1,
+      blocked: 2,
+      planned: 1,
+    },
     byStage: {
       s1: { checked: 1, built: 1, ruled_dead: 1 },
-      s2: { sent_back: 1, needs_you: 2, planned: 1 },
+      s2: { sent_back: 1, needs_you: 1, blocked: 2, planned: 1 },
       s3: {},
     },
   },
@@ -246,9 +268,10 @@ describe("Enterprise build map", () => {
       ["old-idea", "†", "ruled dead"],
       ["sign-in", "●", "checked"],
       ["invites", "✕", "sent back"],
-      ["profile", "◆", "needs you or blocked"],
+      ["profile", "◆", "needs you"],
+      ["rate-limits", "⊘", "blocked"],
       ["search", "◐", "built, unchecked"],
-      ["polish", "○", "planned"],
+      ["docs", "○", "planned"],
     ];
     for (const [id, mark, word] of marks) {
       expect(markOf(id)).toContain(mark);
@@ -260,11 +283,13 @@ describe("Enterprise build map", () => {
     );
 
     // Totals ride on the shared legend; each stage shows its own counts.
-    expect(countIn(legend(), "needs_you")).toBe("2");
+    expect(countIn(legend(), "needs_you")).toBe("1");
+    expect(countIn(legend(), "blocked")).toBe("2");
     expect(countIn(legend(), "checked")).toBe("1");
     expect(countIn(legend(), "planned")).toBe("1");
     const social = document.querySelector('[aria-label="Social counts"]')!;
-    expect(countIn(social, "needs_you")).toBe("2");
+    expect(countIn(social, "needs_you")).toBe("1");
+    expect(countIn(social, "blocked")).toBe("2");
     expect(countIn(social, "sent_back")).toBe("1");
     expect(countIn(social, "checked")).toBeUndefined();
     const foundationCounts = document.querySelector('[aria-label="Foundations counts"]')!;
@@ -276,17 +301,26 @@ describe("Enterprise build map", () => {
     await vi.waitFor(() => expect(legend().textContent).not.toContain("●"));
   });
 
-  it("shows the blocker's name on a blocked dependant", async () => {
+  it("says which item blocks a blocked one, and the relay's reason on hover", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openMap(stack);
     await using _screen = screen;
     await emit(state(["map"], mapRead(MAP())));
     await expect.element(page.getByText("Rate limits")).toBeVisible();
     const blocked = itemRow("rate-limits")!;
-    expect(blocked.querySelector("[data-status]")?.textContent).toContain("◆");
-    expect(blocked.querySelector("[data-status-why]")?.textContent).toBe(
-      'It rests on "Profile blocks", which needs you.',
+    expect(blocked.querySelector("[data-status]")?.textContent).toContain("⊘");
+    expect(blocked.querySelector("[data-blocked-by]")?.textContent).toBe(
+      "Blocked by Profile blocks",
     );
+    expect(blocked.querySelector("[data-status-why]")).toBeNull();
+    // The dependant names its direct blocker, not the root cause.
+    expect(itemRow("polish")!.querySelector("[data-blocked-by]")?.textContent).toBe(
+      "Blocked by Rate limits",
+    );
+    await userEvent.hover(blocked.querySelector("[data-status]")!);
+    await expect
+      .element(page.getByText('Blocked by "Profile blocks", which needs you.'))
+      .toBeVisible();
   });
 
   it("lists what an item rests on and what rests on it", async () => {
@@ -310,9 +344,22 @@ describe("Enterprise build map", () => {
     await userEvent.selectOptions(select, "rate-limits");
     await vi.waitFor(() => expect(ids(restsOn())).toEqual(["profile"]));
     expect(ids(dependants())).toEqual(["polish"]);
-    // The blocked item names its blocker.
+    // The blocked item names its blocker, and the blocker is marked in the list.
     const selected = page.getByRole("list", { name: "Selected item" }).element();
-    expect(selected.querySelector("[data-status-why]")?.textContent).toContain('"Profile blocks"');
+    expect(selected.querySelector("[data-blocked-by]")?.textContent).toBe(
+      "Blocked by Profile blocks",
+    );
+    expect(
+      restsOn().querySelector('[data-item-id="profile"] [data-blocks-selected]'),
+    ).not.toBeNull();
+
+    await userEvent.selectOptions(select, "polish");
+    await vi.waitFor(() => expect(ids(restsOn())).toEqual(["rate-limits", "sign-in"]));
+    expect(
+      [...restsOn().querySelectorAll("[data-blocks-selected]")].map((mark) =>
+        mark.closest("[data-item-id]")?.getAttribute("data-item-id"),
+      ),
+    ).toEqual(["rate-limits"]);
 
     await userEvent.selectOptions(select, "sign-in");
     await vi.waitFor(() => expect(ids(dependants())).toEqual(["invites", "polish"]));
@@ -448,6 +495,8 @@ describe("Enterprise build map", () => {
           key: "9",
           url: "javascript:window.__pwned=1",
         },
+        openedAt: "2026-11-20T09:00:00.000Z",
+        closedAt: null,
       },
     });
     const map = MAP();

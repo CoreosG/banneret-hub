@@ -359,3 +359,45 @@ describe("reshapeToday stuck subject", () => {
     ]);
   });
 });
+
+describe("reshapeToday shipped", () => {
+  const shipped = (item: unknown) =>
+    RelayFeed.reshapeToday(
+      { generatedAt: "2026-11-26T10:00:00Z", shipped: { state: "ok", items: [item] } },
+      () => undefined,
+    )?.shipped.items;
+  const pr = {
+    number: 41,
+    url: "https://github.com/example-org/example-app/pull/41",
+    repo: "example-org/example-app",
+  };
+  const ref = {
+    tracker: "github",
+    scope: "example-org/example-app",
+    key: "37",
+    url: "https://github.com/example-org/example-app/issues/37",
+  };
+  const base = {
+    task: { id: "t_1", title: "Guild roster page" },
+    summary: "Guild roster page merged.",
+    mergedAt: "2026-11-26T07:00:00Z",
+    live: "live",
+  };
+  const kept = {
+    task: { title: "Guild roster page" },
+    summary: base.summary,
+    mergedAt: base.mergedAt,
+    live: base.live,
+  };
+
+  it("keeps the item's own pull request and the task's ref", () => {
+    expect(shipped({ ...base, pr, ref })).toEqual([{ ...kept, pr, ref }]);
+    expect(shipped({ ...base, pr })).toEqual([{ ...kept, pr }]);
+  });
+
+  it("drops an item without a whole pull request, and a ref missing its url", () => {
+    expect(shipped(base)).toEqual([]);
+    expect(shipped({ ...base, pr: { number: 41, url: pr.url } })).toEqual([]);
+    expect(shipped({ ...base, pr, ref: { ...ref, url: undefined } })).toEqual([{ ...kept, pr }]);
+  });
+});

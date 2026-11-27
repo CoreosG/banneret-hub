@@ -350,7 +350,19 @@ describe("Enterprise Today and Needs you", () => {
           ...block,
           items: [
             {
-              task: { title, url: "https://github.com/example-org/example-app/pull/38" },
+              // The task links its issue; the row names and links the item's own pull request.
+              task: { title, url: "https://github.com/example-org/example-app/issues/12" },
+              pr: {
+                number: 38,
+                url: "https://github.com/example-org/example-app/pull/38",
+                repo: "example-org/example-app",
+              },
+              ref: {
+                tracker: "github",
+                scope: "example-org/example-app",
+                key: "12",
+                url: "https://github.com/example-org/example-app/issues/12",
+              },
               summary: title,
               mergedAt: "2026-11-26T09:47:00.000Z",
               live: "no_deploy",

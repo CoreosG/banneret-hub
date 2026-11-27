@@ -33,11 +33,14 @@
           "scope": "example-org/example-app",
           "key": "51",
           "url": "https://github.com/example-org/example-app/issues/51"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
       },
       "column": "free",
       "status": "planned",
       "statusWhy": "Open and nobody has taken it yet.",
+      "prs": [],
       "restsOn": [
         "t_K9w3Ls"
       ],
@@ -52,7 +55,9 @@
           "scope": "example-org/example-app",
           "key": "42",
           "url": "https://github.com/example-org/example-app/issues/42"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
       },
       "column": "taken",
       "status": "planned",
@@ -68,6 +73,7 @@
         "staleAt": "2026-11-26T15:58:00Z",
         "expiresAt": "2026-11-27T09:58:00Z"
       },
+      "prs": [],
       "restsOn": []
     }
   ]

@@ -60,10 +60,17 @@ function linkRef(url: string | undefined): { repo: string; number: string } | nu
   return repo === undefined ? null : { repo, number: parts[at]! };
 }
 
-/** "banneret-hub · #41", the shipped row's subtitle head; null when the link names neither. */
-export function shippedRefLabel(url: string | undefined): string | null {
-  const ref = linkRef(url);
-  return ref === null ? null : `${ref.repo} \u00b7 #${ref.number}`;
+/**
+ * "banneret-hub · #41", the shipped row's subtitle head, from the item's own pull request: the name
+ * part of `owner/name` and the number.
+ */
+export function shippedRefLabel(pr: { readonly number: number; readonly repo: string }): string {
+  const name =
+    pr.repo
+      .split("/")
+      .findLast((part) => part.trim() !== "")
+      ?.trim() ?? "";
+  return name === "" ? `#${pr.number}` : `${name} \u00b7 #${pr.number}`;
 }
 
 export type StuckSubject =

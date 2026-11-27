@@ -20,9 +20,12 @@
           "scope": "example-org/example-app",
           "key": "39",
           "url": "https://github.com/example-org/example-app/issues/39"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": "2026-11-25T16:00:00Z"
       },
-      "restsOn": []
+      "restsOn": [],
+      "blockedBy": []
     },
     {
       "id": "guild-invites",
@@ -38,16 +41,19 @@
           "scope": "example-org/example-app",
           "key": "42",
           "url": "https://github.com/example-org/example-app/issues/42"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
       },
-      "restsOn": ["sign-in"]
+      "restsOn": ["sign-in"],
+      "blockedBy": []
     },
     {
       "id": "profile-blocks",
       "stageId": "s2",
       "title": "Profile blocks",
       "status": "needs_you",
-      "statusWhy": "bo-example has been quiet for 7 hours, so the claim is stale.",
+      "statusWhy": "Required checks are failing on pull request 88.",
       "task": {
         "id": "t_P5n2Hd",
         "title": "Profile blocks",
@@ -56,24 +62,37 @@
           "scope": "example-org/example-app",
           "key": "47",
           "url": "https://github.com/example-org/example-app/issues/47"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
       },
-      "restsOn": []
+      "restsOn": [],
+      "blockedBy": []
     },
     {
       "id": "rate-limits",
       "stageId": "s2",
       "title": "Rate limits",
-      "status": "needs_you",
-      "statusWhy": "It rests on \"Profile blocks\", which needs you.",
-      "restsOn": ["profile-blocks"]
+      "status": "blocked",
+      "statusWhy": "Blocked by \"Profile blocks\", which needs you.",
+      "restsOn": ["guild-invites", "profile-blocks"],
+      "blockedBy": ["profile-blocks"]
+    },
+    {
+      "id": "guild-chat",
+      "stageId": "s2",
+      "title": "Guild chat",
+      "status": "blocked",
+      "statusWhy": "Blocked by \"Rate limits\", which is blocked.",
+      "restsOn": ["rate-limits"],
+      "blockedBy": ["rate-limits"]
     }
   ],
   "counters": {
-    "byStatus": { "checked": 1, "planned": 1, "needs_you": 2 },
+    "byStatus": { "checked": 1, "planned": 1, "needs_you": 1, "blocked": 2 },
     "byStage": {
       "s1": { "checked": 1 },
-      "s2": { "planned": 1, "needs_you": 2 }
+      "s2": { "planned": 1, "needs_you": 1, "blocked": 2 }
     }
   }
 }

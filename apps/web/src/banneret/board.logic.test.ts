@@ -1,7 +1,7 @@
 import type { BanneretBoard, BanneretBoardLease } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { agoLabel, boardColumns, leaseChip, prLine, statusWord } from "./board.logic";
+import { agoLabel, boardColumns, leaseChip, prLine, prLines, statusWord } from "./board.logic";
 
 const NOW = Date.parse("2026-11-26T12:00:00.000Z");
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -16,7 +16,8 @@ const lease = (state: string, sinceMs: number, login = "ada"): BanneretBoardLeas
 
 describe("board words", () => {
   it("names every known status with its mark and keeps an unknown one's words", () => {
-    expect(statusWord("needs_you")).toEqual({ mark: "◆", word: "needs you or blocked" });
+    expect(statusWord("needs_you")).toEqual({ mark: "◆", word: "needs you" });
+    expect(statusWord("blocked")).toEqual({ mark: "⊘", word: "blocked" });
     expect(statusWord("ruled_dead").mark).toBe("†");
     expect(statusWord("brand_new_state")).toEqual({ mark: "·", word: "brand new state" });
   });
@@ -52,19 +53,35 @@ describe("board words", () => {
     expect(agoLabel(ago(50 * 3_600_000), NOW)).toBe("2 d ago");
   });
 
-  it("joins the PR and checks, or says nothing", () => {
+  it("gives each linked PR its own line, with its checks when the relay read them", () => {
     expect(
-      prLine({ pr: { number: 12, url: "https://x", state: "open" }, checks: { state: "passing" } }),
+      prLine({ number: 12, url: "https://x", state: "open", checks: { state: "passing" } }),
     ).toBe("PR #12 open · checks passing");
-    expect(prLine({})).toBeNull();
+    expect(prLine({ number: 9, url: "https://x", state: "closed" })).toBe("PR #9 closed");
+    expect(
+      prLines({
+        prs: [
+          { number: 9, url: "https://x", state: "closed" },
+          { number: 12, url: "https://x", state: "open", checks: { state: "failing" } },
+        ],
+      }),
+    ).toEqual(["PR #9 closed", "PR #12 open · checks failing"]);
+    expect(prLines({ prs: [] })).toEqual([]);
   });
 
   it("keeps the relay's column order and puts a card of an unknown column under Other", () => {
     const card = (id: string, column: string) => ({
-      task: { id, title: id, ref: { tracker: "github", scope: "o/r", key: id, url: "https://x" } },
+      task: {
+        id,
+        title: id,
+        ref: { tracker: "github", scope: "o/r", key: id, url: "https://x" },
+        openedAt: "2026-11-20T09:00:00.000Z",
+        closedAt: null,
+      },
       column,
       status: "planned",
       statusWhy: "Open.",
+      prs: [],
       restsOn: [],
     });
     const board: BanneretBoard = {

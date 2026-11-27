@@ -44,6 +44,7 @@ import { BanneretEnrolment } from "./Enrolment.ts";
 import { RelayCallError, type RelayReply } from "./RelayClient.ts";
 import {
   boardTaskIndex,
+  boardTaskRef,
   liveTaskIds,
   makeSnapshotReader,
   reshapeBoard,
@@ -147,6 +148,20 @@ const task = (value: unknown) => {
   return { title, ...optional("url", text(source?.url, 2048)) };
 };
 
+/** The pull request behind a shipped item: `{number, url, repo}`, all required. */
+const shippedPr = (value: unknown) => {
+  const source = fields(value);
+  const number = source?.number;
+  const url = text(source?.url, 2048);
+  const repo = text(source?.repo, 200);
+  return typeof number === "number" &&
+    Number.isInteger(number) &&
+    url !== undefined &&
+    repo !== undefined
+    ? { number, url, repo }
+    : undefined;
+};
+
 // A stuck item has a task or a subject, never both; the task wins if a relay sends both.
 const stuckSubject = (value: unknown) => {
   const source = fields(value);
@@ -229,15 +244,24 @@ export const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedTod
     shipped: block(source?.shipped, (value) => {
       const item = fields(value);
       const shippedTask = task(item?.task);
+      const pr = shippedPr(item?.pr);
       const summary = text(item?.summary, 300);
       const mergedAt = text(item?.mergedAt, 64);
       const live = text(item?.live, 32);
       return shippedTask === undefined ||
+        pr === undefined ||
         summary === undefined ||
         mergedAt === undefined ||
         live === undefined
         ? undefined
-        : { task: shippedTask, summary, mergedAt, live };
+        : {
+            task: shippedTask,
+            pr,
+            ...optional("ref", boardTaskRef(item?.ref)),
+            summary,
+            mergedAt,
+            live,
+          };
     }),
     working: block(source?.working, (value) => {
       const item = fields(value);

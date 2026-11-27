@@ -7,6 +7,8 @@ const task = (id: string, url = `https://github.com/example-org/app/issues/${id}
   id,
   title: `Task ${id}`,
   ref: { tracker: "github", scope: "example-org/app", key: id, url },
+  openedAt: "2026-11-20T09:00:00.000Z",
+  closedAt: null,
 });
 
 const entry = (id: string, at: string, summary = id): BanneretFeedEntry => ({

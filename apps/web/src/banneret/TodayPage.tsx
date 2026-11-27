@@ -1,5 +1,6 @@
 // Banneret Hub: Today for an Enterprise workspace, drawn from the relay's GET /today. The five blocks
 // come in the relay's order (J1): needs you, shipped since the last visit, working now, stuck, health.
+import type { BanneretFeedShippedPr } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import { useEffect } from "react";
 
@@ -52,11 +53,10 @@ function TaskTitle(props: {
   );
 }
 
-/** "repo · #41 · ", linked to the pull request; nothing when its link names neither. */
-function ShippedRef(props: { readonly url: string | undefined }) {
-  const label = shippedRefLabel(props.url);
-  if (label === null) return null;
-  const href = safeLinkOut(props.url);
+/** "repo · #41 · ", linked to the item's own pull request. */
+function ShippedRef(props: { readonly pr: BanneretFeedShippedPr }) {
+  const label = shippedRefLabel(props.pr);
+  const href = safeLinkOut(props.pr.url);
   return (
     <>
       {href === null ? (
@@ -179,10 +179,10 @@ export function TodayPage() {
           >
             <ul className="flex flex-col gap-1.5 text-sm">
               {today.shipped.items.map((item) => (
-                <li key={`${item.task.title}:${item.mergedAt}`} className="flex flex-col">
+                <li key={`${item.pr.url}:${item.mergedAt}`} className="flex flex-col">
                   <span className="break-words">{item.summary}</span>
                   <span className="text-muted-foreground text-xs">
-                    <ShippedRef url={item.task.url} />
+                    <ShippedRef pr={item.pr} />
                     {shippedLabel(item.live)} · <Age at={item.mergedAt} />
                   </span>
                 </li>

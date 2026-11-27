@@ -196,6 +196,14 @@ the previous visit read count as one visit and leave it as it was; a visit read 
 visit, and `lastVisitAt` becomes the time of the previous visit's last read. The only accepted value of `visit` is
 `1`; any other is refused with 400 `malformed`.
 
+### Shipped
+
+Each shipped item is one merged pull request: `{task{id, title, url?}, pr{number, url, repo}, ref?, summary, mergedAt,
+live}`. `pr` is always present: the pull request's number, its link and the repository as the `owner/name` display
+string. `ref` is the task's tracker ref `{tracker, host?, scope, key, url}`, present when the relay knows which issue
+the pull request belongs to. A client names and links the item from these fields alone; it never joins Shipped to the
+board. Shipped is not in the snapshot (see "Snapshot").
+
 ### Stuck
 
 The stuck block has one item per task and owner. `rules` lists every reason that applies to it. It is never empty
@@ -340,9 +348,15 @@ draws it. Writes (take, release, hand-off) are not part of this contract.
 
 - `columns` are the relay's five, each `{id, title}`: `free` (Free), `taken` (Taken), `validating` (Validating),
   `stuck` (Stuck), `shipped` (Shipped). Ids are open strings.
-- A card is `{task{id, title, ref{tracker, host?, scope, key, url}}, column, status, statusWhy, lease?, pr?{number,
-  url, state}, checks?{state}, restsOn[taskId]}`. Objects in the file are closed, so an unknown field is a relay
-  defect and a conformance failure. New fields come with a new minor version.
+- A card is `{task, column, status, statusWhy, lease?, prs[], restsOn[taskId]}`. Objects in the file are closed, so
+  an unknown field is a relay defect and a conformance failure. New fields come with a new minor version.
+- `task` is `{id, title, ref{tracker, host?, scope, key, url}, openedAt, closedAt}`. `openedAt` is when the tracker
+  issue was opened. `closedAt` is when it was closed, or null while it is open. Every task in the protocol has this
+  shape: board cards, map items, `GET /tasks/{id}`, feed and graveyard entries.
+- `prs` lists every pull request linked to the task, oldest first, each `{number, url, state, checks?{state}}`. It is
+  an array, empty when none is linked. `state` is an open string, known values `open`, `merged`, `closed`. `checks` is
+  the state of the required checks on that pull request's head (known values `passing`, `failing`, `pending`), present
+  when the relay has read them. There is no card-level `pr` or `checks`.
 - `lease` is `{holder{id, login}, state, since, lastSignalAt, staleAt, expiresAt}`. A card with no `lease` is
   Free. A relay that cannot read claims says so in the board's `state` and `notMeasured`, never as a lease state.
 - The "agent at work" ring is not in the file. The Hub derives it from the `work` file, joined by task id.
@@ -355,12 +369,18 @@ first matching row:
 |---|---|---|---|
 | † | `ruled_dead` | ruled dead | Issue closed as "not planned" |
 | ● | `checked` | checked | `checked` label that passes the sign-off rule (see "Checked") |
-| ✕ | `sent_back` | sent back | Issue reopened after its PR merged; review "changes requested"; PR closed unmerged |
-| ◆ | `needs_you` | needs you or blocked | `needs:<person>` or `blocked` label; failing required checks; lease conflict; a rests-on task that is `needs_you`, `sent_back` or `ruled_dead` |
-| ◐ | `built` | built, unchecked | Linked PR merged, or issue closed as completed |
+| ✕ | `sent_back` | sent back | Issue reopened after a linked PR merged; review "changes requested" on an open linked PR; every linked PR closed unmerged (at least one, none open, none merged) |
+| ◆ | `needs_you` | needs you | `needs:<person>` or `blocked` label; any open linked PR with failing required checks; lease conflict |
+| ⊘ | `blocked` | blocked | A rests-on task that is `needs_you`, `sent_back`, `ruled_dead` or `blocked` |
+| ◐ | `built` | built, unchecked | Any linked PR merged, or issue closed as completed |
 | ○ | `planned` | planned | Open, none of the above |
 
 The rule for "checked" is under "Checked", below.
+
+`needs_you` means the task itself needs a person: a label, failing checks or a lease conflict. `blocked` means the task
+waits on a dependency and nobody can act on it directly. A tracker label named `blocked` is a person flagging the task,
+so it gives `needs_you`, not `blocked`. A client shows `blocked` as "Blocked by <title>", or "Blocked" where space is
+short, and its mark is ⊘.
 
 **Lease state.** `state` is an open string; known values `active`, `stale`, `expired`, `paused`, `conflict`. Time
 runs from `lastSignalAt`, the latest heartbeat, push or comment:
@@ -398,34 +418,46 @@ the section. Like the board, the map is snapshot-only: the relay computes it and
   `detail` naming the rule. `stages` and `items` are empty. The Hub never shows a broken plan as an empty one.
 
 **The file.** `SnapshotMap` is `{state, notMeasured, stages[{id, title, order}], items[{id, stageId, title, status,
-statusWhy, task?{id, title, ref}, restsOn[itemId]}], counters{byStatus{<status>: n}, byStage{<stageId>: {<status>: n}}}}`.
-Objects are closed, like the board's.
+statusWhy, task?{id, title, ref, openedAt, closedAt}, restsOn[itemId], blockedBy[itemId]}], counters{byStatus{<status>:
+n}, byStage{<stageId>: {<status>: n}}}}`. Objects are closed, like the board's.
 
 - `stages` are in ascending `order`, ties in plan order. `items` are grouped by stage in that order, and keep plan
   order within a stage.
 - `task` is present whenever the item's plan has a `task` ref, and absent only when it has none. It is always
-  `{id, title, ref}`. When the board holds a card whose `ref` has the same `tracker`, `host` (both absent counts as
+  `{id, title, ref, openedAt, closedAt}`. When the board holds a card whose `ref` has the same `tracker`, `host` (both absent counts as
   equal), `scope` and `key`, `task` is that card's task. When it holds none (the issue is closed, say, or not on the
   board), the relay builds `task` from the plan ref and its own read of the issue: `id` is the relay's opaque task id
   for that ref, `title` is the issue title (the plan item's title if the issue cannot be read), and `ref` is
-  `{tracker, host?, scope, key, url}`. `GET /tasks/{id}` may answer 404 for such a task. The client then shows the
-  map item's status and the issue by `ref`.
+  `{tracker, host?, scope, key, url}`, and `openedAt` and `closedAt` come from that same read of the issue (the issue's
+  open and close times; `closedAt` null while it is open). `GET /tasks/{id}` may answer 404 for such a task. The client
+  then shows the map item's status and the issue by `ref`.
 - `restsOn` lists **item** ids, copied from the plan.
+- `blockedBy` lists the item's **direct** blockers: its own `restsOn` entries whose final status is `needs_you`,
+  `sent_back`, `ruled_dead` or `blocked`, in `restsOn` order, without repeats. It is always present, and empty when
+  nothing blocks the item. It never names a blocker further down the chain.
 - `counters` count every item once by its final status. `byStage` has an entry for every stage, empty when the stage
   has no items.
 
 **Status.** The vocabulary is the board's (see "Board and leases"): `ruled_dead`, `checked`, `sent_back`, `needs_you`,
-`built`, `planned`, and the same first-match order.
+`blocked`, `built`, `planned`, and the same first-match order.
 
-1. An item whose task has a board card takes that card's computed status and `statusWhy`. An item whose task has no
-   card takes it from the issue: closed as completed is `built`, closed as not planned is `ruled_dead`, open is
-   `planned`. An item without a `task` is `planned`.
-2. A rests-on item that ends up `needs_you`, `sent_back` or `ruled_dead` makes its dependant `needs_you`, with a
-   `statusWhy` that names the blocker, for example `It rests on "Profile blocks", which needs you.` This applies only
-   when the dependant's own status ranks below `needs_you` (`built` or `planned`): `ruled_dead`, `checked` and
-   `sent_back` keep their own status, as in the first-match order.
-3. The rule is applied dependencies first, so a blocked item blocks its own dependants in turn. When several
-   dependencies block, the first in `restsOn` order is named.
+1. **Own status.** An item whose task has a board card takes that card's computed status and `statusWhy`, with one
+   exception: a card that is `blocked` (by the board's task-level rests-on row) gives the status it would have without
+   that row, `built` or `planned`, because the map applies its own `restsOn` instead. An item whose task has no card
+   takes its status from the issue: closed as completed is `built`, closed as not planned is `ruled_dead`, open is
+   `planned`. An item without a `task` is `planned`. So the board and the map can disagree about one task: each says
+   what blocks it in its own graph.
+2. **Blockers.** A status is blocking when it is `needs_you`, `sent_back`, `ruled_dead` or `blocked`. `blockedBy` is
+   the item's `restsOn` entries whose final status is blocking. It is computed whatever the item's own status is.
+3. **Blocked.** An item whose own status is `built` or `planned` and whose `blockedBy` is not empty is `blocked`, with
+   a `statusWhy` that names the first entry of `blockedBy`, for example `Blocked by "Profile blocks", which needs you.`
+   Items with a higher own status (`ruled_dead`, `checked`, `sent_back`, `needs_you`) keep it, and still list their
+   `blockedBy`.
+4. **Propagation.** The rule is applied dependencies first, so a `blocked` item blocks its own dependants in turn.
+   A dependant lists the `blocked` item it rests on, never the root cause: if C rests on B and B rests on A, which
+   needs you, then B is `blocked` with `blockedBy` `[A]` and C is `blocked` with `blockedBy` `[B]`.
+5. `needs_you` on the map comes only from the item's own task, never from a dependency.
+6. `counters` count `blocked` like any other status.
 
 ## Stage plan file
 
@@ -480,12 +512,12 @@ unless capabilities carry the section.
   continues in the call. A cursor is opaque, and a page can shift when new entries arrive.
 - **Derived only.** The relay builds entries from tracker and relay events. A client cannot write one; written
   entries (comments, announcements) wait for a later minor version.
-- **Feed entry.** `{id, type, at, author?{id, login}, importance, summary, link?, task?{id, title, ref}, status?}`.
+- **Feed entry.** `{id, type, at, author?{id, login}, importance, summary, link?, task?{id, title, ref, openedAt, closedAt}, status?}`.
   Objects are closed. `type` is an open string; known values `taken`, `released`, `lease_expired`, `pr_opened`,
   `pr_merged`, `built`, `checked`, `sent_back`, `ruled_dead`, `comment`. `importance` is an open string; known
   values `high`, `normal`, `low`. `status` is the task's status when the entry was made, in the board vocabulary.
   `author` is absent for something the relay noticed itself. `summary` is one plain sentence.
-- **Graveyard entry.** `{task{id, title, ref}, cause, ruledAt, by?{id, login}, link?}`. `cause` is always present:
+- **Graveyard entry.** `{task{id, title, ref, openedAt, closedAt}, cause, ruledAt, by?{id, login}, link?}`. `cause` is always present:
   the Hub shows it, so a task never sits in the graveyard without a reason.
 
 ## Task
@@ -511,11 +543,11 @@ event log shows **all** of:
 
 1. a holder of the sign-off role added the `checked` label, and it is the **latest** `labeled` event for `checked`
    (a later `unlabeled` event removes the check);
-2. the linked pull request had already merged;
-3. its checks were green;
-4. a review was approved by someone **other than the person who added the label**, the approval is on the **merged
-   head commit**, and it still stands: a dismissed approval, or a later "changes requested" from the same reviewer,
-   voids it.
+2. a linked pull request (an entry of `prs`) had already merged;
+3. that pull request's checks were green;
+4. a review of that pull request was approved by someone **other than the person who added the label**, the approval
+   is on its **merged head commit**, and it still stands: a dismissed approval, or a later "changes requested" from
+   the same reviewer, voids it.
 
 Identity is the stable `id`, never the login: `checked.by` and the reviewer are compared by `id`, and the login is
 display only (`checked.by` is `{id, login}` like every other person in this protocol).

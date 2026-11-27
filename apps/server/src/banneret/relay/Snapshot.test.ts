@@ -734,6 +734,9 @@ describe("BanneretRelayFeed task read", () => {
         expect(held.fetchedAt).not.toBeNull();
         expect(held.value!.task).toMatchObject({ id: "t_active", title: "Guild invites" });
         expect(held.value!.task.ref.url).toMatch(/^https:\/\//);
+        expect(held.value!.task.openedAt).toEqual(expect.any(String));
+        expect(held.value!.task.closedAt).toBeNull();
+        expect(held.value!.prs).toEqual([]);
         expect(held.value!.lease?.holder).toEqual({ login: "bo-example" });
         expect(held.value!.lease?.state).toBe("active");
         expect(held.value!.preview).toBeUndefined();
@@ -758,7 +761,9 @@ describe("BanneretRelayFeed task read", () => {
           valid: true,
         });
         expect(checked.value!.checked!.ignoredReason).toBeUndefined();
-        expect(checked.value!.pr?.state).toBe("merged");
+        expect(checked.value!.prs.map((pr) => pr.state)).toEqual(["merged"]);
+        expect(checked.value!.prs[0]?.checks).toEqual({ state: "passing" });
+        expect(checked.value!.task.closedAt).toEqual(expect.any(String));
 
         yield* control(fake, "/checked/seed", {
           taskId: "t_stale",
@@ -834,10 +839,17 @@ describe("snapshot reshaping", () => {
             id: "t_gh",
             title: "A",
             ref: { tracker: "github", scope: "example-org/app", key: "7", url: "https://x" },
+            openedAt: "2026-11-20T09:00:00Z",
+            closedAt: null,
           },
           column: "free",
           status: "planned",
           statusWhy: "Open.",
+          prs: [
+            { number: 3, url: "https://x/pull/3", state: "closed" },
+            { number: 4, url: "https://x/pull/4", state: "open", checks: { state: "failing" } },
+            { number: "5", url: "https://x/pull/5", state: "open" },
+          ],
           restsOn: [],
         },
         {
@@ -851,6 +863,8 @@ describe("snapshot reshaping", () => {
               key: "8",
               url: "https://y",
             },
+            openedAt: "2026-11-20T09:00:00Z",
+            closedAt: "2026-11-21T09:00:00Z",
           },
           column: "free",
           status: "planned",
@@ -858,9 +872,27 @@ describe("snapshot reshaping", () => {
           restsOn: [],
         },
         { task: { id: "t_bad" }, column: "free" },
+        {
+          task: {
+            id: "t_undated",
+            title: "C",
+            ref: { tracker: "github", scope: "example-org/app", key: "9", url: "https://z" },
+          },
+          column: "free",
+          status: "planned",
+          statusWhy: "Open.",
+          prs: [],
+          restsOn: [],
+        },
       ],
     })!;
     expect(board.cards.map((card) => card.task.id)).toEqual(["t_gh", "t_ghe"]);
+    expect(board.cards[0]?.prs).toEqual([
+      { number: 3, url: "https://x/pull/3", state: "closed" },
+      { number: 4, url: "https://x/pull/4", state: "open", checks: { state: "failing" } },
+    ]);
+    expect(board.cards[1]?.prs).toEqual([]);
+    expect(board.cards[1]?.task.closedAt).toBe("2026-11-21T09:00:00Z");
     const index = board.cards.map((card) => ({
       id: card.task.id,
       tracker: card.task.ref.tracker,
@@ -973,10 +1005,16 @@ describe("BanneretRelayFeed map from the snapshot", () => {
         expect(item("profile-blocks").task?.title).toBe("Profile blocks");
         expect(item("rate-limits").task).toBeUndefined();
         expect(item("rate-limits").restsOn).toEqual(["profile-blocks"]);
-        expect(item("rate-limits").status).toBe("needs_you");
+        expect(item("rate-limits").status).toBe("blocked");
+        expect(item("rate-limits").blockedBy).toEqual(["profile-blocks"]);
+        expect(item("profile-blocks").blockedBy).toEqual([]);
         expect(item("rate-limits").statusWhy).toContain('"Profile blocks"');
-        expect(map.counters.byStatus).toEqual({ built: 1, needs_you: 2 });
-        expect(map.counters.byStage).toEqual({ s1: { built: 1 }, s2: { needs_you: 2 } });
+        expect(item("sign-in").task?.openedAt).toEqual(expect.any(String));
+        expect(map.counters.byStatus).toEqual({ built: 1, needs_you: 1, blocked: 1 });
+        expect(map.counters.byStage).toEqual({
+          s1: { built: 1 },
+          s2: { needs_you: 1, blocked: 1 },
+        });
 
         yield* Effect.promise(() => relay.close());
         const away = yield* events.next(
@@ -1108,7 +1146,15 @@ describe("reshapeMap", () => {
         { id: "s2", title: "Two" },
       ],
       items: [
-        { id: "a", stageId: "s1", title: "A", status: "planned", statusWhy: "Open.", restsOn: [] },
+        {
+          id: "a",
+          stageId: "s1",
+          title: "A",
+          status: "blocked",
+          statusWhy: "Blocked by B.",
+          restsOn: ["b"],
+          blockedBy: ["b", 7],
+        },
         { id: "b", stageId: "s1", title: "B", status: "planned", restsOn: [] },
         { id: "c", stageId: "s1", title: "C", status: "planned", statusWhy: "Open.", task: {} },
       ],
@@ -1121,6 +1167,8 @@ describe("reshapeMap", () => {
     expect(map?.items.map((item) => item.id)).toEqual(["a", "c"]);
     expect(map?.items[1]?.task).toBeUndefined();
     expect(map?.items[1]?.restsOn).toEqual([]);
+    expect(map?.items[0]?.blockedBy).toEqual(["b"]);
+    expect(map?.items[1]?.blockedBy).toEqual([]);
     expect(map?.counters).toEqual({
       byStatus: { planned: 2 },
       byStage: { s1: { planned: 2 }, s2: {} },

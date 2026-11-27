@@ -1369,6 +1369,119 @@ describe("board and leases", () => {
     expect(takenCard?.lease?.holder.login).toBe("bo-example");
   });
 
+  it("lists every linked pull request in prs, with per-PR checks, and no card-level pr or checks", async () => {
+    const machine = await enrol();
+    const many = id();
+    const none = id();
+    await seed([
+      {
+        id: many,
+        title: "Two pull requests",
+        prs: [
+          { number: 7, state: "closed" },
+          { number: 9, state: "open", checks: "failing" },
+        ],
+      },
+      { id: none, title: "No pull request" },
+    ]);
+    await client.rebuildSnapshot(machine.login);
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    const ref = (head.body as { files: Record<string, string> }).files.board ?? "";
+    const file = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
+    expectSchema("SnapshotBoard", file.body);
+    const cards = (
+      file.body as { cards: Array<Record<string, unknown> & { task: { id: string } }> }
+    ).cards;
+    const card = cards.find((candidate) => candidate.task.id === many);
+    expect(card).not.toHaveProperty("pr");
+    expect(card).not.toHaveProperty("checks");
+    expect(card?.prs).toEqual([
+      { number: 7, url: expect.stringContaining("/7"), state: "closed" },
+      {
+        number: 9,
+        url: expect.stringContaining("/9"),
+        state: "open",
+        checks: { state: "failing" },
+      },
+    ]);
+    expect(cards.find((candidate) => candidate.task.id === none)?.prs).toEqual([]);
+    const read = await call(machine, "GET", `/relay/v1/tasks/${many}`);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expectSchema("TaskRead", read.body);
+    expect(read.body).not.toHaveProperty("pr");
+    expect(read.body).not.toHaveProperty("checks");
+    expect((read.body as { prs: unknown[] }).prs).toHaveLength(2);
+  });
+
+  it("dates every task: openedAt always, closedAt null while open", async () => {
+    const machine = await enrol();
+    const open = id();
+    const closed = id();
+    await seed([
+      { id: open, title: "Open task", openedAt: "2026-11-20T09:00:00Z" },
+      {
+        id: closed,
+        title: "Closed task",
+        status: "built",
+        openedAt: "2026-11-21T09:00:00Z",
+        closedAt: "2026-11-22T09:00:00Z",
+      },
+    ]);
+    const board = await readBoardAfterRebuild(machine);
+    const taskOf = (taskId: string) =>
+      (board.cards.find((card) => card.task.id === taskId)?.task ?? {}) as {
+        openedAt?: string;
+        closedAt?: string | null;
+      };
+    expect(Date.parse(taskOf(open).openedAt ?? "")).toBe(Date.parse("2026-11-20T09:00:00Z"));
+    expect(taskOf(open).closedAt).toBeNull();
+    expect(Date.parse(taskOf(closed).openedAt ?? "")).toBe(Date.parse("2026-11-21T09:00:00Z"));
+    expect(Date.parse(taskOf(closed).closedAt ?? "")).toBe(Date.parse("2026-11-22T09:00:00Z"));
+    const read = await call(machine, "GET", `/relay/v1/tasks/${closed}`);
+    expectSchema("TaskRead", read.body);
+    expect(Date.parse((read.body as { task: { closedAt: string } }).task.closedAt)).toBe(
+      Date.parse("2026-11-22T09:00:00Z"),
+    );
+  });
+
+  it("gives each shipped item its own pr and the task's ref, so no board join is needed", async () => {
+    const shippedTask = id();
+    const openTask = id();
+    await seed([
+      {
+        id: shippedTask,
+        title: "Shipped task",
+        status: "built",
+        prs: [{ number: 41, state: "merged", checks: "passing" }],
+      },
+      { id: openTask, title: "Still open", prs: [{ number: 42, state: "open" }] },
+    ]);
+    const machine = await enrol();
+    const reply = await call(machine, "GET", "/relay/v1/today?visit=1");
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    expectSchema("Today", reply.body);
+    const shipped = (
+      reply.body as {
+        shipped: {
+          state: string;
+          items: Array<{
+            task: { id: string };
+            pr: { number: number; url: string; repo: string };
+            ref?: { tracker: string; scope: string; key: string; url: string };
+          }>;
+        };
+      }
+    ).shipped;
+    expect(shipped.state).toBe("ok");
+    const item = shipped.items.find((candidate) => candidate.task.id === shippedTask);
+    expect(item?.pr.number).toBe(41);
+    expect(item?.pr.url).toContain("/41");
+    expect(item?.pr.repo).toMatch(/^[^/\s]+\/[^/\s]+$/);
+    expect(item?.ref?.tracker).toBeTruthy();
+    expect(item?.ref?.url).toBeTruthy();
+    expect(shipped.items.some((candidate) => candidate.task.id === openTask)).toBe(false);
+  });
+
   const readBoardAfterRebuild = async (machine: Enrolled) => {
     await client.rebuildSnapshot(machine.login);
     const board = await readBoard(machine);
@@ -1697,8 +1810,11 @@ describe("map and the stage plan", () => {
       readonly id: string;
       readonly title: string;
       readonly ref: { tracker: string; scope: string; key: string; url: string };
+      readonly openedAt: string;
+      readonly closedAt: string | null;
     };
     readonly restsOn: ReadonlyArray<string>;
+    readonly blockedBy: ReadonlyArray<string>;
   }
   interface MapFile {
     readonly state: string;
@@ -1820,7 +1936,7 @@ describe("map and the stage plan", () => {
     expect(item("i-built")?.restsOn).toEqual(["i-done"]);
   });
 
-  it("makes an item that rests on a blocked one needs_you, and names the blocker", async () => {
+  it("makes an item that rests on a blocking one blocked, not needs_you, and names the blocker", async () => {
     const machine = await enrol();
     const blocker = id();
     const dead = id();
@@ -1843,15 +1959,88 @@ describe("map and the stage plan", () => {
     const map = await readMap(machine);
     const item = (itemId: string) => map.items.find((candidate) => candidate.id === itemId);
     expect(item("blocker")?.status).toBe("sent_back");
-    expect(item("child")?.status).toBe("needs_you");
+    expect(item("blocker")?.blockedBy).toEqual([]);
+    expect(item("child")?.status).toBe("blocked");
+    expect(item("child")?.blockedBy).toEqual(["blocker"]);
     expect(item("child")?.statusWhy).toContain("Profile blocks");
-    // A blocked item blocks its own dependants in turn.
-    expect(item("grandchild")?.status).toBe("needs_you");
+    // A blocked item blocks its own dependants in turn, and they name it, not the root cause.
+    expect(item("grandchild")?.status).toBe("blocked");
+    expect(item("grandchild")?.blockedBy).toEqual(["child"]);
     expect(item("grandchild")?.statusWhy).toContain("Child");
-    expect(item("orphan")?.status).toBe("needs_you");
+    expect(item("orphan")?.status).toBe("blocked");
+    expect(item("orphan")?.blockedBy).toEqual(["dead"]);
     expect(item("orphan")?.statusWhy).toContain("Old idea");
     expect(item("free")?.status).toBe("planned");
+    expect(item("free")?.blockedBy).toEqual([]);
     expect(item("free")?.task).toBeUndefined();
+    expect(map.items.some((candidate) => candidate.status === "needs_you")).toBe(false);
+  });
+
+  it("lists only direct blockers in blockedBy, in restsOn order, across a seeded chain", async () => {
+    const machine = await enrol();
+    await client.control("/map/seed", {
+      plan: {
+        ...base,
+        stages: [{ id: "s", title: "Stage", order: 1 }],
+        items: [
+          { id: "root", stageId: "s", title: "Root" },
+          { id: "dead", stageId: "s", title: "Dead" },
+          { id: "fine", stageId: "s", title: "Fine" },
+          { id: "mid", stageId: "s", title: "Mid", restsOn: ["fine", "root"] },
+          { id: "leaf", stageId: "s", title: "Leaf", restsOn: ["dead", "fine", "mid"] },
+          { id: "done", stageId: "s", title: "Done", restsOn: ["mid"] },
+          { id: "seeded", stageId: "s", title: "Seeded blocked" },
+        ],
+      },
+      statuses: {
+        root: "needs_you",
+        dead: "ruled_dead",
+        fine: "built",
+        done: "checked",
+        seeded: "blocked",
+      },
+    });
+    const map = await readMap(machine);
+    const item = (itemId: string) => map.items.find((candidate) => candidate.id === itemId);
+    expect(item("root")?.status).toBe("needs_you");
+    expect(item("mid")?.status).toBe("blocked");
+    expect(item("mid")?.blockedBy).toEqual(["root"]);
+    expect(item("mid")?.statusWhy).toContain("Root");
+    expect(item("leaf")?.status).toBe("blocked");
+    // Its direct blockers in restsOn order; never the root cause behind "mid".
+    expect(item("leaf")?.blockedBy).toEqual(["dead", "mid"]);
+    expect(item("leaf")?.statusWhy).toContain("Dead");
+    // A higher own status is kept, and its blockers are still listed.
+    expect(item("done")?.status).toBe("checked");
+    expect(item("done")?.blockedBy).toEqual(["mid"]);
+    // `blocked` never appears without a blocker.
+    expect(item("seeded")?.status).toBe("planned");
+    for (const entry of map.items) {
+      if (entry.status === "blocked") expect(entry.blockedBy.length).toBeGreaterThan(0);
+    }
+    expect(map.counters.byStatus.blocked).toBe(2);
+  });
+
+  it("starts a card that is blocked on the board from its unblocked status on the map", async () => {
+    const machine = await enrol();
+    const waiting = id();
+    const merged = id();
+    const taskFor = await seedBoard(machine, [
+      { id: waiting, title: "Waiting on the board", status: "blocked" },
+      { id: merged, title: "Merged but blocked", status: "blocked", prs: [{ state: "merged" }] },
+    ]);
+    await client.control("/map/seed", {
+      ...base,
+      stages: [{ id: "s", title: "Stage", order: 1 }],
+      items: [
+        { id: "waiting", stageId: "s", title: "Waiting", task: taskFor(waiting) },
+        { id: "merged", stageId: "s", title: "Merged", task: taskFor(merged) },
+      ],
+    });
+    const map = await readMap(machine);
+    expect(map.items.find((item) => item.id === "waiting")?.status).toBe("planned");
+    expect(map.items.find((item) => item.id === "merged")?.status).toBe("built");
+    expect(map.items.every((item) => item.blockedBy.length === 0)).toBe(true);
   });
 
   it("carries task from the plan ref even when the board has no card for it", async () => {
@@ -1872,6 +2061,10 @@ describe("map and the stage plan", () => {
     expect(closed?.task?.title).toBeTruthy();
     expect(closed?.task?.ref).toMatchObject(ref);
     expect(closed?.task?.ref.url).toContain("/9001");
+    expect(Number.isFinite(Date.parse(closed?.task?.openedAt ?? ""))).toBe(true);
+    expect(closed?.task?.closedAt === null || typeof closed?.task?.closedAt === "string").toBe(
+      true,
+    );
     expect(map.items.find((item) => item.id === "plain")?.task).toBeUndefined();
     // The same ref gives the same id on the next read.
     expect((await readMap(machine)).items.find((item) => item.id === "closed")?.task?.id).toBe(
@@ -1912,13 +2105,13 @@ describe("map and the stage plan", () => {
     expect(map.counters.byStatus).toEqual({
       ruled_dead: 1,
       checked: 1,
-      needs_you: 1,
+      blocked: 1,
       planned: 1,
       built: 1,
     });
     expect(map.counters.byStage).toEqual({
       a: { ruled_dead: 1, checked: 1 },
-      b: { needs_you: 1, planned: 1, built: 1 },
+      b: { blocked: 1, planned: 1, built: 1 },
       c: {},
     });
   });

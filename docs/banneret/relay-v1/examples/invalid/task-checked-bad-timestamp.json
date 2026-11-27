@@ -7,19 +7,23 @@
       "scope": "example-org/example-app",
       "key": "42",
       "url": "https://github.com/example-org/example-app/issues/42"
-    }
+    },
+    "openedAt": "2026-11-20T09:00:00Z",
+    "closedAt": null
   },
   "column": "shipped",
   "status": "checked",
   "statusWhy": "A sign-off role holder checked it after the merge.",
-  "pr": {
-    "number": 58,
-    "url": "https://github.com/example-org/example-app/pull/58",
-    "state": "merged"
-  },
-  "checks": {
-    "state": "passing"
-  },
+  "prs": [
+    {
+      "number": 58,
+      "url": "https://github.com/example-org/example-app/pull/58",
+      "state": "merged",
+      "checks": {
+        "state": "passing"
+      }
+    }
+  ],
   "restsOn": [],
   "preview": {
     "state": "ready",

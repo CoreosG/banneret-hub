@@ -4,7 +4,7 @@
 import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
 
 import { FeedStatus, LeaseChipView, useNowMs, When } from "./FeedParts";
-import { boardColumns, boardIncomplete, prLine } from "./board.logic";
+import { boardColumns, boardIncomplete, prLines } from "./board.logic";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { StatusLegend, StatusMark } from "./StatusLegend";
 import { FeedPage, NotJoinedNote } from "./TodayPage";
@@ -19,7 +19,7 @@ function BoardCardView(props: {
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { card } = props;
-  const pr = prLine(card);
+  const prs = prLines(card);
   return (
     <li data-task-id={card.task.id} data-at-work={props.atWork ? "" : undefined}>
       <button
@@ -30,7 +30,11 @@ function BoardCardView(props: {
       >
         <StatusMark status={card.status} why={card.statusWhy} atWork={props.atWork} />
         <span className="break-words text-sm">{card.task.title}</span>
-        {pr === null ? null : <span className="text-muted-foreground text-xs">{pr}</span>}
+        {prs.map((line) => (
+          <span key={line} data-pr className="text-muted-foreground text-xs">
+            {line}
+          </span>
+        ))}
         {props.leases ? <LeaseChipView lease={card.lease} nowMs={props.nowMs} /> : null}
       </button>
     </li>

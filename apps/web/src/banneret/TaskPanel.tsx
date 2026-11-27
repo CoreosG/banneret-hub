@@ -10,6 +10,7 @@ import {
   EnvironmentId,
   type BanneretBoardCard,
   type BanneretBoardTask,
+  type BanneretMap,
   type BanneretMapItem,
   type BanneretTask,
   type ScopedThreadRef,
@@ -25,12 +26,13 @@ import { useEnvironmentQuery } from "../state/query";
 import { useEnrolmentView } from "./enrolmentStore";
 import { LeaseChipView, useNowMs, When } from "./FeedParts";
 import { prLine } from "./board.logic";
+import { blockedByLabel } from "./map.logic";
 import { useEnvironmentFeed, watchFeed } from "./relayFeedStore";
 import { safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
 import { checkedView, previewStateLabel, restsOnItems, trackerName } from "./task.logic";
 import { useTaskRead } from "./taskStore";
-import { decodeTaskSurface, type TaskSurface } from "./taskSurface";
+import { decodeTaskSurface, type TaskIdentity, type TaskSurface } from "./taskSurface";
 
 function LinkOut(props: { readonly url: string | undefined; readonly children: ReactNode }) {
   const href = safeLinkOut(props.url);
@@ -62,7 +64,7 @@ function Row(props: { readonly label: string; readonly children: ReactNode }) {
 function CheckedSection(props: {
   readonly checked: BanneretTask["checked"];
   readonly signOff: boolean;
-  readonly task: BanneretBoardTask;
+  readonly task: TaskIdentity;
 }) {
   const view = checkedView(props.checked);
   return (
@@ -100,10 +102,11 @@ function CheckedSection(props: {
 }
 
 function TaskHeader(props: {
-  readonly task: BanneretBoardTask;
+  readonly task: TaskIdentity;
   readonly card: BanneretBoardCard | BanneretTask | null;
   /** The map's item for the task; its status shows when neither the board nor the relay has a card. */
   readonly mapItem: BanneretMapItem | null;
+  readonly map: BanneretMap | null;
   readonly relayTask: BanneretTask | null;
   readonly cards: ReadonlyArray<BanneretBoardCard>;
   readonly leases: boolean;
@@ -112,8 +115,13 @@ function TaskHeader(props: {
 }) {
   const nowMs = useNowMs();
   const { card, mapItem, relayTask } = props;
-  const pr = card === null ? null : prLine(card);
   const preview = relayTask?.preview;
+  // The relay's own task carries the dates; a saved tab's copy does not.
+  const dated: BanneretBoardTask | null = card?.task ?? mapItem?.task ?? null;
+  const blockedBy =
+    card !== null || mapItem === null || props.map === null
+      ? null
+      : blockedByLabel(props.map, mapItem);
   const restsOn = card === null ? [] : restsOnItems(card.restsOn, props.cards);
   return (
     <header className="flex shrink-0 flex-col gap-2 border-b p-3" data-testid="task-header">
@@ -126,10 +134,29 @@ function TaskHeader(props: {
       {card !== null || mapItem === null ? null : (
         <>
           <StatusMark status={mapItem.status} />
+          {blockedBy === null ? null : (
+            <p className="break-words text-xs" data-testid="task-blocked-by">
+              {blockedBy}
+            </p>
+          )}
           <p className="break-words text-muted-foreground text-xs" data-testid="task-status-why">
             {mapItem.statusWhy}
           </p>
         </>
+      )}
+      {dated === null ? null : (
+        <Row label="Opened">
+          <span data-testid="task-opened">
+            <When at={dated.openedAt} />
+          </span>
+        </Row>
+      )}
+      {dated?.closedAt == null ? null : (
+        <Row label="Closed">
+          <span data-testid="task-closed">
+            <When at={dated.closedAt} />
+          </span>
+        </Row>
       )}
       {card === null ? null : (
         <>
@@ -138,12 +165,14 @@ function TaskHeader(props: {
             {card.statusWhy}
           </p>
           {props.leases ? <LeaseChipView lease={card.lease} nowMs={nowMs} /> : null}
-          {pr === null ? null : (
-            <Row label="Pull request">
-              <span>{pr}</span>
-              <LinkOut url={card.pr?.url}>Open</LinkOut>
+          {card.prs.map((pr) => (
+            <Row key={pr.number} label="Pull request">
+              <span data-pr={pr.number} data-pr-state={pr.state}>
+                {prLine(pr)}
+              </span>
+              <LinkOut url={pr.url}>Open</LinkOut>
             </Row>
-          )}
+          ))}
           {preview === undefined ? null : (
             <Row label="Preview">
               <span data-preview={preview.state}>{previewStateLabel(preview.state)}</span>
@@ -178,7 +207,7 @@ function TaskHeader(props: {
  */
 function TaskThread(props: {
   readonly environmentId: EnvironmentId;
-  readonly task: BanneretBoardTask;
+  readonly task: TaskIdentity;
   readonly threadRef: ScopedThreadRef | null;
 }) {
   const { environmentId, task } = props;
@@ -303,6 +332,7 @@ function TaskPanelBody(props: {
         task={surface.task}
         card={shown}
         mapItem={mapItem}
+        map={feed.map?.value ?? null}
         relayTask={relayTask}
         cards={feed.board?.value?.cards ?? []}
         leases={card === null || feed.board?.leases === true}
