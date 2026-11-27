@@ -412,6 +412,43 @@ describe("LeaseService take", () => {
     }),
   );
 
+  it.effect("a failed claim comment leaves the task untouched", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(EPOCH);
+      const tracker = newTracker({ failComments: 1 });
+      expect((yield* failureOf((yield* leases(tracker)).take({ ...ref }))).reason).toBe("failed");
+      expect(tracker.writes).toEqual([]);
+      expect(tracker.assignees).toEqual([]);
+    }),
+  );
+
+  it.effect("withdraw clears a leftover assignee with no claim, and refuses an active holder", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(EPOCH);
+      const leftover = newTracker({ assignees: [ME], labels: ["claimed"] });
+      addComment(leftover, ME, `claim: ${ME}/hub`, 300);
+      addComment(leftover, ME, "release: take_failed", 200);
+      const service = yield* leases(leftover);
+      expect((yield* service.check(ref)).lease).toMatchObject({
+        holder: ME,
+        state: "incomplete",
+        since: null,
+      });
+      const cleared = yield* service.withdraw(ref);
+      expect(cleared.outcome).toBe("withdrawn");
+      expect(cleared.status.lease).toBeNull();
+      expect(leftover.writes).toEqual(["update assignees= labels="]);
+
+      const active = newTracker({ assignees: [ME], labels: ["claimed"] });
+      addComment(active, ME, `claim: ${ME}/hub`, 300);
+      expect(yield* failureOf((yield* leases(active)).withdraw(ref))).toEqual({
+        reason: "refused",
+        detail: "You hold this task. Release it instead.",
+      });
+      expect(active.writes).toEqual([]);
+    }),
+  );
+
   it.effect("removes paused from the task's open pull request when it wins", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(EPOCH);

@@ -51,15 +51,18 @@ const notRunning = Effect.fail(
 );
 
 /** A reference with an inert default, so layers built without it (tests, tools) need no stub. */
-export class LeaseService extends Context.Reference<LeaseServiceShape>("t3/banneret/lease/LeaseService", {
-  defaultValue: () => ({
-    check: () => notRunning,
-    take: () => notRunning,
-    release: () => notRunning,
-    finish: () => notRunning,
-    withdraw: () => notRunning,
-  }),
-}) {}
+export class LeaseService extends Context.Reference<LeaseServiceShape>(
+  "t3/banneret/lease/LeaseService",
+  {
+    defaultValue: () => ({
+      check: () => notRunning,
+      take: () => notRunning,
+      release: () => notRunning,
+      finish: () => notRunning,
+      withdraw: () => notRunning,
+    }),
+  },
+) {}
 
 export interface LeaseServiceOptions {
   readonly readBackDelay: Duration.Input;
