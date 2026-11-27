@@ -1218,13 +1218,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           a.id.localeCompare(b.id),
       );
 
-  // Every enrolled person sees every live machine; revoked ones only their owner and founders, after the live ones.
+  const visibleToColleagues = (machine: Machine) =>
+    !machine.poolHost && machine.revokedAt === null && machine.facts.share === "agents_and_name";
+
   const visibleMachines = (viewer: Person) => [
     ...liveMachines().filter(
-      (m) =>
-        m.personId === viewer.id ||
-        viewer.role === "founder" ||
-        m.facts.share === "agents_and_name",
+      (m) => m.personId === viewer.id || viewer.role === "founder" || visibleToColleagues(m),
     ),
     ...[...machines.values()]
       .filter(
@@ -4014,13 +4013,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const machinePath = /^\/machines\/([^/]+)$/.exec(route);
     if (method === "DELETE" && machinePath?.[1]) {
       const target = ID_PATTERN.test(machinePath[1]) ? machines.get(machinePath[1]) : undefined;
-      if (!target) throw new RelayError("not_found", "No such machine.");
-      if (target.revokedAt === null) {
-        if (target.personId !== caller.person.id && caller.person.role !== "founder") {
-          throw new RelayError("forbidden", "Only the machine's owner or a founder may revoke it.");
-        }
-        revokeMachine(target);
+      const canRevoke = target?.personId === caller.person.id || caller.person.role === "founder";
+      if (!target || (!canRevoke && !visibleToColleagues(target))) {
+        throw new RelayError("not_found", "No such machine.");
       }
+      if (!canRevoke) {
+        throw new RelayError("forbidden", "Only the machine's owner or a founder may revoke it.");
+      }
+      if (target.revokedAt === null) revokeMachine(target);
       response.writeHead(204);
       response.end();
       return;

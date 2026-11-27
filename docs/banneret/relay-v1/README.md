@@ -264,8 +264,8 @@ page). Cursors are opaque. Today's needs-you block holds at most 20 items, and i
 `GET /machines` lists named machines for colleagues, all own machines, and all machines for founders. A
 revoked machine is listed only to its owner and to founders, with `revokedAt` set, `connected` false and
 `revocable` false; nobody else sees it. Live machines come first, newest heartbeat first; revoked machines follow,
-most recently revoked first. `DELETE /machines/{machineId}` answers 404 `not_found` for a malformed or unknown
-id, never 400. [Orchestrator]
+most recently revoked first. `DELETE /machines/{machineId}` answers 404 `not_found` for a malformed id or an unknown or hidden
+machine. A colleague who can see the machine receives 403 `forbidden`. Owners and founders can revoke it. [Orchestrator]
 
 ## Repositories
 

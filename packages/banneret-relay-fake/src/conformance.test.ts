@@ -961,8 +961,8 @@ describe("revocation", () => {
     const staff = await enrol({ role: "limited_staff" });
     expectError(
       await call(staff, "DELETE", `/relay/v1/machines/${target.machineId}`),
-      403,
-      "forbidden",
+      404,
+      "not_found",
     );
     const founder = await enrol({ role: "founder" });
     expect((await call(founder, "DELETE", `/relay/v1/machines/${target.machineId}`)).status).toBe(
@@ -1007,7 +1007,17 @@ describe("machine visibility", () => {
     expect((await listMachines(staff)).find((m) => m.id === owner.machineId)).toMatchObject({
       revocable: false,
     });
+    expectError(
+      await call(staff, "DELETE", `/relay/v1/machines/${owner.machineId}`),
+      403,
+      "forbidden",
+    );
     expect((await call(owner, "DELETE", `/relay/v1/machines/${owner.machineId}`)).status).toBe(204);
+    expectError(
+      await call(staff, "DELETE", `/relay/v1/machines/${owner.machineId}`),
+      404,
+      "not_found",
+    );
 
     const ids = (view: ListedMachine[]) => view.map((item) => item.id);
     expect(ids(await listMachines(staff))).not.toContain(owner.machineId);
