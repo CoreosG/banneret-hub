@@ -329,8 +329,13 @@ export function MapPage() {
   const query = queryFromUrl(rawSearch);
   const state = mapViewFromUrl(rawSearch);
   const motion = !useMediaQuery("(prefers-reduced-motion: reduce)");
+  const updateMap = (next: MapViewState, q: string, replace = false) => {
+    const params = { ...mapViewPatch(next), q: q || undefined };
+    if (enterprise) rememberFilters(enterprise.workspace.id, "map", params);
+    setSearch(params, { replace });
+  };
   const go = (patch: Partial<MapViewState>, replace = false) =>
-    setSearch(mapViewPatch(patch), { replace });
+    updateMap({ ...state, ...patch }, query, replace);
   if (enterprise === null) {
     return (
       <MapFrame>
@@ -465,10 +470,7 @@ export function MapPage() {
             label="Filter the map"
             placeholder="Filter the map"
             value={query}
-            onChange={(q) => {
-              setSearch({ q }, { replace: true });
-              rememberFilters(workspace.id, "map", { q });
-            }}
+            onChange={(q) => updateMap(state, q, true)}
           />
         ) : null}
         {hasItems ? (

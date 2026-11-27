@@ -17,7 +17,7 @@ import { neighbourhoodSearch } from "./mapGraph.logic";
 import { safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
 import { roleLabel } from "./enterprise.logic";
-import { searchPeople } from "./team.logic";
+import { nameRank, searchPeople } from "./team.logic";
 import {
   closeCompanySearch,
   openCompanySearch,
@@ -107,7 +107,7 @@ const boardsMapFeed: CompanySearchSource = ({ query, enterprise, openTask, navig
 const people: CompanySearchSource = ({ query, enterprise, navigate }) =>
   searchPeople(enterprise.feed.team?.value, query).map((person) => ({
     key: `person:${person.id}`,
-    group: "People",
+    group: nameRank(person.login, query) < 2 ? "Matching people" : "People",
     title: person.login,
     detail: `Team · ${roleLabel(person.role)}`,
     open: () => void navigate({ to: "/team", search: { person: person.login } } as never),
@@ -125,13 +125,15 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
   const context = { query, enterprise: props.enterprise, openTask, navigate };
   const list: ReadonlyArray<CompanySearchHit> = COMPANY_SEARCH_SOURCES.flatMap((source) =>
     source(context),
-  ).map((hit) => ({
-    ...hit,
-    open: () => {
-      closeCompanySearch();
-      hit.open();
-    },
-  }));
+  )
+    .sort((a, b) => Number(b.group === "Matching people") - Number(a.group === "Matching people"))
+    .map((hit) => ({
+      ...hit,
+      open: () => {
+        closeCompanySearch();
+        hit.open();
+      },
+    }));
   const active = list.length === 0 ? -1 : Math.min(highlight, list.length - 1);
   const groups = [...new Set(list.map((hit) => hit.group))];
   return (

@@ -95,7 +95,7 @@ on the work tracker. A coworker's agent on the same task never refreshes someone
 
 **Filters** narrow the board you are looking at: a text box (title, repository and number, people, status), and
 Repo, Person (who holds the claim or is assigned) and Status. **Clear filters** removes them all. The board and its
-filters are part of the page address, so a link, a reload or a tab keeps them. The Hub also remembers the last
+filters are part of the page address, so a link, a reload or a tab keeps them. Opening Map from the sidebar restores the view and selection last chosen in that workspace during this window's session. The Hub also remembers the last
 filters of each board, and of the Map and the Feed, for as long as the window is open. Opening the page again from
 the sidebar brings them back. A link that names its own filters wins, and **Clear filters** forgets them.
 
@@ -114,17 +114,18 @@ Choose **Take** from a board card or its Task tab. Any of your joined machines c
 
 A successful Take sends the task to your orchestrator. Choose **Open** to follow it, or check **Just claim it** before confirming to skip the message. You can choose where to work later or ask your agent to move an ongoing task to another machine.
 
-Each machine remembers one main orchestrator per company and one project orchestrator per project in that company. Use the thread menu to set or clear either role. The company sidebar pins the main thread above Today and marks project orchestrators beside their titles.
+Each machine remembers one main orchestrator per company and one project orchestrator per project in that company. Use the thread menu to designate a thread, retire the main orchestrator, demote a project orchestrator, or choose a replacement. The company sidebar pins the main thread above Today and marks project orchestrators beside their titles.
 
-| State on the selected machine                           | Event               | Result                                                                                                                            |
-| ------------------------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Any                                                     | Set or clear a role | Replace or remove that role in this machine's workspace file.                                                                     |
-| Matching project orchestrator                           | Take                | Send the task and last hand-off to that project thread with `banneret_start_task`.                                                |
-| Main orchestrator only, or no matching project          | Take                | Send to the main thread with `banneret_route_task`.                                                                               |
-| Neither role can receive the task                       | Take                | Create a No project main thread with the person's default model and send there.                                                   |
-| Any                                                     | Just claim it       | Claim the issue and skip the message.                                                                                             |
-| Thread archived, deleted or moved outside its workspace | Next Take           | Skip the invalid designation and use the next destination.                                                                        |
-| Restart                                                 | Open workspace      | Read roles from local state and the lease from GitHub. Pending sends already accepted by the inbox follow normal thread delivery. |
+| State on the selected machine                  | Event                     | Result                                                                                                                            |
+| ---------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Any                                            | Set or clear a role       | Replace or remove that role in this machine's workspace file.                                                                     |
+| Matching project orchestrator                  | Take                      | Send the task and last hand-off to that project thread with `banneret_start_task`.                                                |
+| Main orchestrator only, or no matching project | Take                      | Send to the main thread with `banneret_route_task`.                                                                               |
+| Neither role can receive the task              | Take                      | Create a No project main thread with the person's default model and send there.                                                   |
+| Any                                            | Just claim it             | Claim the issue and skip the message.                                                                                             |
+| Designated thread                              | Settle, archive or delete | Clear every role held by the thread on this machine.                                                                              |
+| Thread moved outside its workspace             | Next Take                 | Skip the invalid designation and use the next destination.                                                                        |
+| Restart                                        | Open workspace            | Read roles from local state and the lease from GitHub. Pending sends already accepted by the inbox follow normal thread delivery. |
 
 **Release** asks for a reason and an optional note (Goal, Done, Next). Turn on **Free to continue** to leave the
 task for someone else. It is on by default for Blocked, Handing over and Out of usage. Such tasks sit at the top
@@ -146,7 +147,7 @@ reason names the blocker. The map is drawn from a [stage plan](#the-stage-plan).
 says so. It never shows a broken plan as an empty one.
 
 The Map has three views. The view, the stage or item you picked and the filter are part of the page address,
-so a link, a reload or a tab keeps them.
+so a link, a reload or a tab keeps them. Opening Map from the sidebar restores the view and selection last chosen in that workspace during this window's session.
 
 - **List** shows one row per stage on a line that marks progress. The current stage is the first one that is
   not fully built. A later stage that is already built keeps its check, but the line does not fill through it:
@@ -154,7 +155,7 @@ so a link, a reload or a tab keeps them.
   empty.
 - **Stages** draws each stage as a bubble, in plan order. A bigger bubble holds more items. The ring shows how
   many items are in each status, and each dot is one item. Lines join stages whose items rest on each other.
-  A line turns amber while something on it blocks. Select a stage to see its items.
+  A line turns amber while something on it blocks. Hover or focus a bubble for its full name. Select a bubble or its entry in the stage legend to see its items.
 - **Neighbourhood** shows one item in the middle. What it rests on is on the left and what rests on it is on
   the right, two steps each way. Arrows point from a blocker to the item waiting on it. An amber arrow means
   the blocker needs you, was sent back or was dropped. A dashed amber arrow means the blocker is itself
@@ -190,7 +191,7 @@ the reason. A task never sits there without one. A text box narrows the entries 
   on, with its machine and how long it has been in its state. A task opens in the Task dialog. A claim chip opens
   its task too.
 - **Find a person** filters by login, role, machine, or a task they hold or work on. The filter and the expanded
-  person are part of the page address. `/` search finds people as well.
+  person are part of the page address. In `/` search, an exact login or the start of a login puts the person first.
 
 The page uses only what the relay already sends: the relay's team file for people and sessions, its machines list,
 and the boards for claims and task titles. It makes no tracker call and never checks a claim, so opening it costs

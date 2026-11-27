@@ -350,9 +350,7 @@ describe("Team page", () => {
     const totals = document.querySelector('[aria-label="Live agents by state"]')!;
     expect(totals.textContent).toContain("1 needs you");
     expect(totals.textContent).toContain("1 waiting on someone else");
-    expect(document.querySelector("h1 + p")?.textContent).toBe(
-      "1 needs you · 4 live agents · 3 people",
-    );
+    expect(document.querySelector("h1 + p")?.textContent).toBe("1 working · 1 idle · 1 needs you");
 
     // A held lease opens its task, without any lease check.
     await userEvent.click(ada.querySelector<HTMLElement>('[data-lease-task="t_limits"]')!);
@@ -440,6 +438,10 @@ describe("Team page", () => {
     await userEvent.keyboard("bo laptop");
     const people = search.getByRole("group", { name: "People" });
     await expect.element(people.getByText("bo-example")).toBeVisible();
+    await userEvent.fill(search.getByRole("combobox"), "bo-ex");
+    await expect
+      .element(search.getByRole("option").first())
+      .toHaveAttribute("data-hit", "person:p_bo");
     await userEvent.keyboard("{Enter}");
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/team"));
     expect(router.state.location.search).toMatchObject({ person: "bo-example" });

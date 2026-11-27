@@ -342,14 +342,20 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     ref: TaskLeaseRef,
     outcome: TaskLeaseResult["outcome"],
     detail?: string,
+    retryLabels = false,
   ) {
     const snapshot = yield* read(ref);
+    const status = statusOf(snapshot, ref);
     return {
       outcome,
       ...(detail === undefined ? {} : { detail }),
       // Every operation answers from inside `exclusive`, so the lock it sees is its own: no other
       // change to this task can be running on this server.
-      status: { ...statusOf(snapshot, ref), busy: false },
+      status: {
+        ...status,
+        actions: { ...status.actions, finish: retryLabels || status.actions.finish },
+        busy: false,
+      },
     } satisfies TaskLeaseResult;
   });
 
@@ -363,6 +369,14 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     })).pipe(Effect.retry({ times: UPDATE_ATTEMPTS - 1 }));
 
   /** The tracker side of a release, after its comment: unassign, unlabel, pause the draft. */
+  const setPaused = Effect.fn(function* (ref: TaskLeaseRef, viewer: string, applied: boolean) {
+    const detail = yield* issues.detail(ref);
+    for (const pr of detail.linkedPullRequests) {
+      if (pr.state === "open" && (!applied || pr.isDraft))
+        yield* issues.pausePullRequest(ref, pr.repository, pr.number, viewer, applied);
+    }
+  });
+
   const settleRelease = Effect.fn("LeaseService.settleRelease")(function* (
     ref: TaskLeaseRef,
     viewer: string,
@@ -381,6 +395,15 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         `The release comment is posted, but unassigning failed: ${unassigned} Finish retries it.`,
       );
     }
+    const paused = yield* attempt(setPaused(ref, viewer, true));
+    if (paused !== null) {
+      return yield* result(
+        ref,
+        "incomplete",
+        `Released, but adding paused to the draft pull request failed: ${paused} Finish retries it.`,
+        true,
+      );
+    }
     return yield* result(ref, "released");
   });
 
@@ -392,6 +415,15 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     const assigned = yield* attempt(assignHolder(ref, viewer));
     if (assigned !== null) {
       return yield* result(ref, "incomplete", `Assigning you failed: ${assigned}`);
+    }
+    const unpaused = yield* attempt(setPaused(ref, viewer, false));
+    if (unpaused !== null) {
+      return yield* result(
+        ref,
+        "taken",
+        `Taken, but removing paused from the pull request failed: ${unpaused} Finish retries it.`,
+        true,
+      );
     }
     return yield* result(ref, "taken");
   });
@@ -451,9 +483,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         const lease = before.fold.lease;
         if (lease !== null) {
           if (lease.claimants[0] !== undefined && same(lease.claimants[0], viewer)) {
-            return lease.state === "incomplete"
-              ? yield* settleTake(ref, viewer)
-              : yield* result(ref, "taken");
+            return yield* settleTake(ref, viewer);
           }
           return yield* new TaskLeaseError({
             reason: "refused",
@@ -645,7 +675,7 @@ export const layerWith = (options: Partial<LeaseServiceOptions>) =>
   Layer.effect(LeaseService, make(options));
 
 export const layer = layerWith({}).pipe(
-  Layer.provide(Layer.merge(CommentEdits.layer, LeaseTracker.layer)),
+  Layer.provide(Layer.mergeAll(CommentEdits.layer, LeaseTracker.layer, Orchestrator.lifecycle)),
 );
 
 /** Handlers for the lease RPCs, spread into the WebSocket handler group. */
@@ -666,7 +696,7 @@ export const rpcHandlers = {
         onSuccess: (thread) => ({
           ...result,
           orchestratorThreadId: thread.id,
-          detail: `Taken. Sent to ${thread.title}.`,
+          detail: [result.detail, `Taken. Sent to ${thread.title}.`].filter(Boolean).join(" "),
         }),
         onFailure: (error) => ({
           ...result,

@@ -331,8 +331,7 @@ export function TeamPage() {
   const tasks = taskIndex(feed.board?.value, feed.map?.value);
   const shown = filterPeople(rows, query, tasks);
   const totals = totalCounts(rows);
-  // Idle agents wait for a message; they show in the tree but count as nothing live.
-  const agents = TEAM_GROUPS.reduce((sum, group) => sum + totals[group.id], 0);
+  const idle = rows.reduce((sum, row) => sum + row.idle, 0);
   const waiting = read?.problem === undefined && !feed.unreachable;
 
   let body: ReactNode;
@@ -398,12 +397,9 @@ export function TeamPage() {
         summary={
           team === null ? undefined : (
             <>
-              <SummaryFigure>
-                {totals.needs_you} {totals.needs_you === 1 ? "needs" : "need"} you
-              </SummaryFigure>
-              {` · ${agents} live ${agents === 1 ? "agent" : "agents"} · ${rows.length} ${
-                rows.length === 1 ? "person" : "people"
-              }`}
+              <SummaryFigure>{totals.working} working</SummaryFigure>
+              {` · ${idle} idle`}
+              {totals.needs_you > 0 ? ` · ${totals.needs_you} needs you` : null}
             </>
           )
         }

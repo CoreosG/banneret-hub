@@ -225,6 +225,12 @@ export function sessionTone(state: string, mine: boolean): Tone {
   return TEAM_GROUPS.find((entry) => entry.id === group)?.tone ?? "muted";
 }
 
+export function nameRank(login: string, query: string) {
+  const name = login.toLowerCase();
+  const term = query.trim().toLowerCase();
+  return name === term ? 0 : name.startsWith(term) ? 1 : 2;
+}
+
 /** People for the `/` search: login, role or machine label. */
 export function searchPeople(
   team: BanneretTeam | null | undefined,
@@ -240,5 +246,6 @@ export function searchPeople(
         ...person.machines.map((machine) => machine.label),
       ]),
     )
+    .sort((a, b) => nameRank(a.login, query) - nameRank(b.login, query))
     .slice(0, limit);
 }

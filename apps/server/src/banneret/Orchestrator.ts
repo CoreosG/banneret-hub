@@ -15,6 +15,9 @@ import { emptyDesignations, readDesignations, saveDesignations } from "./Orchest
 import { projectKeyFromRemote } from "./relay/projectKey.ts";
 import * as Effect from "effect/Effect";
 
+import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+import { OrchestratorV2 } from "../orchestration-v2/Orchestrator.ts";
 import * as Semaphore from "effect/Semaphore";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 
@@ -30,6 +33,42 @@ import * as Workspaces from "./Workspaces.ts";
 const encodePayload = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
 const lock = Semaphore.makeUnsafe(1);
 const unavailable = (detail: string) => new TaskLeaseError({ reason: "unavailable", detail });
+
+export const clearThreadDesignations = (threadId: ThreadId) =>
+  lock.withPermits(1)(
+    Effect.gen(function* () {
+      const all = yield* readDesignations;
+      for (const [workspace, state] of Object.entries(all)) {
+        if (state.main !== threadId && !Object.values(state.projects).includes(threadId)) continue;
+        yield* saveDesignations(workspace, {
+          main: state.main === threadId ? null : state.main,
+          projects: Object.fromEntries(
+            Object.entries(state.projects).filter(([, id]) => id !== threadId),
+          ),
+        });
+      }
+    }),
+  );
+
+export const lifecycle = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const orchestrator = yield* OrchestratorV2;
+    yield* orchestrator.streamDomainEvents.pipe(
+      Stream.runForEach((event) =>
+        event.type === "thread.settled" ||
+        event.type === "thread.archived" ||
+        event.type === "thread.deleted"
+          ? clearThreadDesignations(event.threadId).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("Could not clear thread designation", error),
+              ),
+            )
+          : Effect.void,
+      ),
+      Effect.forkScoped,
+    );
+  }),
+);
 
 const select = Effect.fn("BanneretOrchestrator.select")(function* (input: OrchestratorSelection) {
   const { relayOrigin } = input;
@@ -51,7 +90,14 @@ const select = Effect.fn("BanneretOrchestrator.select")(function* (input: Orches
   const folders = yield* ManagedProjectFolders;
   const valid = Effect.fn(function* (id: ThreadId, projectId?: string) {
     const thread = yield* threads.getThreadShell(id);
-    if (!thread || thread.archivedAt || thread.deletedAt) return false;
+    if (
+      !thread ||
+      thread.archivedAt ||
+      thread.deletedAt ||
+      thread.settledAt ||
+      thread.settledOverride === "settled"
+    )
+      return false;
     if (!projectId && (yield* folders.isScratchProject(thread.projectId))) return true;
     return projects.some(
       (project) => project.id === thread.projectId && (!projectId || projectId === project.id),
@@ -104,7 +150,12 @@ const select = Effect.fn("BanneretOrchestrator.select")(function* (input: Orches
     main = thread.threadId;
   }
   const next = { main, projects: currentProjects };
-  if (input.action !== "get") yield* saveDesignations(workspace.id, next);
+  if (
+    input.action !== "get" ||
+    main !== state.main ||
+    Object.keys(currentProjects).length !== Object.keys(state.projects).length
+  )
+    yield* saveDesignations(workspace.id, next);
   return next;
 });
 
