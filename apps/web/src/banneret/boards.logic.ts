@@ -10,6 +10,7 @@ import type {
   BanneretMapItem,
 } from "@t3tools/contracts";
 import { splitsSurrogatePair } from "@t3tools/shared/assistantCitations";
+import { resolveEventKeys } from "@t3tools/shared/keybindings";
 
 import { cleanLogin } from "./enterprise.logic";
 import { statusWord, taskRef } from "./board.logic";
@@ -242,22 +243,27 @@ export const mapItemText = (item: BanneretMapItem) => [
 ];
 
 /**
- * Whether a key press should open the `/` search: the bare `/` key, outside every text field
- * (inputs, text areas, the composer and the terminal are content-editable or text areas).
+ * Whether a key opens the `/` search outside text fields: the key the layout types `/` with (AltGr,
+ * which Windows reports as Ctrl+Alt, included), or the physical slash key, as Settings search does.
  */
 export function opensSearch(event: {
   readonly key: string;
+  readonly code?: string;
+  readonly shiftKey: boolean;
   readonly ctrlKey: boolean;
   readonly metaKey: boolean;
   readonly altKey: boolean;
   readonly isComposing: boolean;
   readonly defaultPrevented: boolean;
   readonly target: EventTarget | null;
+  readonly getModifierState?: (key: "AltGraph") => boolean;
 }): boolean {
-  if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return false;
-  if (event.isComposing || event.defaultPrevented) return false;
+  if (event.isComposing || event.defaultPrevented || event.metaKey) return false;
+  const altGraph = event.key === "/" && event.getModifierState?.("AltGraph") === true;
+  if (!altGraph && (event.ctrlKey || event.altKey)) return false;
+  if (!resolveEventKeys(event).has("/") || (event.shiftKey && event.key !== "/")) return false;
   const target = event.target;
   if (typeof HTMLElement === "undefined" || !(target instanceof HTMLElement)) return true;
   if (target.isContentEditable) return false;
-  return target.closest("input, textarea, select, [contenteditable]") === null;
+  return target.closest('input, textarea, select, [contenteditable], [role="textbox"]') === null;
 }

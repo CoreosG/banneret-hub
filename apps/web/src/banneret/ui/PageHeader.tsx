@@ -1,7 +1,9 @@
-// Fork UI kit: a page header. Title, a one-line summary, actions on the right.
+// Fork UI kit: a page header. Title, a one-line summary, actions on the right, and the company
+// search button last while there is a company to search.
 import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import { CompanySearchButton } from "./CompanySearchButton";
 import { TEXT_SUMMARY, TYPE } from "./tokens";
 
 /**
@@ -24,9 +26,10 @@ export function PageHeader(props: {
           </p>
         )}
       </div>
-      {props.children === undefined ? null : (
-        <div className="flex flex-wrap items-center gap-2">{props.children}</div>
-      )}
+      <div className="flex flex-wrap items-center gap-2 empty:hidden">
+        {props.children}
+        <CompanySearchButton />
+      </div>
     </header>
   );
 }

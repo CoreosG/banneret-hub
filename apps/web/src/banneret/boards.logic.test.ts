@@ -168,9 +168,11 @@ describe("boards", () => {
     });
   });
 
-  it("opens search on a bare slash only", () => {
+  it("opens search on the key that types a slash, whatever the layout", () => {
     const key = (extra: Partial<Parameters<typeof opensSearch>[0]> = {}) => ({
       key: "/",
+      code: "Slash",
+      shiftKey: false,
       ctrlKey: false,
       metaKey: false,
       altKey: false,
@@ -179,10 +181,28 @@ describe("boards", () => {
       target: null,
       ...extra,
     });
+    const altGraph = () => true;
     expect(opensSearch(key())).toBe(true);
-    expect(opensSearch(key({ key: "?" }))).toBe(false);
+    // Numpad, Brazilian ABNT2 (the key by right Shift) and German Shift+7.
+    expect(opensSearch(key({ code: "NumpadDivide" }))).toBe(true);
+    expect(opensSearch(key({ code: "IntlRo" }))).toBe(true);
+    expect(opensSearch(key({ code: "Digit7", shiftKey: true }))).toBe(true);
+    // AltGr+Q on a Brazilian laptop: Windows reports Ctrl+Alt with AltGraph.
+    expect(
+      opensSearch(key({ code: "KeyQ", ctrlKey: true, altKey: true, getModifierState: altGraph })),
+    ).toBe(true);
+    // The physical slash key on a layout that types something else there.
+    expect(opensSearch(key({ key: ".", code: "Slash" }))).toBe(true);
+    expect(opensSearch(key({ key: "?", shiftKey: true }))).toBe(false);
+    expect(opensSearch(key({ key: "q", code: "KeyQ" }))).toBe(false);
     expect(opensSearch(key({ metaKey: true }))).toBe(false);
     expect(opensSearch(key({ ctrlKey: true }))).toBe(false);
+    expect(opensSearch(key({ altKey: true }))).toBe(false);
+    expect(
+      opensSearch(
+        key({ key: "q", code: "KeyQ", ctrlKey: true, altKey: true, getModifierState: altGraph }),
+      ),
+    ).toBe(false);
     expect(opensSearch(key({ isComposing: true }))).toBe(false);
     expect(opensSearch(key({ defaultPrevented: true }))).toBe(false);
   });

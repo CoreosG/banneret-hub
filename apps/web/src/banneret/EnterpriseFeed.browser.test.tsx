@@ -29,6 +29,7 @@ import { relayKey, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStor
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { NeedsPage } from "./NeedsPage";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
+import { FILTER_MEMORY_KEY } from "./filterMemory";
 import { TodayPage } from "./TodayPage";
 import { useWorkspacesStore } from "./workspacesStore";
 
@@ -153,6 +154,7 @@ function setup(
   });
   useEnrolmentStore.setState({ views: {} });
   useRelayFeedStore.setState({ feeds: {} });
+  sessionStorage.removeItem(FILTER_MEMORY_KEY);
   storeEnrolmentView(LOCAL, options.enrolment ?? configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
   vi.mocked(useEnvironment).mockImplementation((id) =>

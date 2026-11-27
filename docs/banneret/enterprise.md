@@ -93,7 +93,9 @@ on the work tracker. A coworker's agent on the same task never refreshes someone
 
 **Filters** narrow the board you are looking at: a text box (title, repository and number, people, status), and
 Repo, Person (who holds the claim or is assigned) and Status. **Clear filters** removes them all. The board and its
-filters are part of the page address, so a link, a reload or a tab keeps them.
+filters are part of the page address, so a link, a reload or a tab keeps them. The Hub also remembers the last
+filters of each board, and of the Map and the Feed, for as long as the window is open. Opening the page again from
+the sidebar brings them back. A link that names its own filters wins, and **Clear filters** forgets them.
 
 The checked mark appears only when the board says it applies a sign-off rule. A person with the sign-off role
 adds the check, and it counts only after the pull request merged, its checks passed and someone else approved
@@ -157,7 +159,8 @@ the reason. A task never sits there without one. A text box narrows the entries 
 ### Search
 
 Press **/** anywhere outside a text box to search the company: the cards of every board, the Map's items and the
-Feed's entries, grouped by kind. Use the arrow keys and **Enter** to open a result. A card or an item with a task
+Feed's entries, grouped by kind. The **Search** button at the top of each company page and "Search the company…"
+in the command palette open it too. The key is the one your keyboard layout types `/` with, AltGr included. Use the arrow keys and **Enter** to open a result. A card or an item with a task
 opens in the Task tab. A Map item without a task opens the Map filtered to it, and a Feed entry without a task opens
 its link. Search looks only at what the Hub already holds, so it asks the relay for nothing.
 

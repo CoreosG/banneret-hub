@@ -1,5 +1,6 @@
-// Banneret Hub: "Switch workspace…", "New workspace…" and "Show/Hide tabs bar" in the command palette.
-import { LayersIcon, PanelTopIcon, PlusIcon } from "lucide-react";
+// Banneret Hub: "Switch workspace…", "New workspace…", "Show/Hide tabs bar" and, while a company is
+// shown, "Search the company…" in the command palette.
+import { LayersIcon, PanelTopIcon, PlusIcon, SearchIcon } from "lucide-react";
 
 import {
   ADDON_ICON_CLASS,
@@ -7,6 +8,8 @@ import {
   type CommandPaletteActionItem,
   type CommandPaletteSubmenuItem,
 } from "../components/CommandPalette.logic";
+import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { openCompanySearch, useCompanySearchStore } from "./companySearchStore";
 import { setTabsHidden, useTabsStore } from "./tabs/tabsStore";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
@@ -16,11 +19,27 @@ import {
   useWorkspacesStore,
 } from "./workspacesStore";
 
+/**
+ * Resolves once the palette has left the screen (about a second at most), so its focus return lands
+ * before a dialog opened from it takes focus, not after.
+ */
+function paletteGone(): Promise<void> {
+  return new Promise((resolve) => {
+    let frames = 0;
+    const check = () => {
+      if (!isCommandPaletteOpen() || frames++ > 60) resolve();
+      else requestAnimationFrame(check);
+    };
+    check();
+  });
+}
+
 export function useCommandPaletteWorkspaceItems(): Array<
   CommandPaletteActionItem | CommandPaletteSubmenuItem
 > {
   const workspaces = useWorkspaces();
   const tabsHidden = useTabsStore((state) => state.hidden);
+  const searchAvailable = useCompanySearchStore((state) => state.available);
   const activeId = effectiveWorkspaceId(
     useWorkspacesStore((state) => state.activeId),
     workspaces,
@@ -29,7 +48,23 @@ export function useCommandPaletteWorkspaceItems(): Array<
     { id: null, name: "Personal" },
     ...workspaces.map((workspace) => ({ id: workspace.id, name: workspace.name })),
   ];
+  const search: CommandPaletteActionItem[] = searchAvailable
+    ? [
+        {
+          kind: "action",
+          value: "action:search-company",
+          searchTerms: ["search", "find", "company", "tasks", "board", "map", "feed"],
+          title: "Search the company…",
+          icon: <SearchIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            await paletteGone();
+            openCompanySearch();
+          },
+        },
+      ]
+    : [];
   return [
+    ...search,
     {
       kind: "submenu",
       value: "action:switch-workspace",

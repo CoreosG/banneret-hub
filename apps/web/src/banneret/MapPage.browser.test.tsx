@@ -26,6 +26,7 @@ import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { MapPage } from "./MapPage";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
+import { FILTER_MEMORY_KEY } from "./filterMemory";
 import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
@@ -178,6 +179,7 @@ function setup() {
   });
   useEnrolmentStore.setState({ views: {} });
   useRelayFeedStore.setState({ feeds: {} });
+  sessionStorage.removeItem(FILTER_MEMORY_KEY);
   openTaskDialog(null);
   storeEnrolmentView(LOCAL, configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
