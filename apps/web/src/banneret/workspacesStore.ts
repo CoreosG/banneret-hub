@@ -79,7 +79,12 @@ export type WorkspaceDialogState =
     }
   /** The Machines list and Leave act on one Enterprise workspace's relay. */
   | { readonly kind: "machines"; readonly origin: string }
-  | { readonly kind: "leave"; readonly environmentId?: EnvironmentId; readonly origin: string }
+  | {
+      readonly kind: "leave";
+      readonly switchAccount?: boolean;
+      readonly environmentId?: EnvironmentId;
+      readonly origin: string;
+    }
   | null;
 
 interface WorkspacesState {

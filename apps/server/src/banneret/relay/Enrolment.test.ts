@@ -454,6 +454,30 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live(
+    "keeps the outside workspace through a pending check and names the account on revocation",
+    () =>
+      withFake((fake, relay) =>
+        Effect.gen(function* () {
+          const login = "rosa-dev";
+          yield* join(fake, relay, { login, role: "outside", admission: "outside" });
+          const client = new RelayClient(fake.url);
+          const check = (reason: string | null) =>
+            Effect.promise(() => client.control("/outside/check", { login, reason }));
+          yield* check("outside_check_pending");
+          const paused = yield* waitFor(status, (v) => v.health === "outside_check_pending");
+          expect(paused.state).toBe("configured");
+          expect(paused.me?.login).toBe(login);
+          yield* check(null);
+          yield* waitFor(status, (v) => v.health === "healthy");
+          yield* check("outside_grant_lost");
+          expect(yield* waitForState("revoked")).toMatchObject({
+            refusedLogin: login,
+            reason: "outside_grant_lost",
+          });
+        }).pipe(onFreshHub()),
+      ),
+  );
   it.live("goes unreachable while the relay is down and healthy again when it returns", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {
@@ -759,7 +783,7 @@ describe("BanneretEnrolment", () => {
           "https://github.com/other-org/repo-1",
           "/home/someone/src/repo-1",
         ]);
-        expect(matched).toEqual(["git@github.com:Example-Org/repo-2.git"]);
+        expect(matched.matched).toEqual(["git@github.com:Example-Org/repo-2.git"]);
         const sent = relay.requests.map((request) => `${request.url} ${request.body}`).join("\n");
         expect(sent).not.toContain("repo-2.git");
         expect(sent).not.toContain("/home/someone");

@@ -6,6 +6,7 @@ import { ChatConversation } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { SidebarMenuButton } from "../../components/ui/sidebar";
 import type { EnterpriseFeed } from "../useEnterpriseFeed";
+import { OutsideRecipients } from "./OutsideRecipients";
 import { DmSettings } from "./AgentSettings";
 import {
   handles,
@@ -37,10 +38,20 @@ export function ChannelRows({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const rows = useChatRead(load, enterprise.feed.chatRevision ?? 0);
+  const me = enterprise.enrolment.me;
+  const outside = me?.admission === "outside";
+  const allowGroup = !outside && enterprise.feed.chatFlags?.includes("group_dms");
+  const allowCreate =
+    !outside ||
+    me.permissions.some((p) => p === "channels.createPublic" || p === "channels.createPrivate");
+  const allowStart =
+    !outside ||
+    me.permissions.some((p) => p === "dm.start:shared_channel" || p === "dm.start:anyone");
   const agentList = useChatRead(
     () =>
       enterprise.feed.chatFlags?.includes("agents") &&
       enterprise.feed.chatFlags?.includes("agent_dms") &&
+      !outside &&
       creating === "dm"
         ? handles(enterprise.target)
         : Promise.resolve([]),
@@ -73,15 +84,17 @@ export function ChannelRows({
       {flags.includes("channels") && (
         <header className="mt-3 flex items-center justify-between px-2 text-xs font-semibold text-muted-foreground">
           Channels
-          <button
-            aria-label="Create channel"
-            onClick={() => setCreating(creating === "channel" ? null : "channel")}
-          >
-            <PlusIcon size={15} />
-          </button>
+          {allowCreate && (
+            <button
+              aria-label="Create channel"
+              onClick={() => setCreating(creating === "channel" ? null : "channel")}
+            >
+              <PlusIcon size={15} />
+            </button>
+          )}
         </header>
       )}
-      {flags.includes("channels") && creating === "channel" && (
+      {flags.includes("channels") && allowCreate && creating === "channel" && (
         <form
           className="grid gap-2 p-2"
           onSubmit={async (e) => {
@@ -132,27 +145,24 @@ export function ChannelRows({
         <>
           <header className="mt-3 flex items-center justify-between px-2 text-xs font-semibold text-muted-foreground">
             Direct messages
-            <button
-              aria-label="Start direct message"
-              onClick={() => setCreating(creating === "dm" ? null : "dm")}
-            >
-              <PlusIcon size={15} />
-            </button>
+            {allowStart && (
+              <button
+                aria-label="Start direct message"
+                onClick={() => setCreating(creating === "dm" ? null : "dm")}
+              >
+                <PlusIcon size={15} />
+              </button>
+            )}
           </header>
-          {creating === "dm" && (
+          {allowStart && creating === "dm" && (
             <form
               data-chat-dm-picker
               onSubmit={async (e) => {
                 e.preventDefault();
                 const members = new FormData(e.currentTarget).getAll("recipient").map(String);
-                if (
-                  !members.length ||
-                  members.length > (enterprise.feed.chatFlags?.includes("group_dms") ? 7 : 1)
-                ) {
+                if (!members.length || members.length > (allowGroup ? 7 : 1)) {
                   setError(
-                    enterprise.feed.chatFlags?.includes("group_dms")
-                      ? "Choose one to seven other people."
-                      : "Choose one other person.",
+                    allowGroup ? "Choose one to seven other people." : "Choose one other person.",
                   );
                   return;
                 }
@@ -173,37 +183,53 @@ export function ChannelRows({
             >
               <fieldset>
                 <legend>Choose recipients</legend>
-                {enterprise.feed.team?.value?.people
-                  .filter((p) => p.login !== login)
-                  .map((p) => (
-                    <label key={p.id}>
-                      <input
-                        name="recipient"
-                        value={p.id}
-                        type={
-                          enterprise.feed.chatFlags?.includes("group_dms") ? "checkbox" : "radio"
-                        }
-                      />{" "}
-                      {p.login}
-                    </label>
-                  ))}
-                {agentList.value
-                  ?.filter(
-                    (h) =>
-                      flags.includes("agents") &&
-                      flags.includes("agent_dms") &&
-                      (enterprise.feed.chatFlags?.includes("others_agents") || h.owner === login),
-                  )
-                  .map((h) => (
-                    <label key={h.id}>
-                      <input
-                        name="recipient"
-                        value={h.id}
-                        type={flags.includes("group_dms") ? "checkbox" : "radio"}
-                      />{" "}
-                      {h.login} · Agent
-                    </label>
-                  ))}
+                {outside
+                  ? rows.value && (
+                      <OutsideRecipients
+                        key={JSON.stringify([
+                          me.id,
+                          me.permissions,
+                          enterprise.feed.chatRevision,
+                          rows.value
+                            .filter((c) => c.kind === "channel" && c.me.member && !c.archived)
+                            .map((c) => c.id),
+                        ])}
+                        target={enterprise.target}
+                        channels={rows.value}
+                        personId={me.id}
+                        includeOutside={me.permissions.includes("dm.outsiders")}
+                      />
+                    )
+                  : enterprise.feed.team?.value?.people
+                      .filter((p) => p.login !== login)
+                      .map((p) => (
+                        <label key={p.id}>
+                          <input
+                            name="recipient"
+                            value={p.id}
+                            type={allowGroup ? "checkbox" : "radio"}
+                          />{" "}
+                          {p.login}
+                        </label>
+                      ))}
+                {!outside &&
+                  agentList.value
+                    ?.filter(
+                      (h) =>
+                        flags.includes("agents") &&
+                        flags.includes("agent_dms") &&
+                        (enterprise.feed.chatFlags?.includes("others_agents") || h.owner === login),
+                    )
+                    .map((h) => (
+                      <label key={h.id}>
+                        <input
+                          name="recipient"
+                          value={h.id}
+                          type={allowGroup ? "checkbox" : "radio"}
+                        />{" "}
+                        {h.login} · Agent
+                      </label>
+                    ))}
               </fieldset>
               <button disabled={pending}>Open conversation</button>
             </form>

@@ -85,6 +85,7 @@ export type BanneretEnrolmentState = typeof BanneretEnrolmentState.Type;
 export const BanneretRelayHealth = Schema.Literals([
   "healthy",
   "unreachable",
+  "outside_check_pending",
   "clock_wrong",
   "refused",
   /** The relay knows neither this machine's token nor its id: its store was reset, or it was removed. */
@@ -254,7 +255,10 @@ const WsBanneretRelayRevokeMachineRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.revok
  */
 const WsBanneretRelayMatchProjectsRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.matchProjects, {
   payload: Schema.Struct({ ...RelayTarget, remoteUrls: Schema.Array(Schema.String) }),
-  success: Schema.Struct({ matched: Schema.Array(Schema.String) }),
+  success: Schema.Struct({
+    matched: Schema.Array(Schema.String),
+    repositories: Schema.Array(Schema.String),
+  }),
   error: RelayRpcError,
 });
 

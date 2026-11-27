@@ -235,6 +235,7 @@ function dialogBody(dialog: Exclude<WorkspaceDialogState, null>, close: () => vo
     case "leave":
       return (
         <LeavePanel
+          switchAccount={dialog.switchAccount === true}
           selectedId={dialog.environmentId}
           key={JSON.stringify(dialog)}
           origin={dialog.origin}

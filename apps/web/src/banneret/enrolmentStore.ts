@@ -233,7 +233,12 @@ export const enrolmentRpc = {
   matchProjects: (
     { environmentId, relayOrigin }: RelayTarget,
     remoteUrls: ReadonlyArray<string>,
-  ): Promise<RelayOutcome<{ readonly matched: ReadonlyArray<string> }>> =>
+  ): Promise<
+    RelayOutcome<{
+      readonly matched: ReadonlyArray<string>;
+      readonly repositories: ReadonlyArray<string>;
+    }>
+  > =>
     outcome(
       runAtomCommand(appAtomRegistry, matchProjectsCommand, {
         environmentId,

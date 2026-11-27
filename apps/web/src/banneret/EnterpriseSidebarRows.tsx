@@ -32,7 +32,17 @@ import { restoredSearch } from "./filterMemory";
 import { needsCountLabel, offersSection } from "./relayFeed.logic";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
+import { OutsideWorkspace } from "./OutsideWorkspace";
+
 export function EnterpriseSidebarRows() {
+  return (
+    <>
+      <OutsideWorkspace />
+      <CompanyRows />
+    </>
+  );
+}
+function CompanyRows() {
   const enterprise = useEnterpriseFeed();
   const pathname = useLocation({ select: (location) => location.pathname });
   const navigate = useNavigate();
@@ -91,26 +101,28 @@ export function EnterpriseSidebarRows() {
   return (
     <SidebarGroup className="shrink-0">
       <SidebarMenu aria-label={workspace.name}>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            onClick={async () => {
-              const selection = await selectOrchestrator(enterprise.target, {
-                relayOrigin: enterprise.target.relayOrigin,
-                action: "ensure",
-              });
-              if (selection?.main) {
-                if (isMobile) setOpenMobile(false);
-                await navigate({
-                  to: "/$environmentId/$threadId",
-                  params: { environmentId: enterprise.environmentId, threadId: selection.main },
+        {enterprise.enrolment.me?.admission !== "outside" && (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={async () => {
+                const selection = await selectOrchestrator(enterprise.target, {
+                  relayOrigin: enterprise.target.relayOrigin,
+                  action: "ensure",
                 });
-              }
-            }}
-          >
-            <UsersIcon />
-            <span>{(!pinInactive && pinned?.title) || "Main orchestrator"}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
+                if (selection?.main) {
+                  if (isMobile) setOpenMobile(false);
+                  await navigate({
+                    to: "/$environmentId/$threadId",
+                    params: { environmentId: enterprise.environmentId, threadId: selection.main },
+                  });
+                }
+              }}
+            >
+              <UsersIcon />
+              <span>{(!pinInactive && pinned?.title) || "Main orchestrator"}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
         {showToday ? (
           <SidebarMenuItem>
             <SidebarMenuButton isActive={pathname === "/today"} onClick={() => go("/today")}>

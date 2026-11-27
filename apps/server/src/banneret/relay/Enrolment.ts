@@ -26,6 +26,8 @@ import { RelayMe } from "@t3tools/contracts";
 // | approved                     | 401 `unauthenticated`, then poll `refused`/`expired`/404/other | none, as from requested |
 // | approved                     | 401 `unauthenticated`, then 429/503/network        | approved; back off               |
 // | approved                     | any other 401                                      | approved, health `refused`; back off |
+// | configured                   | outside_check_pending (503)                        | keep state and data; retry, health in memory only |
+// | configured                   | successful signed call after pending                | healthy; clear pending |
 // | approved, configured         | 401 `token_revoked`                                | revoked                          |
 import * as NodeCrypto from "node:crypto";
 import { readTailscaleLogin } from "./tailscaleLogin.ts";
@@ -158,6 +160,7 @@ const Persisted = Schema.Union([
     relayOrigin: Schema.String,
     displayName: Schema.String,
     label: Schema.String,
+    refusedLogin: Schema.optional(Schema.String),
     reason: Schema.String,
   }),
 ]);
@@ -216,7 +219,7 @@ const MachinesReply = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 });
 const RepositoriesReply = Schema.Struct({
-  items: Schema.Array(Schema.Struct({ projectKey: Schema.String })),
+  items: Schema.Array(Schema.Struct({ projectKey: Schema.String, name: Schema.String })),
   nextCursor: Schema.NullOr(Schema.String),
 });
 
@@ -337,7 +340,10 @@ export interface RelayEnrolment {
   readonly revokeMachine: (machineId: string) => Effect.Effect<void, BanneretRelayError>;
   readonly matchProjects: (
     remoteUrls: ReadonlyArray<string>,
-  ) => Effect.Effect<ReadonlyArray<string>, BanneretRelayError>;
+  ) => Effect.Effect<
+    { matched: ReadonlyArray<string>; repositories: ReadonlyArray<string> },
+    BanneretRelayError
+  >;
   /** An effect that completes at the next change of this relay's view or files, or driver step. */
   readonly nextChange: Effect.Effect<Effect.Effect<void>>;
   /** RelayFeed seam: a signed GET, only while configured. */
@@ -412,7 +418,10 @@ interface EnrolmentService {
   readonly matchProjects: (
     relayOrigin: string,
     remoteUrls: ReadonlyArray<string>,
-  ) => Effect.Effect<ReadonlyArray<string>, BanneretRelayError>;
+  ) => Effect.Effect<
+    { matched: ReadonlyArray<string>; repositories: ReadonlyArray<string> },
+    BanneretRelayError
+  >;
   /** An effect that completes at the next change of any relay, or when a relay is added. */
   readonly nextChange: Effect.Effect<Effect.Effect<void>>;
 }
@@ -660,17 +669,28 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     from: Enrolled,
     details: unknown,
   ) {
+    const source =
+      typeof details === "object" && details !== null && "reason" in details
+        ? details.reason
+        : undefined;
     const reason =
-      typeof details === "object" &&
-      details !== null &&
-      /replac/i.test(String((details as Record<string, unknown>).reason ?? ""))
-        ? "replaced"
-        : "removed";
+      typeof source === "string" &&
+      [
+        "outside_grant_lost",
+        "outside_entry_removed",
+        "outside_2fa_off",
+        "outside_identity_mismatch",
+      ].includes(source)
+        ? source
+        : /replac/i.test(String(source ?? ""))
+          ? "replaced"
+          : "removed";
     yield* persist({
       state: "revoked",
       relayOrigin: from.relayOrigin,
       displayName: from.displayName,
       label: from.label,
+      ...(from.state === "configured" ? { refusedLogin: from.me.login } : {}),
       reason,
     });
     health = undefined;
@@ -800,6 +820,15 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     }
     if (error.code === "clock_wrong" || error.code === "clock_skew") health = "clock_wrong";
     else if (error.code === "bad_response") health = "invalid_reply";
+    else if (
+      error.code === "unavailable" &&
+      error.retryable &&
+      typeof error.details === "object" &&
+      error.details !== null &&
+      "reason" in error.details &&
+      error.details.reason === "outside_check_pending"
+    )
+      health = "outside_check_pending";
     else if (error.status === 0 || error.retryable || error.code === "redirect") {
       if (health !== "unreachable") unreachableSince = yield* nowIso;
       health = "unreachable";
@@ -1252,6 +1281,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           relayOrigin: state.relayOrigin,
           displayName: state.displayName,
           label: state.label,
+          refusedLogin: state.refusedLogin,
           reason: state.reason,
         };
     }
@@ -1362,6 +1392,16 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     keepWorkspace = false,
   ) {
     const from = current;
+    if (from.state === "revoked" && mode === "revoke") {
+      yield* locked(
+        Effect.gen(function* () {
+          if (current !== from) return yield* fail("This enrolment has changed. Try again.");
+          yield* toNone("left");
+          if (!keepWorkspace) yield* tombstoneWorkspace(from.relayOrigin);
+        }),
+      );
+      return view();
+    }
     // While approved only forget is offered: setup never finished, so there may be no relay to tell.
     if (!isEnrolled(from) || (from.state === "approved" && mode !== "forget")) {
       return yield* fail("This machine has not joined a company.");
@@ -1459,6 +1499,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
   ) {
     const from = yield* requireConfigured;
     const companyKeys = new Set<string>();
+    const repositories: string[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < 20; page += 1) {
       const query: string = cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`;
@@ -1466,14 +1507,18 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
         Effect.flatMap((reply) => decodeReply(RepositoriesReply, reply)),
         Effect.mapError((error) => plainFailure(error, from.displayName)),
       );
-      for (const item of reply.items) companyKeys.add(item.projectKey);
+      for (const item of reply.items) {
+        companyKeys.add(item.projectKey);
+        repositories.push(item.name);
+      }
       cursor = reply.nextCursor;
       if (cursor === null) break;
     }
-    return remoteUrls.slice(0, 1000).filter((remoteUrl) => {
+    const matched = remoteUrls.slice(0, 1000).filter((remoteUrl) => {
       const key = projectKeyFromRemote(remoteUrl);
       return key !== null && companyKeys.has(key);
     });
+    return { matched, repositories };
   });
 
   const configuredNow = Effect.suspend(() =>
@@ -1893,8 +1938,6 @@ export const rpcHandlers = {
     readonly remoteUrls: ReadonlyArray<string>;
   }) =>
     Effect.flatMap(BanneretEnrolment, (enrolment) =>
-      Effect.map(enrolment.matchProjects(input.relayOrigin, input.remoteUrls), (matched) => ({
-        matched,
-      })),
+      enrolment.matchProjects(input.relayOrigin, input.remoteUrls),
     ),
 };
