@@ -175,7 +175,11 @@ const NEEDS_ICONS: Readonly<Record<string, LucideIcon>> = {
 };
 
 /** One thing that needs the person: kind icon, the subject, who asks and when, and where it opens. */
-export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem; target: RelayTarget }) {
+export function NeedsRow(props: {
+  readonly item: BanneretFeedNeedsItem;
+  target: RelayTarget;
+  asks?: boolean | undefined;
+}) {
   const { item } = props;
   const navigate = useNavigate();
   const [error, setError] = useState("");
@@ -194,6 +198,7 @@ export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem; target: 
     }
     setSending(false);
   }
+  if (item.kind === "chat_ask" && !props.asks) return null;
   const read = item.chatRead;
   const Icon = NEEDS_ICONS[item.kind] ?? CircleDotIcon;
   return (
@@ -213,7 +218,8 @@ export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem; target: 
             {" · "}
             <RelativeTime at={item.createdAt} />
           </span>
-          {item.ask?.state === "open" &&
+          {props.asks &&
+            item.ask?.state === "open" &&
             (answered ? (
               <span>Answer sent</span>
             ) : (

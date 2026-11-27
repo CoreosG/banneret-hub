@@ -46,6 +46,16 @@ export async function conversations(target: RelayTarget) {
   } while (cursor);
   return result;
 }
+export function offersConversation(c: ChatConversation, flags: readonly string[] = []) {
+  if (c.kind === "channel")
+    return flags.includes("channels") && (!c.private || flags.includes("private_channels"));
+  return (
+    flags.includes("dms") &&
+    (c.members.length <= 2 || flags.includes("group_dms")) &&
+    (!c.members.some((m) => m.kind === "agent") ||
+      (flags.includes("agents") && flags.includes("agent_dms")))
+  );
+}
 export function conversationTitle(c: ChatConversation, login?: string) {
   if (c.kind === "channel") return "#" + c.name;
   return c.members
@@ -55,7 +65,9 @@ export function conversationTitle(c: ChatConversation, login?: string) {
 export async function replyAuthors(target: RelayTarget, root: string) {
   const page = decodeChatThread(await chatRpc.run(target, { kind: "replyPreview", id: root }));
   return [
-    ...new Set(page.items.flatMap((m) => (m.author.kind === "person" ? [m.author.login] : []))),
+    ...new Set(
+      page.items.flatMap((m) => (!m.deleted && m.author.kind === "person" ? [m.author.login] : [])),
+    ),
   ];
 }
 export async function history(

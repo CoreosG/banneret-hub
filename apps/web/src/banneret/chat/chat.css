@@ -156,24 +156,33 @@
   opacity: 0.28;
   flex: 1;
 }
-[data-chat-actions] {
-  position: absolute;
-  right: 0;
-  top: -0.55rem;
-  display: flex;
-  gap: 0.55rem;
-  border: 1px solid var(--border);
-  background: var(--popover);
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.4rem;
-  font-size: 0.72rem;
-  opacity: 0;
-  pointer-events: none;
+[data-chat-column] > [data-chat-scroll],
+[data-chat-column] > [data-chat-composer] {
+  width: min(calc(100% - 2rem), 76ch);
+  margin-inline: auto;
 }
-[data-chat-row]:hover [data-chat-actions],
-[data-chat-row]:focus-within [data-chat-actions] {
-  opacity: 1;
-  pointer-events: auto;
+[data-chat-empty] {
+  margin-block: 2rem;
+}
+[data-chat-empty] h2 {
+  font-size: 1.2rem;
+  font-weight: 650;
+}
+[data-chat-actions] {
+  margin-inline-start: auto;
+  font-size: 0.8rem;
+}
+[data-chat-actions] summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.25rem 0.6rem;
+}
+[data-chat-actions][open] > div {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
 }
 [data-chat-composer] {
   position: relative;

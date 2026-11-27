@@ -2833,6 +2833,12 @@ components:
         mentions:
           type: integer
           minimum: 0
+    ChatDefaultChannels:
+      description: Relay config chat.defaultChannels. Create these public channels and automatically include every staff member.
+      type: array
+      uniqueItems: true
+      default: [general]
+      items: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,39}$' }
     ChatConversation:
       oneOf:
       - type: object
@@ -2856,6 +2862,7 @@ components:
           name:
             type: string
             pattern: ^[a-z0-9][a-z0-9-]{0,39}$
+          defaultChannel: { const: true, description: Every staff member belongs to this channel. }
           private:
             type: boolean
           id:
@@ -3193,6 +3200,7 @@ components:
                 $ref: '#/components/schemas/Id'
           maxItems: 50
         replyCount:
+          description: Number of replies that have not been deleted. Omit lastReplyAt when zero.
           type: integer
           minimum: 0
         lastReplyAt:
@@ -4045,7 +4053,7 @@ components:
           then:
             properties:
               version: { const: 1 }
-              flags: { type: array, uniqueItems: true, items: { enum: [channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, task_links, reactions, search, promote] } }
+              flags: { type: array, uniqueItems: true, items: { enum: [channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, asks, task_links, reactions, search, promote] } }
         - if: { properties: { kind: { const: team } } }
           then:
             properties:

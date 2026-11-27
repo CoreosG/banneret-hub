@@ -104,7 +104,12 @@ export function NeedsPage() {
           ) : (
             <ul aria-label="Needs you items">
               {items.map((item) => (
-                <NeedsRow key={item.id} item={item} target={target} />
+                <NeedsRow
+                  asks={feed.chatFlags?.includes("asks")}
+                  key={item.id}
+                  item={item}
+                  target={target}
+                />
               ))}
             </ul>
           )}

@@ -7,7 +7,14 @@ import * as Schema from "effect/Schema";
 import { SidebarMenuButton } from "../../components/ui/sidebar";
 import type { EnterpriseFeed } from "../useEnterpriseFeed";
 import { DmSettings } from "./AgentSettings";
-import { handles, conversations, conversationTitle, chatRpc, useChatRead } from "./client";
+import {
+  handles,
+  offersConversation,
+  conversations,
+  conversationTitle,
+  chatRpc,
+  useChatRead,
+} from "./client";
 const decodeChatConversation = Schema.decodeUnknownSync(ChatConversation);
 
 export const chatHref = (id: string, root?: string, message?: string) => {
@@ -32,11 +39,14 @@ export function ChannelRows({
   const rows = useChatRead(load, enterprise.feed.chatRevision ?? 0);
   const agentList = useChatRead(
     () =>
-      enterprise.feed.chatFlags?.includes("agent_dms") && creating === "dm"
+      enterprise.feed.chatFlags?.includes("agents") &&
+      enterprise.feed.chatFlags?.includes("agent_dms") &&
+      creating === "dm"
         ? handles(enterprise.target)
         : Promise.resolve([]),
     String(creating) + ":" + (enterprise.feed.chatRevision ?? 0),
   );
+  const flags = enterprise.feed.chatFlags ?? [];
   const login = enterprise.enrolment.me?.login;
   const tabs = useTabsStore((s) => s.tabs);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keep every open chat tab's mention count current
@@ -60,16 +70,18 @@ export function ChannelRows({
   }
   return (
     <section data-chat-sidebar>
-      <header className="mt-3 flex items-center justify-between px-2 text-xs font-semibold text-muted-foreground">
-        Channels
-        <button
-          aria-label="Create channel"
-          onClick={() => setCreating(creating === "channel" ? null : "channel")}
-        >
-          <PlusIcon size={15} />
-        </button>
-      </header>
-      {creating === "channel" && (
+      {flags.includes("channels") && (
+        <header className="mt-3 flex items-center justify-between px-2 text-xs font-semibold text-muted-foreground">
+          Channels
+          <button
+            aria-label="Create channel"
+            onClick={() => setCreating(creating === "channel" ? null : "channel")}
+          >
+            <PlusIcon size={15} />
+          </button>
+        </header>
+      )}
+      {flags.includes("channels") && creating === "channel" && (
         <form
           className="grid gap-2 p-2"
           onSubmit={async (e) => {
@@ -107,7 +119,8 @@ export function ChannelRows({
       )}
       {(error || rows.error) && <p role="alert">{error || rows.error}</p>}
       {rows.value
-        ?.filter((c) => c.kind === "channel")
+        ?.filter((c) => offersConversation(c, flags))
+        .filter((c) => c.kind === "channel")
         .map((c) => (
           <SidebarMenuButton key={c.id} data-unread={c.me.unread > 0} onClick={() => open(c.id)}>
             {c.private ? <LockIcon /> : <HashIcon />}
@@ -177,22 +190,29 @@ export function ChannelRows({
                 {agentList.value
                   ?.filter(
                     (h) =>
-                      enterprise.feed.chatFlags?.includes("others_agents") || h.owner === login,
+                      flags.includes("agents") &&
+                      flags.includes("agent_dms") &&
+                      (enterprise.feed.chatFlags?.includes("others_agents") || h.owner === login),
                   )
                   .map((h) => (
                     <label key={h.id}>
-                      <input name="recipient" value={h.id} type="checkbox" /> {h.login} · Agent
+                      <input
+                        name="recipient"
+                        value={h.id}
+                        type={flags.includes("group_dms") ? "checkbox" : "radio"}
+                      />{" "}
+                      {h.login} · Agent
                     </label>
                   ))}
               </fieldset>
               <button disabled={pending}>Open conversation</button>
             </form>
           )}
-          {enterprise.feed.chatFlags?.includes("agent_owner_dm_read") && (
+          {flags.includes("agents") && flags.includes("agent_owner_dm_read") && (
             <DmSettings enterprise={enterprise} />
           )}
           {rows.value
-            ?.filter((c) => c.kind === "dm")
+            ?.filter((c) => c.kind === "dm" && offersConversation(c, flags))
             .map((c) => (
               <SidebarMenuButton
                 key={c.id}

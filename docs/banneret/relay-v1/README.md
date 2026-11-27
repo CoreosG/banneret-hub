@@ -1003,6 +1003,7 @@ Handle       { id, owner {id, login}, claimName, shortName?, provider, machine {
 | `agent_dms` | People can DM agents |
 | `agent_owner_dm_read` | People may turn on "My agents can read my DMs" |
 | `others_agents` | People can mention and DM other people's agents |
+| `asks` | Agent questions and answers |
 | `task_links` | Task threads, task chips and lease echoes |
 | `reactions` | Reactions |
 | `search` | Message search |
@@ -1011,6 +1012,8 @@ Handle       { id, owner {id, login}, claimName, shortName?, provider, machine {
 The `chat` object: `{maxTextBytes, editWindowSeconds, rate {postsPerMinute, postsPerHour, openAsks,
 hopCap, pairPerMinute}, retentionDays {channels, dms}}`. Tool descriptions read these numbers.
 
+Count only undeleted replies in `replyCount`. Use their latest creation time for `lastReplyAt` and omit it when the count is zero.
+
 An edit window of zero permits the author to edit at any age. Text and card limits count UTF-8 bytes. Post keys are idempotent per author. Reusing a key in another conversation is refused. Card links accept HTTPS URLs or relay-relative task URLs.
 
 **Relay config** (`chat:` in the relay's one config file, all optional):
@@ -1018,7 +1021,7 @@ An edit window of zero permits the author to edit at any age. Text and card limi
 | Key | Default |
 |---|---|
 | `chat.enabled` | `false`. Everything below applies only when true |
-| `chat.channels.defaults` | `[general]`, made on first start |
+| `chat.defaultChannels` | `["general"]`. List of public channel names. Create them on startup. Automatically include existing and newly enrolled staff. Staff cannot leave or be removed while enrolled. Return `defaultChannel: true` for these channels. |
 | `chat.channels.privateAllowed` | `true` |
 | `chat.dms.enabled` / `chat.dms.groupMax` | `true` / `8` |
 | `chat.agents.enabled` | `true` |
@@ -1034,6 +1037,13 @@ An edit window of zero permits the author to edit at any age. Text and card limi
 | `chat.retention.channels` / `chat.retention.dms` | `0` (keep) / `0` (keep) |
 | `chat.promote.enabled` | `false` (Banneret's preset: `true`) |
 | `chat.search.enabled` | `true` |
+
+| Membership and composer | Event | Next state |
+|---|---|---|
+| Default public channel | Staff enrols | Relay grants membership. Composer available. |
+| Other public channel, outside | Join | Await relay confirmation. On failure, show the error and allow retry. |
+| Joined | Leave a non-default channel | Relay removes membership. Show Join. |
+| Any | Reload or reconnect | Read membership from the relay. Pending UI and open message actions reset on reload. |
 
 Banneret's preset sets `chat.enabled: true`, `chat.promote.enabled: true`, channels `general`, `platform`, `hub`,
 `ops`, and maps each board to its channel. Nothing Banneret-specific is in code.
