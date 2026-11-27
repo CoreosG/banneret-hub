@@ -1,3 +1,5 @@
+import company from "./offices/fixtures/company.csv?raw";
+import { restoredSearch } from "./filterMemory";
 import appCss from "../index.css?inline";
 import { minuteTick } from "@t3tools/client-runtime/clock";
 import {
@@ -222,10 +224,31 @@ const TEAM = (): BanneretTeam => ({
   ],
 });
 
+const counts = { working: 1, waiting: 0, notHeardFrom: 0, stopped: 0, idle: 0 };
+const office = {
+  revision: "one",
+  files: { "team.room.platform": "platform-file" },
+  flags: ["status", "presence", "sharing", "meeting_links"],
+  summary: {
+    rooms: [
+      { board: "platform", active: 2, desks: 2, counts },
+      { board: "other", active: 0, desks: 0, counts: { ...counts, working: 0 } },
+    ],
+    agents: [],
+    agentsNextCursor: null,
+    people: { total: 3 },
+    office: {},
+    hallway: { counts },
+  },
+};
 const teamRead = (
   value: BanneretTeam | null,
   extra: Partial<BanneretTeamRead> = {},
-): BanneretTeamRead => ({ value, fetchedAt: ago(0), ...extra });
+): BanneretTeamRead => ({
+  value: value ? { ...value, office: value.office ?? office } : null,
+  fetchedAt: ago(0),
+  ...extra,
+});
 
 const state = (sections: string[], team: BanneretTeamRead | null): BanneretFeedState => ({
   joined: true,
@@ -254,6 +277,7 @@ function setup() {
   openTaskDialog(null);
   storeEnrolmentView(LOCAL, configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
+  vi.spyOn(feedRpc, "room").mockResolvedValue({ sessions: [], nextCursor: null });
   const listeners = new Set<(event: BanneretFeedState) => void>();
   const nothing = { joined: true, value: null, fetchedAt: null };
   vi.spyOn(feedRpc, "today").mockResolvedValue(nothing);
@@ -314,16 +338,7 @@ const founderExample = Schema.decodeUnknownSync(PoolFounderView)(rawFounder);
 const ALL = ["today", "board", "team"];
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
 const personRow = (login: string) =>
-  document.querySelector<HTMLElement>(`li[data-person="${login}"]`);
-const groupsOf = (login: string) =>
-  Object.fromEntries(
-    [...(personRow(login)?.querySelectorAll('[aria-label="Live agents"] [data-group]') ?? [])].map(
-      (pill) => [pill.getAttribute("data-group"), pill.textContent],
-    ),
-  );
-const shownLogins = () =>
-  [...document.querySelectorAll("li[data-person]")].map((row) => row.getAttribute("data-person"));
-
+  document.querySelector<HTMLElement>(`[data-person="${login}"]`);
 describe("Team page", () => {
   it("opens founder approvals and prepares the manual seat command", async () => {
     using stack = new DisposableStack();
@@ -492,9 +507,12 @@ describe("Team page", () => {
     const team = TEAM();
     const people = team.people.map((p) => ({
       ...p,
+      presence: "available",
       machines: p.machines.slice(0, 1).map((m) => ({ ...m, poolHostId: "dev" })),
     }));
     await emit(state([...ALL, "pool"], teamRead({ people })));
+    await userEvent.click(page.getByText("Ada server", { exact: true }));
+    await userEvent.click(page.getByText("Bo laptop", { exact: true }));
     await vi.waitFor(() => expect(personRow("ada-example")?.textContent).toContain("14.0 GiB"));
     const colleague = personRow("bo-example")!;
     expect(colleague.textContent).toContain("Host available");
@@ -502,125 +520,171 @@ describe("Team page", () => {
     expect(colleague.textContent).not.toContain("CPU cores");
     expect(read.mock.calls.every(([id]) => id === LOCAL)).toBe(true);
   });
-  it("shows one row per person: role, machines, held leases and live agents by state", async () => {
+  it("loads open rooms on demand, caps desks, and windows 500 people", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen, router } = await openTeam(stack);
+    await using _screen = screen;
+    // Directory IDs and logins from the fake relay's 500-owner conformance case.
+    const people = company
+      .trim()
+      .split("\n")
+      .map((line, i) => ({
+        id: line.split(",")[0]!,
+        login: line.split(",")[1]!,
+        role: "limited_staff",
+        presence: i === 0 ? "away" : "off",
+        machines: [],
+        sessions: [],
+      }));
+    vi.mocked(feedRpc.room).mockImplementation(async (_target, _room, cursor) => ({
+      sessions: (cursor
+        ? people.slice(Number(cursor), Number(cursor) + 100)
+        : people.slice(0, 300)
+      ).map((p) => ({
+        id: "s" + p.id,
+        personId: p.id,
+        state: "working",
+        since: ago(2),
+        provider: "codex",
+      })),
+      nextCursor: cursor === "400" ? null : cursor ? "400" : "300",
+    }));
+    const agents = people
+      .map((p) => ({ personId: p.id, counts, rooms: [{ board: "platform", waiting: 0 }] }))
+      .sort((a, b) => a.personId.localeCompare(b.personId));
+    const largeOffice = {
+      ...office,
+      summary: {
+        ...office.summary,
+        people: { total: 500 },
+        rooms: [
+          { board: "platform", desks: 500, active: 500, counts: { ...counts, working: 500 } },
+        ],
+        agents: agents.slice(0, 400),
+        agentsNextCursor: "opaque",
+      },
+    };
+    const next = vi
+      .spyOn(feedRpc, "agents")
+      .mockResolvedValue({ agents: agents.slice(400), nextCursor: null });
+    await emit(state(ALL, teamRead({ people, office: largeOffice })));
+    expect(next).not.toHaveBeenCalled();
+    expect(feedRpc.room).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole("button", { name: /Platform.*desks/ }));
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll("article[data-person]")).toHaveLength(12),
+    );
+    await expect.element(page.getByText("488 more")).toBeVisible();
+    expect(vi.mocked(feedRpc.room).mock.calls.map((c) => c[1])).toEqual([
+      "platform",
+      "platform",
+      "platform",
+    ]);
+    await userEvent.click(page.getByRole("button", { name: /Platform.*desks/ }));
+    expect(document.querySelectorAll("article[data-person]")).toHaveLength(0);
+    await userEvent.click(page.getByRole("button", { name: "List", exact: true }));
+    const list = page.getByRole("list", { name: "Team members" });
+    await vi.waitFor(() => expect(list.getByRole("listitem").elements()).toHaveLength(25));
+    list.element().scrollTop = 4800;
+    await vi.waitFor(() => expect(list.getByText(people[100]!.login).elements()).toHaveLength(1));
+    expect(list.getByRole("listitem").elements()).toHaveLength(25);
+    await userEvent.selectOptions(page.getByLabelText("Presence"), "away");
+    await vi.waitFor(() => expect(list.getByRole("listitem").elements()).toHaveLength(1));
+    expect(router.state.location.search).toMatchObject({ presence: "away" });
+  });
+  it("loads a waiting room only when scrolled into view and preserves folding on refresh", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openTeam(stack);
     await using _screen = screen;
-    await emit(state(ALL, teamRead(TEAM())));
-    await vi.waitFor(() =>
-      expect(shownLogins()).toEqual(["ada-example", "bo-example", "cy-example"]),
-    );
+    const rooms = Array.from({ length: 50 }, (_, i) => ({
+      board: "board-" + i,
+      active: 1,
+      desks: 1,
+      counts,
+    }));
+    const last = rooms[49]!.board;
+    const team = {
+      ...TEAM(),
+      office: {
+        ...office,
+        summary: {
+          ...office.summary,
+          rooms,
+          agents: [
+            {
+              personId: "p_ada",
+              counts: { ...counts, waiting: 1 },
+              rooms: [{ board: last, waiting: 1 }],
+            },
+          ],
+        },
+      },
+    };
+    await emit(state(ALL, teamRead(team)));
+    const button = page.getByRole("button", { name: /board-49.*desks/ });
+    await expect.element(button).toHaveAttribute("aria-expanded", "true");
+    expect(feedRpc.room).not.toHaveBeenCalled();
+    button.element().scrollIntoView();
+    await vi.waitFor(() => expect(feedRpc.room).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(feedRpc.room).mock.calls[0]?.[1]).toBe(last);
+    await userEvent.click(button);
+    await emit(state(ALL, teamRead({ ...team, office: { ...team.office, revision: "two" } })));
+    await expect.element(button).toHaveAttribute("aria-expanded", "false");
+  });
 
-    const ada = personRow("ada-example")!;
-    expect(ada.textContent).toContain("you");
-    expect(ada.textContent).toContain("Founder");
-    expect(
-      [...ada.querySelectorAll("[data-machine]")].map((machine) => [
-        machine.textContent,
-        machine.hasAttribute("data-online"),
-      ]),
-    ).toEqual([
-      ["Ada server, online", true],
-      ["Ada laptop, online", true],
-      ["Ada PC, offline", false],
-    ]);
-    // Helpers count under their lead: the lead takes its waiting helper's state, and it is mine.
-    expect(groupsOf("ada-example")).toEqual({ needs_you: "1 needs you", working: "1 working" });
-    expect(ada.textContent).toContain("1 idle");
-    expect(
-      [...ada.querySelectorAll("[data-lease-task]")].map((lease) =>
-        lease.getAttribute("data-lease-task"),
+  it("pages agent counts only when List needs an uncovered row and restores Team filters", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen, router } = await openTeam(stack, "/team?view=list");
+    await using _screen = screen;
+    const people = Array.from({ length: 100 }, (_, i) => ({
+      id: "p" + String(i).padStart(3, "0"),
+      login: "worker" + i,
+      role: "staff",
+      presence: "available",
+      machines: [],
+      sessions: [],
+    }));
+    const agents = people.map((p) => ({
+      personId: p.id,
+      counts,
+      rooms: [{ board: "other", waiting: 0 }],
+    }));
+    const next = vi
+      .spyOn(feedRpc, "agents")
+      .mockResolvedValue({ agents: agents.slice(30), nextCursor: null });
+    await emit(
+      state(
+        ALL,
+        teamRead({
+          people,
+          office: {
+            ...office,
+            summary: { ...office.summary, agents: agents.slice(0, 30), agentsNextCursor: "opaque" },
+          },
+        }),
       ),
-    ).toEqual(["t_invites", "t_limits"]);
-
-    // Someone else's wait is theirs to answer; their quiet machine is not heard from.
-    expect(groupsOf("bo-example")).toEqual({
-      waiting: "1 waiting on someone else",
-      not_heard_from: "1 not heard from",
+    );
+    const list = page.getByRole("list", { name: "Team members" });
+    await vi.waitFor(() => expect(list.getByRole("listitem").elements()).toHaveLength(25));
+    expect(next).not.toHaveBeenCalled();
+    list.element().scrollTop = 48 * 35;
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(1));
+    expect(next.mock.calls[0]?.[1]).toBe("opaque");
+    await userEvent.fill(page.getByRole("searchbox", { name: "Find a person" }), "worker77");
+    await userEvent.selectOptions(page.getByLabelText("Agent states"), "working");
+    await userEvent.selectOptions(page.getByLabelText("Boards"), "other");
+    await vi.waitFor(() => expect(list.getByRole("listitem").elements()).toHaveLength(1));
+    expect(router.state.location.search).toMatchObject({
+      q: "worker77",
+      state: "working",
+      board: "other",
     });
-    expect(personRow("cy-example")!.textContent).toContain("No live agents");
-    expect(personRow("cy-example")!.textContent).toContain("Not joined yet");
-    expect(personRow("cy-example")!.textContent).toContain("No machines");
-
-    const totals = document.querySelector('[aria-label="Live agents by state"]')!;
-    expect(totals.textContent).toContain("1 needs you");
-    expect(totals.textContent).toContain("1 waiting on someone else");
-    expect(document.querySelector("h1 + p")?.textContent).toBe("1 working · 1 idle · 1 needs you");
-
-    // A held lease opens its task, without any lease check.
-    await userEvent.click(ada.querySelector<HTMLElement>('[data-lease-task="t_limits"]')!);
-    await expect
-      .element(page.getByRole("dialog").getByRole("heading", { name: "Rate limits for invites" }))
-      .toBeVisible();
-  });
-
-  it("expands a person into the working tree: sessions, their helpers and the task each works on", async () => {
-    using stack = new DisposableStack();
-    const { emit, router, screen } = await openTeam(stack);
-    await using _screen = screen;
-    await emit(state(ALL, teamRead(TEAM())));
-    await vi.waitFor(() => expect(personRow("ada-example")).not.toBeNull());
-    expect(document.querySelector("[data-session]")).toBeNull();
-
-    await userEvent.click(page.getByRole("button", { name: /ada-example/ }));
-    await vi.waitFor(() =>
-      expect(router.state.location.search).toMatchObject({ person: "ada-example" }),
-    );
-    const tree = page.getByRole("list", { name: "Agents of ada-example" });
-    await expect.element(tree).toBeVisible();
-    const lead = document.querySelector<HTMLElement>('[data-session="s_lead"]')!;
-    expect(
-      [...lead.querySelectorAll("[data-session]")].map((child) =>
-        child.getAttribute("data-session"),
-      ),
-    ).toEqual(["s_helper_1", "s_helper_2"]);
-    const helper = document.querySelector<HTMLElement>('[data-session="s_helper_1"]')!;
-    expect(helper.textContent).toContain("Helper · Claude");
-    expect(helper.textContent).toContain("Ada server · waiting for a permission answer");
-    expect(document.querySelector('[data-session="s_idle"]')!.textContent).toContain(
-      "no task linked",
-    );
-
-    await userEvent.click(lead.querySelector<HTMLElement>('[data-task-link="t_invites"]')!);
-    await expect
-      .element(page.getByRole("dialog").getByRole("heading", { name: "Guild invites" }))
-      .toBeVisible();
-  });
-
-  it("names a task that is on no board, and says not heard from with its time", async () => {
-    using stack = new DisposableStack();
-    const { emit, screen } = await openTeam(stack, "/team?person=bo-example");
-    await using _screen = screen;
-    await emit(state(ALL, teamRead(TEAM())));
-    const gone = await vi.waitFor(() => {
-      const row = document.querySelector<HTMLElement>('[data-session="s_bo_gone"]');
-      expect(row).not.toBeNull();
-      return row!;
+    expect(restoredSearch(WORKSPACE_ID, "/team", null)).toEqual({
+      q: "worker77",
+      state: "working",
+      board: "other",
     });
-    expect(gone.textContent).toContain("a task not on the board");
-    // The page's clock moves by the minute, so the age reads 13 or 14 minutes.
-    expect(gone.textContent).toMatch(/Bo server · not heard from for 1[34] min/);
-    expect(document.querySelector('[data-session="s_bo_ask"]')!.textContent).toContain(
-      "waiting for an answer",
-    );
   });
-
-  it("narrows the people with the filter, kept in the URL", async () => {
-    using stack = new DisposableStack();
-    const { emit, router, screen } = await openTeam(stack, "/team?q=laptop");
-    await using _screen = screen;
-    await emit(state(ALL, teamRead(TEAM())));
-    await expect.element(page.getByLabelText("Find a person")).toHaveValue("laptop");
-    await vi.waitFor(() => expect(shownLogins()).toEqual(["ada-example", "bo-example"]));
-
-    await userEvent.fill(page.getByLabelText("Find a person"), "profile blocks");
-    await vi.waitFor(() => expect(shownLogins()).toEqual(["bo-example"]));
-    expect(router.state.location.search).toMatchObject({ q: "profile blocks" });
-
-    await userEvent.fill(page.getByLabelText("Find a person"), "nobody here");
-    await expect.element(page.getByText("No person matches this filter.")).toBeVisible();
-  });
-
   it("finds a person from / search and opens them on the Team page", async () => {
     using stack = new DisposableStack();
     const { emit, router, screen } = await openTeam(stack, "/");
@@ -640,7 +704,7 @@ describe("Team page", () => {
     await userEvent.keyboard("{Enter}");
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/team"));
     expect(router.state.location.search).toMatchObject({ person: "bo-example" });
-    await expect.element(page.getByRole("list", { name: "Agents of bo-example" })).toBeVisible();
+    await expect.element(page.getByRole("listitem").getByText("bo-example")).toBeVisible();
   });
 
   it("is hidden when the relay does not advertise a team", async () => {
@@ -673,7 +737,7 @@ describe("Team page", () => {
       expect(status).toContain("Cannot reach Example Company.");
       expect(status).toMatch(/Showing what Example Company said [67] min ago/);
     });
-    expect(shownLogins()).toHaveLength(3);
+    await expect.element(page.getByRole("button", { name: /Platform.*desks/ })).toBeVisible();
   });
 
   it("says when nobody is here yet", async () => {

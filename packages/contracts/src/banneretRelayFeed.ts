@@ -14,6 +14,8 @@ export const BANNERET_RELAY_FEED_WS_METHODS = {
   today: "banneretRelay.today",
   needs: "banneretRelay.needs",
   feed: "banneretRelay.feed",
+  room: "banneretRelay.teamRoom",
+  agents: "banneretRelay.teamAgents",
   feedPage: "banneretRelay.feedPage",
   graveyardPage: "banneretRelay.graveyardPage",
   task: "banneretRelay.task",
@@ -457,6 +459,60 @@ export const BanneretTeamSession = Schema.Struct({
 });
 export type BanneretTeamSession = typeof BanneretTeamSession.Type;
 
+export const OfficeCounts = Schema.Struct({
+  working: Schema.Number,
+  waiting: Schema.Number,
+  idle: Schema.Number,
+  notHeardFrom: Schema.Number,
+  stopped: Schema.Number,
+});
+const OfficeAgent = Schema.Struct({
+  personId: Schema.String,
+  counts: OfficeCounts,
+  rooms: Schema.Array(Schema.Struct({ board: Schema.String, waiting: Schema.Number })),
+});
+export const OfficeAgentPage = Schema.Struct({
+  agents: Schema.Array(OfficeAgent),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export const OfficeRoomPage = Schema.Struct({
+  sessions: Schema.Array(Schema.Struct({ ...BanneretTeamSession.fields, personId: Schema.String })),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export const OfficeSummary = Schema.Struct({
+  rooms: Schema.Array(
+    Schema.Struct({
+      board: Schema.String,
+      counts: OfficeCounts,
+      desks: Schema.Number,
+      active: Schema.Number,
+      meetingUrl: Schema.optional(Schema.String),
+    }),
+  ),
+  agents: Schema.Array(OfficeAgent),
+  agentsNextCursor: Schema.NullOr(Schema.String),
+  office: Schema.Struct({ meetingUrl: Schema.optional(Schema.String) }),
+  hallway: Schema.Struct({ counts: OfficeCounts }),
+  people: Schema.Struct({ total: Schema.Number }),
+});
+export const OfficeDirectory = Schema.Struct({
+  people: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      login: Schema.String,
+      role: Schema.String,
+      displayName: Schema.optional(Schema.String),
+      presence: Schema.Literals(["available", "focusing", "away", "off"]),
+      status: Schema.optional(Schema.Struct({ text: Schema.String })),
+      seatBoard: Schema.optional(Schema.String),
+    }),
+  ),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export type OfficeRoomPage = typeof OfficeRoomPage.Type;
+export type OfficeAgentPage = typeof OfficeAgentPage.Type;
+export type OfficeSummary = typeof OfficeSummary.Type;
+
 /** One person: their role, their machines and their live sessions. */
 export const BanneretTeamPerson = Schema.Struct({
   id: Schema.String,
@@ -469,7 +525,25 @@ export const BanneretTeamPerson = Schema.Struct({
 export type BanneretTeamPerson = typeof BanneretTeamPerson.Type;
 
 /** The Team directory joined with room sessions and visible machines, in the relay's (login) order. */
-export const BanneretTeam = Schema.Struct({ people: Schema.Array(BanneretTeamPerson) });
+export const BanneretTeam = Schema.Struct({
+  people: Schema.Array(
+    Schema.Struct({
+      ...BanneretTeamPerson.fields,
+      displayName: Schema.optional(Schema.String),
+      presence: Schema.optional(Schema.String),
+      status: Schema.optional(Schema.Struct({ text: Schema.String })),
+      seatBoard: Schema.optional(Schema.String),
+    }),
+  ),
+  office: Schema.optional(
+    Schema.Struct({
+      summary: OfficeSummary,
+      revision: Schema.String,
+      files: Schema.Record(Schema.String, Schema.String),
+      flags: Schema.Array(Schema.String),
+    }),
+  ),
+});
 export type BanneretTeam = typeof BanneretTeam.Type;
 
 /** A snapshot file as last read, kept with its age when the relay is away. */
@@ -621,6 +695,20 @@ export const BANNERET_RELAY_FEED_RPCS = [
     success: ChannelResult,
     error: EnvironmentAuthorizationError,
   }),
+  Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.room, {
+    payload: Schema.Struct({
+      relayOrigin: Schema.String,
+      board: Schema.NullOr(Schema.String),
+      cursor: Schema.optional(Schema.String),
+    }),
+    success: Schema.NullOr(OfficeRoomPage),
+    error: EnvironmentAuthorizationError,
+  }),
+  Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.agents, {
+    payload: Schema.Struct({ relayOrigin: Schema.String, cursor: Schema.String }),
+    success: Schema.NullOr(OfficeAgentPage),
+    error: EnvironmentAuthorizationError,
+  }),
   WsBanneretRelayTodayRpc,
   WsBanneretRelayNeedsRpc,
   WsBanneretRelayFeedRpc,
@@ -632,6 +720,8 @@ export const BANNERET_RELAY_FEED_RPCS = [
 export const BANNERET_RELAY_FEED_RPC_SCOPES = {
   [BANNERET_RELAY_FEED_WS_METHODS.chat]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.today]: AuthOrchestrationOperateScope,
+  [BANNERET_RELAY_FEED_WS_METHODS.agents]: AuthOrchestrationOperateScope,
+  [BANNERET_RELAY_FEED_WS_METHODS.room]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: AuthOrchestrationOperateScope,
@@ -642,6 +732,8 @@ export const BANNERET_RELAY_FEED_RPC_SCOPES = {
 export const BANNERET_RELAY_FEED_RPC_AGGREGATES = {
   [BANNERET_RELAY_FEED_WS_METHODS.chat]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.today]: "banneret-relay",
+  [BANNERET_RELAY_FEED_WS_METHODS.agents]: "banneret-relay",
+  [BANNERET_RELAY_FEED_WS_METHODS.room]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: "banneret-relay",

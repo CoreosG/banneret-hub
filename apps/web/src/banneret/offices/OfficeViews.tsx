@@ -1,0 +1,527 @@
+import { MachineResources, usePoolResources } from "../ui/MachineResources";
+import type {
+  PoolResources,
+  BanneretTeam,
+  BanneretBoardEntry,
+  OfficeSummary,
+} from "@t3tools/contracts";
+import { useEffect, useRef, useState } from "react";
+import { drawSprite, personForLogin, spriteSize } from "./sprites";
+import { readLocalApi } from "../../localApi";
+import type { EnterpriseFeed } from "../useEnterpriseFeed";
+import type { RelayTarget } from "../enrolmentStore";
+import { useRoomSessions } from "./useRoomSessions";
+import { ChevronRightIcon } from "lucide-react";
+import { useUrlSearch } from "../useUrlSearch";
+import { rememberFilters } from "../filterMemory";
+import { FilterBox } from "../ui/FilterBox";
+import { LeaseChip } from "../ui/Chips";
+import { toneProps } from "../ui/tokens";
+import { QuietLine } from "../ui/QuietLine";
+import { groupBy } from "effect/Array";
+import {
+  createAgentIndex,
+  needsAgent,
+  useAgentIndex,
+  useAgentPage,
+  type AgentIndex,
+} from "./agentIndex";
+import { useOpenTask } from "../useOpenTask";
+
+type Person = BanneretTeam["people"][number];
+type Office = NonNullable<BanneretTeam["office"]>;
+type Counts = OfficeSummary["hallway"]["counts"];
+type Props = { enterprise: EnterpriseFeed; people: readonly Person[]; office: Office };
+const labels = {
+  working: "Working",
+  waiting: "Waiting",
+  idle: "Idle",
+  notHeardFrom: "Not heard from",
+  stopped: "Stopped",
+};
+const states = Object.keys(labels) as (keyof Counts)[];
+const countText = (counts?: Counts) =>
+  states
+    .filter((k) => counts?.[k])
+    .map((k) => counts?.[k] + " " + labels[k].toLowerCase())
+    .join(" · ");
+const value = (v: unknown) => (typeof v === "string" ? v : "");
+
+function PersonSprite({ login }: { login: string }) {
+  return (
+    <canvas
+      aria-hidden
+      width={spriteSize}
+      height={spriteSize}
+      className="mr-1 inline-block size-8 align-middle"
+      ref={(node) => {
+        const ctx = node?.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, spriteSize, spriteSize);
+          drawSprite(
+            ctx,
+            personForLogin(login),
+            0,
+            0,
+            1,
+            document.documentElement.classList.contains("dark") ? "dark" : "light",
+            "full",
+          );
+        }
+      }}
+    />
+  );
+}
+
+function Meeting({ url }: { url?: string | undefined }) {
+  if (!url || !/^https:\/\/[^/@?#\\\s]+(?:[/?#][^\s\\]*)?$/.test(url)) return null;
+  return (
+    <a
+      className="text-sm underline"
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => {
+        const api = readLocalApi();
+        if (api) {
+          e.preventDefault();
+          void api.shell.openExternal(url);
+        }
+      }}
+    >
+      Meeting link
+    </a>
+  );
+}
+
+function SharedMachine({
+  machine,
+  owner,
+  target,
+  pool,
+  visible,
+}: {
+  machine: Person["machines"][number];
+  owner: string;
+  target: RelayTarget;
+  pool: PoolResources | null;
+  visible: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <details
+      className="text-xs text-muted-foreground"
+      onToggle={(e) => setExpanded(e.currentTarget.open)}
+    >
+      <summary className="cursor-pointer">{machine.label}</summary>
+      {expanded && visible && (
+        <MachineResources
+          target={target}
+          machineId={machine.id}
+          hostId={machine.poolHostId}
+          owner={owner}
+          pool={pool}
+        />
+      )}
+    </details>
+  );
+}
+function AgentCounts({ counts }: { counts: Counts | undefined }) {
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {states
+        .filter((k) => counts?.[k])
+        .map((k) => (
+          <span
+            key={k}
+            className="rounded-full px-2 py-0.5 text-xs"
+            {...toneProps(
+              k === "waiting" ? "warn" : k === "working" ? "ok" : "muted",
+              "tint",
+              "fg",
+            )}
+          >
+            {counts?.[k]} {labels[k].toLowerCase()}
+          </span>
+        ))}
+    </span>
+  );
+}
+
+function Select({
+  label,
+  selected,
+  options,
+  change,
+}: {
+  label: string;
+  selected: string;
+  options: readonly (readonly [string, string])[];
+  change: (s: string) => void;
+}) {
+  return (
+    <select
+      className="rounded-md border bg-background px-2 py-1 text-sm"
+      aria-label={label}
+      value={selected}
+      onChange={(e) => change(e.target.value)}
+    >
+      <option value="">
+        {label === "Presence" ? "Any presence" : "All " + label.toLowerCase()}
+      </option>
+      {options.map(([k, v]) => (
+        <option value={k} key={k}>
+          {v}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Room({
+  room,
+  board,
+  people,
+  initialOpen,
+  index,
+  revision,
+  seatFor,
+  target,
+  state,
+  flags,
+  pool,
+}: {
+  room: OfficeSummary["rooms"][number];
+  board: BanneretBoardEntry | undefined;
+  people: readonly Person[];
+  initialOpen: boolean;
+  index: AgentIndex;
+  revision: string | undefined;
+  seatFor: (p: Person, board: string) => string | undefined;
+  target: RelayTarget;
+  state: string;
+  flags: readonly string[];
+  pool: PoolResources | null;
+}) {
+  const [override, toggle] = useState<boolean>();
+  const open = override ?? initialOpen;
+  const ref = useRef<HTMLElement>(null);
+  const [visible, show] = useState(false);
+  const { sessions, retry } = useRoomSessions(target, room.board, revision, open && visible);
+  const indexState = useAgentIndex(index);
+  const openTask = useOpenTask(target);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribe to the scroll viewport
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const observer = new IntersectionObserver((entries) =>
+      show(entries[0]?.isIntersecting ?? false),
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  const owned = groupBy(sessions ?? [], (s) => s.personId);
+  const claims = groupBy(
+    (board?.board?.cards ?? []).filter((c) => c.lease),
+    (c) => c.lease!.holder.login,
+  );
+  const desks = people.flatMap((p) => {
+    const agents = (Object.hasOwn(owned, p.id) ? owned[p.id] : undefined) ?? [];
+    const cards = (Object.hasOwn(claims, p.login) ? claims[p.login] : undefined) ?? [];
+    if (!cards.length && !agents.length) return [];
+    const seated =
+      (p.presence === "available" || p.presence === "focusing") &&
+      seatFor(p, room.board) === room.board;
+    if (!seated && !agents.some((a) => a.state !== "stopped")) return [];
+    const counts = indexState.byPerson.get(p.id)?.counts;
+    if (state && !counts?.[state as keyof Counts]) return [];
+    return [{ p, counts, cards }];
+  });
+  const needed =
+    visible &&
+    open &&
+    (desks.slice(0, 12).some((d) => needsAgent(indexState, d.p.id)) ||
+      (!!state && people.some((p) => owned[p.id] && needsAgent(indexState, p.id))));
+  useAgentPage(index, needed);
+  return (
+    <section
+      ref={ref}
+      className="rounded-lg border bg-card"
+      aria-label={board?.title ?? room.board}
+    >
+      <header className="flex items-center justify-between gap-3 px-4 py-2">
+        <button
+          className="flex flex-1 flex-wrap items-baseline gap-2 text-start"
+          type="button"
+          aria-expanded={open}
+          onClick={() => toggle(!open)}
+        >
+          <ChevronRightIcon
+            aria-hidden
+            className={open ? "size-4 rotate-90 self-center" : "size-4 self-center"}
+          />
+          <strong>{board?.title ?? room.board}</strong>
+          <span className="text-xs text-muted-foreground">
+            {room.desks} desks · {room.active} active
+            {countText(room.counts) && " · " + countText(room.counts)}
+          </span>
+        </button>
+        {flags.includes("meeting_links") && <Meeting url={room.meetingUrl} />}
+      </header>
+      {open && (
+        <div className="border-t p-3">
+          {!sessions ? (
+            sessions === null ? (
+              <button onClick={retry}>Retry room</button>
+            ) : (
+              <p>Loading desks…</p>
+            )
+          ) : (
+            <>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {desks.slice(0, 12).map(({ p, counts, cards }) => (
+                  <article
+                    key={p.id}
+                    data-person={p.login}
+                    className="min-w-0 space-y-1 rounded-md border p-3 text-sm"
+                  >
+                    <PersonSprite login={p.login} />
+                    <strong>{p.displayName ?? p.login}</strong>
+                    {flags.includes("presence") && (
+                      <span className="ml-2 text-muted-foreground">{p.presence}</span>
+                    )}
+                    {flags.includes("status") && p.status && <p>{p.status.text}</p>}
+                    <div className="my-1">
+                      <AgentCounts counts={counts} />
+                    </div>
+                    {p.machines.map((m) => (
+                      <SharedMachine
+                        key={m.id}
+                        machine={m}
+                        owner={p.login}
+                        target={target}
+                        visible={visible}
+                        pool={pool}
+                      />
+                    ))}
+                    {cards.map((card) => (
+                      <button
+                        key={card.task.id}
+                        className="flex items-center gap-1 hover:underline"
+                        onClick={() => openTask(card.task)}
+                      >
+                        {card.task.title}
+                        <LeaseChip
+                          state={
+                            ["active", "paused"].includes(card.lease!.state)
+                              ? card.lease!.state
+                              : "stale"
+                          }
+                          staleAt={card.lease!.staleAt}
+                        />
+                      </button>
+                    ))}
+                  </article>
+                ))}
+              </div>
+              {desks.length > 12 && <p>{desks.length - 12} more</p>}
+              {!desks.length && <p>No matching desks.</p>}
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function OfficeViews({ enterprise, office, people }: Props) {
+  const pool = usePoolResources(enterprise.target, enterprise.feed.sections.includes("pool"));
+  const [raw, set] = useUrlSearch();
+  const filters = {
+    q: value(raw.q) || value(raw.person),
+    board: value(raw.board),
+    state: value(raw.state),
+    presence: value(raw.presence),
+  };
+  const update = (patch: Partial<typeof filters>) => {
+    rememberFilters(enterprise.workspace.id, "team", { ...filters, ...patch });
+    set({ ...filters, ...patch, person: undefined }, { replace: true });
+  };
+  const list = raw.view === "list" || (!raw.view && !!raw.person);
+  const selection = JSON.stringify(filters);
+  const [position, scroll] = useState({ selection, start: 0 });
+  const start = position.selection === selection ? position.start : 0;
+  const { summary, flags } = office;
+  const [cached, setCached] = useState(() => ({
+    revision: office.revision,
+    index: createAgentIndex(enterprise.target, summary),
+  }));
+  if (cached.revision !== office.revision)
+    setCached({ revision: office.revision, index: createAgentIndex(enterprise.target, summary) });
+  const { index } = cached;
+  const indexState = useAgentIndex(index);
+  const { byPerson, error } = indexState;
+  const me = people.find((p) => p.login === enterprise.enrolment.me?.login);
+  const boards = enterprise.feed.board?.value?.boards ?? [];
+  const boardById = new Map(boards.map((b) => [b.id, b]));
+  const claims = boards.flatMap((b) =>
+    (b.board?.cards ?? []).flatMap((c) =>
+      c.lease ? [{ board: b.id, login: c.lease.holder.login }] : [],
+    ),
+  );
+  const candidates = people.filter(
+    (p) =>
+      (!filters.presence || p.presence === filters.presence) &&
+      [p.login, p.displayName].some((n) => n?.toLowerCase().includes(filters.q.toLowerCase())),
+  );
+  const matches = candidates.filter((p) => {
+    const a = byPerson.get(p.id);
+    return (
+      (!filters.state || !!a?.counts[filters.state as keyof Counts]) &&
+      (!filters.board ||
+        a?.rooms.some((r) => r.board === filters.board) ||
+        claims.some((c) => c.board === filters.board && c.login === p.login))
+    );
+  });
+  const unresolved = (p: Person) => needsAgent(indexState, p.id);
+  const filterPerson = Boolean(filters.q || filters.presence);
+  const more = list
+    ? matches.slice(start, start + 25).some(unresolved) ||
+      (matches.length < start + 25 && candidates.some(unresolved))
+    : (!!me && unresolved(me)) || (filterPerson && candidates.some(unresolved));
+  useAgentPage(index, more);
+  function hasDesk(p: Person, board: string) {
+    return (
+      byPerson.get(p.id)?.rooms.some((r) => r.board === board) ||
+      claims.some((c) => c.login === p.login && c.board === board)
+    );
+  }
+  function seatFor(p: Person, here: string) {
+    const has = (board: string) => here === board || hasDesk(p, board);
+    return p.seatBoard && has(p.seatBoard)
+      ? p.seatBoard
+      : summary.rooms.find((r) => has(r.board))?.board;
+  }
+  const roomList = summary.rooms.filter(
+    (r) =>
+      (!filters.board || r.board === filters.board) &&
+      (!filters.state || r.counts[filters.state as keyof Counts] > 0) &&
+      (!filterPerson || candidates.some((p) => hasDesk(p, r.board))),
+  );
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="group" aria-label="Team view" className="flex rounded-md border">
+          {["Floor", "List"].map((name) => (
+            <button
+              type="button"
+              key={name}
+              aria-pressed={name === (list ? "List" : "Floor")}
+              className="px-3 py-1 text-sm aria-pressed:bg-accent"
+              onClick={() => {
+                scroll({ selection, start: 0 });
+                set({ view: name.toLowerCase() }, { replace: true });
+              }}
+            >
+              {name}
+            </button>
+          ))}
+          <button type="button" disabled className="px-3 py-1 text-muted-foreground text-sm">
+            Office
+          </button>
+        </div>
+        {flags.includes("meeting_links") && <Meeting url={summary.office.meetingUrl} />}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <FilterBox
+          placeholder="Find a person"
+          label="Find a person"
+          value={filters.q}
+          onChange={(q) => update({ q })}
+        />
+        <Select
+          label="Boards"
+          selected={filters.board}
+          options={summary.rooms.map((r) => [r.board, boardById.get(r.board)?.title ?? r.board])}
+          change={(board) => update({ board })}
+        />
+        <Select
+          label="Agent states"
+          selected={filters.state}
+          options={states.map((k) => [k, labels[k]])}
+          change={(state) => update({ state })}
+        />
+        {flags.includes("presence") && (
+          <Select
+            label="Presence"
+            selected={filters.presence}
+            options={["available", "focusing", "away", "off"].map((k) => [k, k])}
+            change={(presence) => update({ presence })}
+          />
+        )}
+      </div>
+      {error && <button onClick={() => index.retry()}>Retry agent counts</button>}
+      {!people.length ? (
+        <QuietLine fact="Nobody is here yet." />
+      ) : list ? (
+        <div
+          key={selection}
+          role="list"
+          aria-label="Team members"
+          className="max-h-[1008px] min-h-0 flex-1 overflow-auto"
+          onScroll={(e) => {
+            const next = Math.max(0, Math.floor(e.currentTarget.scrollTop / 48) - 2);
+            if (next !== start) scroll({ selection, start: next });
+          }}
+        >
+          <div style={{ height: matches.length * 48, position: "relative" }}>
+            {matches.slice(start, start + 25).map((p, i) => (
+              <div
+                key={p.id}
+                role="listitem"
+                data-person={p.login}
+                className="absolute flex h-12 w-full items-center gap-3 border-b px-3 text-sm"
+                style={{ top: (start + i) * 48 }}
+              >
+                <strong>{p.displayName ?? p.login}</strong>
+                {flags.includes("presence") && p.presence}
+                {flags.includes("status") && <span className="truncate">{p.status?.text}</span>}
+                <span className="ml-auto">
+                  <AgentCounts counts={byPerson.get(p.id)?.counts} />
+                </span>
+              </div>
+            ))}
+          </div>
+          {!matches.length && <QuietLine fact="No matching people." />}
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          {roomList.map((room) => (
+            <Room
+              pool={pool}
+              key={room.board}
+              revision={office.files["team.room." + room.board]}
+              index={index}
+              seatFor={seatFor}
+              room={room}
+              board={boardById.get(room.board)}
+              flags={flags}
+              target={enterprise.target}
+              people={candidates}
+              state={filters.state}
+              initialOpen={Boolean(
+                filters.q ||
+                filters.presence ||
+                filters.board ||
+                filters.state ||
+                byPerson.get(me?.id ?? "")?.rooms.some((r) => r.board === room.board) ||
+                claims.some((c) => c.board === room.board && c.login === me?.login),
+              )}
+            />
+          ))}
+          {!roomList.length && <QuietLine fact="No matching rooms." />}
+        </div>
+      )}
+    </>
+  );
+}
