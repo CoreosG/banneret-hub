@@ -280,7 +280,7 @@ export const commentEdits = (tracker: FakeTracker) =>
       }),
   });
 
-export const enrolledAs = (login: string, role = "limited_staff") =>
+export const enrolledAs = (login: string, role = "staff") =>
   Layer.succeed(BanneretEnrolment.BanneretEnrolment, {
     ...BanneretEnrolment.BanneretEnrolment.defaultValue(),
     status: (relayOrigin: string) =>
@@ -288,7 +288,13 @@ export const enrolledAs = (login: string, role = "limited_staff") =>
         state: "configured" as const,
         workspaceId: "ent-0000000000000000",
         relayOrigin,
-        me: { login, role },
+        me: {
+          id: "p_me",
+          login,
+          role: { id: role, name: role },
+          admission: "member" as const,
+          permissions: role === "founder" ? ["relay.admin"] : [],
+        },
       }),
   });
 

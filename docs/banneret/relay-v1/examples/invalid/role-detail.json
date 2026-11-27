@@ -1,0 +1,9 @@
+{
+  "id": "contributor",
+  "name": "Contributor",
+  "forOutside": true,
+  "permissions": {
+    "relay.admin": true
+  },
+  "memberCount": 2
+}

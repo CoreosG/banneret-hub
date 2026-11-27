@@ -117,14 +117,18 @@ export async function command(op, arg) {
         ],
       });
       const kim = await enrol(relay, "kim");
-      await kim.call("PUT", "chat/me/settings", { agentsReadMyDms: true });
+      await kim.call("PUT", "chat/me/settings", {
+        agentsReadMyDms: true,
+        agentWakeDefault: "everyone",
+      });
       return {
         id: c.id,
         root: root.id,
-        people: [ada.me, leo.me, kim.me].map(({ id, login }) => ({
+        people: [ada.me, leo.me, kim.me].map(({ id, login, role, admission }) => ({
           id,
           login,
-          role: "founder",
+          role,
+          admission,
           machines: [],
           sessions: [],
         })),

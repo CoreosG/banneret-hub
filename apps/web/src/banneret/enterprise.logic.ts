@@ -266,11 +266,6 @@ export function countdown(expiresAt: string | undefined, nowMs: number): string 
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** Relays name roles in an open set; anything unknown is limited staff. */
-export function roleLabel(role: string): string {
-  return role === "founder" ? "Founder" : "Staff";
-}
-
 /** A login from the relay, trimmed; empty when the relay sent none. */
 export function cleanLogin(login: string | undefined): string {
   return login?.trim() ?? "";
@@ -289,10 +284,10 @@ export function loginSuffix(label: string, login: string | undefined): string {
 
 /** "Signed in as ada · Founder"; drops the login or the role when the relay sent none. */
 export function connectedLine(
-  me: { login?: string | undefined; role?: string | undefined } | undefined,
+  me: { login?: string | undefined; role?: { name: string } | undefined } | undefined,
 ): string {
   const login = cleanLogin(me?.login);
-  const role = me?.role?.trim() ? roleLabel(me.role) : "";
+  const role = me?.role?.name.trim() ? me.role.name : "";
   const head = login === "" ? "Connected" : `Signed in as ${login}`;
   return role === "" ? head : `${head} \u00b7 ${role}`;
 }

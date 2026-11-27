@@ -3,8 +3,12 @@
     {
       "id": "p_7Hq2xK",
       "login": "ada-example",
-      "role": "founder",
-      "presence": "off"
+      "presence": "off",
+      "role": {
+        "id": "founder",
+        "name": "Founder"
+      },
+      "admission": "member"
     }
   ],
   "nextCursor": null

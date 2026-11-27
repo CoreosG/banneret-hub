@@ -414,9 +414,9 @@ const make = Effect.gen(function* () {
         return { askId: result.id };
       }),
     ),
-    banneret_chat_inbox: McpToolAccess.readsAsCaller(({ after }) =>
+    banneret_chat_inbox: McpToolAccess.actsAsCaller(() =>
       Effect.gen(function* () {
-        return yield* (yield* chat).read("deliveries", after ? { cursor: after } : {});
+        return yield* (yield* chat).consumeInbox;
       }),
     ),
     banneret_pool_status: McpToolAccess.readsAsCaller(() =>
@@ -625,7 +625,7 @@ const make = Effect.gen(function* () {
             const labels = new Map(entry.machines.map((machine) => [machine.id, machine.label]));
             return {
               login: entry.login,
-              role: entry.role,
+              role: entry.role.name,
               machines: entry.machines.map((machine) => ({
                 label: machine.label,
                 online: machine.connected,

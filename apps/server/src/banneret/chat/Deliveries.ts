@@ -52,7 +52,7 @@ const pages = Effect.fn("Chat.pages")(function* <A, E>(
   return items;
 });
 
-// Pending | owner-only and another sender | pending until owner opens, or 24 h expiry.
+// Pending inbox-only deliveries wait for the handle to consume them, or expire after seven days.
 // Pending | owner machine claims | claimed. Claimed | durable queue/start receipt | consumed.
 // Claimed | retry/restart | replay the same dispatch command, then consume. Gone thread | refuse.
 // Working/stale progress | no live session at start or during reconciliation | stopped.
@@ -68,17 +68,13 @@ export const makeDeliveries = Effect.gen(function* () {
     const t = yield* threads.getThreadShell(id);
     return t && !t.archivedAt && !t.deletedAt ? t : null;
   });
-  const drain = Effect.fn("Chat.drain")(function* (relay: RelayEnrolment, opened?: string) {
+  const drain = Effect.fn("Chat.drain")(function* (relay: RelayEnrolment) {
     const call = relay.signedChat;
     const rows = yield* pages((q) =>
       call("GET", "deliveries" + q).pipe(Effect.flatMap((r) => decodeDeliveries(r.body))),
     );
     for (const row of rows) {
-      if (
-        (row.wake === "owner_only" && !row.fromOwner && opened !== row.threadRef) ||
-        Date.parse(row.expiresAt) <= (yield* Clock.currentTimeMillis)
-      )
-        continue;
+      if (!row.wakes || Date.parse(row.expiresAt) <= (yield* Clock.currentTimeMillis)) continue;
       const t = yield* target(relay, row.threadRef),
         body = { asHandle: row.handleId },
         path = "deliveries/" + encodeURIComponent(row.id);
@@ -101,7 +97,7 @@ export const makeDeliveries = Effect.gen(function* () {
         yield* call("POST", path + "/refuse", { ...body, reason: "message_unavailable" });
         continue;
       }
-      if (d.wake === "owner_only" && !d.fromOwner && opened !== d.threadRef) continue;
+      if (!d.wakes) continue;
       const key = "chat-" + row.handleId + "-" + row.id;
       const commandId = CommandId.make(key);
       if (!(yield* threads.hasReceipt(commandId)))
@@ -163,7 +159,7 @@ export const makeDeliveries = Effect.gen(function* () {
         ...action.settings,
       })).body;
     }
-    yield* drain(relay, thread.id);
+    yield* drain(relay);
     const handles = yield* pages((q) =>
       relay.signedChat("GET", "handles" + q).pipe(Effect.flatMap((r) => decodeHandles(r.body))),
     );

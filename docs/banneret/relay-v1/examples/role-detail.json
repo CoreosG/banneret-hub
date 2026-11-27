@@ -1,0 +1,12 @@
+{
+  "id": "contributor",
+  "name": "Contributor",
+  "forOutside": true,
+  "permissions": {
+    "scope.boards": [
+      "platform"
+    ],
+    "agents.mention": true
+  },
+  "memberCount": 2
+}

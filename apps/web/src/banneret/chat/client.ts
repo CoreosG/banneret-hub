@@ -48,7 +48,10 @@ export async function conversations(target: RelayTarget) {
 }
 export function offersConversation(c: ChatConversation, flags: readonly string[] = []) {
   if (c.kind === "channel")
-    return flags.includes("channels") && (!c.private || flags.includes("private_channels"));
+    return (
+      flags.includes("channels") &&
+      (c.access.visibility === "public" || flags.includes("private_channels"))
+    );
   return (
     flags.includes("dms") &&
     (c.members.length <= 2 || flags.includes("group_dms")) &&

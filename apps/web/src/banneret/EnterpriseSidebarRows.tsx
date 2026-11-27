@@ -171,7 +171,7 @@ export function EnterpriseSidebarRows() {
         )}
         {canManagePool &&
           feed.sections.includes("pool") &&
-          enterprise.enrolment.me?.role === "founder" && (
+          enterprise.enrolment.me?.permissions.includes("relay.admin") && (
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={pathname === "/offer-machine"}

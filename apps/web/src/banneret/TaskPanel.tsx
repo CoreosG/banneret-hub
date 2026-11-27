@@ -645,7 +645,7 @@ function TaskPanelBody(props: {
       : null;
   const facts = taskFacts(view, {
     leases,
-    signOff: enrolment?.me?.role === "founder",
+    signOff: enrolment?.me?.permissions.includes("relay.admin") ?? false,
     lease,
     showOnMap,
   });

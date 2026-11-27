@@ -49,6 +49,7 @@ describe("relay v1 contract", () => {
     ]);
     expect(Object.keys(schemas.PersonRef!.properties).toSorted()).toEqual(["id", "login"]);
     expect(Object.keys(schemas.TeamPerson!.properties).toSorted()).toEqual([
+      "admission",
       "displayName",
       "id",
       "login",
@@ -174,11 +175,11 @@ describe("relay v1 contract", () => {
     for (const item of needs.items) item.kind = "kind_added_in_v1_9";
     expect(spec.check("NeedsPage", needs)).toBeNull();
     const capabilities = readExample("capabilities.json") as {
-      me: { role: string };
-      mcpTools: Array<{ role: string }>;
+      me: { role: { id: string; name: string } };
+      mcpTools: Array<{ requires?: string }>;
     };
-    capabilities.me.role = "auditor";
-    for (const tool of capabilities.mcpTools) tool.role = "auditor";
+    capabilities.me.role = { id: "auditor", name: "Auditor" };
+    for (const tool of capabilities.mcpTools) tool.requires = "audit.read";
     expect(spec.check("Capabilities", capabilities)).toBeNull();
     // Open, not free text: the value is still a lowercase token.
     for (const item of needs.items) item.kind = "Not a kind";
@@ -233,11 +234,13 @@ describe("chat privacy", () => {
       }
     ).schemas;
     expect(Object.keys(schemas.ChatMe!.properties).sort()).toEqual([
+      "can",
       "member",
       "mentions",
       "muted",
       "notify",
       "readSeq",
+      "request",
       "unread",
     ]);
     expect(Object.keys(schemas.ChatRead!.properties).sort()).toEqual([
@@ -246,7 +249,7 @@ describe("chat privacy", () => {
       "threadRootId",
     ]);
     expect(schemas.ChatMember!.oneOf.map((s) => Object.keys(s.properties).sort())).toEqual([
-      ["id", "kind", "login"],
+      ["admission", "id", "kind", "login", "role"],
       ["handle", "id", "kind", "ownerLogin"],
     ]);
   });

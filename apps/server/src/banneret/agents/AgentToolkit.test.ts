@@ -258,7 +258,8 @@ const boardState = (cards: ReadonlyArray<BanneretBoardCard>): BanneretFeedState 
         {
           id: "p_me",
           login: ME,
-          role: "limited_staff",
+          role: { id: "staff", name: "Staff" },
+          admission: "member" as const,
           machines: [{ id: "m_1", label: "Dev server", kind: "server", connected: true }],
           sessions: [
             {
@@ -271,7 +272,14 @@ const boardState = (cards: ReadonlyArray<BanneretBoardCard>): BanneretFeedState 
             },
           ],
         },
-        { id: "p_bo", login: "bo-example", role: "founder", machines: [], sessions: [] },
+        {
+          id: "p_bo",
+          login: "bo-example",
+          role: { id: "founder", name: "Founder" },
+          admission: "member" as const,
+          machines: [],
+          sessions: [],
+        },
       ],
     },
     fetchedAt: "2026-11-26T10:00:00.000Z",
@@ -291,10 +299,10 @@ describe("agent toolkit listing", () => {
 
   /** Relays asked anything by the stub feed, so a test can prove which relays were never asked. */
   const asked: Array<string> = [];
-  // Withdraw is named for founders only, so a limited_staff person is not offered it.
+  // Withdraw is named for founders only, so a staff member is not offered it.
   const ALL_TOOLS = BANNERET_AGENT_TOOLS.map((name) => ({
     name,
-    role: name === "banneret_lease_withdraw" ? "founder" : "limited_staff",
+    ...(name === "banneret_lease_withdraw" && { requires: "relay.admin" }),
   }));
   /** The relay's capabilities `mcpTools`; null until the Hub has read them. */
   let relayTools: ReadonlyArray<RelayFeed.RelayMcpTool> | null = ALL_TOOLS;
@@ -309,7 +317,13 @@ describe("agent toolkit listing", () => {
               workspaceId: "ent-company",
               relayOrigin,
               displayName: "Example Company",
-              me: { login: ME, role: "limited_staff" },
+              me: {
+                login: ME,
+                id: "p_me",
+                permissions: [],
+                role: { id: "staff", name: "Staff" },
+                admission: "member" as const,
+              },
             }
           : { state: "none", workspaceId: "ent-unjoined", relayOrigin },
       ),
@@ -770,20 +784,20 @@ describe("agent toolkit listing", () => {
 });
 
 describe("offeredTools", () => {
-  it("enables only the Hub's own tools the relay names, at or below the person's role", () => {
+  it("enables only the Hub's own tools the relay names, when the caller has the required permission", () => {
     const tools = [
-      { name: "banneret_board", role: "limited_staff" },
-      { name: "banneret_lease_take", role: "founder" },
-      { name: "banneret_task", role: "auditor" },
-      { name: "needs_list", role: "limited_staff" },
+      { name: "banneret_board" },
+      { name: "banneret_lease_take", requires: "relay.admin" },
+      { name: "banneret_task", requires: "audit.read" },
+      { name: "needs_list" },
     ];
-    expect([...AgentRelays.offeredTools(tools, "limited_staff")]).toEqual(["banneret_board"]);
-    expect([...AgentRelays.offeredTools(tools, "founder")].sort()).toEqual([
+    expect([...AgentRelays.offeredTools(tools, [])]).toEqual(["banneret_board"]);
+    expect([...AgentRelays.offeredTools(tools, ["relay.admin"])].sort()).toEqual([
       "banneret_board",
       "banneret_lease_take",
     ]);
-    // A role the Hub does not know admits only that exact role, and counts as the lowest otherwise.
-    expect([...AgentRelays.offeredTools(tools, "auditor")].sort()).toEqual([
+    // A custom permission works without a role ranking.
+    expect([...AgentRelays.offeredTools(tools, ["audit.read"])].sort()).toEqual([
       "banneret_board",
       "banneret_task",
     ]);
@@ -928,7 +942,7 @@ describe("agent lease tools against the fake relay", () => {
         label: "Ada laptop",
         kind: "laptop",
       });
-      fake.approve(view.confirmCode!, { login: ME, role: "limited_staff" });
+      fake.approve(view.confirmCode!, { login: ME, role: "staff" });
       const feed = yield* RelayFeed.BanneretRelayFeed;
       yield* feed.events(relay.origin).pipe(
         Stream.filter((state) => allBoardCards(state.board?.value).length > 0),

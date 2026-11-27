@@ -123,7 +123,7 @@ export function ChannelRows({
         .filter((c) => c.kind === "channel")
         .map((c) => (
           <SidebarMenuButton key={c.id} data-unread={c.me.unread > 0} onClick={() => open(c.id)}>
-            {c.private ? <LockIcon /> : <HashIcon />}
+            {c.access.visibility === "private" ? <LockIcon /> : <HashIcon />}
             <span>{c.name}</span>
             {c.me.mentions > 0 && <b>{c.me.mentions}</b>}
           </SidebarMenuButton>

@@ -1,3 +1,4 @@
 {
-  "agentsReadMyDms": false
+  "agentsReadMyDms": false,
+  "agentWakeDefault": "everyone"
 }

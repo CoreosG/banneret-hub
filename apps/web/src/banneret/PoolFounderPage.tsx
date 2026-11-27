@@ -286,7 +286,7 @@ export function PoolFounderPage() {
   if (
     !company ||
     !permitted ||
-    company.enrolment.me?.role !== "founder" ||
+    !company.enrolment.me?.permissions.includes("relay.admin") ||
     !company.feed.sections.includes("pool")
   )
     return null;

@@ -16,18 +16,38 @@
     "muted": false,
     "readSeq": 1,
     "unread": 1,
-    "mentions": 1
+    "mentions": 1,
+    "can": {
+      "read": true,
+      "post": false,
+      "reply": false,
+      "join": false,
+      "request": false,
+      "invite": false,
+      "manage": false,
+      "openToOutside": false
+    }
   },
   "members": [
     {
       "kind": "person",
       "id": "p_ada",
-      "login": "ada"
+      "login": "ada",
+      "role": {
+        "id": "staff",
+        "name": "Staff"
+      },
+      "admission": "member"
     },
     {
       "kind": "person",
       "id": "p_leo",
-      "login": "leo"
+      "login": "leo",
+      "role": {
+        "id": "staff",
+        "name": "Staff"
+      },
+      "admission": "member"
     }
   ],
   "agentReaders": [

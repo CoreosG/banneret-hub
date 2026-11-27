@@ -1,3 +1,4 @@
+import { RoleRef, Admission } from "./banneretChat.ts";
 import { PLUGIN_RPCS, PLUGIN_SCOPES, PLUGIN_AGGREGATES } from "./banneretPlugins.ts";
 // Banneret Hub: enrolment of this server environment in a company relay (docs/banneret/relay-v1).
 // The server holds the machine key and device token and makes every relay call; clients see only
@@ -111,6 +112,13 @@ export type BanneretMachineKind = typeof BanneretMachineKind.Type;
 /** The machine label pattern of the relay contract (MachineFacts.label). */
 export const BANNERET_MACHINE_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
 
+export const RelayMe = Schema.Struct({
+  id: Schema.String,
+  login: Schema.String,
+  role: RoleRef,
+  admission: Admission,
+  permissions: Schema.Array(Schema.String),
+});
 export const BanneretEnrolmentView = Schema.Struct({
   state: BanneretEnrolmentState,
   /** The Enterprise workspace this enrolment belongs to: `ent-` + 16 hex of sha256(origin). */
@@ -131,7 +139,7 @@ export const BanneretEnrolmentView = Schema.Struct({
   reason: Schema.optional(Schema.String),
   /** The same in plain words. */
   message: Schema.optional(Schema.String),
-  me: Schema.optional(Schema.Struct({ login: Schema.String, role: Schema.String })),
+  me: Schema.optional(RelayMe),
   replacedLabel: Schema.optional(Schema.String),
   health: Schema.optional(BanneretRelayHealth),
   lastOkAt: Schema.optional(Schema.String),

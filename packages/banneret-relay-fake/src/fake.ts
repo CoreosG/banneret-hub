@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off extendsNativeError:off - a plain node:http test double with no Effect runtime.
+import { templates, type RoleWrite } from "./roles.ts";
 import { editPresence, emptyCounts, leadSessions } from "./team.ts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeHttp from "node:http";
@@ -56,7 +57,14 @@ import { checkStagePlan, type StagePlan } from "./stage-plan.ts";
  * pairings through the methods below or the HTTP control surface under /conformance/v1 (see FAKE.md).
  */
 
-export type Role = "founder" | "limited_staff";
+export type Role = string;
+type Admission = "member" | "outside";
+type OutsideReason =
+  | "outside_check_pending"
+  | "outside_grant_lost"
+  | "outside_entry_removed"
+  | "outside_2fa_off"
+  | "outside_identity_mismatch";
 export type Refusal =
   | "declined"
   | "not_staff"
@@ -68,6 +76,7 @@ type ErrorCode =
   | "stale_offer"
   | "pool_limit_reached"
   | "level_not_offered"
+  | "capacity"
   | "malformed"
   | "rate_limited"
   | "too_large"
@@ -80,12 +89,27 @@ type ErrorCode =
   | "forbidden"
   | "network_identity_mismatch"
   | "not_found"
+  | "role_permission_missing"
+  | "chat_post_restricted"
+  | "chat_not_member"
+  | "chat_invite_restricted"
+  | "chat_outsiders_not_allowed"
+  | "chat_manage_restricted"
+  | "chat_dm_restricted"
+  | "chat_agent_capped"
+  | "role_in_use"
+  | "role_not_for_outside"
+  | "chat_request_closed"
+  | "unavailable"
   | "internal";
 
 export interface PersonInput {
   readonly login: string;
   readonly displayName?: string;
   readonly role?: Role;
+  readonly admission?: Admission;
+  readonly repoKeys?: readonly string[];
+  readonly outsideReason?: OutsideReason;
   /** The person's registered network identity, checked only when `networkIdentityHeader` is set. */
   readonly networkIdentity?: string;
   /** Hold the pairing in `awaiting_approval` until `approvePairing` (a person new to the relay). */
@@ -135,10 +159,18 @@ export interface FakeRelayOptions {
     text: string;
     locked: boolean;
   }>;
+  readonly roles?: { default?: string; outsideDefault?: string };
   readonly chat?:
     | boolean
     | {
-        readonly defaultChannels: readonly string[];
+        readonly defaultChannels?: readonly string[];
+        readonly requests?: {
+          expireAfter?: string;
+          retryAfterDecline?: string;
+          maxPendingPerPerson?: number;
+        };
+        readonly deliveries?: { expireAfter?: string; inboxExpireAfter?: string };
+        readonly channels?: { maxMembers?: number };
         readonly boards?: readonly { board: string; channel: string }[];
       };
   readonly officeFixture?: "company" | "community";
@@ -180,6 +212,9 @@ interface Person {
   readonly id: string;
   readonly login: string;
   role: Role;
+  admission: Admission;
+  repoKeys?: readonly string[];
+  outsideReason?: OutsideReason;
   networkIdentity: string | null;
   removed: boolean;
 }
@@ -272,6 +307,7 @@ interface Pairing {
   expiresAt: number;
   wrongCodes: number;
   reason?: Refusal | Expiry;
+  refusedLogin?: string;
   personId?: string;
   machineId?: string;
 }
@@ -479,6 +515,7 @@ class RelayError extends Error {
 }
 
 const STATUS: Record<ErrorCode, number> = {
+  capacity: 409,
   malformed: 400,
   stale_offer: 409,
   pool_limit_reached: 409,
@@ -494,6 +531,18 @@ const STATUS: Record<ErrorCode, number> = {
   forbidden: 403,
   network_identity_mismatch: 403,
   not_found: 404,
+  role_permission_missing: 403,
+  chat_post_restricted: 403,
+  chat_not_member: 403,
+  chat_invite_restricted: 403,
+  chat_outsiders_not_allowed: 403,
+  chat_manage_restricted: 403,
+  chat_dm_restricted: 403,
+  chat_agent_capped: 403,
+  role_in_use: 409,
+  role_not_for_outside: 409,
+  chat_request_closed: 409,
+  unavailable: 503,
   internal: 500,
 };
 
@@ -632,6 +681,8 @@ const NEEDS_CLASS: Readonly<Record<string, number>> = {
   thread_question: 1,
   thread_approval: 1,
   chat_ask: 1,
+  chat_join_requests: 2,
+  agent_inbox: 3,
   pull_request: 2,
   pr_approval: 2,
   waiting_for_approver: 2,
@@ -731,12 +782,22 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     options.publicOrigin === undefined ? undefined : parsePublicOrigin(options.publicOrigin);
   if (options.pool && spec.check("PoolConfig", options.pool))
     throw new Error("Invalid pool configuration.");
-  const defaultNames =
-    typeof options.chat === "object"
-      ? options.chat.defaultChannels
-      : options.chat
-        ? ["general"]
-        : [];
+  const chatConfig = typeof options.chat === "object" ? options.chat : undefined;
+  const defaultNames = chatConfig?.defaultChannels ?? (options.chat ? ["general"] : []);
+  const duration = (value: string) => {
+    const match = /^(\d+)(s|m|h|d)$/.exec(value);
+    if (!match) throw new Error("Invalid chat duration: " + value);
+    return (
+      Number(match[1]) *
+      { s: 1000, m: 60000, h: 3600000, d: 86400000 }[match[2] as "s" | "m" | "h" | "d"]
+    );
+  };
+  const requestLifetime = duration(chatConfig?.requests?.expireAfter ?? "14d");
+  const declineCooldown = duration(chatConfig?.requests?.retryAfterDecline ?? "7d");
+  const deliveryLifetime = duration(chatConfig?.deliveries?.expireAfter ?? "24h");
+  const inboxLifetime = duration(chatConfig?.deliveries?.inboxExpireAfter ?? "7d");
+  const maxPending = chatConfig?.requests?.maxPendingPerPerson ?? 5;
+  const maxMembers = chatConfig?.channels?.maxMembers ?? 200;
   if (spec.check("ChatDefaultChannels", defaultNames))
     throw new Error("Invalid chat.defaultChannels.");
   const board = options.board ?? { staleSeconds: 21600, expirySeconds: 86400 };
@@ -792,6 +853,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const retryAfterMs = options.retryAfterMs ?? 2000;
   const identityHeader = options.networkIdentityHeader;
 
+  const roles = new Map(Object.entries(templates));
+  const roleOf = (p: Person) => roles.get(p.role)!;
+  const has = (p: Person, key: string) => roleOf(p).permissions[key] === true;
+  const roleRef = (p: Person) => ({ id: p.role, name: roles.get(p.role)?.name ?? p.role });
+  const personRef = (p: Person) => ({ id: p.id, login: p.login });
+  const account = (p: Person) => ({ ...personRef(p), role: roleRef(p), admission: p.admission });
   const people = new Map<string, Person>();
   const peopleByLogin = new Map<string, Person>();
   const pool = createPool(options.pool, (code, message, current) => {
@@ -826,10 +893,44 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   let capabilitiesRevision = 1;
   const capabilitiesVersion = () => `c-${capabilitiesRevision}`;
 
+  const unrestricted = (p: Person) =>
+    roleOf(p).permissions["scope.boards"] === "all" && !p.repoKeys && p.admission !== "outside";
+  const boardAllowed = (p: Person, board: string | undefined) => {
+    if (unrestricted(p)) return true;
+    const scope = roleOf(p).permissions["scope.boards"];
+    return (
+      !!board &&
+      (scope === "all" || (Array.isArray(scope) && scope.includes(board))) &&
+      ((!p.repoKeys && p.admission !== "outside") ||
+        boardTasks.some(
+          (t) => t.board === board && t.projectKey && p.repoKeys?.includes(t.projectKey),
+        ))
+    );
+  };
+  const taskAllowed = (p: Person, t: BoardTask) =>
+    boardAllowed(p, t.board) &&
+    ((!p.repoKeys && p.admission !== "outside") ||
+      (!!t.projectKey && !!p.repoKeys?.includes(t.projectKey)));
+  const recordAllowed = (p: Person, id: string | null) =>
+    unrestricted(p) || boardTasks.some((t) => t.id === id && taskAllowed(p, t));
+  const reposFor = (p: Person) =>
+    repositories.filter(
+      (r) =>
+        unrestricted(p) ||
+        boardTasks.some((t) => t.projectKey === r.projectKey && taskAllowed(p, t)),
+    );
+  const peopleAllowed = (p: Person, id: string) =>
+    id === p.id || roleOf(p).permissions["scope.people"] === "all" || shared(p.id, id);
   const personFor = (input: PersonInput): Person => {
     const existing = peopleByLogin.get(input.login);
     if (existing && !existing.removed) {
-      if (input.role) existing.role = input.role;
+      if (
+        input.role &&
+        (!roles.has(input.role) ||
+          (existing.admission === "outside" && !roles.get(input.role)?.forOutside))
+      )
+        throw new RelayError("role_not_for_outside", "Choose an eligible role.");
+      // Enrolling a second machine preserves the current staff assignment.
       if (input.networkIdentity !== undefined) existing.networkIdentity = input.networkIdentity;
       return existing;
     }
@@ -838,11 +939,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       id: holderIds.get(input.login) ?? randomId("p"),
       login: input.login,
       ...(input.displayName && { displayName: input.displayName }),
-      role: input.role ?? "limited_staff",
+      role:
+        input.role ??
+        (input.admission === "outside"
+          ? (options.roles?.outsideDefault ?? "outside")
+          : (options.roles?.default ?? "staff")),
+      ...(input.repoKeys && { repoKeys: input.repoKeys }),
+      admission: input.admission ?? "member",
+      ...(input.outsideReason && { outsideReason: input.outsideReason }),
       networkIdentity: input.networkIdentity ?? null,
       removed: false,
     };
-    for (const channel of defaultChannels) channel.members.add(person.id);
+    if (!roles.has(person.role) || (person.admission === "outside" && !roleOf(person).forOutside))
+      throw new RelayError("role_not_for_outside", "Choose a role allowed for this person.");
+    if (person.admission === "member" && has(person, "channels.seePublic"))
+      for (const channel of defaultChannels) channel.members.add(person.id);
     people.set(person.id, person);
     peopleByLogin.set(person.login, person);
     return person;
@@ -1000,7 +1111,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       pairing.reason = "network_identity_mismatch";
       return pairing.state;
     }
-    if (pairing.poolHost && person.role !== "founder") {
+    if (pairing.poolHost && !has(person, "relay.admin")) {
       pairing.state = "refused";
       pairing.reason = "declined";
       return pairing.state;
@@ -1021,9 +1132,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return pairing.state;
   };
 
-  const refusePairing = (pairingId: string, reason: Refusal): PairingState => {
+  const refusePairing = (pairingId: string, reason: Refusal, login?: string): PairingState => {
     const pairing = pairingById(pairingId);
     if (isOpen(pairing)) {
+      if (!pairing.poolHost && !pairing.personId && !login)
+        throw new RelayError("malformed", "Supply the signed-in login for a refused pairing.");
+      if (login) pairing.refusedLogin = login;
       pairing.state = "refused";
       pairing.reason = reason;
     }
@@ -1143,7 +1257,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const machine = machinesByToken.get(hashToken(match[1]));
     if (!machine) throw new RelayError("unauthenticated", "Unknown device token.");
     if (machine.revokedAt !== null)
-      throw new RelayError("token_revoked", "This machine was revoked; enrol again.");
+      throw new RelayError(
+        "token_revoked",
+        "This machine was revoked; enrol again.",
+        people.get(machine.personId)?.outsideReason
+          ? { reason: people.get(machine.personId)!.outsideReason }
+          : undefined,
+      );
     if (machine.poolHost !== hostCall)
       throw new RelayError("forbidden", "Wrong credential for this route.");
     const device = headerValue(request, "X-Banneret-Device");
@@ -1169,6 +1289,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       });
     }
     const person = people.get(machine.personId);
+    if (person?.admission === "outside" && person.outsideReason) {
+      const reason = person.outsideReason;
+      throw new RelayError(
+        reason === "outside_check_pending" ? "unavailable" : "token_revoked",
+        reason === "outside_check_pending"
+          ? "Outside access could not be checked."
+          : "Outside access ended.",
+        { reason },
+      );
+    }
     if (!person || person.removed)
       throw new RelayError("token_revoked", "This person was removed.");
     if (
@@ -1215,7 +1345,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         !revoked &&
         machine.lastHeardAt !== null &&
         Date.now() - machine.lastHeardAt <= NOT_HEARD_FROM_MS,
-      revocable: !revoked && (machine.personId === viewer.id || viewer.role === "founder"),
+      revocable: !revoked && (machine.personId === viewer.id || has(viewer, "relay.admin")),
       ...(machine.revokedAt === null ? {} : { revokedAt: iso(machine.revokedAt) }),
     };
   };
@@ -1235,14 +1365,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const visibleMachines = (viewer: Person) => [
     ...liveMachines().filter(
-      (m) => m.personId === viewer.id || viewer.role === "founder" || visibleToColleagues(m),
+      (m) =>
+        m.personId === viewer.id ||
+        (has(viewer, "hub.machinesAll") && (has(viewer, "relay.admin") || visibleToColleagues(m))),
     ),
     ...[...machines.values()]
       .filter(
         (machine) =>
           !machine.poolHost &&
           machine.revokedAt !== null &&
-          (machine.personId === viewer.id || viewer.role === "founder"),
+          (machine.personId === viewer.id || has(viewer, "relay.admin")),
       )
       .toSorted((a, b) => (b.revokedAt ?? 0) - (a.revokedAt ?? 0) || a.id.localeCompare(b.id)),
   ];
@@ -1269,38 +1401,46 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         })
       : [];
   const approvalNeeds = (viewer: Person) =>
-    boardTasks.flatMap((task) =>
-      task.prs.flatMap((pr) => {
-        if (
-          !outstanding(pr) ||
-          !pr.approvalOnly ||
-          pr.checks === "failing" ||
-          pr.checks === "pending"
-        )
-          return [];
-        const author = pr.author === viewer.login;
-        if (!author && !candidates(pr).some((p) => p.id === viewer.id)) return [];
-        const kind = author ? "waiting_for_approver" : "pr_approval";
-        return [
-          {
-            seq: pr.number,
-            id: sha256Hex(Buffer.from(JSON.stringify([kind, task.id, pr.number]))),
-            kind,
-            title: `#${pr.number} ${task.title}`.slice(0, 300),
-            url: prUrl(pr.number),
-            createdAt: iso(task.openedAt),
-          },
-        ];
-      }),
-    );
+    boardTasks
+      .filter((t) => taskAllowed(viewer, t))
+      .flatMap((task) =>
+        task.prs.flatMap((pr) => {
+          if (
+            !outstanding(pr) ||
+            !pr.approvalOnly ||
+            pr.checks === "failing" ||
+            pr.checks === "pending"
+          )
+            return [];
+          const author = pr.author === viewer.login;
+          if (!author && !candidates(pr).some((p) => p.id === viewer.id)) return [];
+          const kind = author ? "waiting_for_approver" : "pr_approval";
+          return [
+            {
+              seq: pr.number,
+              id: sha256Hex(Buffer.from(JSON.stringify([kind, task.id, pr.number]))),
+              kind,
+              title: `#${pr.number} ${task.title}`.slice(0, 300),
+              url: prUrl(pr.number),
+              createdAt: iso(task.openedAt),
+            },
+          ];
+        }),
+      );
   const personalNeeds = (person: Person) => {
-    const recipient = options.criticalRecipients?.includes(person.id) ?? person.role === "founder";
-    const critical = recipient ? activeAlarms().filter((a) => a.severity === "critical") : [];
+    const recipient = options.criticalRecipients?.includes(person.id) ?? has(person, "relay.admin");
+    const critical =
+      recipient && has(person, "hub.health")
+        ? activeAlarms().filter((a) => a.severity === "critical")
+        : [];
     return byUrgency([
-      ...(needs.get(person.id) ?? []),
+      ...(needs.get(person.id) ?? []).filter(
+        (i) => i.kind !== "health" || has(person, "hub.health"),
+      ),
       ...chatNeeds(person),
+      ...requestNeeds(person),
       ...approvalNeeds(person),
-      ...(person.role === "founder" ? pool.needs().map((need, seq) => ({ ...need, seq })) : []),
+      ...(has(person, "relay.admin") ? pool.needs().map((need, seq) => ({ ...need, seq })) : []),
       ...critical.map((a, seq) => ({
         seq,
         id: sha256Hex(Buffer.from(JSON.stringify([a.sourceId, a.id, a.firedAt]))),
@@ -1338,7 +1478,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const working = liveMachines().flatMap((machine) => {
       if (!machine.facts.share || machine.facts.share === "hidden") return [];
       const owner = people.get(machine.personId);
-      const live = machine.sessions.filter((session) => session.state !== "stopped");
+      const live = machine.sessions.filter(
+        (session) =>
+          session.state !== "stopped" &&
+          peopleAllowed(person, machine.personId) &&
+          (unrestricted(person) ||
+            recordAllowed(person, session.taskId ?? taskForBranch(session)?.id ?? null)),
+      );
       const first = live[0];
       if (!owner || !first) return [];
       const heard = machine.lastHeardAt !== null && now - machine.lastHeardAt <= NOT_HEARD_FROM_MS;
@@ -1357,7 +1503,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       working: { state: "ok", items: working.slice(0, TODAY_BLOCK_MAX), notMeasured: [] },
       stuck: notConfigured("work_tracker"),
       health:
-        sources.size === 0
+        sources.size === 0 || !has(person, "hub.health")
           ? undefined
           : {
               state: "ok",
@@ -1370,11 +1516,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   // README, Shipped: one item per merged pull request since the last visit (all of them before a first visit),
   // newest first. Each carries its own `pr` and the task's `ref`, so a client never joins Shipped to the board.
-  const shippedBlock = (since: number | null) => {
+  const shippedBlock = (person: Person, since: number | null) => {
     const items = boardTasks
       .flatMap((task, index) =>
         task.prs.flatMap((pr) =>
-          pr.mergedAt === null || (since !== null && pr.mergedAt <= since)
+          !taskAllowed(person, task) ||
+          pr.mergedAt === null ||
+          (since !== null && pr.mergedAt <= since)
             ? []
             : [{ task, index, pr, mergedAt: pr.mergedAt }],
         ),
@@ -1401,7 +1549,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return {
       generatedAt: iso(now),
       needsYou: blocks.needsYou,
-      shipped: boardSeeded ? shippedBlock(since) : notConfigured("work_tracker"),
+      shipped: boardSeeded ? shippedBlock(caller.person, since) : notConfigured("work_tracker"),
       working: blocks.working,
       stuck: blocks.stuck,
       health: blocks.health,
@@ -1479,7 +1627,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         assignees: tracker.assignees,
         labels: tracker.labels,
         founders: [...peopleByLogin.values()]
-          .filter((person) => person.role === "founder" && person.removed !== true)
+          .filter((person) => person.removed !== true && has(person, "relay.admin"))
           .map((person) => person.login),
         now: iso(now),
       },
@@ -1601,12 +1749,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           state: pr.state,
           baseBranch: pr.baseBranch,
           approvals: pr.approvals,
-          canApprove,
+          canApprove: canApprove.map((p) =>
+            !viewer || peopleAllowed(viewer, p.id) ? p : { login: p.login },
+          ),
           youCanApprove: canApprove.some((p) => p.id === viewer?.id),
           ...(pr.checks === null ? {} : { checks: { state: pr.checks } }),
         };
       }),
-      restsOn: task.restsOn,
+      restsOn: viewer ? task.restsOn.filter((id) => recordAllowed(viewer, id)) : task.restsOn,
     };
   };
 
@@ -1618,22 +1768,26 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       board: task.board,
       card: cardView(task, index, now, viewer),
     }));
-    return boards.map((config) => {
-      const own = cards.filter((entry) => entry.board === config.id).map((entry) => entry.card);
-      const counts: Record<string, number> = {};
-      for (const column of BOARD_COLUMNS) counts[column.id] = 0;
-      for (const card of own) counts[card.column] = (counts[card.column] ?? 0) + 1;
-      return {
-        entry: {
-          id: config.id,
-          title: config.title,
-          mode: "dev",
-          source: { kind: "filter" },
-          counts,
-        },
-        file: { state: "ok", notMeasured: [], columns: BOARD_COLUMNS, cards: own },
-      };
-    });
+    return boards
+      .filter((b) => boardAllowed(viewer, b.id))
+      .map((config) => {
+        const own = cards
+          .filter((entry) => entry.board === config.id && recordAllowed(viewer, entry.card.task.id))
+          .map((entry) => entry.card);
+        const counts: Record<string, number> = {};
+        for (const column of BOARD_COLUMNS) counts[column.id] = 0;
+        for (const card of own) counts[card.column] = (counts[card.column] ?? 0) + 1;
+        return {
+          entry: {
+            id: config.id,
+            title: config.title,
+            mode: "dev",
+            source: { kind: "filter" },
+            counts,
+          },
+          file: { state: "ok", notMeasured: [], columns: BOARD_COLUMNS, cards: own },
+        };
+      });
   };
 
   // README, Map and the stage plan.
@@ -1648,7 +1802,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   // the item starts from the status the card has without that row. A seeded `blocked` is treated the same way.
   const unblocked = (status: string, merged: boolean) =>
     status === "blocked" ? (merged ? "built" : "planned") : status;
-  const mapView = () => {
+  const mapView = (viewer: Person) => {
     if (stagePlan === null)
       throw new Error("the map is built only when a stage plan is configured");
     if (stagePlan.kind === "broken") {
@@ -1671,6 +1825,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const now = Date.now();
     // The join: the plan's task names tracker, host, scope and key; a board card is found by its ref.
     const cards = boardTasks.map((task, index) => ({
+      allowed: taskAllowed(viewer, task),
       view: cardView(task, index, now),
       ref: taskRefView(task, index),
     }));
@@ -1678,14 +1833,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       item.task === undefined
         ? undefined
         : cards.find(
-            ({ ref }) =>
+            ({ ref, allowed }) =>
+              allowed &&
               ref.ref.tracker === item.task?.tracker &&
               ref.ref.scope === item.task.scope &&
               ref.ref.key === item.task.key &&
               // The fake's board has no host, so a plan that names one matches nothing.
               item.task.host === undefined,
           );
-    const planned = new Map(plan.items.map((item) => [item.id, item] as const));
+    const scopedItems = unrestricted(viewer)
+      ? plan.items
+      : plan.items.filter((item) => findCard(item));
+    const planned = new Map(scopedItems.map((item) => [item.id, item] as const));
     type Resolved = { status: string; statusWhy: string; blockedBy: ReadonlyArray<string> };
     const resolved = new Map<string, Resolved>();
     const resolve = (id: string): Resolved => {
@@ -1712,8 +1871,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             ? { status: "planned", statusWhy: "The tracker issue is not on the board yet." }
             : ownOf(unblocked(statuses.get(item.id) ?? "planned", false));
       // Direct blockers only: each dependency's own final status, never the root cause behind it.
-      const blockedBy = [...new Set(item.restsOn ?? [])].filter((target) =>
-        BLOCKING.has(resolve(target).status),
+      const blockedBy = [...new Set(item.restsOn ?? [])].filter(
+        (target) => planned.has(target) && BLOCKING.has(resolve(target).status),
       );
       const first = blockedBy[0];
       if (first !== undefined && (own.status === "built" || own.status === "planned")) {
@@ -1732,7 +1891,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     };
     const stages = plan.stages.toSorted((a, b) => a.order - b.order);
     const stageRank = new Map(stages.map((stage, index) => [stage.id, index] as const));
-    const items = plan.items
+    const items = scopedItems
       .map((item, position) => ({ item, position }))
       .toSorted(
         (a, b) =>
@@ -1752,7 +1911,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ...(item.task === undefined
             ? {}
             : { task: card?.ref ?? refOnlyTask(item.task, item.title) }),
-          restsOn: [...(item.restsOn ?? [])],
+          restsOn: (item.restsOn ?? []).filter((id) => planned.has(id)),
           blockedBy: [...blockedBy],
         };
       });
@@ -1835,16 +1994,22 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     };
   };
   const SNAPSHOT_FEED_MAX = 100;
-  const feedFile = () => ({
-    entries: feedRecords.slice(0, SNAPSHOT_FEED_MAX).map(feedEntryView),
-    nextCursor: feedRecords.length > SNAPSHOT_FEED_MAX ? encodeCursor(SNAPSHOT_FEED_MAX) : null,
+  const feedFile = (viewer: Person) =>
+    page(
+      feedRecords.filter((r) => recordAllowed(viewer, r.taskId)).map(feedEntryView),
+      0,
+      SNAPSHOT_FEED_MAX,
+    );
+  const graveyardFile = (viewer: Person) =>
+    page(
+      graveyardRecords.filter((r) => recordAllowed(viewer, r.taskId)).map(graveyardEntryView),
+      0,
+      SNAPSHOT_FEED_MAX,
+    );
+  const entriesPage = <T>(p: { items: T[]; nextCursor: string | null }) => ({
+    entries: p.items,
+    nextCursor: p.nextCursor,
   });
-  const graveyardFile = () => ({
-    entries: graveyardRecords.slice(0, SNAPSHOT_FEED_MAX).map(graveyardEntryView),
-    nextCursor:
-      graveyardRecords.length > SNAPSHOT_FEED_MAX ? encodeCursor(SNAPSHOT_FEED_MAX) : null,
-  });
-
   // The board task a fact without a taskId works on, by its branch and projectKey, as for lease heartbeats.
   const taskForBranch = (fact: ActivityFact) =>
     fact.branch === undefined
@@ -1857,24 +2022,26 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const presence = new Map<string, TeamPresenceValues>();
   const meetings = new Map<string, string>();
-  const teamPeople = () =>
+  const teamPeople = (viewer: Person) =>
     [...people.values()]
-      .filter((p) => !p.removed)
+      .filter((p) => !p.removed && peopleAllowed(viewer, p.id))
       .sort((a, b) => a.login.localeCompare(b.login))
-      .map(({ id, login, role, displayName }) => ({
-        id,
-        login,
-        role,
-        ...(displayName && { displayName }),
-        ...(presence.get(id) ?? { presence: "off" as const }),
-      }));
+      .map((p) => {
+        const { seatBoard, ...state } = presence.get(p.id) ?? { presence: "off" as const };
+        return {
+          ...account(p),
+          ...(p.displayName && { displayName: p.displayName }),
+          ...state,
+          ...(seatBoard && boardAllowed(viewer, seatBoard) && { seatBoard }),
+        };
+      });
 
   const fixtureSessions: {
     board: string;
     heardAt: number;
     session: { id: string; personId: string; provider: string; state: string; since: string };
   }[] = [];
-  const teamSessions = () => {
+  const teamSessions = (viewer: Person) => {
     const now = Date.now();
     const rows = liveMachines()
       .toSorted((a, b) => a.id.localeCompare(b.id))
@@ -1929,8 +2096,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         });
       });
     rows.push(...fixtureSessions);
+    const scoped = rows.filter(
+      (r) => peopleAllowed(viewer, r.session.personId) && boardAllowed(viewer, r.board),
+    );
     const visibleIds = new Map(
-      [...Map.groupBy(rows, (r) => r.session.personId)].map(([id, owned]) => [
+      [...Map.groupBy(scoped, (r) => r.session.personId)].map(([id, owned]) => [
         id,
         new Set(owned.map((r) => r.session.id)),
       ]),
@@ -1942,7 +2112,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       )
         delete session.parentId;
     }
-    return rows;
+    return scoped;
   };
 
   const teamPage = <K extends string, T>(
@@ -1960,6 +2130,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
 
   const teamSummary = (
+    viewer: Person,
     staff: ReturnType<typeof teamPeople>,
     rows: ReturnType<typeof teamSessions>,
   ) => {
@@ -1970,7 +2141,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const hallway = emptyCounts();
     for (const task of boardTasks) {
       const holder = leaseOf(task, Date.now())?.holder;
-      if (holder) desks.get(task.board)?.add(holder.id);
+      if (holder && peopleAllowed(viewer, holder.id) && taskAllowed(viewer, task))
+        desks.get(task.board)?.add(holder.id);
     }
     const agents = [...owners]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -2007,13 +2179,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           : boards.find((b) => desks.get(b.id)?.has(p.id))?.id;
       if (seat) active.get(seat)?.add(p.id);
     }
-    const rooms = boards.map((b) => ({
-      board: b.id,
-      counts: counts.get(b.id)!,
-      desks: desks.get(b.id)!.size,
-      active: active.get(b.id)!.size,
-      ...(meetings.has(b.id) && { meetingUrl: meetings.get(b.id) }),
-    }));
+    const rooms = boards
+      .filter((b) => boardAllowed(viewer, b.id))
+      .map((b) => ({
+        board: b.id,
+        counts: counts.get(b.id)!,
+        desks: desks.get(b.id)!.size,
+        active: active.get(b.id)!.size,
+        ...(meetings.has(b.id) && { meetingUrl: meetings.get(b.id) }),
+      }));
     return {
       rooms,
       hallway: { counts: hallway },
@@ -2022,10 +2196,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       people: { total: staff.length },
     };
   };
-  const teamFiles = (): ReadonlyArray<readonly [string, SchemaName, unknown]> => {
-    const staff = teamPeople();
-    const rows = teamSessions();
-    const { agents, ...summary } = teamSummary(staff, rows);
+  const teamFiles = (viewer: Person): ReadonlyArray<readonly [string, SchemaName, unknown]> => {
+    if (!has(viewer, "hub.team")) return [];
+    const staff = teamPeople(viewer);
+    const rows = teamSessions(viewer);
+    const { agents, ...summary } = teamSummary(viewer, staff, rows);
     const first = boundedPage(agents, 0, agents.length, 65536, (items, nextCursor) => ({
       ...summary,
       agents: items,
@@ -2051,16 +2226,25 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         teamPage("people", staff, 0, TEAM_PEOPLE_MAX, 160 * 1024),
       ],
       ["team.hallway", "SnapshotTeamRoom", roomFile()],
-      ...boards.map((b) => [`team.room.${b.id}`, "SnapshotTeamRoom", roomFile(b.id)] as const),
+      ...boards
+        .filter((b) => boardAllowed(viewer, b.id))
+        .map((b) => [`team.room.${b.id}`, "SnapshotTeamRoom", roomFile(b.id)] as const),
     ];
   };
 
   // Snapshot (README, Snapshot). A head is rebuilt on every change and on every read, so a served head is always
   // current. Files are content-addressed and shared, but a read checks the caller's own retained heads.
-  const buildSnapshotFiles = (person: Person, sharedTeam = teamFiles()): Record<string, string> => {
+  const buildSnapshotFiles = (
+    person: Person,
+    sharedTeam = teamFiles(person),
+  ): Record<string, string> => {
     const blocks = todayBlocks(person);
     const machineList = liveMachines()
-      .filter((machine) => machine.facts.share === "agents_and_name")
+      .filter(
+        (machine) =>
+          (machine.personId === person.id || has(person, "hub.machinesAll")) &&
+          machine.facts.share === "agents_and_name",
+      )
       .map((machine) => machineView(machine, person));
     const entries: ReadonlyArray<readonly [string, SchemaName, unknown]> = [
       ["needs", "SnapshotNeeds", blocks.needsYou],
@@ -2078,8 +2262,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         "repositories",
         "SnapshotRepositories",
         {
-          items: repositories.slice(0, SNAPSHOT_REPOSITORIES_MAX),
-          truncated: repositories.length > SNAPSHOT_REPOSITORIES_MAX,
+          items: reposFor(person).slice(0, SNAPSHOT_REPOSITORIES_MAX),
+          truncated: reposFor(person).length > SNAPSHOT_REPOSITORIES_MAX,
         },
       ],
       ...(() => {
@@ -2093,9 +2277,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       })(),
       ...(stagePlan === null
         ? []
-        : [["map", "SnapshotMap", mapView()] as readonly [string, SchemaName, unknown]]),
-      ["feed", "FeedPage", feedFile()],
-      ["graveyard", "GraveyardPage", graveyardFile()],
+        : [["map", "SnapshotMap", mapView(person)] as readonly [string, SchemaName, unknown]]),
+      ["feed", "FeedPage", entriesPage(feedFile(person))],
+      ["graveyard", "GraveyardPage", entriesPage(graveyardFile(person))],
       ...sharedTeam,
     ];
     const refs: Record<string, string> = {};
@@ -2134,7 +2318,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     for (const hex of snapshotFiles.keys()) if (!named.has(hex)) snapshotFiles.delete(hex);
   };
 
-  const refreshHead = (person: Person, sharedTeam = teamFiles()): SnapshotHeadRecord => {
+  const refreshHead = (person: Person, sharedTeam = teamFiles(person)): SnapshotHeadRecord => {
     const refs = buildSnapshotFiles(person, sharedTeam);
     const heads = snapshotHeads.get(person.id) ?? [];
     const current = heads.at(-1);
@@ -2170,10 +2354,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   // a head, and the work and machines files are relay-wide.
   const refreshAllHeads = () => {
     if (snapshotHeads.size === 0) return;
-    const sharedTeam = teamFiles();
+
     for (const personId of snapshotHeads.keys()) {
       const person = people.get(personId);
-      if (person && !person.removed) refreshHead(person, sharedTeam);
+      if (person && !person.removed) refreshHead(person);
     }
     pruneSnapshots();
   };
@@ -2253,16 +2437,30 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const ownersAllowingDmReads = new Set<string>();
   const preferences = new Map<string, ChatNotifications>();
+  type Access = Extract<ChatConversation, { kind: "channel" }>["access"];
+  const channelAccess = (template = "team"): Access => ({
+    visibility: ["private", "shared"].includes(template) ? "private" : "public",
+    join: ["private", "shared"].includes(template)
+      ? "invite"
+      : template === "community"
+        ? "request"
+        : "open",
+    outsiders: template === "community" ? "listed" : template === "shared" ? "invited" : "none",
+    post: template === "announcement" ? "managers" : "everyone",
+    replies: "everyone",
+    invite: ["announcement", "community", "shared"].includes(template) ? "managers" : "members",
+  });
+  const wakeDefaults = new Map<string, ChatHandle["wake"]>();
   type Channel = {
     dmKey?: string;
     id: string;
     name: string;
     purpose: string;
-    private: boolean;
+    access: Access;
+    managers: Set<string>;
     agents: ChatConversation["agents"];
     archived: boolean;
     members: Set<string>;
-    creator: string;
   };
   const channels = new Map<string, Channel>();
   type Handle = { view: ChatHandle; threadRef: string };
@@ -2271,11 +2469,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const agentHops = new Map<string, number>();
   const pairWrites = new Map<string, number[]>();
   const label = (h: ChatHandle) => h.owner.login + "/" + (h.shortName ?? h.claimName);
+  const retiredHandles = new Map<string, ChatHandle>();
   const member = (id: string): ChatMember => {
-    const h = handles.get(id)?.view;
+    const h = handles.get(id)?.view ?? retiredHandles.get(id);
     return h
       ? { kind: "agent", id, handle: label(h), ownerLogin: h.owner.login }
-      : { kind: "person", id, login: people.get(id)!.login };
+      : { kind: "person", ...account(people.get(id)!) };
   };
   const messages = new Map<string, ChatMessage>();
   const postKeys = new Map<string, string>();
@@ -2302,17 +2501,115 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       id: "c_" + name,
       name,
       purpose: "",
-      private: false,
+      access: channelAccess(),
+      managers: new Set(),
       agents: "allowed",
       archived: false,
       members: new Set(),
-      creator: "",
     };
     channels.set(channel.id, channel);
     return channel;
   });
-  if (!options.officeFixture) personFor({ login: "cy-example", role: "limited_staff" });
-  const visible = (c: Channel, p: string) => !c.private || c.members.has(p);
+  if (!options.officeFixture) personFor({ login: "cy-example", role: "staff" });
+  const visible = (c: Channel, id: string) => {
+    const p = people.get(id);
+    return (
+      !!p &&
+      (c.members.has(id) ||
+        (!c.dmKey &&
+          c.access.visibility === "public" &&
+          (p.admission === "outside"
+            ? c.access.outsiders === "listed"
+            : has(p, "channels.seePublic"))))
+    );
+  };
+  const shared = (a: string, b: string) =>
+    [...channels.values()].some(
+      (c) => !c.dmKey && !c.archived && c.members.has(a) && c.members.has(b),
+    );
+  const dmAllowed = (sender: Person, ids: Set<string>) => {
+    if (ids.size > 2 && (sender.admission === "outside" || !has(sender, "dm.group"))) return false;
+    const participants = [...ids].map(
+      (id) => people.get(id) ?? people.get(handles.get(id)?.view.owner.id ?? ""),
+    );
+    return (
+      [...ids].every(
+        (id) =>
+          !handles.has(id) ||
+          handles.get(id)!.view.owner.id === sender.id ||
+          (sender.admission !== "outside" && has(sender, "agents.dm")),
+      ) &&
+      participants.every(
+        (p) =>
+          p &&
+          !p.removed &&
+          participants.every((other) => {
+            if (!other || other.id === p.id) return true;
+            const start = roleOf(p).permissions["dm.start"];
+            return (
+              (start === "anyone" || start === "shared_channel") &&
+              ((start === "anyone" && p.admission !== "outside" && other.admission !== "outside") ||
+                shared(p.id, other.id)) &&
+              (p !== sender || other.admission !== "outside" || has(p, "dm.outsiders"))
+            );
+          }),
+      )
+    );
+  };
+  type JoinRequest = {
+    id: string;
+    conversationId: string;
+    requester: PersonView;
+    note?: string;
+    state: "pending" | "approved" | "declined" | "cancelled" | "expired" | "void";
+    createdAt: string;
+    closedBy?: PersonView;
+  };
+  const requests = new Map<string, JoinRequest>();
+  const declinedAt = new Map<string, number>();
+  const settleRequests = () => {
+    for (const r of requests.values()) {
+      if (r.state !== "pending") continue;
+      const c = channels.get(r.conversationId),
+        p = people.get(r.requester.id);
+      if (!c || !p || p.removed || !rights(c, p).request) r.state = "void";
+      else if (Date.now() - Date.parse(r.createdAt) >= requestLifetime) r.state = "expired";
+    }
+  };
+  const pendingRequest = (c: Channel, p: Person) =>
+    [...requests.values()].find(
+      (r) => r.state === "pending" && r.conversationId === c.id && r.requester.id === p.id,
+    );
+  const rights = (c: Channel, p: Person) => {
+    const read = visible(c, p.id),
+      member = c.members.has(p.id),
+      manage = !c.dmKey && (has(p, "channels.manageAll") || c.managers.has(p.id));
+    const writable = member && !c.archived && (!c.dmKey || dmAllowed(p, c.members));
+    const post =
+      writable &&
+      (manage ||
+        c.access.post === "everyone" ||
+        (c.access.post === "roles" && !!c.access.postRoles?.includes(p.role)));
+    const enter =
+      read &&
+      !member &&
+      !c.archived &&
+      !c.dmKey &&
+      (p.admission === "member" || c.access.outsiders === "listed");
+    return {
+      read,
+      post,
+      reply: writable && (post || c.access.replies === "everyone"),
+      join: enter && c.access.join === "open",
+      request: enter && c.access.join === "request",
+      invite:
+        member &&
+        !c.dmKey &&
+        (manage || (has(p, "channels.invite") && c.access.invite === "members")),
+      manage,
+      openToOutside: manage && has(p, "channels.openToOutside"),
+    };
+  };
   const chatChange = (channel: Channel, value: ChatChange, person?: string) => {
     if (value.kind === "read.moved") {
       const { threadRootId } = value.read;
@@ -2399,8 +2696,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
   };
   const channelView = (channel: Channel, person: Person): ChatConversation => {
+    const pending = pendingRequest(channel, person);
     const roots = [...messages.values()].filter(
-      (m) => m.conversationId === channel.id && !m.threadRootId,
+      (m) => visible(channel, person.id) && m.conversationId === channel.id && !m.threadRootId,
     );
     const readSeq = cursors.get(cursorKey(person.id, channel.id)) ?? 0;
     const unread = roots.filter(
@@ -2428,7 +2726,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         : {
             kind: "channel" as const,
             ...(defaultChannels.includes(channel) && { defaultChannel: true as const }),
-            private: channel.private,
+            access: channel.access,
+            managers: [...channel.managers].map((id) => personRef(people.get(id)!)),
             name: channel.name,
           }),
       purpose: channel.purpose,
@@ -2440,6 +2739,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       },
       lastSeq: roots.at(-1)?.seq ?? 0,
       me: {
+        ...(pending && { request: { id: pending.id, createdAt: pending.createdAt } }),
+        can: { ...rights(channel, person), request: !pending && rights(channel, person).request },
         member: channel.members.has(person.id),
         ...(preferences.get(cursorKey(person.id, channel.id)) ?? {
           notify: "mentions",
@@ -2454,7 +2755,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   function systemMessage(
     channel: Channel,
-    taskRef: string,
+    taskRef: string | undefined,
     systemEvent: string,
     text: string,
     root?: ChatMessage,
@@ -2466,7 +2767,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       author: { kind: "system" },
       kind: "system",
       systemEvent,
-      taskRef,
+      ...(taskRef && { taskRef }),
       text: text.replace(/\s+/g, " "),
       mentions: [],
       reactions: [],
@@ -2486,6 +2787,55 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (root) systemMessage(channels.get(root.conversationId)!, task.id, event, text, root);
   }
 
+  const deliveryReadable = (d: ChatDelivery, person: Person) => {
+    const channel = channels.get(d.message.conversationId);
+    return (
+      !!channel &&
+      (visible(channel, person.id) || (!!channel.dmKey && channel.members.has(d.handleId)))
+    );
+  };
+  function requestNeeds(person: Person): NeedsItem[] {
+    settleRequests();
+    const pending = [...requests.values()].filter(
+      (r) => r.state === "pending" && rights(channels.get(r.conversationId)!, person).manage,
+    );
+    const waiting = [...deliveries.values()]
+      .map((d) => d.row)
+      .filter(
+        (d) =>
+          !d.wakes &&
+          d.state === "pending" &&
+          Date.parse(d.expiresAt) > Date.now() &&
+          handles.get(d.handleId)?.view.owner.id === person.id &&
+          deliveryReadable(d, person),
+      );
+    return [
+      ...Array.from(
+        Map.groupBy(pending, (r) => r.conversationId),
+        ([conversationId, rows]) => ({
+          seq: 0,
+          id: conversationId,
+          conversationId,
+          kind: "chat_join_requests",
+          count: rows.length,
+          title: "Requests to join #" + channels.get(conversationId)!.name,
+          createdAt: rows[0]!.createdAt,
+        }),
+      ),
+      ...Array.from(
+        Map.groupBy(waiting, (d) => d.handleId),
+        ([handleId, rows]) => ({
+          seq: 0,
+          id: handleId,
+          handleId,
+          kind: "agent_inbox",
+          count: rows.length,
+          title: "Waiting agent deliveries",
+          createdAt: rows[0]!.message.createdAt,
+        }),
+      ),
+    ];
+  }
   function chatNeeds(person: Person) {
     return [...messages.values()].flatMap((m) => {
       const c = channels.get(m.conversationId);
@@ -2544,7 +2894,27 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (!person || person.removed) throw new RelayError("not_found", "No such person.");
     presence.delete(person.id);
     person.removed = true;
-    for (const channel of defaultChannels) channel.members.delete(person.id);
+    for (const c of channels.values()) {
+      c.managers.delete(person.id);
+      if (!c.dmKey && c.members.delete(person.id) && person.admission === "outside")
+        systemMessage(c, undefined, "access_ended", person.login + "'s access ended.");
+    }
+    for (const [id, h] of handles) {
+      if (h.view.owner.id !== person.id) continue;
+      for (const c of channels.values())
+        if (c.members.has(id)) {
+          if (c.dmKey) c.archived = true;
+          else c.members.delete(id);
+        }
+      for (const delivery of deliveries.values())
+        if (delivery.row.handleId === id && ["pending", "claimed"].includes(delivery.row.state))
+          delivery.row = { ...delivery.row, state: "expired" };
+      // Keep the author label for participants reading archived DM history.
+      if ([...channels.values()].some((c) => c.dmKey && c.members.has(id)))
+        retiredHandles.set(id, h.view);
+      handles.delete(id);
+    }
+    settleRequests();
     ownersAllowingDmReads.delete(person.id);
     snapshotHeads.delete(person.id);
     for (const machine of machines.values())
@@ -2576,7 +2946,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       error: {
         code: error.code,
         message: error.message,
-        retryable: error.status === 429,
+        retryable: error.status === 429 || error.status === 503,
         ...(error.details === undefined ? {} : { details: error.details }),
       },
     };
@@ -2675,7 +3045,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       for (const person of people.values()) {
         if (
           !person.removed &&
-          (options.criticalRecipients?.includes(person.id) ?? person.role === "founder")
+          (options.criticalRecipients?.includes(person.id) ?? has(person, "relay.admin"))
         )
           emit(
             "needs.changed",
@@ -2708,7 +3078,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           me: {
             id: caller.person.id,
             login: caller.person.login,
-            role: caller.person.role,
+            role: roleRef(caller.person),
+            admission: caller.person.admission,
+            permissions: Object.entries(roleOf(caller.person).permissions).flatMap(([k, v]) =>
+              v === true ? [k] : [v].flat().map((x) => k + ":" + x),
+            ),
             machineId: caller.machine.id,
           },
           ...(options.chat
@@ -2729,8 +3103,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 },
               }
             : {}),
-          dashboards,
+          ...(has(caller.person, "hub.health") && { dashboards }),
           sections: [
+            ...(has(caller.person, "relay.admin")
+              ? [{ id: "roles", kind: "roles", version: 1, flags: [] }]
+              : []),
             ...(options.chat
               ? [
                   {
@@ -2741,6 +3118,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                       ...(options.search === false ? [] : ["search"]),
                       ...(options.promote === false ? [] : ["promote"]),
                       "task_links",
+                      "channel_access",
+                      "join_requests",
+                      "agent_inbox",
                       "channels",
                       "private_channels",
                       "threads",
@@ -2756,8 +3136,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                   },
                 ]
               : []),
-            ...(options.pool?.enabled ? [{ id: "pool", kind: "pool", version: 1, flags: [] }] : []),
-            ...(sources.size ? [{ id: "health", kind: "health", version: 1, flags: [] }] : []),
+            ...(options.pool?.enabled && has(caller.person, "hub.pool")
+              ? [{ id: "pool", kind: "pool", version: 1, flags: [] }]
+              : []),
+            ...(sources.size && has(caller.person, "hub.health")
+              ? [{ id: "health", kind: "health", version: 1, flags: [] }]
+              : []),
             { id: "today", kind: "today", version: 1, flags: [] },
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
             { id: "machines", kind: "machines", version: 1, flags: ["revoke"] },
@@ -2773,26 +3157,34 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               : [{ id: "map", kind: "map", version: 1, flags: ["rests_on"] }]),
             { id: "feed", kind: "feed", version: 1, flags: ["graveyard"] },
             { id: "task", kind: "task", version: 1, flags: [] },
-            {
-              id: "team",
-              kind: "team",
-              version: 2,
-              flags: ["presence", "status", "sharing", "meeting_links"],
-            },
+            ...(has(caller.person, "hub.team")
+              ? [
+                  {
+                    id: "team",
+                    kind: "team",
+                    version: 2,
+                    flags: ["presence", "status", "sharing", "meeting_links"],
+                  },
+                ]
+              : []),
           ],
-          team: {
-            preset: options.officeFixture ?? options.teamPreset ?? "company",
-            stoppedKeptSeconds: 3600,
-          },
+          ...(has(caller.person, "hub.team") && {
+            team: {
+              preset: options.officeFixture ?? options.teamPreset ?? "company",
+              stoppedKeptSeconds: 3600,
+            },
+          }),
           // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
           mcpTools: BANNERET_AGENT_TOOLS.filter(
             (name) =>
               (options.chat || !name.startsWith("banneret_chat_")) &&
-              (options.pool?.enabled || !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
+              ((options.pool?.enabled && has(caller.person, "hub.pool")) ||
+                !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
           ).map((name) => ({
             name,
             description: "A Banneret Hub agent tool.",
-            role: "limited_staff",
+            ...(name === "banneret_team" && { requires: "hub.team" }),
+            ...(BANNERET_POOL_TOOLS.some((tool) => tool === name) && { requires: "hub.pool" }),
           })),
           adapters: [
             { role: "work_tracker", kind: "none" },
@@ -2869,7 +3261,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           pairing.state === "pending" || pairing.state === "awaiting_approval" ? retryAfterMs : 0,
       };
       if (pairing.state === "refused" && pairing.personId)
-        reply.login = people.get(pairing.personId)?.login;
+        reply.account = { login: people.get(pairing.personId)!.login };
+      if (pairing.state === "refused" && pairing.refusedLogin)
+        reply.account = { login: pairing.refusedLogin };
       if (pairing.state === "approved") {
         reply.machineId = pairing.machineId;
         const machine =
@@ -2878,7 +3272,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (token !== undefined) reply.token = token;
       }
       if (pairing.state === "refused" || pairing.state === "expired") reply.reason = pairing.reason;
-      sendJson(response, 200, "EnrolPollResponse", reply);
+      sendJson(response, 200, hostEnroll ? "PoolPollResponse" : "EnrolPollResponse", reply);
       return;
     }
 
@@ -2888,12 +3282,92 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       body,
       isPool && (route.startsWith("/pool/hosts/") || !!statePath),
     );
+    if (route === "/roles" || route.startsWith("/roles/") || /^\/staff\/[^/]+\/role$/.test(route)) {
+      const p = caller.person;
+      if (!has(p, "relay.admin"))
+        throw new RelayError(
+          "role_permission_missing",
+          "Role administration requires relay.admin.",
+          { account: account(p), rule: "relay.admin" },
+        );
+      const [, resource, id, action] = route.split("/");
+      const holders = (id: string) =>
+        [...people.values()].filter((person) => !person.removed && person.role === id);
+      const detail = (id: string) => ({
+        id,
+        ...roles.get(id),
+        ...(Object.hasOwn(templates, id) && { template: id }),
+        memberCount: holders(id).length,
+      });
+      if (route === "/roles" && method === "GET")
+        return sendJson(response, 200, "Roles", { items: [...roles.keys()].map(detail) });
+      if (!id) throw new RelayError("not_found", "Unknown role.");
+      if (resource === "staff" && method === "PUT") {
+        const { roleId } = parseJson(body, "RoleAssignment") as { roleId: string };
+        const person = people.get(id),
+          role = roles.get(roleId);
+        if (!person || person.removed || !role)
+          throw new RelayError("not_found", "Unknown person or role.");
+        if (person.admission === "outside" && !role.forOutside)
+          throw new RelayError("role_not_for_outside", "Choose a role for outside collaborators.");
+        if (
+          has(person, "relay.admin") &&
+          !role.permissions["relay.admin"] &&
+          ![...people.values()].some(
+            (other) => !other.removed && other !== person && has(other, "relay.admin"),
+          )
+        )
+          throw new RelayError("role_in_use", "Keep one administrator.");
+        person.role = roleId;
+      } else if (resource === "roles" && /^[a-z][a-z0-9_]{0,31}$/.test(id)) {
+        if (method === "DELETE" && !action) {
+          if (!roles.has(id)) throw new RelayError("not_found", "Unknown role.");
+          if (holders(id).length || Object.hasOwn(templates, id))
+            throw new RelayError(
+              "role_in_use",
+              "Move members first. Built-in templates cannot be removed.",
+            );
+          roles.delete(id);
+        } else {
+          const role =
+            method === "PUT" && !action
+              ? (parseJson(body, "RoleWrite") as RoleWrite)
+              : method === "POST" && action === "reset" && Object.hasOwn(templates, id)
+                ? templates[id]
+                : undefined;
+          if (!role) throw new RelayError("not_found", "Unknown role operation.");
+          if (!role.forOutside && holders(id).some((person) => person.admission === "outside"))
+            throw new RelayError("role_not_for_outside", "Outside collaborators hold this role.");
+          if (
+            holders(id).some((person) => has(person, "relay.admin")) &&
+            !role.permissions["relay.admin"] &&
+            ![...people.values()].some(
+              (person) => !person.removed && person.role !== id && has(person, "relay.admin"),
+            )
+          )
+            throw new RelayError("role_in_use", "Keep one administrator.");
+          roles.set(id, role);
+        }
+      } else throw new RelayError("not_found", "Unknown role operation.");
+      for (const person of people.values())
+        if (!person.removed && person.admission === "member" && has(person, "channels.seePublic"))
+          for (const c of defaultChannels) c.members.add(person.id);
+      settleRequests();
+      snapshotHeads.clear();
+      capabilitiesRevision++;
+      emit("roles.changed", "RolesChangedEvent", {}, null);
+      if (resource === "roles" && method !== "DELETE")
+        return sendJson(response, 200, "RoleDetail", detail(id));
+      response.writeHead(204).end();
+      return;
+    }
     if (isPool) {
+      if (!has(caller.person, "hub.pool")) throw new RelayError("not_found", "Pool unavailable.");
       const owner = caller.person.id;
       const host = caller.machine.facts.environmentId;
       const sandbox = /^\/pool\/sandboxes\/([^/]+)(\/extend)?$/.exec(route);
       if (route === "/pool/founder" && (method === "GET" || method === "POST")) {
-        if (caller.person.role !== "founder")
+        if (!has(caller.person, "relay.admin"))
           throw new RelayError("forbidden", "Founder role required.");
         if (method === "POST") {
           const input = parseJson(body, "PoolFounderAction") as PoolFounderAction;
@@ -2975,6 +3449,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     if (options.chat && route.startsWith("/chat/")) {
+      settleRequests();
       const { person } = caller;
       const [, , resource, id = "", action, memberId] = route.split("/");
       const send = (schema: SchemaName, value: unknown) => sendJson(response, 200, schema, value);
@@ -2984,18 +3459,30 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           throw new RelayError("forbidden", "This machine does not own that agent.");
         return h;
       };
+      const handleVisible = (h: ChatHandle) =>
+        h.owner.id === person.id ||
+        (has(person, "agents.mention") &&
+          [...channels.values()].some(
+            (c) => visible(c, person.id) && (c.members.has(h.owner.id) || c.members.has(h.id)),
+          ));
       const reader = query.has("asHandle") ? owned(query.get("asHandle")!) : undefined;
       const canRead = (c: Channel) =>
         reader
-          ? !c.private ||
-            c.members.has(reader.view.id) ||
-            (!!c.dmKey &&
-              c.members.has(person.id) &&
-              ownersAllowingDmReads.has(person.id) &&
-              [...c.members].every((id) => people.has(id)))
+          ? (!!c.dmKey && c.members.has(reader.view.id)) ||
+            (visible(c, person.id) &&
+              (c.access.visibility === "public" ||
+                c.members.has(reader.view.id) ||
+                (!!c.dmKey &&
+                  c.members.has(person.id) &&
+                  ownersAllowingDmReads.has(person.id) &&
+                  [...c.members].every((id) => people.has(id)))))
           : visible(c, person.id);
       const canReadThread = (c: Channel, rootId: string) =>
-        canRead(c) || (!c.dmKey && !!reader && !!follows.get(rootId)?.has(reader.view.id));
+        canRead(c) ||
+        (visible(c, person.id) &&
+          !c.dmKey &&
+          !!reader &&
+          !!follows.get(rootId)?.has(reader.view.id));
       const channelFor = (id: string) => {
         const c = channels.get(id);
         if (!c || !canRead(c)) throw new RelayError("not_found", "Unknown channel.");
@@ -3022,8 +3509,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           const name = mention.slice(1),
             p = peopleByLogin.get(name);
           const h = [...handles.values()].find((h) => label(h.view) === name);
-          if (h) mentions.push({ kind: "agent", id: h.view.id });
-          else if (p) mentions.push({ kind: "person", id: p.id });
+          if (h && handleVisible(h.view)) mentions.push({ kind: "agent", id: h.view.id });
+          else if (p && peopleAllowed(person, p.id)) mentions.push({ kind: "person", id: p.id });
         }
         if (mentions.length > 50) throw new RelayError("malformed", "Too many mentions.");
         return mentions;
@@ -3039,7 +3526,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         throw new RelayError("forbidden", "This call is unavailable to agents.");
       if (resource === "handles") {
         if (method === "GET" && !id)
-          return send("ChatHandles", paged([...handles.values()].map((h) => h.view)));
+          return send(
+            "ChatHandles",
+            paged([...handles.values()].map((h) => h.view).filter(handleVisible)),
+          );
         if (method === "PUT" && id) {
           const data = parseJson(body, "ChatRegister") as ChatRegister;
           const existing = handles.has(id) ? owned(id) : undefined;
@@ -3069,7 +3559,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             machine: { id: data.machineId, label: caller.machine.facts.label },
             provider: data.provider,
             reachable: true,
-            wake: data.wake ?? existing?.view.wake ?? "everyone",
+            wake: data.wake ?? existing?.view.wake ?? wakeDefaults.get(person.id) ?? "everyone",
           };
           if ([...handles.values()].some((h) => h.view.id !== id && label(h.view) === label(view)))
             throw new RelayError("malformed", "That chat name is taken.");
@@ -3077,7 +3567,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           return send("ChatHandle", view);
         }
       }
-      if (resource === "deliveries") {
+      if (resource === "me" && id === "agents" && action === "wake" && method === "PUT") {
+        const { wake } = parseJson(body, "ChatWakeSetting") as { wake: ChatHandle["wake"] };
+        for (const h of handles.values())
+          if (h.view.owner.id === person.id) h.view = { ...h.view, wake };
+        response.writeHead(204).end();
+        return;
+      }
+      if (resource === "deliveries" || resource === "inbox") {
         const notDelivered = (d: ChatDelivery) => {
           const original = messages.get(d.messageId)!;
           const note: ChatMessage = {
@@ -3108,13 +3605,38 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (d.row.state !== "pending" && d.row.state !== "claimed") continue;
           if (Date.parse(d.row.expiresAt) <= now) {
             d.row = { ...d.row, state: "expired" };
-            notDelivered(d.row);
+            if (d.row.wakes) notDelivered(d.row);
           } else if (d.row.state === "claimed" && now - d.claimedAt >= 600000)
             d.row = { ...d.row, state: "pending" };
         }
+        if (resource === "inbox") {
+          if (method !== "POST" || id) throw new RelayError("not_found", "Unknown inbox call.");
+          const { asHandle } = parseJson(body, "ChatAct") as ChatAct;
+          owned(asHandle);
+          const items = [...deliveries.values()]
+            .filter(
+              (d) =>
+                d.row.handleId === asHandle &&
+                !d.row.wakes &&
+                d.row.state === "pending" &&
+                deliveryReadable(d.row, person),
+            )
+            .slice(0, 100)
+            .map(
+              (d) =>
+                (d.row = { ...d.row, message: messages.get(d.row.messageId)!, state: "consumed" }),
+            );
+          if (items.length)
+            emit(
+              "needs.changed",
+              "NeedsChangedEvent",
+              { at: iso(now), count: personalNeeds(person).length },
+              person.id,
+            );
+          return send("ChatDeliveries", { items, nextCursor: null });
+        }
         const current = (row: ChatDelivery) => ({
           ...row,
-          wake: owned(row.handleId).view.wake,
           message: messages.get(row.messageId)!,
         });
         if (method === "GET" && !id)
@@ -3125,6 +3647,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 .map((d) => d.row)
                 .filter(
                   (d) =>
+                    deliveryReadable(d, person) &&
+                    d.wakes &&
                     d.machineId === caller.machine.id &&
                     (!reader || d.handleId === reader.view.id) &&
                     ["pending", "claimed"].includes(d.state),
@@ -3138,10 +3662,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             | ChatRefuse;
           owned(act.asHandle);
           const d = deliveries.get(id);
-          if (!d || d.row.handleId !== act.asHandle)
+          if (!d || !deliveryReadable(d.row, person) || d.row.handleId !== act.asHandle)
             throw new RelayError("forbidden", "This delivery belongs to another agent.");
           const state =
-            action === "claim" && ["pending", "claimed"].includes(d.row.state)
+            action === "claim" && d.row.wakes && ["pending", "claimed"].includes(d.row.state)
               ? "claimed"
               : action === "consume" && d.row.state === "claimed"
                 ? "consumed"
@@ -3186,6 +3710,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (ask && (!to || to.removed))
           throw new RelayError("not_found", "Choose a current staff member.");
         if (ask && !ask.threadRootId && to) {
+          if (
+            !dmAllowed(person, new Set([person.id, to.id])) ||
+            (to.admission === "outside" && to.id !== person.id)
+          )
+            throw new RelayError("chat_dm_restricted", "These participants cannot open a DM.", {
+              account: account(person),
+              rule: "dm.start",
+              asHandle: h.id,
+              owner: personRef(person),
+            });
           const dmKey = JSON.stringify([h.id, to.id].sort());
           c = [...channels.values()].find((c) => c.dmKey === dmKey);
           if (!c) {
@@ -3194,11 +3728,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               dmKey,
               name: "",
               purpose: "",
-              private: true,
+              access: channelAccess("private"),
+              managers: new Set(),
               agents: "allowed",
               archived: false,
               members: new Set([h.id, to.id]),
-              creator: person.id,
             };
             channels.set(c.id, c);
           }
@@ -3207,8 +3741,19 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           !c ||
           c.archived ||
           c.agents === "off" ||
+          (!c.dmKey &&
+            (!rights(c, person).reply ||
+              (c.agents === "mentions_only" &&
+                !(
+                  root &&
+                  [...messages.values()].some(
+                    (m) =>
+                      (m.threadRootId ?? m.id) === (root.threadRootId ?? root.id) &&
+                      m.mentions.some((t) => t.id === h.id),
+                  )
+                )))) ||
           (to && !visible(c, to.id)) ||
-          (c.private &&
+          (c.access.visibility === "private" &&
             !c.members.has(h.id) &&
             !(root && follows.get(root.threadRootId ?? root.id)?.has(h.id)))
         )
@@ -3382,9 +3927,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       if (resource === "me" && id === "settings" && !action) {
         if (method === "GET")
-          return send("ChatSettings", { agentsReadMyDms: ownersAllowingDmReads.has(person.id) });
+          return send("ChatSettings", {
+            agentWakeDefault: wakeDefaults.get(person.id) ?? "everyone",
+            agentsReadMyDms: ownersAllowingDmReads.has(person.id),
+          });
         if (method === "PUT") {
           const settings = parseJson(body, "ChatSettings") as ChatSettings;
+          wakeDefaults.set(person.id, settings.agentWakeDefault);
           if (settings.agentsReadMyDms !== ownersAllowingDmReads.has(person.id)) {
             if (settings.agentsReadMyDms) ownersAllowingDmReads.add(person.id);
             else ownersAllowingDmReads.delete(person.id);
@@ -3426,6 +3975,68 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           resync: Number(after) > chatSeq,
         });
       }
+      const deny = (code: ErrorCode, rule: string, c?: Channel, handle?: string): never => {
+        throw new RelayError(
+          code,
+          "Refused for " + person.login + " (" + roleOf(person).name + "): " + rule,
+          {
+            account: account(person),
+            rule,
+            ...(c && { conversationId: c.id }),
+            ...(handle && { asHandle: handle, owner: personRef(person) }),
+          },
+        );
+      };
+      const changed = (c: Channel, kind: "request.updated" | "access.updated", refId: string) => {
+        chatChange(c, { kind, refId, conversationId: c.id, seq: ++chatSeq });
+        for (const viewer of people.values())
+          if (!viewer.removed && rights(c, viewer).manage)
+            emit(
+              "needs.changed",
+              "NeedsChangedEvent",
+              { at: iso(Date.now()), count: personalNeeds(viewer).length },
+              viewer.id,
+            );
+      };
+      if (resource === "requests") {
+        const r = requests.get(id),
+          c = r && channels.get(r.conversationId);
+        if (!c || !r || (r.requester.id !== person.id && !rights(c, person).manage))
+          throw new RelayError("not_found", "Unknown request.");
+        if (r.state !== "pending")
+          throw new RelayError("chat_request_closed", "This request is " + r.state + ".", {
+            closedBy: r.closedBy,
+          });
+        if (method === "DELETE" && !action && r.requester.id === person.id) r.state = "cancelled";
+        else if (
+          method === "POST" &&
+          rights(c, person).manage &&
+          (action === "approve" || action === "decline")
+        ) {
+          if (action === "approve" && c.members.size >= maxMembers)
+            throw new RelayError("capacity", "Channel is full.");
+          r.state = action === "approve" ? "approved" : "declined";
+          if (r.state === "approved") c.members.add(r.requester.id);
+          else declinedAt.set(cursorKey(r.requester.id, c.id), Date.now());
+        } else deny("chat_manage_restricted", "Only managers decide requests.", c);
+        r.closedBy = personRef(person);
+        changed(c, "request.updated", r.id);
+        return send("ChatJoinRequest", r);
+      }
+      if (resource === "directory" && method === "GET")
+        return send(
+          "ChatConversations",
+          paged(
+            [...channels.values()]
+              .filter(
+                (c) =>
+                  !c.dmKey &&
+                  !c.members.has(person.id) &&
+                  (visible(c, person.id) || has(person, "channels.directoryAll")),
+              )
+              .map((c) => channelView(c, person)),
+          ),
+        );
       if (resource === "conversations" && !id) {
         if (method === "GET")
           return send(
@@ -3445,6 +4056,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               ([...members].some((id) => handles.has(id)) && members.size !== 2)
             )
               throw new RelayError("malformed", "Choose two to eight staff members.");
+            if (!dmAllowed(person, members))
+              deny("chat_dm_restricted", "The participants cannot start this DM.");
             const dmKey = JSON.stringify([...members].sort());
             const existing = [...channels.values()].find((c) => c.dmKey === dmKey);
             if (existing) return send("ChatConversation", channelView(existing, person));
@@ -3453,11 +4066,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               id: randomId("c"),
               name: "",
               purpose: "",
-              private: true,
+              access: channelAccess("private"),
+              managers: new Set(),
               agents: [...members].some((id) => handles.has(id)) ? "allowed" : "off",
               archived: false,
               members,
-              creator: person.id,
             };
             channels.set(c.id, c);
             chatChange(c, {
@@ -3471,13 +4084,38 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (channels.size >= 500) throw new RelayError("malformed", "Channel limit reached.");
           if ([...channels.values()].some((c) => c.name === input.name))
             throw new RelayError("malformed", "This channel name is taken.");
+          const access = input.access ?? channelAccess(input.template);
+          if (
+            !has(
+              person,
+              access.visibility === "public" ? "channels.createPublic" : "channels.createPrivate",
+            ) ||
+            (access.outsiders !== "none" && !has(person, "channels.openToOutside"))
+          )
+            deny("role_permission_missing", "This role cannot create that channel.");
+          const managers = new Set([person.id, ...(input.managers ?? []).map((m) => m.id)]);
+          for (const id of managers) {
+            const target = people.get(id);
+            if (!target || target.removed || !peopleAllowed(person, id))
+              throw new RelayError("not_found", "Unknown manager.");
+            if (target.admission === "outside" && access.outsiders === "none")
+              deny("chat_outsiders_not_allowed", "This channel does not allow outsiders.");
+          }
           const c: Channel = {
             ...input,
+            access,
+            managers,
+            agents:
+              input.agents ??
+              (input.template === "announcement"
+                ? "off"
+                : ["community", "shared"].includes(input.template ?? "")
+                  ? "mentions_only"
+                  : "allowed"),
             purpose: input.purpose ?? "",
             id: "c_" + NodeCrypto.randomUUID(),
-            members: new Set([person.id]),
+            members: new Set(managers),
             archived: false,
-            creator: person.id,
           };
           channels.set(c.id, c);
           chatChange(c, {
@@ -3490,11 +4128,69 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         }
       }
       if (resource === "conversations" && id) {
-        const c = channelFor(id);
+        const candidate = channels.get(id);
+        const directoryManager =
+          candidate &&
+          !visible(candidate, person.id) &&
+          !candidate.dmKey &&
+          has(person, "channels.directoryAll") &&
+          rights(candidate, person).manage &&
+          !reader &&
+          ((!action && method === "PATCH") ||
+            (action === "members" && memberId === person.id && method === "PUT"));
+        const c = directoryManager ? candidate : channelFor(id);
         if (reader && (action !== "messages" || method !== "GET"))
           throw new RelayError("forbidden", "Choose a conversation to read.");
         if (c.dmKey && method !== "GET")
           throw new RelayError("forbidden", "DM participants are fixed.");
+        if (action === "requests") {
+          if (method === "GET" && rights(c, person).manage)
+            return send(
+              "ChatJoinRequests",
+              paged(
+                [...requests.values()].filter(
+                  (r) => r.conversationId === id && r.state === "pending",
+                ),
+              ),
+            );
+          if (method !== "POST" || !rights(c, person).request)
+            deny("chat_manage_restricted", "This request is unavailable.", c);
+          const input = parseJson(body, "ChatRequestInput") as { note?: string };
+          const existing = pendingRequest(c, person);
+          if (existing) return send("ChatJoinRequest", existing);
+          const last = declinedAt.get(cursorKey(person.id, c.id));
+          if (
+            (last && Date.now() - last < declineCooldown) ||
+            [...requests.values()].filter(
+              (r) => r.requester.id === person.id && r.state === "pending",
+            ).length >= maxPending
+          )
+            throw new RelayError("rate_limited", "Try again after the request limit clears.");
+          const row: JoinRequest = {
+            id: randomId("r"),
+            conversationId: id,
+            requester: personRef(person),
+            createdAt: iso(Date.now()),
+            state: "pending",
+            ...input,
+          };
+          requests.set(row.id, row);
+          changed(c, "request.updated", row.id);
+          return send("ChatJoinRequest", row);
+        }
+        if (action === "managers" && memberId && (method === "PUT" || method === "DELETE")) {
+          if (!rights(c, person).manage)
+            deny("chat_manage_restricted", "Only managers change channel managers.", c);
+          if (!people.has(memberId) || !c.members.has(memberId))
+            throw new RelayError("not_found", "Unknown channel member.");
+          if (method === "PUT") c.managers.add(memberId);
+          else if (c.managers.has(memberId) && c.managers.size === 1)
+            deny("chat_manage_restricted", "Keep one channel manager.", c);
+          else c.managers.delete(memberId);
+          changed(c, "access.updated", id);
+          response.writeHead(204).end();
+          return;
+        }
         if (action === "settings" && method === "PUT") {
           if (!c.members.has(person.id))
             throw new RelayError("forbidden", "Join the channel first.");
@@ -3508,11 +4204,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           return send("ChatNotifications", settings);
         }
         if (!action && method === "PATCH") {
-          if (c.creator !== person.id && person.role !== "founder")
-            throw new RelayError(
-              "forbidden",
-              "Channel management requires its creator or a founder.",
-            );
+          if (!rights(c, person).manage)
+            deny("chat_manage_restricted", "Only managers can change these settings.", c);
           const patch = parseJson(body, "ChatPatch") as ChatPatch;
           if (
             patch.name &&
@@ -3521,12 +4214,47 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             throw new RelayError("malformed", "This channel name is taken.");
           if (
             defaultChannels.includes(c) &&
-            ((patch.name && patch.name !== c.name) || patch.archived || patch.private)
+            ((patch.name && patch.name !== c.name) ||
+              patch.archived ||
+              patch.access?.visibility === "private")
           )
             throw new RelayError("forbidden", "Default channels must remain available.");
-          Object.assign(c, patch);
+          const { managers, ...settings } = patch;
+          if (
+            settings.access &&
+            settings.access.outsiders !== c.access.outsiders &&
+            !rights(c, person).openToOutside
+          )
+            deny(
+              "role_permission_missing",
+              "Changing outside access requires channels.openToOutside.",
+              c,
+            );
+          if (
+            managers &&
+            (!managers.length || managers.some((m) => !people.has(m.id) || !c.members.has(m.id)))
+          )
+            throw new RelayError("malformed", "Choose channel members as managers.");
+          if (managers) c.managers = new Set(managers.map((m) => m.id));
+          if (settings.access?.outsiders === "none" && c.access.outsiders !== "none") {
+            const removed = [...c.members].filter((id) => people.get(id)?.admission === "outside");
+            for (const id of removed) {
+              c.members.delete(id);
+              c.managers.delete(id);
+            }
+            if (removed.length)
+              systemMessage(
+                c,
+                undefined,
+                "outside_access_closed",
+                removed.length + " outside collaborators removed.",
+              );
+          }
+          Object.assign(c, settings);
+          settleRequests();
+          snapshotHeads.clear();
           chatChange(c, {
-            kind: "conversation.updated",
+            kind: patch.access || managers ? "access.updated" : "conversation.updated",
             seq: ++chatSeq,
             refId: id,
             conversationId: id,
@@ -3537,26 +4265,63 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!memberId && method === "GET")
             return send("ChatMembers", paged([...c.members].map(member)));
           if (memberId && (method === "PUT" || method === "DELETE")) {
-            if (memberId !== person.id && c.creator !== person.id && person.role !== "founder")
-              throw new RelayError("forbidden", "Cannot change this membership.");
+            const self = memberId === person.id,
+              can = rights(c, person);
+            if (
+              method === "PUT" &&
+              !(self ? can.join || directoryManager || c.members.has(person.id) : can.invite)
+            )
+              deny("chat_invite_restricted", "The channel rules do not allow this addition.", c);
+            if (!self && method === "DELETE" && !can.manage)
+              deny("chat_manage_restricted", "Only managers remove members.", c);
+            if (method === "PUT" && people.get(memberId)?.admission === "outside") {
+              if (c.access.outsiders === "none")
+                deny(
+                  "chat_outsiders_not_allowed",
+                  "This channel does not allow outside collaborators.",
+                  c,
+                );
+              if (!self && !can.manage)
+                deny("chat_invite_restricted", "Only managers add outside collaborators.", c);
+            }
+            if (method === "DELETE" && c.managers.has(memberId) && c.managers.size === 1)
+              deny("chat_manage_restricted", "Keep one manager.", c);
             if (
               handles.has(memberId)
                 ? owned(memberId).view.owner.id !== person.id
                 : !people.has(memberId) || people.get(memberId)?.removed
             )
               throw new RelayError("not_found", "Unknown person.");
-            if (method === "PUT" && c.members.size >= 200 && !c.members.has(memberId))
+            if (method === "PUT" && c.members.size >= maxMembers && !c.members.has(memberId))
               throw new RelayError("malformed", "Channel member limit reached.");
-            if (method === "DELETE" && defaultChannels.includes(c) && people.has(memberId))
+            const targetPerson = people.get(memberId);
+            if (
+              method === "DELETE" &&
+              defaultChannels.includes(c) &&
+              targetPerson?.admission === "member" &&
+              has(targetPerson, "channels.seePublic")
+            )
               throw new RelayError("forbidden", "All staff belong to default channels.");
             if (method === "PUT") c.members.add(memberId);
-            else c.members.delete(memberId);
+            else {
+              c.members.delete(memberId);
+              c.managers.delete(memberId);
+            }
+            snapshotHeads.clear();
+            settleRequests();
+            if (directoryManager)
+              systemMessage(c, undefined, "member_joined", person.login + " joined.");
             chatChange(c, {
               kind: method === "PUT" ? "member.added" : "member.removed",
               seq: ++chatSeq,
               conversationId: id,
               refId: memberId,
             });
+            if (method === "PUT")
+              return send("ChatMembership", {
+                addedBy: personRef(person),
+                member: member(memberId),
+              });
             response.writeHead(204).end();
             return;
           }
@@ -3643,7 +4408,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             });
           } else {
             const channel = defaultChannels[0];
-            if (!channel || channel.archived || channel.private)
+            if (!channel || channel.archived || channel.access.visibility === "private")
               throw new RelayError("forbidden", "No public discussion channel is available.");
             destination = systemMessage(channel, taskId, "task_linked", task.title);
           }
@@ -3680,14 +4445,38 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           };
         } else post = parseJson(body, "ChatPost") as ChatPost;
         const h = post.asHandle ? owned(post.asHandle) : undefined;
-        const c = channels.get(post.conversationId);
+        const c = channelFor(post.conversationId);
+        const can = rights(c, person);
+        if (!can[post.threadRootId ? "reply" : "post"])
+          deny(
+            c.dmKey
+              ? "chat_dm_restricted"
+              : c.members.has(person.id)
+                ? "chat_post_restricted"
+                : "chat_not_member",
+            "Your account cannot post here.",
+            c,
+            post.asHandle,
+          );
+        if (
+          h &&
+          ((!post.threadRootId && c.access.post === "managers") ||
+            (c.agents === "mentions_only" &&
+              post.threadRootId &&
+              ![...messages.values()].some(
+                (m) =>
+                  (m.threadRootId ?? m.id) === post.threadRootId &&
+                  m.mentions.some((t) => t.id === h.view.id),
+              )))
+        )
+          deny("chat_agent_capped", "This agent cannot post here.", c, h.view.id);
         if (
           !c ||
           c.archived ||
           (explicitAnswer && c.agents === "off") ||
           (h
             ? c.agents === "off" ||
-              (c.private &&
+              (c.access.visibility === "private" &&
                 !c.members.has(h.view.id) &&
                 !(post.threadRootId && follows.get(post.threadRootId)?.has(h.view.id)))
             : !explicitAnswer && !c.members.has(person.id))
@@ -3707,6 +4496,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (root && (root.threadRootId || root.conversationId !== c.id))
           throw new RelayError("malformed", "Choose a root in this channel.");
         const mentions = messageMentions(post.text, post.card);
+        if (
+          mentions.some(
+            (t) => t.kind === "agent" && handles.get(t.id)?.view.owner.id !== person.id,
+          ) &&
+          !has(person, "agents.mention")
+        )
+          deny("role_permission_missing", "Mentioning agents requires agents.mention.", c);
         if (
           (h && /@(channel|here)\b/.test(post.text)) ||
           (c.agents === "off" && mentions.some((t) => t.kind === "agent"))
@@ -3783,7 +4579,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         }
         const subscribers = follows.get(root?.id ?? m.id) ?? new Set<string>();
         for (const [hid, target] of handles) {
-          if (hid === actor || c.agents === "off") continue;
+          if (
+            hid === actor ||
+            c.agents === "off" ||
+            (!visible(c, target.view.owner.id) && !(c.dmKey && c.members.has(hid)))
+          )
+            continue;
           const reason = answered.has(hid)
             ? "answer"
             : mentions.some((t) => t.id === hid)
@@ -3794,7 +4595,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                   ? "follow"
                   : undefined;
           if (!reason) continue;
+          const fromOwner = !h && target.view.owner.id === person.id;
+          const wakes =
+            target.view.wake !== "nobody" &&
+            (fromOwner ||
+              (target.view.wake === "everyone" &&
+                person.admission !== "outside" &&
+                has(person, "agents.wakeOthers")));
           const row: ChatDelivery = {
+            wakes,
             id: randomId("d"),
             handleId: hid,
             messageId: m.id,
@@ -3802,14 +4611,24 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             reason,
             fromOwner: !h && target.view.owner.id === person.id,
             state: "pending",
-            expiresAt: iso(Date.now() + 86400000),
+            expiresAt: iso(Date.now() + (wakes ? deliveryLifetime : inboxLifetime)),
             threadRef: target.threadRef,
             wake: target.view.wake,
             message: m,
           };
           deliveries.set(row.id, { row, claimedAt: 0 });
+          if (!wakes)
+            emit(
+              "needs.changed",
+              "NeedsChangedEvent",
+              {
+                at: row.message.createdAt,
+                count: personalNeeds(people.get(target.view.owner.id)!).length,
+              },
+              target.view.owner.id,
+            );
           for (const stream of streams)
-            if (stream.machineId === row.machineId)
+            if (wakes && stream.machineId === row.machineId)
               stream.response.write(
                 "event: chat.delivery\ndata: " +
                   JSON.stringify({ deliveryId: row.id, handleId: hid }) +
@@ -3837,7 +4656,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         const m = messageFor(id);
         if (
           (m.author.kind !== "person" || m.author.id !== person.id) &&
-          !(method === "DELETE" && person.role === "founder")
+          !(method === "DELETE" && has(person, "relay.admin"))
         )
           throw new RelayError("forbidden", "Cannot change this message.");
         if (m.deleted) throw new RelayError("malformed", "This message has been deleted.");
@@ -3909,7 +4728,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (
           m.deleted ||
           (!c.members.has(actor) &&
-            !(reader && (!c.private || follows.get(m.threadRootId ?? m.id)?.has(actor))))
+            !(
+              reader &&
+              (c.access.visibility === "public" || follows.get(m.threadRootId ?? m.id)?.has(actor))
+            ))
         )
           throw new RelayError("forbidden", "Cannot react to this message.");
         const emoji = decodeURIComponent(memberId);
@@ -3946,13 +4768,19 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     if (route.startsWith("/team/")) {
+      if (!has(caller.person, "hub.team")) throw new RelayError("not_found", "Team unavailable.");
       const roomPath = /^\/team\/rooms\/([^/]+)(\/sessions)?$/.exec(route);
       const board = roomPath?.[1];
-      if (board && !boards.some((b) => b.id === board))
+      if (board && (!boardAllowed(caller.person, board) || !boards.some((b) => b.id === board)))
         throw new RelayError("not_found", "Unknown room.");
       const broadcast = (event: string, data: unknown) => {
         for (const stream of streams)
-          stream.response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+          if (
+            has(people.get(stream.personId)!, "hub.team") &&
+            peopleAllowed(people.get(stream.personId)!, caller.person.id) &&
+            (!board || boardAllowed(people.get(stream.personId)!, board))
+          )
+            stream.response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
       if (method === "PUT" && route === "/team/me") {
         const id = caller.person.id;
@@ -3961,7 +4789,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         const needsClear =
           current.seatBoard &&
           edit.seatBoard === undefined &&
-          !teamSessions().some((r) => r.session.personId === id && r.board === current.seatBoard) &&
+          !teamSessions(caller.person).some(
+            (r) => r.session.personId === id && r.board === current.seatBoard,
+          ) &&
           !boardTasks.some(
             (t) => t.board === current.seatBoard && leaseOf(t, Date.now())?.holder.id === id,
           );
@@ -3971,7 +4801,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         return sendJson(response, 200, "TeamPresence", { id, ...next });
       }
       if (method === "PUT" && (route === "/team/office" || (board && !roomPath?.[2]))) {
-        if (caller.person.role !== "founder")
+        if (!has(caller.person, "relay.admin"))
           throw new RelayError("forbidden", "Only founders can set meeting links.");
         const { meetingUrl } = parseJson(body, "TeamMeeting") as { meetingUrl: string | null };
         if (meetingUrl === null) meetings.delete(board ?? "");
@@ -3985,7 +4815,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         const ids = query.get("sessions")?.split(",") ?? [];
         if (!ids.length || ids.length > 50 || ids.some((id) => !ID_PATTERN.test(id)))
           throw new RelayError("malformed", "Choose 1 to 50 session ids.");
-        const visible = new Map(teamSessions().map((r) => [r.session.id, r.heardAt]));
+        const visible = new Map(teamSessions(caller.person).map((r) => [r.session.id, r.heardAt]));
         const sessions = [...new Set(ids)].flatMap((id) => {
           const heardAt = visible.get(id);
           return heardAt === undefined ? [] : [{ id, heardAt: iso(heardAt) }];
@@ -3996,7 +4826,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         const { offset, limit } = pageParams(query);
         const count = query.has("limit") ? limit : 100;
         if (route === "/team/agents") {
-          const summary = teamSummary(teamPeople(), teamSessions());
+          const summary = teamSummary(
+            caller.person,
+            teamPeople(caller.person),
+            teamSessions(caller.person),
+          );
           return sendJson(
             response,
             200,
@@ -4006,7 +4840,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         }
         if (route === "/team/people") {
           const q = (query.get("q") ?? "").toLowerCase();
-          const rows = teamPeople().filter(
+          const rows = teamPeople(caller.person).filter(
             (p) =>
               p.login.toLowerCase().startsWith(q) || p.displayName?.toLowerCase().startsWith(q),
           );
@@ -4018,7 +4852,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           );
         }
         if (route === "/team/hallway/sessions" || roomPath?.[2]) {
-          const rows = teamSessions()
+          const rows = teamSessions(caller.person)
             .filter((r) => r.board === board)
             .map((r) => r.session);
           return sendJson(
@@ -4044,8 +4878,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const machinePath = /^\/machines\/([^/]+)$/.exec(route);
     if (method === "DELETE" && machinePath?.[1]) {
       const target = ID_PATTERN.test(machinePath[1]) ? machines.get(machinePath[1]) : undefined;
-      const canRevoke = target?.personId === caller.person.id || caller.person.role === "founder";
-      if (!target || (!canRevoke && !visibleToColleagues(target))) {
+      const canRevoke = target?.personId === caller.person.id || has(caller.person, "relay.admin");
+      if (
+        !target ||
+        (!canRevoke && (!has(caller.person, "hub.machinesAll") || !visibleToColleagues(target)))
+      ) {
         throw new RelayError("not_found", "No such machine.");
       }
       if (!canRevoke) {
@@ -4135,13 +4972,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
     if (method === "GET" && route === "/repositories") {
       const { offset, limit } = pageParams(query);
-      sendJson(response, 200, "RepositoriesPage", page(repositories, offset, limit));
+      sendJson(response, 200, "RepositoriesPage", page(reposFor(caller.person), offset, limit));
       return;
     }
 
     if (method === "GET" && (route === "/feed" || route === "/graveyard")) {
       const { offset, limit } = pageParams(query);
-      const records = route === "/feed" ? feedRecords : graveyardRecords;
+      const records = (route === "/feed" ? feedRecords : graveyardRecords).filter((r) =>
+        recordAllowed(caller.person, r.taskId),
+      );
       const slice = records.slice(offset, offset + limit);
       const next = offset + limit < records.length ? encodeCursor(offset + limit) : null;
       if (route === "/feed") {
@@ -4165,7 +5004,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         ? boardTasks.findIndex((candidate) => candidate.id === taskId)
         : -1;
       const found = index < 0 ? undefined : boardTasks[index];
-      if (found === undefined) throw new RelayError("not_found", "No such task.");
+      if (found === undefined || !taskAllowed(caller.person, found))
+        throw new RelayError("not_found", "No such task.");
       sendJson(response, 200, "TaskRead", taskView(found, index, caller.person));
       return;
     }
@@ -4336,7 +5176,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           : action === "approve"
             ? approvePairing(pairingId)
             : action === "refuse"
-              ? refusePairing(pairingId, input.reason as Refusal)
+              ? refusePairing(
+                  pairingId,
+                  input.reason as Refusal,
+                  typeof input.login === "string" ? input.login : undefined,
+                )
               : expirePairing(pairingId);
       reply({ state });
       return;
@@ -4619,10 +5463,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       if (by === "") throw new RelayError("malformed", "by must be a person id.");
       const checker = people.get(by);
       if (checker === undefined) throw new RelayError("not_found", "No such person for by.");
-      const ignoredReason =
-        checker.role === "founder"
-          ? undefined
-          : `${checker.login} does not hold the sign-off role.`;
+      const ignoredReason = has(checker, "relay.admin")
+        ? undefined
+        : `${checker.login} does not hold the sign-off role.`;
       const valid = ignoredReason === undefined;
       const before = approvalViews();
       task.holder = null;
@@ -4688,6 +5531,28 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         [...machine.teamStates].map(([id, team]) => [id, { ...team, since: team.since - shift }]),
       );
       refreshAllHeads();
+      reply({});
+      return;
+    }
+    if (request.method === "POST" && route === "/outside/check") {
+      const person = peopleByLogin.get(String(input.login));
+      if (!person || person.admission !== "outside")
+        throw new RelayError("not_found", "Unknown outside collaborator.");
+      const reason = input.reason;
+      if (reason === null) delete person.outsideReason;
+      else if (
+        [
+          "outside_check_pending",
+          "outside_grant_lost",
+          "outside_entry_removed",
+          "outside_2fa_off",
+          "outside_identity_mismatch",
+        ].includes(String(reason))
+      ) {
+        person.outsideReason = reason as OutsideReason;
+        closeStreams((stream) => stream.personId === person.id);
+        if (reason !== "outside_check_pending") removeStaff(person.login);
+      } else throw new RelayError("malformed", "Unknown outside check result.");
       reply({});
       return;
     }

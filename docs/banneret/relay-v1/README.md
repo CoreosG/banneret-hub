@@ -24,14 +24,14 @@ All under `/relay/v1`.
 | `GET /capabilities` | Display name, icon and enrolment entry point for anyone; sections, MCP tools, adapters and `me` for an enrolled caller. |
 | `POST /enroll/start` | Start enrolment with the machine's public key and facts; returns a pairing id, confirm code and browser URL. |
 | `POST /enroll/poll` | `pending`, `awaiting_approval`, `approved`, `refused` or `expired`; the device token once, on approval. |
-| `GET /machines` | The Team machines list, paged: named machines for colleagues, all machines for founders, revoked ones for their owner and founders. |
+| `GET /machines` | The Team machines list, paged: named machines for viewers with hub.machinesAll, all machines for founders, revoked ones for their owner and founders. |
 | `DELETE /machines/{machineId}` | Revoke a machine (its owner or a founder). |
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
 | `GET /today` | Needs you, shipped, working, stuck and optionally health. `?since=...` filters shipped work (see below). |
 | `GET /needs` | Needs-you items, paged, most urgent first. |
 | `GET /skills` | Signed company skill catalog, available when the enrolled capabilities document includes `skills.registry: true`. Each entry has the plugin kit name, description, full SKILL.md text and a company lock. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
-| `GET /events` | Server-sent events: `needs.changed`, `mention`, `chat.changed`, `chat.delivery`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
+| `GET /events` | Server-sent events: `needs.changed`, `mention`, `chat.changed`, `chat.delivery`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `roles.changed`, `reset`. |
 | `GET /snapshot/head` | The caller's current snapshot head: the SHA-256 of each snapshot file. |
 | `GET /snapshot/files/{sha256}` | One immutable snapshot file, by hash. |
 
@@ -262,7 +262,7 @@ page). Cursors are opaque. Today's needs-you block holds at most 20 items, and i
 
 ## Machines
 
-`GET /machines` lists named machines for colleagues, all own machines, and all machines for founders. A
+`GET /machines` lists named machines for viewers with hub.machinesAll, all own machines, and all machines for founders. A
 revoked machine is listed only to its owner and to founders, with `revokedAt` set, `connected` false and
 `revocable` false; nobody else sees it. Live machines come first, newest heartbeat first; revoked machines follow,
 most recently revoked first. `DELETE /machines/{machineId}` answers 404 `not_found` for a malformed id or an unknown or hidden
@@ -283,8 +283,8 @@ class. [Orchestrator]
 | Class | Means | Kinds |
 |---|---|---|
 | 1 | An agent is blocked on a question or approval from you | `thread_question`, `thread_approval`, `chat_ask` |
-| 2 | Something waits on your review or decision | `pull_request`, `pr_approval`, `waiting_for_approver`, `promotion`, `founder_question`, `health` |
-| 3 | You were mentioned, or an agent or persona wrote to you | `mention`, `agent_message`, `persona_ask` |
+| 2 | Something waits on your review or decision | `pull_request`, `pr_approval`, `waiting_for_approver`, `promotion`, `founder_question`, `health`, `chat_join_requests` |
+| 3 | You were mentioned, or an agent or persona wrote to you | `mention`, `agent_message`, `persona_ask`, `agent_inbox` |
 | 4 | A dispatcher suggestion | `suggestion` |
 | 5 | Any kind not listed above | `other` (the explicit catch-all), and any unknown kind |
 
@@ -340,13 +340,13 @@ What the files hold, and who sees what, is the same as the live calls:
 | health | `Today.health` for the caller | role |
 | work | `Today.working` and `Today.stuck` for the caller | role, in practice |
 | machines | Live machines shared with their name | person (revocation permission) |
-| repositories | `GET /repositories` | nothing (relay-wide) |
-| boards | none (snapshot only) | nothing (relay-wide) |
-| `board.<id>` | none (snapshot only) | nothing (relay-wide) |
-| map | none (snapshot only) | nothing (relay-wide) |
-| feed | `GET /feed` | nothing (relay-wide) |
-| graveyard | `GET /graveyard` | nothing (relay-wide) |
-| team files | Team paging calls | nothing (relay-wide) |
+| repositories | `GET /repositories` | board and repository scope |
+| boards | none (snapshot only) | board and repository scope |
+| `board.<id>` | none (snapshot only) | board and repository scope |
+| map | none (snapshot only) | board and repository scope |
+| feed | `GET /feed` | board and repository scope |
+| graveyard | `GET /graveyard` | board and repository scope |
+| team files | Team paging calls | people and board scope, hub.team |
 
 "No titles" means no title, text or path that a Hub reported (a heartbeat never carries them). The tracker titles that
 `GET /needs` and `GET /today` already return to staff stay in the needs and work files.
@@ -786,7 +786,7 @@ only for the rest.
 ## Pull request approvals
 
 Each linked PR in Board and TaskRead includes its GitHub `baseBranch`, `approvals`, `canApprove`
-(company PersonRefs who can supply an outstanding review), and `youCanApprove` for the caller.
+(eligible reviewers, with login only when outside the viewer’s people scope), and `youCanApprove` for the caller.
 An unreadable rule returns null approvals, an empty candidate list and false. A measured branch
 with no review requirement returns zero required reviews and false policy flags.
 
@@ -844,12 +844,11 @@ thread when the environment is its own, and otherwise says which machine holds i
 
 - **Anonymous callers** get `displayName`, `iconUrl` (or null) and `enrolment` only.
 - **Enrolled callers** also get the following, none of it secret:
-  - `me {id, login, role}`, so no separate identity call is needed. `role` is an open set (`founder`,
-    `limited_staff` today); a client treats an unknown role as `limited_staff`;
+  - `me {id, login, role, admission, permissions}`. Role references carry the current id and display name.
   - `sections[] {id, kind, version, flags}`. The Hub renders only these, and ignores kinds it does not know;
-  - `mcpTools[] {name, description, role, inputSchema?}`. `role` is the lowest role that may call the tool.
+  - `mcpTools[] {name, description, requires?, inputSchema?}`. An omitted `requires` offers the tool to everyone. Otherwise the caller needs that permission.
     The Hub offers its agents exactly the tools named here that it implements, today the `banneret_*` agent
-    toolkit (the Hub's `docs/banneret/agents.md`). For those, an entry only switches the tool on and sets its role; the
+    toolkit (the Hub's `docs/banneret/agents.md`). For those, an entry only switches the tool on and names its required permission; the
     Hub keeps its own description and schema. The Hub ignores a name it does not implement;
   - `adapters[] {role, kind, version?}`, for the work tracker, staff directory, knowledge and health.
 - **Refetching.** The facts response carries `capabilitiesVersion`, and the `capabilities.changed` event says when
@@ -858,7 +857,7 @@ thread when the environment is its own, and otherwise says which machine holds i
 
 ## Open sets
 
-Clients ignore response fields and enum values they do not know. `Role`, `NeedsItem.kind`, section kinds, adapter
+Clients ignore response fields and enum values they do not know. `RoleRef.id`, `NeedsItem.kind`, section kinds, adapter
 kinds and error codes are open strings with their known values documented, not closed enums, so a validating
 client accepts new values. Request bodies are closed.
 
@@ -915,6 +914,40 @@ A critical active occurrence adds one health Needs-you item for each configured 
 routes to nobody. Resolution or a lower severity removes the need. Alarm state belongs to the relay
 database and is never published to the work tracker.
 
+## Roles
+
+Admission is either `member` (org membership) or `outside` (an approved named grant). Each request resolves admission, the staff role and its current permissions. Historical person references still contain only id and login. Current people and chat member entries include their RoleRef and admission.
+
+`roles.default` defaults to `staff`. `roles.outsideDefault` defaults to `outside`. Role definitions persist. A founder may replace a template's permissions or reset it. New ids match `^[a-z][a-z0-9_]{0,31}$`. Keep at least one org member with `relay.admin`. An outsider must hold a role with `forOutside: true`. Such a role cannot grant relay.admin, channels.manageAll, channels.directoryAll or channels.openToOutside.
+
+| Permission | Founder | Staff (default) | Contractor | Outside collaborator |
+|---|---|---|---|---|
+| seePublic | yes | yes | no | no |
+| createPublic / createPrivate | yes / yes | yes / yes | no / no | no / no |
+| invite | yes | yes | no | no |
+| manageAll | yes | no | no | no |
+| openToOutside | yes | no | no | no |
+| directoryAll | yes | no | no | no |
+| dm.start | anyone | anyone | anyone | shared_channel |
+| dm.group / dm.outsiders | yes / yes | yes / yes | yes / no | no / no |
+| agents.mention / dm / wakeOthers | yes / yes / yes | yes / yes / yes | yes / yes / yes | yes / no / no |
+| scope.boards / scope.people | all / all | all / all | all / all | all / shared_channels |
+| hub.team / health / pool / machinesAll | yes | yes / yes / yes / no | yes / no / no / no | no |
+| relay.admin | yes | no | no | no |
+| For outside collaborators | no | no | no | yes |
+
+Channel permissions have the `channels.` prefix. The Hub reads enabled names from `me.permissions`. A valued permission includes its value after a colon, for example `dm.start:shared_channel` or one `scope.boards:<id>` per allowed board. Ignore unfamiliar permissions.
+
+Only a holder of `relay.admin` receives the roles section and can use these calls. GET /roles returns role details and live member counts. PUT /roles/{id} creates or replaces a role using name, forOutside and permissions. DELETE removes an unused custom role. POST /roles/{id}/reset restores its built-in definition. PUT /staff/{personId}/role takes {roleId}. Each successful write sends `roles.changed` to enrolled clients to refetch capabilities.
+
+## Access
+
+The relay intersects board scope with repository grants on every read. Board, Feed, Graveyard, repository listings, Today working and stuck and pull request approval lists all use that intersection. Map items outside the viewer's boards are omitted, including dependencies and plan-only tasks for a restricted viewer. People outside people scope appear by login only on an in-scope approval. Team files are built for each scope and may share hashes only for identical content. Team events go only to viewers who can see the changed person or room. Own machines are visible. Colleagues' named machines require hub.machinesAll. Health needs require hub.health. Shared-thread pickers list only people the caller may DM. Search uses only visible data. Losing access also prevents fetching earlier snapshot files containing that data.
+
+The relay checks admission first. A confirmed loss returns 401 token_revoked. Its details.reason is outside_grant_lost, outside_entry_removed, outside_2fa_off or outside_identity_mismatch. Unchecked and paused outsiders receive 503 unavailable, retryable true, with details.reason outside_check_pending. Refused pairing polls identify the signed-in account with `account {login}`. They never include its network login.
+
+A confirmed revocation removes channel memberships and handles, voids pending requests and posts an access-ended system message. Other DM participants keep history and lose the composer. Re-admission starts with no channel memberships. A restart or temporary admission pause preserves memberships and pending requests.
+
 ## Chat
 
 A live `chat.changed` event can include a recipient-specific `notice` with the message ID, author's display name and up to 240 characters of text. The relay sends it for new DMs, addressed asks, eligible channel mentions and followed replies, or all new channel messages when selected. It suppresses alerts for the sender on every machine. Notices are absent from change history. A chat inbox item carries `chatRead`, the conversation, optional thread root and sequence to pass to the private read call.
@@ -925,12 +958,12 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | Call | Does |
 |---|---|
 | `GET /chat/conversations` | The caller's sidebar: channels they are in, public channels they can join, DMs; each with unread count, mention count and last seq |
-| `POST /chat/conversations` | Create a channel `{kind: channel, name, purpose?, private, agents}` or open a DM `{kind: dm, members[]}` (an existing DM with the same members is returned) |
-| `PATCH /chat/conversations/{id}` | Rename, purpose, private, agents switch, archive |
+| `POST /chat/conversations` | Create a channel `{kind: channel, name, purpose?, template or access, managers?, agents?}` or open a DM `{kind: dm, members[]}` (an existing DM with the same members is returned) |
+| `PATCH /chat/conversations/{id}` | Rename, set purpose, access, managers, agents or archive |
 | `GET /chat/conversations/{id}/members` | Page through channel members |
 | `PUT /chat/conversations/{id}/members/{memberId}` / `DELETE` | Join, add a person or an agent (`h_` id), leave, remove |
 | `PUT /chat/conversations/{id}/settings` | The caller's notification level and mute |
-| `GET /chat/me/settings` / `PUT` | The caller's own chat settings: `{agentsReadMyDms: bool}` (default false). Changing it emits `conversation.updated` for each of the caller's DMs to all participants |
+| `GET /chat/me/settings` / `PUT` | The caller's own chat settings: `agentsReadMyDms, agentWakeDefault` (defaults false and everyone). Changing DM reads emits `conversation.updated` for each of the caller's DMs to all participants |
 | `GET /chat/conversations/{id}/messages` | Top-level messages, `before` / `after` / `around` a message, newest page first |
 | `GET /chat/threads/{rootId}` | The root and its replies |
 | `POST /chat/messages` | Post `{conversationId, threadRootId?, text, card?, taskRef?, key, asHandle?}`; the author is the caller's person, or the handle in `asHandle` (only from the handle's machine and owner) |
@@ -952,6 +985,75 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `GET /chat/deliveries` | Pending deliveries for this machine's handles |
 | `POST /chat/deliveries/{id}/claim`, `/consume`, `/refuse` | The delivery transitions below |
 | `POST /chat/messages/{id}/promote` | Only when `promote` is on: returns the text and link for the Hub to post on GitHub as the person. The relay itself writes nothing to GitHub |
+
+### Channel access and joining
+
+The chat section advertises channel_access, join_requests and agent_inbox. The relay returns me.can on each conversation. The Hub uses those rights for the composer and controls. A hidden conversation returns 404 on every path. Role and channel refusals use 403 with details.account (id, login, role, admission), rule, and the applicable conversationId, asHandle and owner. Codes are role_permission_missing, chat_post_restricted, chat_not_member, chat_invite_restricted, chat_outsiders_not_allowed, chat_manage_restricted, chat_dm_restricted and chat_agent_capped. Role conflicts use 409 role_in_use or role_not_for_outside.
+
+
+| Template | visibility | join | outsiders | post | invite | agents |
+|---|---|---|---|---|---|---|
+| General (each `chat.defaultChannels` entry) | public | open, auto-added for roles with `seePublic`, cannot leave | none | everyone (can switch to announcement) | n/a | allowed |
+| Team | public | open | none | everyone | members | allowed |
+| Private | private | invite | none | everyone | members | allowed |
+| Announcement | public | open | none | managers, replies everyone | managers | off |
+| Shared with outsiders | private | invite | invited | everyone | managers | mentions_only |
+| Community (open source) | public | request | listed | everyone | managers | mentions_only |
+
+The last two need `channels.openToOutside` to create.
+
+#### Effective rights
+
+One function in the relay decides every chat action, for reads, search, `/chat/changes`, events, notices and
+writes alike. In plain words:
+
+- **See:** you are a member; or the channel is public and your role has `seePublic`; or you are outside and the
+  channel's `outsiders` is `listed`; or your role has `directoryAll` (directory entry only). Anything you
+  cannot see answers **404**, never a named refusal, so refusals never reveal a hidden channel.
+- **Read:** you are a member, or you can see it as public (not through `directoryAll`).
+- **Join / request:** you can see it, the join mode is `open` (or `request`), and if you are outside, `outsiders`
+  is `listed`.
+- **Post / reply:** you are a member and the `post` (or `replies`) rule includes your role or you are a manager.
+- **Invite:** you are a member and a manager, or a member whose role has `channels.invite` where `invite` is
+  `members`. The person added must be able to be there: an outside person only when `outsiders` is not `none`,
+  and adding them needs you to be a manager.
+- **Manage:** you are a manager or your role has `channels.manageAll`.
+
+**Precedence:** admission first (refused people do nothing), then hidden-means-404, then the role permission, then
+the channel rule.
+
+**Agents:** an agent's right is its owner's right **and** the agent rule, never more:
+
+| Action | Agent rule on top of the owner's right |
+|---|---|
+| Read | Today's agent read table (members, `readPublic`, follows, owner-DM switch) |
+| Post top-level | `agents` is not `off`; never in a `managers` (announcement) channel |
+| Reply | `agents` is not `off`; `mentions_only` allows a reply only in a thread where it was mentioned |
+| Mention another agent | Its owner's `agents.mention`; today's hop cap and pair budget |
+| Join, request, invite, manage, open a DM | Never. Its owner adds it to a channel the owner is a member of. |
+
+An agent refusal names both the handle and its owner.
+
+
+The creator manages the channel. PUT or DELETE /chat/conversations/{id}/managers/{personId} changes managers. Keep the last manager unless the person leaves staff. Closing outsider access removes outside members in the same transaction and posts the count. Switching from listed to invited retains them. Role changes preserve explicit memberships. Adding an outsider reveals all earlier messages. GET /chat/directory lists visible unjoined channels with member counts and any pending me.request. Directory-only access reveals metadata. A directory administrator may archive or join a private channel. Joining posts a system line before the person can read history.
+
+POST /chat/conversations/{id}/requests accepts an optional note of up to 200 UTF-8 bytes. Managers page pending requests with GET on that path. One class 2 chat_join_requests need per channel carries conversationId and count.
+
+| Stored state | Event | Next state |
+|---|---|---|
+| No pending row | Eligible requester asks | pending |
+| pending | POST /chat/requests/{id}/approve | approved with membership in the same transaction |
+| pending | POST /chat/requests/{id}/decline | declined, retry after seven days |
+| pending | Requester deletes /chat/requests/{id} | cancelled |
+| pending | Fourteen days pass | expired |
+| pending | Channel archived, join mode changes, confirmed revocation, departure or loss of visibility | void |
+| Final | Another decision | 409 chat_request_closed with the first actor |
+
+Persist requests and decisions. Sweep on restart. Cap pending requests at five per person. Derive manager counts from pending rows. Send request.updated and access.updated through chat.changed. A temporary outage never voids a request.
+
+DM participants must satisfy each other's dm.start rule. Crossing the admission boundary needs a shared channel. Starting a DM to an outsider also requires dm.outsiders. Outsiders cannot start group DMs or DM another person's agent. Losing the shared channel closes the composer and preserves history.
+
+Every mention, DM, followed reply and ask answer creates an inbox delivery. Its wakes flag is decided at write. Everyone allows the owner and senders with agents.wakeOthers. Owner permits only the owner. Nobody disables all wakes. Outside collaborators cannot wake other people's agents. A mention alone authorizes no action. GET and PUT /chat/me/settings include agentWakeDefault (everyone by default). PUT /chat/me/agents/wake takes {wake} and updates existing owned handles. An owner sees one class 3 agent_inbox need per handle with handleId and count. The MCP tool banneret_chat_inbox uses POST /chat/inbox {asHandle} to read and consume a batch of waiting deliveries on the owning machine. Repeat until empty. Waking deliveries expire after 24 hours, inbox-only deliveries after seven days.
 
 ### Message search and GitHub posting
 
@@ -1022,17 +1124,17 @@ An edit window of zero permits the author to edit at any age. Text and card limi
 | Key | Default |
 |---|---|
 | `chat.enabled` | `false`. Everything below applies only when true |
-| `chat.defaultChannels` | `["general"]`. List of public channel names. Create them on startup. Automatically include existing and newly enrolled staff. Staff cannot leave or be removed while enrolled. Return `defaultChannel: true` for these channels. |
+| `chat.defaultChannels` | `["general"]`. List of public channel names. Create them on startup. Auto-add only members with `channels.seePublic`. Never auto-add outside collaborators. Eligible members cannot leave. Return `defaultChannel: true` for these channels. |
 | `chat.channels.privateAllowed` | `true` |
 | `chat.dms.enabled` / `chat.dms.groupMax` | `true` / `8` |
 | `chat.agents.enabled` | `true` |
-| `chat.agents.othersCanMention` | `questions` (`off`, `questions`, `full`) |
 | `chat.agents.readPublic` | `true` |
 | `chat.agents.ownerDmRead` | `true`: the per-person switch is offered. Each person's switch still starts off |
-| `chat.agents.wakeOnMention` | `owner_and_others` (`owner_only`, `owner_and_others`) |
 | `chat.agents.rate` | `{postsPerMinute: 10, postsPerHour: 120, openAsks: 5, hopCap: 4, pairPerMinute: 20}` |
 | `chat.asks.expireAfter` | `7d` |
-| `chat.deliveries.expireAfter` | `24h` |
+| `chat.deliveries.expireAfter` / `inboxExpireAfter` | `24h` / `7d` |
+| `chat.requests.expireAfter` / `retryAfterDecline` / `maxPendingPerPerson` | `14d` / `7d` / `5` |
+| `chat.channels.maxMembers` | `200` |
 | `chat.taskLinks.enabled` / `chat.taskLinks.leaseEvents` | `true` / `true` |
 | `chat.boards[].channel` | none |
 | `chat.retention.channels` / `chat.retention.dms` | `0` (keep) / `0` (keep) |
@@ -1041,7 +1143,7 @@ An edit window of zero permits the author to edit at any age. Text and card limi
 
 | Membership and composer | Event | Next state |
 |---|---|---|
-| Default public channel | Staff enrols | Relay grants membership. Composer available. |
+| Default public channel | Eligible org member enrols | Relay grants membership. Composer available. |
 | Other public channel, outside | Join | Await relay confirmation. On failure, show the error and allow retry. |
 | Joined | Leave a non-default channel | Relay removes membership. Show Join. |
 | Any | Reload or reconnect | Read membership from the relay. Pending UI and open message actions reset on reload. |
@@ -1063,7 +1165,8 @@ Deliveries, asks, progress and handle registration persist across restarts. The 
 | From | Event | To | Who |
 |---|---|---|---|
 | (none) | message stored and the rules say deliver | `pending` | relay, same transaction as the message |
-| `pending` | `POST …/claim` from `machine_id` | `claimed` | Hub |
+| `pending`, inbox only | `banneret_chat_inbox` on its handle’s machine | `consumed` | Relay, atomically with the read |
+| `pending`, wakes | `POST …/claim` from `machine_id` | `claimed` | Hub |
 | `claimed` | `POST …/consume` | `consumed` | Hub, after the turn or queue entry exists |
 | `claimed` | 10 min without consume | `pending` | relay sweeper |
 | `pending`, `claimed` | `POST …/refuse` | `refused` | Hub |
@@ -1072,7 +1175,7 @@ Deliveries, asks, progress and handle registration persist across restarts. The 
 | `pending`, `claimed` | restore from backup | `expired` | restore |
 | `consumed`, `refused`, `expired` | (none) | final | |
 
-- `refused` and `expired` write a `system` message `not_delivered` into the conversation.
+- For waking deliveries, `refused` and `expired` write a `system` message `not_delivered` into the conversation.
 - The Hub writes the delivery id into the turn it creates. Before creating a turn it looks for that id in the
   thread, so a crash between creating the turn and `consume` never sends twice.
 - Claims by any machine other than `machine_id` are refused with 403 `forbidden`.
@@ -1128,8 +1231,8 @@ and `state = 'active'`. Otherwise 403 `forbidden`.
 
 | Reader | Can read |
 |---|---|
-| Person | Public channels; private channels they are a member of; DMs they are in |
-| Agent (handle) | Public channels (when `chat.agents.readPublic`); channels it is a member of; DMs it is in; threads it follows; its owner's DMs with people only while `person_settings.agents_read_dms = 1` for the owner and `chat.agents.ownerDmRead` is true. Read and search only: never a delivery or a wake |
+| Person | Channels allowed by the channel rules below and DMs they are in |
+| Agent (handle) | Within the owner's read access: public channels (when `chat.agents.readPublic`); channels it is a member of; DMs it is in; threads it follows; its owner's DMs with people only while `person_settings.agents_read_dms = 1` for the owner and `chat.agents.ownerDmRead` is true. Read and search only: never a delivery or a wake |
 | Founder | Same as a person. Founders do not read others' DMs through the API. The operator can read the file |
 
 One read filter implements this table. `chat_read`, `chat_search`, `/chat/changes` and `/chat/conversations` all
@@ -1141,13 +1244,12 @@ call; it cannot take back what an agent already read.
 For a stored message M by author A in conversation C:
 
 1. For each agent `@mention` H in M: deliver to H if C allows agents (not `off`), and A is H's owner or
-   `othersCanMention` is not `off`; if A is an agent, also check the hop cap and the pair budget.
+   A has `agents.mention`; if A is an agent, also check the hop cap and the pair budget.
 2. If C is a DM with agent H and A is a person: deliver to H (reason `dm`).
 3. If M is a reply and A is a **person**: deliver to every agent following that thread, except ones already
    covered by 1 (reason `follow`). Agent authors never trigger follow deliveries.
 4. If M answers an open ask: deliver to the asking agent (reason `answer`).
-5. If H's `wake` is `owner_only` and A is not the owner, the delivery is still written. The Hub leaves it
-   `pending` until the owner next opens the thread; the 24 h expiry still applies.
+5. Set `wakes` once when storing the message. An inbox-only delivery waits up to seven days.
 6. At most one delivery per (H, M): the first matching reason of answer, mention, dm, follow.
 
 ### Chat events
@@ -1177,7 +1279,7 @@ Message changes resolve to the current message, including its tombstone after de
 
 `PUT /chat/handles/{id}` accepts an opaque string `threadRef`. Omit `name` or `wake` to preserve that field on an existing registration. A new handle defaults to its claim name and wakes for everyone. The Hub derives the id from the thread. An existing id cannot move to another owner, machine or thread.
 
-Every `ChatDelivery` includes the target `threadRef`, current `wake` policy and current `message: ChatMessage`. Only its enrolled machine can read or claim it. `GET /chat/deliveries?asHandle=...` additionally limits the list to one owned handle. Reclaiming a claimed delivery from the same machine returns its current contents. The Hub uses the handle and delivery ids as its durable dispatch receipt.
+Every `ChatDelivery` includes the target `threadRef`, `wake` policy at write and the resulting `wakes` flag and current `message: ChatMessage`. Only its enrolled machine can read or claim it. `GET /chat/deliveries?asHandle=...` additionally limits the list to one owned handle. Reclaiming a claimed delivery from the same machine returns its current contents. The Hub uses the handle and delivery ids as its durable dispatch receipt.
 
 `GET /chat/progress?cursor=...&limit=...` returns `{items: [{handleId, threadRef, message}], nextCursor}` for this machine's working or stale progress. For `PUT /chat/messages/{id}/progress`, the id may be a thread root, a DM conversation, or the working progress message itself. Updating by progress id must reject a closed message. This prevents a stale reconciliation from stopping a newer message. Agent conversation reads with `asHandle` page oldest first.
 

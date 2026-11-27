@@ -23,7 +23,6 @@ import {
   peerUpdateMessage,
   remoteUrlsOf,
   revokedMessage,
-  roleLabel,
   wizardStep,
 } from "./enterprise.logic";
 
@@ -50,7 +49,13 @@ const joined = (overrides: Partial<BanneretEnrolmentView> = {}): BanneretEnrolme
   displayName: "Example Company",
   machineId: "m_1",
   label: "Ada laptop",
-  me: { login: "ada-example", role: "founder" },
+  me: {
+    login: "ada-example",
+    id: "p_me",
+    permissions: ["relay.admin"],
+    role: { id: "founder", name: "Founder" },
+    admission: "member" as const,
+  },
   ...overrides,
 });
 
@@ -200,9 +205,31 @@ describe("enrolmentLine", () => {
     [{ state: "awaiting_approval" }, "warn", "Waiting for a founder to approve"],
     [{ state: "approved" }, "muted", "Finishing setup…"],
     [{ health: "healthy" }, "ok", "Signed in as ada-example \u00b7 Founder"],
-    [{ health: "healthy", me: { login: " ", role: "founder" } }, "ok", "Connected \u00b7 Founder"],
     [
-      { health: "healthy", me: { login: "ada-example", role: "" } },
+      {
+        health: "healthy",
+        me: {
+          login: " ",
+          id: "p_me",
+          permissions: ["relay.admin"],
+          role: { id: "founder", name: "Founder" },
+          admission: "member" as const,
+        },
+      },
+      "ok",
+      "Connected \u00b7 Founder",
+    ],
+    [
+      {
+        health: "healthy",
+        me: {
+          login: "ada-example",
+          id: "p_me",
+          permissions: [],
+          role: { id: "", name: "" },
+          admission: "member" as const,
+        },
+      },
       "ok",
       "Signed in as ada-example",
     ],
@@ -307,12 +334,6 @@ describe("helpers", () => {
     expect(countdown(undefined, now)).toBe("");
   });
 
-  it("treats unknown roles as limited staff", () => {
-    expect(roleLabel("founder")).toBe("Founder");
-    expect(roleLabel("limited_staff")).toBe("Staff");
-    expect(roleLabel("auditor")).toBe("Staff");
-  });
-
   it("shows unknown needs kinds as a generic row and skips unknown sections", () => {
     expect(needsItemLabel("mention")).toEqual({ label: "Mention", generic: false });
     expect(needsItemLabel("brand_new_kind")).toEqual({ label: "Item", generic: true });
@@ -364,19 +385,25 @@ describe("helpers", () => {
 
 describe("login copy", () => {
   it("names the person and role", () => {
-    expect(connectedLine({ login: "ada-example", role: "founder" })).toBe(
+    expect(connectedLine({ login: "ada-example", role: { name: "Founder" } })).toBe(
       "Signed in as ada-example \u00b7 Founder",
     );
   });
 
   it("drops an empty or whitespace login but keeps the role", () => {
-    expect(connectedLine({ login: "", role: "founder" })).toBe("Connected \u00b7 Founder");
-    expect(connectedLine({ login: "  \t", role: "staff" })).toBe("Connected \u00b7 Staff");
+    expect(connectedLine({ login: "", role: { name: "Founder" } })).toBe(
+      "Connected \u00b7 Founder",
+    );
+    expect(connectedLine({ login: "  \t", role: { name: "Staff" } })).toBe(
+      "Connected \u00b7 Staff",
+    );
   });
 
   it("drops a missing role", () => {
-    expect(connectedLine({ login: "ada-example", role: "" })).toBe("Signed in as ada-example");
-    expect(connectedLine({ login: "", role: "" })).toBe("Connected");
+    expect(connectedLine({ login: "ada-example", role: { name: "" } })).toBe(
+      "Signed in as ada-example",
+    );
+    expect(connectedLine({ login: "", role: { name: "" } })).toBe("Connected");
     expect(connectedLine(undefined)).toBe("Connected");
   });
 

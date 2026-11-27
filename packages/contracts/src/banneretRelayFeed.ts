@@ -1,3 +1,4 @@
+import { RoleRef, Admission } from "./banneretChat.ts";
 // Banneret Hub: Today, Needs you, the board, the map, the feed and one task from the company relay
 // (docs/banneret/relay-v1). The server makes every relay call and reshapes the answers into the
 // views below; clients never see the token or key. Relay failures are data, not errors, so a screen
@@ -38,6 +39,9 @@ export const BanneretFeedTask = Schema.Struct({
 
 /** `kind` is an open set; an unknown kind is shown as a generic item. */
 export const BanneretFeedNeedsItem = Schema.Struct({
+  count: Schema.optional(Schema.Int),
+  conversationId: Schema.optional(Schema.String),
+  handleId: Schema.optional(Schema.String),
   ask: Schema.optional(ChatAsk),
   chatRead: Schema.optional(ChatRead),
   id: Schema.String,
@@ -227,7 +231,9 @@ export const BanneretPrRules = Schema.Struct({
       stale: Schema.Boolean,
     }),
   ),
-  canApprove: Schema.Array(ApprovalPerson),
+  canApprove: Schema.Array(
+    Schema.Struct({ id: Schema.optional(Schema.String), login: Schema.String }),
+  ),
   youCanApprove: Schema.Boolean,
 });
 export const BanneretBoardPr = Schema.Struct({
@@ -503,7 +509,8 @@ export const OfficeDirectory = Schema.Struct({
     Schema.Struct({
       id: Schema.String,
       login: Schema.String,
-      role: Schema.String,
+      role: RoleRef,
+      admission: Admission,
       displayName: Schema.optional(Schema.String),
       presence: Schema.Literals(["available", "focusing", "away", "off"]),
       status: Schema.optional(Schema.Struct({ text: Schema.String })),
@@ -520,8 +527,8 @@ export type OfficeSummary = typeof OfficeSummary.Type;
 export const BanneretTeamPerson = Schema.Struct({
   id: Schema.String,
   login: Schema.String,
-  /** Open: `founder`, `limited_staff`. */
-  role: Schema.String,
+  role: RoleRef,
+  admission: Admission,
   machines: Schema.Array(BanneretTeamMachine),
   sessions: Schema.Array(BanneretTeamSession),
 });

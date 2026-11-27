@@ -1,6 +1,5 @@
 import type { BanneretTeam, BanneretTeamPerson } from "@t3tools/contracts";
 import { matchesText } from "./boards.logic";
-import { roleLabel } from "./enterprise.logic";
 
 export function nameRank(login: string, query: string) {
   const name = login.toLowerCase();
@@ -19,7 +18,7 @@ export function searchPeople(
     .filter((person) =>
       matchesText(query, [
         person.login,
-        roleLabel(person.role),
+        person.role.name,
         ...person.machines.map((machine) => machine.label),
       ]),
     )

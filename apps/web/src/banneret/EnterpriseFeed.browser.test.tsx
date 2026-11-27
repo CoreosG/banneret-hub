@@ -70,7 +70,13 @@ const configured: BanneretEnrolmentView = {
   displayName: "Example Company",
   machineId: "m_1",
   label: "Ada laptop",
-  me: { login: "ada-example", role: "founder" },
+  me: {
+    login: "ada-example",
+    id: "p_me",
+    permissions: ["relay.admin"],
+    role: { id: "founder", name: "Founder" },
+    admission: "member" as const,
+  },
 };
 
 const item = (

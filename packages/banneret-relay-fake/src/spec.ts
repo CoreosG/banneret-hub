@@ -14,6 +14,16 @@ export const specDirectory = NodeURL.fileURLToPath(
 const specUrl = "https://relay-v1.invalid/openapi.json";
 
 export type SchemaName =
+  | "RoleWrite"
+  | "RoleDetail"
+  | "Roles"
+  | "RoleAssignment"
+  | "RolesChangedEvent"
+  | "ChatRequestInput"
+  | "ChatJoinRequest"
+  | "ChatJoinRequests"
+  | "ChatWakeSetting"
+  | "ChatMembership"
   | "ChatPerson"
   | "ChatMember"
   | "ChatMe"
@@ -59,6 +69,7 @@ export type SchemaName =
   | "EnrolStartRequest"
   | "EnrolStartResponse"
   | "EnrolPollRequest"
+  | "PoolPollResponse"
   | "EnrolPollResponse"
   | "FactsRequest"
   | "FactsResponse"
@@ -221,6 +232,10 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "chat-register.json": "ChatRegister",
   "chat-dm.json": "ChatConversation",
   "chat-ask-needs.json": "NeedsPage",
+  "outside-pending.json": "Error",
+  "outside-revoked.json": "Error",
+  "role-detail.json": "RoleDetail",
+  "chat-join-request.json": "ChatJoinRequest",
   "chat-act.json": "ChatAct",
   "chat-refuse.json": "ChatRefuse",
   "chat-promotion.json": "ChatPromotion",

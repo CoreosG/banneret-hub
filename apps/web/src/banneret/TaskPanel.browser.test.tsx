@@ -61,7 +61,13 @@ const founder: BanneretEnrolmentView = {
   workspaceId: "ent-0123456789abcdef",
   relayOrigin: "https://relay.example.com",
   displayName: "Example Company",
-  me: { login: "ada-example", role: "founder" },
+  me: {
+    login: "ada-example",
+    id: "p_me",
+    permissions: ["relay.admin"],
+    role: { id: "founder", name: "Founder" },
+    admission: "member" as const,
+  },
 };
 
 const ref = (key: string, tracker = "github") => ({
@@ -515,7 +521,16 @@ describe("Task tab", () => {
 
   it("gives staff no sign-off link", async () => {
     const { emit, read } = setup({
-      enrolment: { ...founder, me: { login: "bo-example", role: "limited_staff" } },
+      enrolment: {
+        ...founder,
+        me: {
+          login: "bo-example",
+          id: "p_me",
+          permissions: [],
+          role: { id: "staff", name: "Staff" },
+          admission: "member" as const,
+        },
+      },
     });
     const shown = card("3", "Profile blocks", { status: "built" });
     read.mockResolvedValue(found(shown));

@@ -29,34 +29,27 @@ export interface AgentRelay {
   readonly relayOrigin: string;
   readonly company: string;
   /** The person the relay knows this machine as; every lease write is checked against it. */
-  readonly me: { readonly login: string; readonly role: string };
+  readonly me: { readonly login: string; readonly permissions: readonly string[] };
   readonly projectId: ProjectId;
 }
 
 /** Every tools/list asks once per agent tool, so the offer is kept this long per thread. */
 const OFFER_TTL = Duration.seconds(15);
 
-const ROLE_RANK: Readonly<Record<string, number>> = { limited_staff: 0, founder: 1 };
-
-/**
- * Whether a person may call a tool named for `toolRole`, the lowest role that may. Roles are an open set: a
- * person's unknown role counts as `limited_staff`, and a tool's unknown role admits only that exact role.
- */
-const roleAllows = (toolRole: string, role: string) => {
-  const needed = ROLE_RANK[toolRole];
-  return needed === undefined ? toolRole === role : (ROLE_RANK[role] ?? 0) >= needed;
-};
-
 const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(BANNERET_AGENT_TOOLS);
 
-/** The agent tools the relay enables for this person: named in `mcpTools`, at or below their role. */
+/** The agent tools the relay enables for this person: named in `mcpTools`, with the required permission. */
 export const offeredTools = (
   mcpTools: ReadonlyArray<RelayMcpTool>,
-  role: string,
+  permissions: readonly string[],
 ): ReadonlySet<string> =>
   new Set(
     mcpTools
-      .filter((tool) => AGENT_TOOL_NAMES.has(tool.name) && roleAllows(tool.role, role))
+      .filter(
+        (tool) =>
+          AGENT_TOOL_NAMES.has(tool.name) &&
+          (!tool.requires || permissions.includes(tool.requires)),
+      )
       .map((tool) => tool.name),
   );
 
@@ -139,7 +132,7 @@ export const layer = Layer.effect(
         const relay = yield* forThread(threadId);
         if (relay === null) return new Set<string>();
         const tools = yield* feed.mcpTools(relay.relayOrigin);
-        return tools === null ? new Set<string>() : offeredTools(tools, relay.me.role);
+        return tools === null ? new Set<string>() : offeredTools(tools, relay.me.permissions);
       },
       // A failed offer must hide the tools, never fail the list request that asked.
       Effect.catchCause((cause) =>
@@ -169,7 +162,7 @@ export const layer = Layer.effect(
           workspace.projectKeys.toSorted(),
           view.state,
           view.me?.login ?? null,
-          view.me?.role ?? null,
+          view.me?.permissions ?? null,
           joined ? yield* feed.mcpTools(view.relayOrigin) : null,
         ]);
       }

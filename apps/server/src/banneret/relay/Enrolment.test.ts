@@ -214,7 +214,11 @@ describe("BanneretEnrolment", () => {
               "approved",
             );
             const configured = yield* waitForState("configured");
-            expect(configured.me).toEqual({ login: "ada-example", role: "founder" });
+            expect(configured.me).toMatchObject({
+              login: "ada-example",
+              role: { id: "founder" },
+              admission: "member",
+            });
             expect(configured.label).toBe("Ada laptop");
             yield* waitFor(status, (view) => view.health === "healthy");
 
@@ -292,7 +296,11 @@ describe("BanneretEnrolment", () => {
         );
         expect(fake.approvePairing(yield* pairingId)).toBe("approved");
         const configured = yield* waitForState("configured");
-        expect(configured.me).toEqual({ login: "new-person", role: "limited_staff" });
+        expect(configured.me).toMatchObject({
+          login: "new-person",
+          role: { id: "staff" },
+          admission: "member",
+        });
       }).pipe(onFreshHub()),
     ),
   );
@@ -726,7 +734,7 @@ describe("BanneretEnrolment", () => {
   it.live("refuses staff meeting edits before contacting the relay", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {
-        yield* join(fake, relay, { login: "staff-example", role: "limited_staff" });
+        yield* join(fake, relay, { login: "staff-example", role: "staff" });
         const office = (yield* (yield* Enrolment.BanneretEnrolment).relay(focus.origin))!;
         expect(
           Exit.isFailure(

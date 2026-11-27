@@ -185,7 +185,13 @@ function setup(options: { issues?: boolean; localRepo?: boolean; server?: Linked
     relayOrigin: "https://relay.example.com",
     displayName: "Example Company",
     label: "desk",
-    me: { login: ME, role: "staff" },
+    me: {
+      login: ME,
+      id: "p_me",
+      permissions: [],
+      role: { id: "staff", name: "Staff" },
+      admission: "member" as const,
+    },
   });
   const issues = options.issues !== false;
   const server = options.server;
@@ -196,7 +202,13 @@ function setup(options: { issues?: boolean; localRepo?: boolean; server?: Linked
       relayOrigin: "https://relay.example.com",
       displayName: "Example Company",
       label: "dev-server",
-      me: { login: server.me, role: "staff" },
+      me: {
+        login: server.me,
+        id: "p_me",
+        permissions: [],
+        role: { id: "staff", name: "Staff" },
+        admission: "member" as const,
+      },
     });
   } else if (server !== undefined) {
     // It answered: no relay joined.

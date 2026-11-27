@@ -1,0 +1,11 @@
+{
+  "id": "r_1",
+  "conversationId": "c_launch",
+  "requester": {
+    "id": "p_1",
+    "login": "rosa"
+  },
+  "note": "Helping with release",
+  "state": "pending",
+  "createdAt": "2026-11-27T12:00:00Z"
+}
