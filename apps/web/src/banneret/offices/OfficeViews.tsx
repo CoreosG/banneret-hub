@@ -1,15 +1,15 @@
-import { AgentDetails, Hallway, MachineHeard } from "./AgentDetails";
 import { MeetingEditor, PresenceForm, SharingForm } from "./OfficeSettings";
 import { Meeting } from "./Meeting";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import * as Schema from "effect/Schema";
-import { MachineResources, usePoolResources } from "../ui/MachineResources";
-import type {
-  PoolResources,
-  BanneretTeam,
-  BanneretBoardEntry,
-  OfficeSummary,
+import { usePoolResources } from "../ui/MachineResources";
+import {
+  allBoardCards,
+  type PoolResources,
+  type BanneretTeam,
+  type BanneretBoardEntry,
+  type OfficeSummary,
 } from "@t3tools/contracts";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { drawSprite, personForLogin, spriteSize } from "./sprites";
@@ -20,8 +20,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { useUrlSearch } from "../useUrlSearch";
 import { rememberFilters } from "../filterMemory";
 import { FilterBox } from "../ui/FilterBox";
-import { LeaseChip } from "../ui/Chips";
-import { toneProps } from "../ui/tokens";
+import { AgentCounts, Claims, DeskDetails, labels, states } from "./DeskDetails";
 import { QuietLine } from "../ui/QuietLine";
 import { groupBy } from "effect/Array";
 import {
@@ -31,7 +30,6 @@ import {
   useAgentPage,
   type AgentIndex,
 } from "./agentIndex";
-import { useOpenTask } from "../useOpenTask";
 
 const TeamOffice = lazy(() => import("./office/TeamOffice"));
 
@@ -39,14 +37,6 @@ type Person = BanneretTeam["people"][number];
 type Office = NonNullable<BanneretTeam["office"]>;
 type Counts = OfficeSummary["hallway"]["counts"];
 type Props = { enterprise: EnterpriseFeed; people: readonly Person[]; office: Office };
-const labels = {
-  working: "Working",
-  waiting: "Waiting",
-  idle: "Idle",
-  notHeardFrom: "Not heard from",
-  stopped: "Stopped",
-};
-const states = Object.keys(labels) as (keyof Counts)[];
 const countText = (counts?: Counts) =>
   states
     .filter((k) => counts?.[k])
@@ -80,61 +70,6 @@ function PersonSprite({ login }: { login: string }) {
   );
 }
 
-function SharedMachine({
-  machine,
-  owner,
-  target,
-  pool,
-  visible,
-}: {
-  machine: Person["machines"][number];
-  owner: string;
-  target: RelayTarget;
-  pool: PoolResources | null;
-  visible: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <details
-      className="text-xs text-muted-foreground"
-      onToggle={(e) => setExpanded(e.currentTarget.open)}
-    >
-      <summary className="cursor-pointer">{machine.label}</summary>
-      {expanded && visible && machine.lastHeardAt && <MachineHeard at={machine.lastHeardAt} />}
-      {expanded && visible && (
-        <MachineResources
-          target={target}
-          machineId={machine.id}
-          hostId={machine.poolHostId}
-          owner={owner}
-          pool={pool}
-        />
-      )}
-    </details>
-  );
-}
-function AgentCounts({ counts }: { counts: Counts | undefined }) {
-  return (
-    <span className="inline-flex flex-wrap gap-1">
-      {states
-        .filter((k) => counts?.[k])
-        .map((k) => (
-          <span
-            key={k}
-            className="rounded-full px-2 py-0.5 text-xs"
-            {...toneProps(
-              k === "waiting" ? "warn" : k === "working" ? "ok" : "muted",
-              "tint",
-              "fg",
-            )}
-          >
-            {counts?.[k]} {labels[k].toLowerCase()}
-          </span>
-        ))}
-    </span>
-  );
-}
-
 function Select({
   label,
   selected,
@@ -162,6 +97,69 @@ function Select({
         </option>
       ))}
     </select>
+  );
+}
+
+function Hallway({
+  target,
+  revision,
+  people,
+  index,
+  hasBoardDesk,
+  pool,
+  flags,
+}: {
+  people: readonly Person[];
+  index: AgentIndex;
+  hasBoardDesk: (p: Person) => boolean;
+  pool: PoolResources | null;
+  flags: readonly string[];
+  target: RelayTarget;
+  revision: string | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const { sessions, retry } = useRoomSessions(target, null, revision, open);
+  const indexState = useAgentIndex(index);
+  const owned = groupBy(sessions ?? [], (s) => s.personId);
+  const desks = open ? people.filter((p) => Object.hasOwn(owned, p.id) || !hasBoardDesk(p)) : [];
+  useAgentPage(
+    index,
+    open &&
+      (desks.slice(0, 12).some((p) => needsAgent(indexState, p.id)) ||
+        (desks.length < 12 && people.some((p) => needsAgent(indexState, p.id)))),
+  );
+  return (
+    <details className="rounded-lg border p-3" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>Hallway</summary>
+      {open &&
+        (sessions ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {desks.slice(0, 12).map((p) => (
+              <article
+                key={p.id}
+                data-person={p.login}
+                className="min-w-0 space-y-1 rounded-md border p-3 text-sm"
+              >
+                <DeskDetails
+                  p={p}
+                  counts={indexState.byPerson.get(p.id)?.counts}
+                  agents={Object.hasOwn(owned, p.id) ? owned[p.id]! : []}
+                  cards={[]}
+                  flags={flags}
+                  pool={pool}
+                  target={target}
+                  visible
+                />
+              </article>
+            ))}
+            {desks.length > 12 && <p>{desks.length - 12} more</p>}
+          </div>
+        ) : sessions === null ? (
+          <button onClick={retry}>Retry hallway</button>
+        ) : (
+          "Loading agents…"
+        ))}
+    </details>
   );
 }
 
@@ -198,7 +196,7 @@ function Room({
   const [visible, show] = useState(false);
   const { sessions, retry } = useRoomSessions(target, room.board, revision, open && visible);
   const indexState = useAgentIndex(index);
-  const openTask = useOpenTask(target);
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribe to the scroll viewport
   useEffect(() => {
     const node = ref.current;
@@ -279,45 +277,7 @@ function Room({
                     className="min-w-0 space-y-1 rounded-md border p-3 text-sm"
                   >
                     {seated && <PersonSprite login={p.login} />}
-                    <strong>{p.displayName ?? p.login}</strong>
-                    {flags.includes("presence") && (
-                      <span className="ml-2 text-muted-foreground">{p.presence}</span>
-                    )}
-                    {flags.includes("status") && p.status && <p>{p.status.text}</p>}
-                    <div className="my-1">
-                      <AgentCounts counts={counts} />
-                    </div>
-                    {agents.map((session) => (
-                      <AgentDetails key={session.id} session={session} target={target} />
-                    ))}
-                    {p.machines.map((m) => (
-                      <SharedMachine
-                        key={m.id}
-                        machine={m}
-                        owner={p.login}
-                        target={target}
-                        visible={visible}
-                        pool={pool}
-                      />
-                    ))}
-                    {cards.map((card) => (
-                      <button
-                        key={card.task.id}
-                        className="flex items-center gap-1 hover:underline"
-                        onClick={() => openTask(card.task)}
-                      >
-                        {card.task.title}
-                        <LeaseChip
-                          holder={card.lease!.claim ?? p.login + "/private"}
-                          state={
-                            ["active", "paused"].includes(card.lease!.state)
-                              ? card.lease!.state
-                              : "stale"
-                          }
-                          staleAt={card.lease!.staleAt}
-                        />
-                      </button>
-                    ))}
+                    <DeskDetails {...{ p, counts, agents, cards, flags, target, visible, pool }} />
                   </article>
                 ))}
               </div>
@@ -350,11 +310,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
   const [preferred, rememberView] = useLocalStorage(preferenceKey, "", Schema.String);
   const list = raw.view === "list" || (!raw.view && (!!raw.person || preferred === "List"));
   const showOffice =
-    raw.view === "office" ||
-    (!raw.view &&
-      !raw.person &&
-      !simple &&
-      (preferred === "Office" || (!preferred && office.preset === "company")));
+    raw.view === "office" || (!raw.view && !raw.person && !simple && preferred === "Office");
   const selection = JSON.stringify(filters);
   const [position, scroll] = useState({ selection, start: 0 });
   const start = position.selection === selection ? position.start : 0;
@@ -376,6 +332,12 @@ export function OfficeViews({ enterprise, office, people }: Props) {
       c.lease ? [{ board: b.id, login: c.lease.holder.login }] : [],
     ),
   );
+  const cardsByLogin = groupBy(
+    allBoardCards(enterprise.feed.board?.value).filter((c) => c.lease),
+    (c) => c.lease!.holder.login,
+  );
+  const cardsFor = (login: string) =>
+    Object.hasOwn(cardsByLogin, login) ? cardsByLogin[login]! : [];
   const candidates = people.filter(
     (p) =>
       (!filters.presence || p.presence === filters.presence) &&
@@ -409,6 +371,8 @@ export function OfficeViews({ enterprise, office, people }: Props) {
       ? p.seatBoard
       : summary.rooms.find((r) => has(r.board))?.board;
   }
+  const hasBoardDesk = (p: Person) =>
+    summary.rooms.some((r) => hasDesk(p, r.board)) || unresolved(p);
   const roomList = summary.rooms.filter(
     (r) =>
       (!filters.board || r.board === filters.board) &&
@@ -493,6 +457,10 @@ export function OfficeViews({ enterprise, office, people }: Props) {
       ) : showOffice ? (
         <Suspense fallback={<p>Loading office…</p>}>
           <TeamOffice
+            pool={pool}
+            index={index}
+            cardsFor={cardsFor}
+            dms={enterprise.feed.chatFlags?.includes("dms") ?? false}
             viewer={me?.login}
             target={enterprise.target}
             office={office}
@@ -501,7 +469,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
             people={filters.state ? matches : candidates}
             seatFor={seatFor}
             hallway={!filters.board && !filters.state}
-            hasBoardDesk={(p) => summary.rooms.some((r) => hasDesk(p, r.board)) || unresolved(p)}
+            hasBoardDesk={hasBoardDesk}
             openList={(board) => set({ view: "list", board }, { replace: true })}
           />
         </Suspense>
@@ -528,6 +496,9 @@ export function OfficeViews({ enterprise, office, people }: Props) {
                 <strong>{p.displayName ?? p.login}</strong>
                 {flags.includes("presence") && p.presence}
                 {flags.includes("status") && <span className="truncate">{p.status?.text}</span>}
+                <div className="flex min-w-0 gap-2 overflow-x-auto">
+                  <Claims cards={cardsFor(p.login)} login={p.login} target={enterprise.target} />
+                </div>
                 <span className="ml-auto">
                   <AgentCounts counts={byPerson.get(p.id)?.counts} />
                 </span>
@@ -538,7 +509,14 @@ export function OfficeViews({ enterprise, office, people }: Props) {
         </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-          <Hallway target={enterprise.target} revision={office.files["team.hallway"]} />
+          {!filters.board && !filters.state && (
+            <Hallway
+              people={candidates}
+              {...{ hasBoardDesk, index, pool, flags }}
+              target={enterprise.target}
+              revision={office.files["team.hallway"]}
+            />
+          )}
           {roomList.map((room) => (
             <Room
               founder={enterprise.enrolment.me?.role === "founder"}

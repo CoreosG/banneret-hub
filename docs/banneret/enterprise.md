@@ -207,7 +207,7 @@ makes the lead count as waiting. Claim chips say live, paused or quiet.
 Team version 2 supplies the same facts for the Office, Floor and List views. Each board is one room.
 Office draws visible rooms on demand. Drag to pan, use + or - to zoom, or explore the map with arrow keys.
 Enter opens a desk, robot or room and Escape returns to the map. Floor and List work with a screen reader.
-Company teams start in Office. Community teams, reduced motion and forced colours start in Floor.
+Teams start in Floor. Select Office to explore the map. Reduced motion and forced colours favour Floor.
 The view switch remembers your choice on this device.
 
 Expand **My office** in Office or choose **My presence** in the workspace
@@ -220,7 +220,7 @@ In **My office**, choose what to share from this machine. **Agents only** is the
 also shows the machine name. **Hidden** hides its agents and name. The preview updates before you
 save. Claims remain visible as `login/private` when the machine name is private. You can share a
 stopped agent's reason separately. Stopped agents stay in the office for one hour. Expand an agent
-or machine to see when the relay heard from it.
+to see when the relay heard from it.
 
 ### Search
 

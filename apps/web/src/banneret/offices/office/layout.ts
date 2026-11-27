@@ -12,6 +12,7 @@ export type Desk = {
   info: string;
 };
 export type Item = {
+  personId?: string;
   presence?: string | undefined;
   id: string;
   x: number;
@@ -52,7 +53,7 @@ export function layout(desks: readonly Desk[], detail: Detail, viewer?: string) 
         gx + 0.12,
         gy + 0.12,
         { kind: "object", name: "desk" },
-        { id: "desk/" + p.id, label: p.displayName ?? p.login, info, presence },
+        { personId: p.id, id: "desk/" + p.id, label: p.displayName ?? p.login, info, presence },
       );
       sessions.forEach((s, j) => {
         const name =
@@ -70,6 +71,7 @@ export function layout(desks: readonly Desk[], detail: Detail, viewer?: string) 
           gy + Math.floor(j / 3) * 0.32,
           { kind: "agent", name },
           {
+            personId: p.id,
             id: "agent/" + s.id,
             label: s.provider + " · " + s.state,
             info: [p.login, s.id, s.taskId].filter(Boolean).join(" · "),
