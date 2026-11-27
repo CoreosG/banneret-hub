@@ -623,6 +623,7 @@ describe("Task dialog facts", () => {
       "Opened",
       "Closed",
       "Pull requests",
+      "Merge approvals",
       "Stage",
       "Preview",
       "Rests on",
@@ -632,6 +633,7 @@ describe("Task dialog facts", () => {
       [...panel().querySelectorAll("dt")]
         .find((term) => term.textContent === label)
         ?.nextElementSibling?.querySelector("[data-fact-empty]")?.textContent;
+    expect(panel().textContent).toContain("#60 · Approval rules unavailable");
     expect(empty("Closed")).toBe("Still open");
     // The relay served no task read here, so it has not said whether there is a preview.
     expect(empty("Preview")).toBe("Not known");
