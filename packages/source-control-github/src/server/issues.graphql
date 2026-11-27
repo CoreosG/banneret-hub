@@ -94,6 +94,7 @@ query IssueDetail($owner: String!, $name: String!, $number: Int!) {
           }
           body
           createdAt
+          updatedAt
           url
           ...Reactions
         }
@@ -263,6 +264,7 @@ query IssueComments($owner: String!, $name: String!, $number: Int!, $cursor: Str
           }
           body
           createdAt
+          updatedAt
           url
           ...Reactions
         }

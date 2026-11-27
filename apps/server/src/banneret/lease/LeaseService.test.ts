@@ -82,13 +82,20 @@ const newTracker = (overrides: Partial<FakeTracker> = {}): FakeTracker => ({
 const addComment = (tracker: FakeTracker, author: string, body: string, ageSeconds = 0) =>
   addCommentAt(tracker, author, body, EPOCH - ageSeconds * 1000);
 
-const addCommentAt = (tracker: FakeTracker, author: string, body: string, atMs: number) => {
+const addCommentAt = (
+  tracker: FakeTracker,
+  author: string,
+  body: string,
+  atMs: number,
+  editedAfterMs = 0,
+) => {
   const id = tracker.nextId++;
   tracker.comments.push({
     id: `IC_node${id}`,
     author: { login: author, name: null, avatarUrl: null },
     body,
     createdAt: new Date(atMs).toISOString(),
+    updatedAt: new Date(atMs + editedAfterMs).toISOString(),
     url: `https://github.com/example-org/example-app/issues/7#issuecomment-${id}`,
   });
 };
@@ -237,6 +244,18 @@ describe("LeaseService take", () => {
     }),
   );
 
+  it.effect("ignores an edited claim: the task reads as free", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(EPOCH);
+      const tracker = newTracker();
+      addCommentAt(tracker, OTHER, `claim: ${OTHER}/hub`, EPOCH - 30_000, 5_000);
+      const service = yield* leases(tracker);
+      const read = yield* service.check(ref);
+      expect(read.lease).toBeNull();
+      expect(tracker.writes).toEqual([]);
+    }),
+  );
+
   it.effect("writes nothing when someone else holds it", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(EPOCH);
@@ -312,6 +331,7 @@ describe("LeaseService take", () => {
         author: { login: OTHER, name: null, avatarUrl: null },
         body: `claim: ${OTHER}/hub`,
         createdAt: at,
+        updatedAt: at,
         url: "https://github.com/example-org/example-app/issues/7#issuecomment-998",
       });
       tracker.comments.push({
@@ -319,6 +339,7 @@ describe("LeaseService take", () => {
         author: { login: ME, name: null, avatarUrl: null },
         body: `claim: ${ME}/hub`,
         createdAt: at,
+        updatedAt: at,
         url: "https://github.com/example-org/example-app/issues/7#issuecomment-1002",
       });
       tracker.assignees = [ME, OTHER];

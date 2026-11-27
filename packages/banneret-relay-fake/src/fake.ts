@@ -1987,10 +1987,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         throw new RelayError("malformed", "A comment has an author login and a body.");
       const at = entry.createdAt === undefined ? now : Date.parse(String(entry.createdAt));
       if (!Number.isFinite(at)) throw new RelayError("malformed", "createdAt must be a timestamp.");
+      const edited = entry.updatedAt === undefined ? at : Date.parse(String(entry.updatedAt));
+      if (!Number.isFinite(edited))
+        throw new RelayError("malformed", "updatedAt must be a timestamp.");
       return {
         id: entry.id === undefined ? String(1000 + offset + index) : String(entry.id),
         author: entry.author,
         createdAt: iso(at),
+        updatedAt: iso(edited),
         body: entry.body,
       };
     });
@@ -2391,6 +2395,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         task.tracker.comments = task.tracker.comments.map((comment) => ({
           ...comment,
           createdAt: iso(Date.parse(comment.createdAt) - shift),
+          updatedAt: iso(Date.parse(comment.updatedAt) - shift),
         }));
       }
       refreshAllHeads();

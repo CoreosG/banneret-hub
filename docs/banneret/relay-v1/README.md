@@ -450,6 +450,12 @@ More valid line 1 examples: `release: done`, `release: other · not needed after
 **Labels.** `claimed` is on the issue while it is held. `paused` is on the task's open draft pull request after a
 release, and the next take removes it. The relay reads `claimed`; `paused` is for people and agents.
 
+**Edited comments do not count.** On GitHub anyone with write access can edit another person's comment, so an
+edited `claim:` could be turned into a `release: done`. A `claim:` or `release:` comment whose `updated_at` is later
+than its `created_at` is ignored by the fold, as if it were not a protocol line: it starts no claim, ends none and
+counts as no release or withdrawal. The author must post a new comment. A comment that is not a protocol line is not
+affected. The Hub never edits its own protocol comments (see "How the Hub writes").
+
 **The fold.** Comments are read in order of `created_at`, then comment id. On GitHub the comment id is the numeric
 REST id (`databaseId`, the number in `#issuecomment-<id>`), compared as a number; never the GraphQL node id. Other
 trackers compare their ids as numbers when both are digits, otherwise as strings.
@@ -464,6 +470,9 @@ trackers compare their ids as numbers when both are digits, otherwise as strings
    author's claim. The system reasons are never accepted as a release reason from a comment, so they never set
    `lastRelease` and never make a feed entry.
 5. Everything else is ignored, including a release by someone who neither holds the lease nor is a founder.
+6. An extra assignee next to a consistent standing claim does not make the lease incomplete. For example, a conflict
+   loser who withdraws with `lost_claim` but is still assigned leaves the winner's lease `active`, as long as the
+   winner is assigned and `claimed` is on (fixture `loser-withdrawn-still-assigned-active`).
 
 **Settle window: 60 seconds.** A standing holder should be assigned and the issue should carry `claimed`. When no
 claim stands, nobody should be assigned and `claimed` should be off. `incomplete` means the protocol is plainly in
@@ -499,9 +508,9 @@ not an assignee: once someone is assigned, it reads false.
 written, and `reasonText` and `note` when present. Withdrawals make no entry.
 
 **Shared fold fixtures.** `fixtures/lease-fold/*.json` are cases of `{name, description, input{comments[{id, author,
-createdAt, body}], assignees, labels, founders, now}, expected{lease, lastRelease, releases}}`. `lease` is
+createdAt, updatedAt?, body}], assignees, labels, founders, now}, expected{lease, lastRelease, releases}}`. `lease` is
 `{holder, state, since, claimants}` (logins; `since` is null when no claim comment backs it) or null for free.
-`releases` lists every counted release in order, `{by, holder, at, reason, freeToContinue, reasonText?, note?}`,
+A comment without `updatedAt` was never edited: it equals `createdAt`. `releases` lists every counted release in order, `{by, holder, at, reason, freeToContinue, reasonText?, note?}`,
 with `freeToContinue` as written. Every reader of the protocol runs all of them: the Hub
 (`packages/contracts/src/leaseProtocol.ts`, run by the fake relay's tests) and the Go relay. Time-based states
 (`stale`, `expired`) are applied after the fold and are not in the fixtures.
@@ -513,6 +522,9 @@ Not part of the relay contract; it explains the states a relay sees. The Hub's `
 request API (GitHub's issue update resolves a number as an issue and refuses a pull request). It keeps one operation
 per task in memory and nothing on disk; every step reads the issue again before it writes.
 
+- **Comments are only created.** The Hub never edits or deletes a protocol comment it wrote, and its
+  `LeaseService` has no call that does. Because the fold ignores an edited comment, an edit would only erase the
+  record. It reads each comment's `updatedAt` from the tracker and passes it to the fold.
 - **Take:** read and fold, and stop unless the task is free and the person may comment, label and assign. Comment
   `claim: <login>/<agent>`. Assign the person and add `claimed` in one update, up to three tries; if all fail,
   comment `release: take_failed`. Wait 10 seconds, read again: the earliest claim wins. The winner removes `paused`

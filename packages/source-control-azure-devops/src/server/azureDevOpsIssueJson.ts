@@ -331,6 +331,7 @@ export function decodeCommentsJson(
           author: toActor(comment.value.createdBy),
           body: comment.value.text ?? "",
           createdAt: comment.value.createdDate,
+          updatedAt: comment.value.createdDate,
           url: null,
           reactions: toReactions(comment.value.reactions),
         },

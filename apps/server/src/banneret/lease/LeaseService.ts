@@ -138,6 +138,7 @@ export const make = Effect.fn("LeaseService.make")(function* (
         id: protocolCommentId(comment),
         author: comment.author?.login ?? null,
         createdAt: comment.createdAt,
+        updatedAt: comment.updatedAt,
         body: comment.body,
       })),
       assignees: detail.assignees.map((actor) => actor.login),

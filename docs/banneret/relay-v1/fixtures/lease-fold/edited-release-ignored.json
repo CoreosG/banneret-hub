@@ -1,0 +1,35 @@
+{
+  "name": "edited-release-ignored",
+  "description": "Ada's release was edited later (it may have been something else when she wrote it), so it does not count and her claim stands.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:20:00Z",
+        "body": "release: done",
+        "updatedAt": "2026-11-20T10:25:00Z"
+      }
+    ],
+    "assignees": ["ada-example"],
+    "labels": ["claimed"],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "ada-example",
+      "state": "active",
+      "since": "2026-11-20T10:01:00Z",
+      "claimants": ["ada-example"]
+    },
+    "lastRelease": null,
+    "releases": []
+  }
+}

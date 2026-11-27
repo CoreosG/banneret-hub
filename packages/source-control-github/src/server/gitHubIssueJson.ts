@@ -241,6 +241,7 @@ function toComments(
         author: toActor(comment.author),
         body: comment.body ?? "",
         createdAt: comment.createdAt,
+        updatedAt: comment.updatedAt,
         url: trimmed(comment.url),
         reactions: toReactions(comment.reactionGroups, viewer),
       },

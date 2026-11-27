@@ -1381,7 +1381,9 @@ components:
         `active`, `stale`, `expired`, `paused`, `conflict` and `incomplete` (README, "Lease protocol": the tracker's
         assignee and `claimed` label disagree with the claim comments for longer than the 60 s settle window). A relay
         that cannot read claims says so in the board's `notMeasured`, never as a lease state. A relay only reads:
-        every take, release and hand-off write comes from the Hub on the person's own login.
+        every take, release and hand-off write comes from the Hub on the person's own login. A `claim:` or `release:`
+        comment edited after it was written (`updated_at` later than `created_at`) counts for nothing (README, "Lease
+        protocol").
       type: object
       additionalProperties: false
       required: [holder, state, since, lastSignalAt, staleAt, expiresAt]
