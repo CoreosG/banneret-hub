@@ -326,7 +326,28 @@ type StagePlanSource =
       readonly since: number;
     };
 
+interface PrApprovals {
+  required: number;
+  have: number;
+  codeOwners: { required: boolean; owners: string[]; satisfiedBy?: PersonView[] };
+  lastPushApproval: boolean;
+  lastPushSatisfied: boolean;
+  stale: boolean;
+}
+const noApprovalRule: PrApprovals = {
+  required: 0,
+  have: 0,
+  codeOwners: { required: false, owners: [] },
+  lastPushApproval: false,
+  lastPushSatisfied: true,
+  stale: false,
+};
 interface LinkedPr {
+  readonly baseBranch: string;
+  readonly approvals: PrApprovals | null;
+  readonly author: string;
+  readonly candidates: string[];
+  readonly approvalOnly: boolean;
   readonly number: number;
   readonly state: string;
   readonly checks: string | null;
@@ -511,6 +532,8 @@ const NEEDS_CLASS: Readonly<Record<string, number>> = {
   thread_question: 1,
   thread_approval: 1,
   pull_request: 2,
+  pr_approval: 2,
+  waiting_for_approver: 2,
   promotion: 2,
   founder_question: 2,
   health: 2,
@@ -1096,11 +1119,52 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     notMeasured: [{ source, reason: "not_configured", since: iso(startedAt) }],
   });
 
+  const outstanding = (pr: LinkedPr) =>
+    pr.state === "open" &&
+    pr.approvals !== null &&
+    (pr.approvals.have < pr.approvals.required ||
+      (pr.approvals.codeOwners.required && !pr.approvals.codeOwners.satisfiedBy?.length) ||
+      (pr.approvals.lastPushApproval && !pr.approvals.lastPushSatisfied));
+  const candidates = (pr: LinkedPr) =>
+    outstanding(pr)
+      ? pr.candidates.flatMap((login) => {
+          const person = peopleByLogin.get(login);
+          return person && !person.removed && person.login !== pr.author
+            ? [{ id: person.id, login: person.login }]
+            : [];
+        })
+      : [];
+  const approvalNeeds = (viewer: Person) =>
+    boardTasks.flatMap((task) =>
+      task.prs.flatMap((pr) => {
+        if (
+          !outstanding(pr) ||
+          !pr.approvalOnly ||
+          pr.checks === "failing" ||
+          pr.checks === "pending"
+        )
+          return [];
+        const author = pr.author === viewer.login;
+        if (!author && !candidates(pr).some((p) => p.id === viewer.id)) return [];
+        const kind = author ? "waiting_for_approver" : "pr_approval";
+        return [
+          {
+            seq: pr.number,
+            id: sha256Hex(Buffer.from(JSON.stringify([kind, task.id, pr.number]))),
+            kind,
+            title: `#${pr.number} ${task.title}`.slice(0, 300),
+            url: prUrl(pr.number),
+            createdAt: iso(task.openedAt),
+          },
+        ];
+      }),
+    );
   const personalNeeds = (person: Person) => {
     const recipient = options.criticalRecipients?.includes(person.id) ?? person.role === "founder";
     const critical = recipient ? activeAlarms().filter((a) => a.severity === "critical") : [];
     return byUrgency([
       ...(needs.get(person.id) ?? []),
+      ...approvalNeeds(person),
       ...critical.map((a, seq) => ({
         seq,
         id: sha256Hex(Buffer.from(JSON.stringify([a.sourceId, a.id, a.firedAt]))),
@@ -1336,7 +1400,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         ? []
         : [task.holder];
 
-  const cardView = (task: BoardTask, index: number, now: number) => {
+  const cardView = (task: BoardTask, index: number, now: number, viewer?: Person) => {
     const lease = leaseOf(task, now);
     const lastRelease = lastReleaseOf(task, now);
     // A held task that is not active is in Stuck, never Free; a held task never sits in Free.
@@ -1366,23 +1430,30 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       ...(lease === undefined ? {} : { lease }),
       ...(lastRelease === undefined ? {} : { lastRelease }),
       assignees: assigneesOf(task),
-      prs: task.prs.map((pr) => ({
-        number: pr.number,
-        url: prUrl(pr.number),
-        state: pr.state,
-        ...(pr.checks === null ? {} : { checks: { state: pr.checks } }),
-      })),
+      prs: task.prs.map((pr) => {
+        const canApprove = candidates(pr);
+        return {
+          number: pr.number,
+          url: prUrl(pr.number),
+          state: pr.state,
+          baseBranch: pr.baseBranch,
+          approvals: pr.approvals,
+          canApprove,
+          youCanApprove: canApprove.some((p) => p.id === viewer?.id),
+          ...(pr.checks === null ? {} : { checks: { state: pr.checks } }),
+        };
+      }),
       restsOn: task.restsOn,
     };
   };
 
   // One file per board and the index with each board's counts, after every column rule. Task ids and keys stay
   // relay-wide: a card's index is its place in the whole seed, whichever board shows it.
-  const boardFiles = () => {
+  const boardFiles = (viewer: Person) => {
     const now = Date.now();
     const cards = boardTasks.map((task, index) => ({
       board: task.board,
-      card: cardView(task, index, now),
+      card: cardView(task, index, now, viewer),
     }));
     return boards.map((config) => {
       const own = cards.filter((entry) => entry.board === config.id).map((entry) => entry.card);
@@ -1542,8 +1613,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
 
   // README, Task: the card plus the preview and the sign-off record.
-  const taskView = (task: BoardTask, index: number) => ({
-    ...cardView(task, index, Date.now()),
+  const taskView = (task: BoardTask, index: number, viewer: Person) => ({
+    ...cardView(task, index, Date.now(), viewer),
     ...(task.preview === null ? {} : { preview: task.preview }),
     ...(task.checked === null
       ? {}
@@ -1704,7 +1775,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         },
       ],
       ...(() => {
-        const files = boardFiles();
+        const files = boardFiles(person);
         return [
           ["boards", "SnapshotBoards", { boards: files.map((board) => board.entry) }],
           ...files.map(
@@ -2256,7 +2327,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         : -1;
       const found = index < 0 ? undefined : boardTasks[index];
       if (found === undefined) throw new RelayError("not_found", "No such task.");
-      sendJson(response, 200, "TaskRead", taskView(found, index));
+      sendJson(response, 200, "TaskRead", taskView(found, index, caller.person));
       return;
     }
 
@@ -2511,7 +2582,17 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           const number = entry.number === undefined ? nextPr++ : Number(entry.number);
           if (!Number.isInteger(number) || number < 1)
             throw new RelayError("malformed", "A pull request number is a whole number from 1.");
+          const approvals = entry.approvals === undefined ? noApprovalRule : entry.approvals;
+          if (approvals !== null && spec.check("PrApprovals", approvals))
+            throw new RelayError("malformed", "Invalid PR approvals.");
           return {
+            baseBranch: String(entry.baseBranch ?? "main"),
+            approvals: approvals as PrApprovals | null,
+            candidates: Array.isArray(entry.canApprove)
+              ? [...new Set(entry.canApprove.map(String))]
+              : [],
+            author: String(entry.author ?? ""),
+            approvalOnly: entry.approvalOnly === true,
             number,
             state,
             checks: entry.checks === undefined ? null : String(entry.checks),
@@ -2695,25 +2776,23 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const task = boardTasks.find((candidate) => candidate.id === String(input.taskId));
       if (task === undefined) throw new RelayError("not_found", "No such task.");
       const by = String(input.by ?? "");
-      const reviewer = String(input.reviewer ?? "");
-      if (by === "" || reviewer === "")
-        throw new RelayError("malformed", "by and reviewer are person ids.");
+      if (by === "") throw new RelayError("malformed", "by must be a person id.");
       const checker = people.get(by);
       if (checker === undefined) throw new RelayError("not_found", "No such person for by.");
-      // README, Checked: identity is the stable id. The checker holds the sign-off role (founders here), and the
-      // reviewer is someone else. The merged head, the approval on it and the green checks are fixed by the
-      // seed, so only these two can fail.
-      const holdsRole = checker.role === "founder";
-      const ignoredReason = !holdsRole
-        ? `${checker.login} does not hold the sign-off role.`
-        : by === reviewer
-          ? "The person who checked it also approved the review."
-          : undefined;
+      const ignoredReason =
+        checker.role === "founder"
+          ? undefined
+          : `${checker.login} does not hold the sign-off role.`;
       const valid = ignoredReason === undefined;
       task.holder = null;
       task.prs = [
         {
           number: 100 + boardTasks.indexOf(task),
+          baseBranch: "main",
+          approvals: noApprovalRule,
+          candidates: [],
+          author: "",
+          approvalOnly: false,
           state: "merged",
           checks: "passing",
           mergedAt: Date.now(),

@@ -20,6 +20,20 @@
     {
       "number": 58,
       "url": "https://github.com/example-org/example-app/pull/58",
+      "baseBranch": "main",
+      "approvals": {
+        "required": 0,
+        "have": 0,
+        "codeOwners": {
+          "required": false,
+          "owners": []
+        },
+        "lastPushApproval": false,
+        "lastPushSatisfied": true,
+        "stale": false
+      },
+      "canApprove": [],
+      "youCanApprove": false,
       "state": "merged",
       "checks": {
         "state": "passing"

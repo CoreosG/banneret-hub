@@ -277,6 +277,8 @@ export function connectedLine(
 
 const KNOWN_NEEDS_KINDS: Readonly<Record<string, string>> = {
   thread_question: "Question from an agent",
+  pr_approval: "You can approve",
+  waiting_for_approver: "Waiting for an approver",
   thread_approval: "Approval for an agent",
   pull_request: "Pull request",
   promotion: "Promotion",

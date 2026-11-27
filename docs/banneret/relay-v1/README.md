@@ -277,7 +277,7 @@ class. [Orchestrator]
 | Class | Means | Kinds |
 |---|---|---|
 | 1 | An agent is blocked on a question or approval from you | `thread_question`, `thread_approval` |
-| 2 | Something waits on your review or decision | `pull_request`, `promotion`, `founder_question`, `health` |
+| 2 | Something waits on your review or decision | `pull_request`, `pr_approval`, `waiting_for_approver`, `promotion`, `founder_question`, `health` |
 | 3 | You were mentioned, or an agent or persona wrote to you | `mention`, `agent_message`, `persona_ask` |
 | 4 | A dispatcher suggestion | `suggestion` |
 | 5 | Any kind not listed above | `other` (the explicit catch-all), and any unknown kind |
@@ -381,7 +381,7 @@ protocol"). The relay has no write endpoint for them.
 - `task` is `{id, title, ref{tracker, host?, scope, key, url}, openedAt, closedAt}`. `openedAt` is when the tracker
   issue was opened. `closedAt` is when it was closed, or null while it is open. Every task in the protocol has this
   shape: board cards, map items, `GET /tasks/{id}`, feed and graveyard entries.
-- `prs` lists every pull request linked to the task, oldest first, each `{number, url, state, checks?{state}}`. It is
+- `prs` lists every pull request linked to the task, oldest first, each `{number, url, state, checks?{state}, baseBranch, approvals, canApprove, youCanApprove}`. It is
   an array, empty when none is linked. `state` is an open string, known values `open`, `merged`, `closed`. `checks` is
   the state of the required checks on that pull request's head (known values `passing`, `failing`, `pending`), present
   when the relay has read them. There is no card-level `pr` or `checks`.
@@ -797,29 +797,50 @@ A `taskId` that is malformed (not an `Id`) or unknown answers 404 `not_found`, n
 /machines/{machineId}`. The Hub reads the card from a `board.<id>` or the `map` file when it holds the task and calls this
 only for the rest.
 
+## Pull request approvals
+
+Each linked PR in Board and TaskRead includes its GitHub `baseBranch`, `approvals`, `canApprove`
+(company PersonRefs who can supply an outstanding review), and `youCanApprove` for the caller.
+An unreadable rule returns null approvals, an empty candidate list and false. A measured branch
+with no review requirement returns zero required reviews and false policy flags.
+
+Read `GET /repos/{owner}/{repo}/branches/{branch}/protection` and its `required_pull_request_reviews` and the parameters of all active `pull_request`
+rules returned by `GET /repos/{owner}/{repo}/rules/branches/{branch}`, including inherited rules.
+Take the largest `required_approving_review_count` and apply each enabled `require_code_owner_reviews`,
+`require_last_push_approval` and `dismiss_stale_reviews` (rulesets use
+`require_code_owner_review` and `dismiss_stale_reviews_on_push`). They determine `required`, `codeOwners.required` for applicable
+files, `lastPushApproval` and `stale`. Resolve the first CODEOWNERS file on the base ref in
+.github/, repository root, then docs/. Match each changed path against its last matching pattern.
+Report applicable team or login names in `owners`. Include `satisfiedBy` only when all applicable
+owner groups have an effective approval.
+
+Use PR `base.ref`, `base.sha`, `head.sha`, `user.login`, changed-file `filename` and review
+`user.login`, `state`, `commit_id` and `submitted_at`. Use push actor evidence for the latest
+reviewable push. A commit author alone cannot identify the pusher.
+Count distinct qualifying reviewers in `have` using GitHub review state, dismissals, changes
+requested and review commit evidence. For last-push approval, report `lastPushSatisfied` when
+unrequired or approved after the latest reviewable push by someone other than its pusher.
+Use repository review permissions and owner team memberships. Exclude the author and people
+whose review cannot advance any remaining requirement. PersonRef identity is the stable person id.
+Consult GitHub review decision, required checks, draft state, conflicts and other merge blockers
+before declaring approval the sole blocker. If a review rule cannot be measured or represented,
+report null approvals. GitHub remains authoritative for mergeability.
+
+| GitHub state | Needs you for the viewer |
+| --- | --- |
+| Open and approval is the sole outstanding merge condition | `pr_approval` for eligible reviewers, `waiting_for_approver` for the author |
+| Other blockers, approvals satisfied, closed, or unreadable | Neither approval item |
+
+The relay recomputes this view from repository state, including after a push, review, rule or
+membership change, or restart. The Hub only caches the viewer's snapshot.
+
 ## Checked
 
-"Checked" means a person with the **sign-off role** confirms the item after CI passed and review approved. (Banneret's
-preset gives the sign-off role to founders; another company may map it differently, and the relay decides.) The sign-off
-lives in the `checked` label on the tracker issue; the relay keeps no store of its own. It counts only when the tracker's
-event log shows **all** of:
-
-1. a holder of the sign-off role added the `checked` label, and it is the **latest** `labeled` event for `checked`
-   (a later `unlabeled` event removes the check);
-2. a linked pull request (an entry of `prs`) had already merged;
-3. that pull request's checks were green;
-4. a review of that pull request was approved by someone **other than the person who added the label**, the approval
-   is on its **merged head commit**, and it still stands: a dismissed approval, or a later "changes requested" from
-   the same reviewer, voids it.
-
-Identity is the stable `id`, never the login: `checked.by` and the reviewer are compared by `id`, and the login is
-display only (`checked.by` is `{id, login}` like every other person in this protocol).
-
-If any of these fails, the relay ignores the label: `checked.valid` is false, `checked.ignoredReason` says why in one
-plain sentence (for example "The person who checked it also approved the review." or "ada-example does not hold the
-sign-off role."), and the card's `status` is not `checked`. A relay that applies the rule advertises the flag `checked`
-on the `board` section. A Hub draws a valid check as the checked mark with who and when, and an invalid one as the
-built mark with the reason.
+Checked is a separate company flag after merge. The latest checked label event must add the label,
+a company sign-off role holder must add it, and a linked PR must already have merged with green
+checks. The checker may have reviewed the PR. Repository approval rules govern the merge.
+When the label does not count, TaskRead carries `valid: false` and an `ignoredReason`.
+A board offering this company flag advertises `checked`.
 
 ## Events
 

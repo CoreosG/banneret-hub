@@ -445,6 +445,42 @@ describe("Task tab", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
+  it("explains the base branch review rule in the task facts", async () => {
+    const { emit, read } = setup();
+    const shown = card("3", "Review me", {
+      prs: [
+        {
+          number: 3,
+          url: "https://example.com/pr/3",
+          state: "open",
+          rules: {
+            baseBranch: "main",
+            approvals: {
+              required: 1,
+              have: 0,
+              codeOwners: { required: true, owners: ["org/team"] },
+              lastPushApproval: false,
+              lastPushSatisfied: true,
+              stale: false,
+            },
+            canApprove: [],
+            youCanApprove: true,
+          },
+        },
+      ],
+    });
+    read.mockResolvedValue(found(shown));
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
+    await emit(state(["board", "task"], [shown]));
+    await expect
+      .element(
+        page.getByText("Branch rule on main: 1 approval, code owners · You can approve", {
+          exact: false,
+        }),
+      )
+      .toBeVisible();
+  });
+
   it("shows an ignored sign-off with its reason, and gives founders a sign-off link", async () => {
     const { emit, read } = setup();
     const shown = card("3", "Profile blocks", { status: "built" });

@@ -27,12 +27,15 @@ import type {
   BanneretTeamSession,
 } from "@t3tools/contracts";
 import {
+  BanneretPrRules,
   allBoardCards,
   capCodePoints,
   capUtf8,
   LEASE_NOTE_MAX_BYTES,
   LEASE_REASON_TEXT_MAX,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 
 import { RelayCallError, type RelayReply } from "./RelayClient.ts";
@@ -252,6 +255,7 @@ const boardTask = (value: unknown): BanneretBoardTask | undefined => {
 };
 
 /** One linked pull request `{number, url, state, checks?}`; undefined when a required field is missing. */
+const decodeRules = Schema.decodeUnknownOption(BanneretPrRules);
 const linkedPr = (value: unknown): BanneretBoardPr | undefined => {
   const pr = fields(value);
   const number = pr?.number;
@@ -261,7 +265,13 @@ const linkedPr = (value: unknown): BanneretBoardPr | undefined => {
     return undefined;
   if (state === undefined) return undefined;
   const checks = text(fields(pr?.checks)?.state, 32);
-  return { number, url, state, ...(checks === undefined ? {} : { checks: { state: checks } }) };
+  return {
+    number,
+    url,
+    state,
+    ...optional("rules", Option.getOrUndefined(decodeRules(pr))),
+    ...(checks === undefined ? {} : { checks: { state: checks } }),
+  };
 };
 
 const card = (value: unknown): BanneretBoardCard | undefined => {

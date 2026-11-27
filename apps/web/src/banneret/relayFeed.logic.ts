@@ -4,6 +4,8 @@ import type { BanneretFeedDeepLink } from "@t3tools/contracts";
 
 const NEEDS_KINDS: Readonly<Record<string, string>> = {
   thread_question: "An agent asks you",
+  pr_approval: "You can approve",
+  waiting_for_approver: "Waiting for an approver",
   thread_approval: "An agent needs your approval",
   pull_request: "Pull request",
   promotion: "Promotion",

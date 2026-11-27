@@ -1478,7 +1478,7 @@ describe("board and leases", () => {
     const card = cards.find((candidate) => candidate.task.id === many);
     expect(card).not.toHaveProperty("pr");
     expect(card).not.toHaveProperty("checks");
-    expect(card?.prs).toEqual([
+    expect(card?.prs).toMatchObject([
       { number: 7, url: expect.stringContaining("/7"), state: "closed" },
       {
         number: 9,
@@ -1822,19 +1822,58 @@ describe("feed, graveyard, tasks and checked", () => {
     expect(unsigned.status).toBe(401);
   });
 
+  it("directs approval-only PRs to the reviewer and author separately", async () => {
+    const reviewer = await enrol();
+    const author = await enrol();
+    const task = id();
+    const pr = {
+      number: 123,
+      author: author.login,
+      canApprove: [author.login, reviewer.login, "unknown"],
+      approvals: {
+        required: 1,
+        have: 0,
+        codeOwners: { required: true, owners: ["org/team"] },
+        lastPushApproval: false,
+        lastPushSatisfied: true,
+        stale: true,
+      },
+      approvalOnly: true,
+    };
+    const seed = (approvalOnly: boolean) =>
+      seedTasks([{ id: task, prs: [{ ...pr, approvalOnly }] }]);
+    await seed(true);
+    const reply = await readTask(reviewer, task);
+    expectSchema("TaskRead", reply.body);
+    expect(reply.body).toMatchObject({
+      prs: [
+        { approvals: pr.approvals, youCanApprove: true, canApprove: [{ login: reviewer.login }] },
+      ],
+    });
+    expect((await readTask(author, task)).body).toMatchObject({ prs: [{ youCanApprove: false }] });
+    const kinds = async (who: Enrolled) =>
+      ((await call(who, "GET", "/relay/v1/needs")).body as { items: { kind: string }[] }).items.map(
+        (item) => item.kind,
+      );
+    expect(await kinds(reviewer)).toContain("pr_approval");
+    expect(await kinds(author)).toContain("waiting_for_approver");
+    await seed(false);
+    expect(await kinds(reviewer)).not.toContain("pr_approval");
+    expect(await kinds(author)).not.toContain("waiting_for_approver");
+  });
+
   describe("checked", () => {
     const personIdOf = async (machine: Enrolled): Promise<string> => {
       const reply = await call(machine, "GET", "/relay/v1/capabilities");
       return (reply.body as { me: { id: string } }).me.id;
     };
-    const checkedFor = async (by: Enrolled, reviewer: Enrolled) => {
+    const checkedFor = async (by: Enrolled) => {
       const machine = await enrol();
       const task = id();
       await seedTasks([{ id: task, title: "Built task" }]);
       await client.control("/checked/seed", {
         taskId: task,
         by: await personIdOf(by),
-        reviewer: await personIdOf(reviewer),
       });
       const reply = await readTask(machine, task);
       expect(reply.status, JSON.stringify(reply.body)).toBe(200);
@@ -1852,10 +1891,9 @@ describe("feed, graveyard, tasks and checked", () => {
       return { task: reply.body as TaskReply, boardStatus: card?.status };
     };
 
-    it("is valid when a sign-off role holder checks and someone else reviewed", async () => {
+    it("is valid when a sign-off role holder adds the company label", async () => {
       const checker = await enrol({ role: "founder" });
-      const reviewer = await enrol({ role: "limited_staff" });
-      const { task, boardStatus } = await checkedFor(checker, reviewer);
+      const { task, boardStatus } = await checkedFor(checker);
       expect(task.checked?.valid).toBe(true);
       expect(task.checked?.by.login).toBe(checker.login);
       expect(task.checked?.by.id).toBe(await personIdOf(checker));
@@ -1864,19 +1902,9 @@ describe("feed, graveyard, tasks and checked", () => {
       expect(boardStatus).toBe("checked");
     });
 
-    it("is invalid, with the reason, when the reviewer is the checker", async () => {
-      const checker = await enrol({ role: "founder" });
-      const { task, boardStatus } = await checkedFor(checker, checker);
-      expect(task.checked?.valid).toBe(false);
-      expect(task.checked?.ignoredReason).toMatch(/review/i);
-      expect(task.status).not.toBe("checked");
-      expect(boardStatus).not.toBe("checked");
-    });
-
     it("is invalid, with the reason, when the checker lacks the sign-off role", async () => {
       const checker = await enrol({ role: "limited_staff" });
-      const reviewer = await enrol({ role: "founder" });
-      const { task, boardStatus } = await checkedFor(checker, reviewer);
+      const { task, boardStatus } = await checkedFor(checker);
       expect(task.checked?.valid).toBe(false);
       expect(task.checked?.ignoredReason).toMatch(/sign-off role/);
       expect(task.status).not.toBe("checked");

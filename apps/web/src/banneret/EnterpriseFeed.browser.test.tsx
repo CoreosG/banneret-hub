@@ -383,6 +383,29 @@ describe("Enterprise Today and Needs you", () => {
     expect(rows).toEqual(["thread_question", "thread_approval", "mention", "zz_new_kind"]);
   });
 
+  it("explains the two repository approval items", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const { server, emit } = setup();
+    server.needs = {
+      joined: true,
+      fetchedAt: "2026-11-26T10:00:00Z",
+      value: {
+        nextCursor: null,
+        items: [
+          item("r", "pr_approval", "Review #1"),
+          item("a", "waiting_for_approver", "Your PR #2"),
+        ],
+      },
+    };
+    const router = createFeedRouter("/needs");
+    await using _screen = await render(<RouterProvider router={router} />, { router: false });
+    await emit(snapshot(["today", "needs"]));
+    const list = page.getByRole("list", { name: "Needs you items" });
+    await expect.element(list.getByText("You can approve", { exact: false })).toBeVisible();
+    await expect.element(list.getByText("Waiting for an approver", { exact: false })).toBeVisible();
+  });
+
   it("renders an unknown kind generically and a hostile string as inert text", async () => {
     using stack = new DisposableStack();
     await prepareScreen(stack);
