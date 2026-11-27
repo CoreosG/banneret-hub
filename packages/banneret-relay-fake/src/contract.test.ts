@@ -73,7 +73,7 @@ describe("relay v1 contract", () => {
     }
   });
 
-  it("lets a stuck item carry a task or a subject, never both, and closes the subject", () => {
+  it("lets a stuck item carry exactly one of a task or a subject, and closes the subject", () => {
     const today = readExample("today.json") as {
       stuck: { items: Record<string, unknown>[] };
     };
@@ -82,9 +82,17 @@ describe("relay v1 contract", () => {
     expect(withSubject?.task).toBeUndefined();
     const check = (item: Record<string, unknown>) =>
       spec.check("Today", { ...today, stuck: { ...today.stuck, items: [item] } });
-    const subject = withSubject?.subject as { repo: string };
+    const subject = withSubject?.subject as { repo: string; run: unknown };
     expect(check({ ...withSubject, subject: { repo: subject.repo } })).toBeNull();
     expect(check({ ...withSubject, task: { id: "t_1", title: "Both" } })).not.toBeNull();
+    const { subject: _dropped, ...neither } = withSubject ?? {};
+    expect(check(neither)).not.toBeNull();
+    expect(check({ ...withSubject, subject: { run: subject.run } })).not.toBeNull();
+    expect(check({ ...withSubject, subject: {} })).not.toBeNull();
+    expect(check({ ...withSubject, subject: { job: { name: "nightly" } } })).toBeNull();
+    expect(
+      check({ ...withSubject, subject: { job: { url: "https://x.example" } } }),
+    ).not.toBeNull();
     expect(check({ ...withSubject, subject: { ...subject, id: "r_1" } })).not.toBeNull();
     expect(
       check({ ...withSubject, subject: { ...subject, run: { name: "ci", url: "x", id: 1 } } }),

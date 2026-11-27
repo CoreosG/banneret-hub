@@ -351,7 +351,15 @@ describe("reshapeToday stuck subject", () => {
     ]);
   });
 
-  it("drops a subject without a repo, and a subject next to a task", () => {
+  it("keeps a job-only subject, with or without its url", () => {
+    const job = { name: "nightly-backup", url: "https://jobs.example.com/nightly-backup" };
+    expect(today({ ...base, subject: { job } })).toEqual([{ ...base, subject: { job } }]);
+    expect(today({ ...base, subject: { job: { name: "nightly-backup" } } })).toEqual([
+      { ...base, subject: { job: { name: "nightly-backup" } } },
+    ]);
+  });
+
+  it("drops a subject without a repo or job, and a subject next to a task", () => {
     expect(today({ ...base, subject: { run: subject.run } })).toEqual([base]);
     const task = { id: "t_1", title: "Profile blocks" };
     expect(today({ ...base, task, subject })).toEqual([

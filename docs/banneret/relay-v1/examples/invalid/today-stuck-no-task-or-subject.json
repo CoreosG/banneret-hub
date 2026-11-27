@@ -1,0 +1,121 @@
+{
+  "generatedAt": "2026-11-26T10:00:05Z",
+  "lastVisitAt": "2026-11-25T22:10:00Z",
+  "needsYou": {
+    "state": "ok",
+    "items": [
+      {
+        "id": "n_Wd7Kp3",
+        "kind": "thread_approval",
+        "title": "A session is waiting for a permission answer",
+        "deepLink": {
+          "environmentId": "env_9d8c7b6a-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+          "threadId": "th_01JDX3K9"
+        },
+        "createdAt": "2026-11-26T09:58:00Z",
+        "updatedAt": "2026-11-26T09:58:00Z"
+      }
+    ],
+    "nextCursor": "c_eyJvIjoxfQ",
+    "notMeasured": []
+  },
+  "shipped": {
+    "state": "ok",
+    "items": [
+      {
+        "task": {
+          "id": "t_R2m8Xc",
+          "title": "Guild roster page",
+          "url": "https://github.com/example-org/example-app/issues/37"
+        },
+        "pr": {
+          "number": 41,
+          "url": "https://github.com/example-org/example-app/pull/41",
+          "repo": "example-org/example-app"
+        },
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "37",
+          "url": "https://github.com/example-org/example-app/issues/37"
+        },
+        "summary": "Guild roster page is live on the preview",
+        "mergedAt": "2026-11-26T07:00:00Z",
+        "live": "live"
+      },
+      {
+        "task": {
+          "id": "t_H6q3Rn",
+          "title": "Fix typo in footer"
+        },
+        "pr": {
+          "number": 43,
+          "url": "https://github.com/example-org/example-app/pull/43",
+          "repo": "example-org/example-app"
+        },
+        "summary": "Fix typo in footer merged",
+        "mergedAt": "2026-11-26T06:30:00Z",
+        "live": "not_live_yet"
+      }
+    ],
+    "notMeasured": []
+  },
+  "working": {
+    "state": "partial",
+    "items": [
+      {
+        "person": {
+          "id": "p_7Hq2xK",
+          "login": "ada-example"
+        },
+        "task": {
+          "id": "t_K9w3Ls",
+          "title": "Guild invites"
+        },
+        "branch": "work/42-guild-invites",
+        "sessions": 2,
+        "state": "working",
+        "lastActivityAt": "2026-11-26T10:00:00Z",
+        "deepLink": {
+          "environmentId": "env_9d8c7b6a-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+          "threadId": "th_01JDX3K9"
+        }
+      }
+    ],
+    "notMeasured": [
+      {
+        "source": "github",
+        "reason": "rate_limited",
+        "since": "2026-11-26T09:55:00Z"
+      }
+    ]
+  },
+  "stuck": {
+    "state": "ok",
+    "items": [
+      {
+        "rules": [
+          "check_failed",
+          "claim_quiet"
+        ],
+        "since": "2026-11-26T03:00:00Z",
+        "owner": {
+          "id": "p_3Nc8vR",
+          "login": "bo-example"
+        }
+      }
+    ],
+    "notMeasured": []
+  },
+  "health": {
+    "state": "not_measured",
+    "items": [],
+    "notMeasured": [
+      {
+        "source": "health",
+        "reason": "not_configured",
+        "since": "2026-11-20T12:00:00Z"
+      }
+    ]
+  }
+}
