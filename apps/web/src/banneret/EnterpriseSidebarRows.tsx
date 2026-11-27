@@ -1,6 +1,6 @@
 // Banneret Hub: the company rows above the thread list (Today, Needs you with its count, the Board,
 // the Map and the Feed), shown only for an Enterprise workspace this machine has joined, and only for sections the
-// relay offers. They also hold the `/` search over that company, so it works on every page.
+// relay offers. Board, Map and Feed open with the filters last set on them in this window.
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { ActivityIcon, InboxIcon, MapIcon, SquareKanbanIcon, SunIcon } from "lucide-react";
 
@@ -11,7 +11,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "../components/ui/sidebar";
-import { CompanySearch } from "./CompanySearch";
+import { restoredSearch } from "./filterMemory";
 import { needsCountLabel, offersSection } from "./relayFeed.logic";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
@@ -27,11 +27,13 @@ export function EnterpriseSidebarRows() {
   const showBoard = offersSection(feed, "board");
   const showMap = offersSection(feed, "map");
   const showFeed = offersSection(feed, "feed");
-  const search = <CompanySearch enterprise={enterprise} />;
-  if (!showToday && !showNeeds && !showBoard && !showMap && !showFeed) return search;
+  if (!showToday && !showNeeds && !showBoard && !showMap && !showFeed) return null;
   const go = (to: "/today" | "/needs" | "/board" | "/map" | "/feed") => {
     if (isMobile) setOpenMobile(false);
-    void navigate({ to });
+    void navigate({
+      to,
+      search: restoredSearch(workspace.id, to, feed.board?.value ?? null),
+    } as never);
   };
   const count = needsCountLabel({
     needsCount: feed.needsCount,
@@ -92,7 +94,6 @@ export function EnterpriseSidebarRows() {
           </SidebarMenuItem>
         ) : null}
       </SidebarMenu>
-      {search}
     </SidebarGroup>
   );
 }

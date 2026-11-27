@@ -1,10 +1,11 @@
 // Banneret Hub: the `/` search over the active workspace's company. It looks through the snapshot
-// data the feed already holds (every board's cards, the map's items, the feed's entries) and asks the
-// relay for nothing. Enter opens the highlighted result: a card or a task in the Task dialog, a map item
-// without a task on the Map, a feed entry without a task at its link.
+// data the feed already holds (every board's cards, the map's items, the feed's entries, and whatever
+// other sources add) and asks the relay for nothing. Enter opens the highlighted result: a card or a
+// task in the Task dialog, a map item without a task on the Map, a feed entry without a task at its link.
+import type { BanneretBoardTask } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { SearchIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog";
 import { Kbd } from "../components/ui/kbd";
@@ -15,10 +16,17 @@ import { opensSearch, searchCompany } from "./boards.logic";
 import { mergeFeedEntries } from "./feed.logic";
 import { safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
-import type { EnterpriseFeed } from "./useEnterpriseFeed";
+import {
+  closeCompanySearch,
+  openCompanySearch,
+  setCompanySearchAvailable,
+  useCompanySearchStore,
+} from "./companySearchStore";
+import { type EnterpriseFeed, useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
 
-interface Hit {
+/** One result row. `open` runs after the dialog closes. */
+export interface CompanySearchHit {
   readonly key: string;
   readonly group: string;
   readonly title: string;
@@ -27,23 +35,27 @@ interface Hit {
   readonly open: () => void;
 }
 
-function SearchBody(props: { readonly enterprise: EnterpriseFeed; readonly onDone: () => void }) {
-  const { feed, target, workspace } = props.enterprise;
-  const openTask = useOpenTask(target);
-  const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-  const [highlight, setHighlight] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+export interface CompanySearchContext {
+  readonly query: string;
+  readonly enterprise: EnterpriseFeed;
+  readonly openTask: (task: BanneretBoardTask) => void;
+  readonly navigate: ReturnType<typeof useNavigate>;
+}
+
+/** A kind of thing the search finds, as rows in its own groups. */
+export type CompanySearchSource = (
+  context: CompanySearchContext,
+) => ReadonlyArray<CompanySearchHit>;
+
+/** Every board's cards, the map's items and the feed's entries. */
+const boardsMapFeed: CompanySearchSource = ({ query, enterprise, openTask, navigate }) => {
+  const { feed } = enterprise;
   const hits = searchCompany(query, {
     boards: feed.board?.value ?? null,
     map: feed.map?.value ?? null,
     feed: mergeFeedEntries(feed.activity?.value?.entries ?? [], feed.activityOlder?.entries ?? []),
   });
-  const done = (run: () => void) => () => {
-    props.onDone();
-    run();
-  };
-  const list: ReadonlyArray<Hit> = [
+  return [
     ...hits.cards.map(({ boardTitle, card }) => {
       const ref = taskRef(card.task);
       return {
@@ -52,7 +64,7 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed; readonly onDon
         title: card.task.title,
         detail: `${boardTitle} · ${ref.repo} ${ref.number}`,
         status: card.status,
-        open: done(() => openTask(card.task)),
+        open: () => openTask(card.task),
       };
     }),
     ...hits.mapItems.map((item) => {
@@ -63,10 +75,10 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed; readonly onDon
         title: item.title,
         detail: stage === undefined ? "Build map" : `Build map · ${stage.title}`,
         status: item.status,
-        open: done(() => {
+        open: () => {
           if (item.task !== undefined) openTask(item.task);
           else void navigate({ to: "/map", search: { q: item.title } } as never);
-        }),
+        },
       };
     }),
     ...hits.feed.map((entry) => {
@@ -77,14 +89,35 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed; readonly onDon
         title: entry.summary,
         detail: entry.task === undefined ? "Feed" : `Feed · ${entry.task.title}`,
         status: entry.status,
-        open: done(() => {
+        open: () => {
           if (entry.task !== undefined) openTask(entry.task);
           else if (link !== null) window.open(link, "_blank", "noopener,noreferrer");
           else void navigate({ to: "/feed", search: { q: entry.summary } } as never);
-        }),
+        },
       };
     }),
   ];
+};
+
+/** Every source, in result order. A page with its own kind of thing (people, say) adds one here. */
+const COMPANY_SEARCH_SOURCES: ReadonlyArray<CompanySearchSource> = [boardsMapFeed];
+
+function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
+  const { target, workspace } = props.enterprise;
+  const openTask = useOpenTask(target);
+  const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const context = { query, enterprise: props.enterprise, openTask, navigate };
+  const list: ReadonlyArray<CompanySearchHit> = COMPANY_SEARCH_SOURCES.flatMap((source) =>
+    source(context),
+  ).map((hit) => ({
+    ...hit,
+    open: () => {
+      closeCompanySearch();
+      hit.open();
+    },
+  }));
   const active = list.length === 0 ? -1 : Math.min(highlight, list.length - 1);
   const groups = [...new Set(list.map((hit) => hit.group))];
   return (
@@ -93,7 +126,6 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed; readonly onDon
       <label className="flex items-center gap-2 border-b px-4 py-3">
         <SearchIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <input
-          ref={inputRef}
           autoFocus
           role="combobox"
           aria-expanded={list.length > 0}
@@ -174,32 +206,42 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed; readonly onDon
 }
 
 /**
- * Opens on `/` anywhere outside a text field while an Enterprise workspace is active. Settings and
- * Usage keep `/` for their own search, so it is off there.
+ * The dialog and its `/` key, for the whole app: WorkspacesHost mounts it once, so the key works on
+ * every page whether or not the sidebar is shown. It is off without a joined company, and on Settings
+ * and Usage, which keep `/` for their own search.
  */
-export function CompanySearch(props: { readonly enterprise: EnterpriseFeed }) {
-  const [open, setOpen] = useState(false);
-  const enabled = !isAppModalPage(useLocation({ select: (location) => location.pathname }));
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- one document key listener while the company rows are shown
+export function CompanySearchHost() {
+  const enterprise = useEnterpriseFeed();
+  const onModalPage = isAppModalPage(useLocation({ select: (location) => location.pathname }));
+  const available = enterprise !== null && !onModalPage;
+  const open = useCompanySearchStore((state) => state.open);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the openers whether there is a company to search, and owns the one document key listener
   useEffect(() => {
-    if (!enabled) return;
+    setCompanySearchAvailable(available);
+    if (!available) return;
     const onKey = (event: KeyboardEvent) => {
       if (!opensSearch(event)) return;
       event.preventDefault();
-      setOpen(true);
+      openCompanySearch();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [enabled]);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      setCompanySearchAvailable(false);
+    };
+  }, [available]);
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      {open ? (
+    <Dialog
+      open={open && enterprise !== null}
+      onOpenChange={(next) => (next ? openCompanySearch() : closeCompanySearch())}
+    >
+      {open && enterprise !== null ? (
         <DialogPopup
           showCloseButton={false}
           className="max-w-xl overflow-hidden"
           data-testid="company-search"
         >
-          <SearchBody enterprise={props.enterprise} onDone={() => setOpen(false)} />
+          <SearchBody enterprise={enterprise} />
         </DialogPopup>
       ) : null}
     </Dialog>

@@ -28,7 +28,9 @@ import { offersSection, safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
 import { FeedPage, NotJoinedNote } from "./TodayPage";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
+import { CompanySearchButton } from "./ui/CompanySearchButton";
 import { FilterBox } from "./ui/FilterBox";
+import { rememberFilters } from "./filterMemory";
 import { useOpenTask } from "./useOpenTask";
 import { useUrlSearch } from "./useUrlSearch";
 
@@ -298,12 +300,18 @@ export function FeedActivityPage() {
     <FeedPage title={`Feed in ${workspace.name}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         {graveyardOffered ? <Tabs active={active} onChange={setTab} /> : <span />}
-        <FilterBox
-          label="Filter the feed"
-          placeholder="Filter the feed"
-          value={query}
-          onChange={(q) => setSearch({ q }, { replace: true })}
-        />
+        <div className="flex min-w-0 items-center gap-2">
+          <FilterBox
+            label="Filter the feed"
+            placeholder="Filter the feed"
+            value={query}
+            onChange={(q) => {
+              setSearch({ q }, { replace: true });
+              rememberFilters(workspace.id, "feed", { q });
+            }}
+          />
+          <CompanySearchButton />
+        </div>
       </div>
       <FeedStatus
         feed={feed}

@@ -8,7 +8,8 @@ import { TYPE, toneProps } from "./tokens";
 
 /**
  * `lease` and `footer` are slots (a `LeaseChip`, a pull request line). With `onOpen` the card is
- * one button; without it, a plain box. Only attention statuses get the left accent bar.
+ * one button; without it, a plain box. Only attention statuses get the left accent bar. The title
+ * wraps to three lines at any width, breaking a word too long for the card, then truncates.
  */
 export function TaskCard(props: {
   readonly title: string;
@@ -22,6 +23,8 @@ export function TaskCard(props: {
   readonly lease?: ReactNode;
   readonly footer?: ReactNode;
   readonly onOpen?: (() => void) | undefined;
+  /** A menu button sits in the top right corner; the first line keeps clear of it. */
+  readonly menu?: boolean;
   readonly className?: string;
 }) {
   const view = statusView(props.status, { blockedBy: props.blockedBy });
@@ -42,14 +45,24 @@ export function TaskCard(props: {
         />
       ) : null}
       {props.refLabel === undefined ? null : (
-        <span className={cn(TYPE.ref, "flex min-w-0 whitespace-nowrap")} data-slot="task-ref">
+        <span
+          className={cn(TYPE.ref, "flex min-w-0 whitespace-nowrap", props.menu === true && "pe-6")}
+          data-slot="task-ref"
+        >
           <span className="min-w-0 truncate">{props.refLabel}</span>
           {props.refNumber === undefined ? null : (
             <span className="shrink-0">{props.refNumber}</span>
           )}
         </span>
       )}
-      <span className={cn(TYPE.cardTitle, "line-clamp-3", view.struck && "line-through")}>
+      <span
+        className={cn(
+          TYPE.cardTitle,
+          "line-clamp-3 wrap-anywhere",
+          props.menu === true && props.refLabel === undefined && "pe-6",
+          view.struck && "line-through",
+        )}
+      >
         {props.title}
       </span>
       <StatusPill

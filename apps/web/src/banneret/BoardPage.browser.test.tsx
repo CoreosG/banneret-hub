@@ -29,6 +29,7 @@ import { SidebarProvider } from "../components/ui/sidebar";
 import { useProjects, useServerConfigs } from "../state/entities";
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
 import { BoardPage } from "./BoardPage";
+import { CompanySearchHost } from "./CompanySearch";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { leaseRpc, useLeaseStore, type LeaseCall } from "./leaseStore";
@@ -38,6 +39,7 @@ import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
 import { rememberedBoard } from "./boardChoice";
 import { boardEntry, singleBoard } from "./boards.testkit";
+import { FILTER_MEMORY_KEY, rememberedFilters } from "./filterMemory";
 
 vi.mock("../state/environments", { spy: true });
 vi.mock("../state/entities", { spy: true });
@@ -187,6 +189,7 @@ function setup() {
   });
   useEnrolmentStore.setState({ views: {} });
   useRelayFeedStore.setState({ feeds: {} });
+  sessionStorage.removeItem(FILTER_MEMORY_KEY);
   openTaskDialog(null);
   storeEnrolmentView(LOCAL, configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
@@ -214,6 +217,7 @@ function Shell() {
       </nav>
       <Outlet />
       <TaskDialogHost />
+      <CompanySearchHost />
     </SidebarProvider>
   );
 }
@@ -223,6 +227,7 @@ function createBoardRouter(path = "/board") {
   return createRouter({
     routeTree: root.addChildren([
       createRoute({ getParentRoute: () => root, path: "/", component: () => <p>Home</p> }),
+      createRoute({ getParentRoute: () => root, path: "/today", component: () => <p>Today</p> }),
       createRoute({ getParentRoute: () => root, path: "/board", component: BoardPage }),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -511,6 +516,53 @@ describe("Enterprise board", () => {
     const lineHeight = Number.parseFloat(getComputedStyle(title).lineHeight);
     expect(title.clientHeight).toBe(Math.round(lineHeight * 3));
     expect(title.scrollHeight).toBeGreaterThan(title.clientHeight);
+  });
+
+  it("keeps five full columns at least 180px wide at 1165px, each title on up to three whole lines", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    // The tester's window: 1165px with the sidebar open, a card in every column, card menus on.
+    await page.viewport(1165, 800);
+    const long =
+      "Delivery: v1 Stage 3 Guild, Trust, Works and Games, then the follow-ups from review";
+    const path = "Fix banneret-knowledge-base/docs/spec/50-decided-by-orchestrator.md links";
+    await emit(
+      state(
+        ["board"],
+        boardRead(
+          boardOf([
+            card("1", long, "free"),
+            card("2", path, "taken", { lease: lease("bo-example", "active", MINUTE) }),
+            card("3", "Relay: stuck rule for quiet claims", "validating"),
+            card("4", "Hub: Task dialog sized to its content", "stuck"),
+            card("5", "Relay: board and leases", "shipped"),
+          ]),
+        ),
+      ),
+    );
+    await expect.element(page.getByText(long)).toBeVisible();
+    const grid = document.querySelector<HTMLElement>('[data-layout="board-columns"]')!;
+    const widths = [...grid.children].map((child) => child.getBoundingClientRect().width);
+    expect(widths).toHaveLength(5);
+    for (const width of widths) expect(width).toBeGreaterThanOrEqual(180);
+    const titles = [
+      ...document.querySelectorAll<HTMLElement>("[data-task-id] [data-slot=task-ref] + span"),
+    ];
+    expect(titles).toHaveLength(5);
+    for (const title of titles) {
+      const lineHeight = Number.parseFloat(getComputedStyle(title).lineHeight);
+      expect(title.clientHeight).toBeLessThanOrEqual(Math.round(lineHeight * 3));
+      // Nothing is cut off sideways: a path too long for the card breaks onto the next line.
+      expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
+      // The card menu keeps clear of the title, which takes the card's whole inner width.
+      const card = title.closest<HTMLElement>("[data-slot=task-card]")!;
+      expect(title.clientWidth).toBe(card.clientWidth - 24);
+    }
+    const first = page.getByText(long).element() as HTMLElement;
+    expect(first.clientHeight).toBe(
+      Math.round(Number.parseFloat(getComputedStyle(first).lineHeight) * 3),
+    );
   });
 
   it("has no row without the board section, and says so when the board is empty or partial", async () => {
@@ -950,6 +1002,43 @@ describe("Several boards, filters and search", () => {
     await vi.waitFor(() => expect(shownIds()).toEqual(["3"]));
     await userEvent.type(page.getByLabelText("Filter tasks"), "/");
     expect(document.querySelector('[data-testid="company-search"]')).toBeNull();
+  });
+
+  it("brings back a board's last filters when the sidebar opens it again, until they are cleared", async () => {
+    localStorage.removeItem("banneret.board-choice.v1");
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openBoard(stack);
+    await using _screen = screen;
+    await emit(state(["today", "board"], boardRead(boardOf(CARDS()))));
+    await vi.waitFor(() => expect(shownIds()).toHaveLength(7));
+    await userEvent.fill(page.getByLabelText("Filter tasks"), "guild");
+    await vi.waitFor(() => expect(shownIds()).toEqual(["2"]));
+    expect(rememberedFilters(WORKSPACE_ID, "board:platform")).toEqual({ q: "guild" });
+
+    // Today, then Board from the sidebar: the filter is back, in the box and in the URL.
+    const openFromSidebar = async (row: string, path: string) => {
+      await userEvent.click(sidebar().getByRole("button", { name: row, exact: true }));
+      await vi.waitFor(() => expect(router.state.location.pathname).toBe(path));
+    };
+    await openFromSidebar("Today", "/today");
+    await openFromSidebar("Board", "/board");
+    await vi.waitFor(() => expect(router.state.location.search).toEqual({ q: "guild" }));
+    await vi.waitFor(() => expect(shownIds()).toEqual(["2"]));
+    await expect.element(page.getByLabelText("Filter tasks")).toHaveValue("guild");
+
+    // A link's own filters win over the remembered ones.
+    await act(() => router.navigate({ to: "/board", search: { q: "profile" } } as never));
+    await vi.waitFor(() => expect(shownIds()).toEqual(["3"]));
+    await expect.element(page.getByLabelText("Filter tasks")).toHaveValue("profile");
+
+    // Clear filters forgets them: the sidebar then opens the whole board.
+    await userEvent.click(page.getByRole("button", { name: "Clear filters" }));
+    await vi.waitFor(() => expect(shownIds()).toHaveLength(7));
+    expect(rememberedFilters(WORKSPACE_ID, "board:platform")).toEqual({});
+    await openFromSidebar("Today", "/today");
+    await openFromSidebar("Board", "/board");
+    await vi.waitFor(() => expect(shownIds()).toHaveLength(7));
+    expect(router.state.location.search).toEqual({});
   });
 
   it("opens / search, finds a card on a board that is not shown, and opens it with Enter", async () => {

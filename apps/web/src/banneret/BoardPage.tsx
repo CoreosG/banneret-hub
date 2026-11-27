@@ -50,6 +50,7 @@ import {
 } from "./boards.logic";
 import type { RelayTarget } from "./enrolmentStore";
 import { FeedStatus } from "./FeedParts";
+import { rememberFilters } from "./filterMemory";
 import { freeToContinueFirst, freeToContinueLine, isFreeToContinue } from "./lease.logic";
 import { LeaseButtons, LeaseNoticeLine, routeMachine, useLeaseCheck } from "./LeaseControls";
 import { useLeaseRoute } from "./leaseMachineStore";
@@ -174,7 +175,7 @@ function BoardCard(props: {
       className="relative"
     >
       <TaskCard
-        {...(props.leases ? { className: "pe-9" } : {})}
+        menu={props.leases}
         title={card.task.title}
         status={card.status}
         why={card.statusWhy}
@@ -290,7 +291,7 @@ function BoardColumn(props: {
   return (
     <section
       aria-label={column.title}
-      className="flex min-h-0 min-w-0 flex-col border bg-muted"
+      className="flex min-h-0 flex-col border bg-muted"
       {...RADIUS_PANEL}
     >
       <header className="flex shrink-0 items-center gap-2 px-3 pt-3 pb-2">
@@ -632,7 +633,17 @@ export function BoardPage() {
               <FilterBar
                 cards={board.cards}
                 search={search}
-                onChange={(patch, replace) => setSearch(patch, { replace: replace === true })}
+                onChange={(patch, replace) => {
+                  setSearch(patch, { replace: replace === true });
+                  if (active === null) return;
+                  const next = { ...search, ...patch };
+                  rememberFilters(workspace.id, `board:${active.id}`, {
+                    repo: next.repo,
+                    person: next.person,
+                    status: next.status,
+                    q: next.q,
+                  });
+                }}
               />
               <StatusLegend
                 counts={counts}

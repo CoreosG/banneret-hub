@@ -57,6 +57,7 @@ import {
   toneProps,
 } from "./ui/tokens";
 import { FilterBox } from "./ui/FilterBox";
+import { rememberFilters } from "./filterMemory";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
 import { useUrlSearch } from "./useUrlSearch";
@@ -580,7 +581,10 @@ export function MapPage() {
             label="Filter the map"
             placeholder="Filter the map"
             value={query}
-            onChange={(q) => setSearch({ q }, { replace: true })}
+            onChange={(q) => {
+              setSearch({ q }, { replace: true });
+              rememberFilters(workspace.id, "map", { q });
+            }}
           />
         ) : null}
         {restsOnOffered ? (
