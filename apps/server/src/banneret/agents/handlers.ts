@@ -1,3 +1,6 @@
+import * as Schema from "effect/Schema";
+import { memoryAccess, unavailable } from "../memory/access.ts";
+import type { NoteStore } from "../memory/store.ts";
 // Banneret Hub: the agent toolkit's handlers. Every call first finds the company the calling thread works for;
 // a thread outside one is refused before anything is asked of a relay or a tracker. Lease calls run through
 // LeaseService with the same reference the Board builds, so the claim grammar, the settle window, the read-back
@@ -96,6 +99,8 @@ const cardView = (card: BanneretBoardCard) => ({
 
 const problemOf = (read: { readonly problem?: { readonly message: string } | undefined }) =>
   read.problem === undefined ? {} : { problem: read.problem.message };
+
+const encodeMemory = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const make = Effect.gen(function* () {
   const enrolment = yield* BanneretEnrolment;
@@ -227,7 +232,41 @@ const make = Effect.gen(function* () {
       action,
     }).pipe(Effect.provideService(BanneretEnrolment, enrolment), Effect.mapError(poolFailure));
   });
+  const memoryContext = yield* Effect.context<Effect.Services<ReturnType<typeof memoryAccess>>>();
+  const memory = Effect.fn("BanneretMemory.invoke")(function* <T>(
+    run: (store: NoteStore, thread: ThreadId) => T,
+  ) {
+    const scope = yield* McpInvocationContext.McpInvocationContext;
+    const caller = scope.thread;
+    if (!caller) return yield* unavailable();
+    const access = yield* memoryAccess(caller.threadId, scope.environmentId).pipe(
+      Effect.provideContext(memoryContext),
+    );
+    const data = yield* access.open((store) => run(store, caller.threadId));
+    return {
+      data: yield* encodeMemory(data).pipe(
+        Effect.mapError(
+          () =>
+            new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message: "Could not encode the note.",
+            }),
+        ),
+      ),
+    };
+  });
   return {
+    banneret_memory_read: McpToolAccess.readsAsCaller(({ key }) => memory((s) => s.read(key))),
+    banneret_memory_search: McpToolAccess.readsAsCaller(({ query }) =>
+      memory((s) => s.search(query)),
+    ),
+    banneret_memory_use: McpToolAccess.actsAsCaller(({ key }) =>
+      memory((s, thread) => s.use(key, thread)),
+    ),
+    banneret_memory_propose: McpToolAccess.actsAsCaller((input) => memory((s) => s.propose(input))),
+    banneret_memory_flag: McpToolAccess.actsAsCaller(({ key, reason }) =>
+      memory((s) => s.flag(key, reason)),
+    ),
     banneret_chat_read: McpToolAccess.readsAsCaller(({ conversation, thread, after, limit }) =>
       Effect.gen(function* () {
         if (!!conversation === !!thread)

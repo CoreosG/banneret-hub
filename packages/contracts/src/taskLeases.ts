@@ -10,6 +10,7 @@ import { IssueRef } from "./issue.ts";
 import { LEASE_RELEASE_REASONS } from "./leaseProtocol.ts";
 
 export const TASK_LEASE_WS_METHODS = {
+  memorySummary: "memory.summary",
   sandboxHandoff: "leases.sandboxHandoff",
   orchestrator: "leases.orchestrator",
   check: "leases.check",
@@ -190,6 +191,13 @@ export const OrchestratorDesignations = Schema.Struct({
 export type OrchestratorDesignations = typeof OrchestratorDesignations.Type;
 
 export const TASK_LEASE_RPCS = [
+  Rpc.make(TASK_LEASE_WS_METHODS.memorySummary, {
+    payload: Schema.Struct({ threadId: ThreadId }),
+    success: Schema.NullOr(
+      Schema.Struct({ total: Schema.Int, proposed: Schema.Int, disputed: Schema.Int }),
+    ),
+    error: LeaseRpcError,
+  }),
   Rpc.make(TASK_LEASE_WS_METHODS.sandboxHandoff, {
     payload: Schema.Struct({
       relayOrigin: Schema.NonEmptyString,
@@ -213,6 +221,7 @@ export const TASK_LEASE_RPCS = [
 
 /** Every lease call writes to the tracker on the person's behalf, or reads for that, so all need operate. */
 export const TASK_LEASE_RPC_SCOPES = {
+  [TASK_LEASE_WS_METHODS.memorySummary]: AuthOrchestrationOperateScope,
   [TASK_LEASE_WS_METHODS.sandboxHandoff]: AuthOrchestrationOperateScope,
   [TASK_LEASE_WS_METHODS.orchestrator]: AuthOrchestrationOperateScope,
   [TASK_LEASE_WS_METHODS.check]: AuthOrchestrationOperateScope,
@@ -223,6 +232,7 @@ export const TASK_LEASE_RPC_SCOPES = {
 } as const;
 
 export const TASK_LEASE_RPC_AGGREGATES = {
+  [TASK_LEASE_WS_METHODS.memorySummary]: "leases",
   [TASK_LEASE_WS_METHODS.sandboxHandoff]: "leases",
   [TASK_LEASE_WS_METHODS.orchestrator]: "leases",
   [TASK_LEASE_WS_METHODS.check]: "leases",

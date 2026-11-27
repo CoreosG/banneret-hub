@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "banneret:chat-cases": "node banneret/chat-cases.ts",
+    "banneret:memory-cases": "node banneret/memory-cases.ts",
     "banneret:task-cases": "node banneret/task-cases.ts",
     "mcp-tool-use": "node --env-file-if-exists=../.env mcp-tool-use/run.ts",
     "mcp-tool-use:trim-capture": "node mcp-tool-use/trim-capture.ts",

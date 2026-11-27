@@ -144,7 +144,7 @@ const newestFirst = (a: BanneretWorkspace, b: BanneretWorkspace) =>
   a.updatedAt === b.updatedAt ? a.id.localeCompare(b.id) : a.updatedAt > b.updatedAt ? -1 : 1;
 
 /** Each project key's workspace: the newest live workspace that claims it, as the web's `resolveWorkspaces`. */
-const ownersByKey = (workspaces: ReadonlyArray<BanneretWorkspace>) => {
+export const ownersByKey = (workspaces: ReadonlyArray<BanneretWorkspace>) => {
   const owner = new Map<string, BanneretWorkspace>();
   for (const workspace of workspaces
     .filter((candidate) => candidate.deleted !== true)
@@ -154,8 +154,8 @@ const ownersByKey = (workspaces: ReadonlyArray<BanneretWorkspace>) => {
   return owner;
 };
 
-/** The one workspace a project belongs to, or undefined when none or more than one claims it. */
-const ownerOf = (
+/** The one workspace a project belongs to, undefined when unclaimed, null when its keys name different workspaces. */
+export const ownerOf = (
   owner: ReadonlyMap<string, BanneretWorkspace>,
   project: FactsProject,
   environmentId: string,
@@ -167,7 +167,7 @@ const ownerOf = (
   ];
   const owners = new Set(keys.flatMap((key) => owner.get(key) ?? []));
   const [only] = owners;
-  return owners.size === 1 ? only : undefined;
+  return owners.size > 1 ? null : only;
 };
 
 /**
@@ -187,7 +187,7 @@ export function enterpriseProjects(input: {
     const identity = project.repositoryIdentity ?? null;
     const only = ownerOf(owner, project, input.environmentId);
     if (
-      only === undefined ||
+      only == null ||
       only.kind !== "enterprise" ||
       only.relay?.origin !== input.relayOrigin ||
       identity === null

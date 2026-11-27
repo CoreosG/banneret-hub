@@ -1,3 +1,4 @@
+import { MemoryStrip } from "../MemoryStrip";
 import { ChatHandle, ChatSettings, type EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -124,6 +125,13 @@ export function ChatHeader(props: ComponentProps<typeof ThreadHeader>) {
   return (
     <>
       <ThreadHeader {...props} />
+      {props.isServerThread && (
+        <MemoryStrip
+          key={props.activeThreadEnvironmentId + ":" + props.activeThreadId}
+          environmentId={props.activeThreadEnvironmentId}
+          threadId={props.activeThreadId}
+        />
+      )}
       {props.isServerThread && (
         <AgentThreadHeader
           thread={props.activeThreadId}
