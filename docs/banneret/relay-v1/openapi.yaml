@@ -4,7 +4,7 @@ info:
   version: "1"
   summary: The calls a Banneret Hub server makes to a central relay.
   description: |
-    Every call starts from a Banneret Hub server. The relay never dials a machine and cannot run anything on one.
+    Every call starts from a Hub or a pool host agent. The relay never dials a machine and cannot run anything on one.
     Conventions (auth, signing, errors, paging, ids) are in README.md next to this file; the schema
     descriptions below repeat the binding parts.
   license:
@@ -27,7 +27,273 @@ tags:
   - name: events
   - name: chat
   - name: snapshot
+  - name: pool
 paths:
+  /pool:
+    get:
+      tags:
+      - pool
+      operationId: getPool
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolView'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/workspaces:
+    post:
+      tags:
+      - pool
+      operationId: requestPoolWorkspace
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PoolWorkspaceRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolWorkspace'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/sandboxes:
+    post:
+      tags:
+      - pool
+      operationId: requestPoolSandbox
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PoolSandboxRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolSandbox'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/sandboxes/{id}:
+    get:
+      tags:
+      - pool
+      operationId: getPoolSandbox
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolSandbox'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - pool
+      operationId: cancelPoolSandbox
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolSandbox'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/sandboxes/{id}/extend:
+    post:
+      tags:
+      - pool
+      operationId: extendPoolSandbox
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolSandbox'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/hosts/enroll/start:
+    post:
+      tags:
+      - pool
+      operationId: startPoolEnrolment
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrolStartRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrolStartResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/hosts/enroll/poll:
+    post:
+      tags:
+      - pool
+      operationId: pollPoolEnrolment
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrolPollRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrolPollResponse'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/hosts/facts:
+    post:
+      tags:
+      - pool
+      operationId: reportPoolFacts
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PoolHostFacts'
+      responses:
+        '200':
+          description: The effective host ceilings and configured warning thresholds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PoolPolicy" }
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/hosts/next:
+    post:
+      tags:
+      - pool
+      operationId: takePoolRequest
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PoolNextRequest'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolOffer'
+        default:
+          $ref: '#/components/responses/Error'
+  /pool/sandboxes/{id}/state:
+    post:
+      tags:
+      - pool
+      operationId: reportPoolState
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: "#/components/schemas/Id" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PoolStateUpdate'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolSandbox'
+        default:
+          $ref: '#/components/responses/Error'
   /chat/conversations:
     get:
       tags:
@@ -1590,6 +1856,408 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    PoolSizes:
+      type: object
+      additionalProperties: false
+      required: [small, large]
+      properties:
+        small:
+          type: object
+          additionalProperties: false
+          required: [cpu, memory, disk]
+          properties:
+            cpu: {type: integer, minimum: 0}
+            memory: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
+            disk: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
+        large:
+          type: object
+          additionalProperties: false
+          required: [cpu, memory, disk]
+          properties:
+            cpu: {type: integer, minimum: 0}
+            memory: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
+            disk: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
+    PoolPolicy:
+      type: object
+      additionalProperties: false
+      required: [warnings, limits, sizes]
+      properties:
+        warnings: { $ref: "#/components/schemas/PoolWarnings" }
+        limits: { $ref: "#/components/schemas/PoolHostLimits" }
+        sizes: { $ref: "#/components/schemas/PoolSizes" }
+    PoolSlots:
+      type: object
+      additionalProperties: false
+      required: [small, large]
+      properties: {small: {type: integer, minimum: 0}, large: {type: integer, minimum: 0}}
+    PoolHostLimits:
+      type: object
+      additionalProperties: false
+      required: [id, level, workspaces, sandbox_slots]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        level: {type: string, enum: [staff, community]}
+        workspaces:
+          type: object
+          additionalProperties: false
+          required: [max, each]
+          properties:
+            max: {type: integer, minimum: 0}
+            each:
+              type: object
+              additionalProperties: false
+              required: [cpu, memory_floor, memory_max, disk, tasks]
+              properties:
+                cpu: {type: integer, minimum: 0}
+                memory_floor: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
+                memory_max: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
+                disk: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
+                tasks: {type: integer, minimum: 0}
+        sandbox_slots: {$ref: '#/components/schemas/PoolSlots'}
+    PoolWarnings:
+      type: object
+      additionalProperties: false
+      required: [quota_percent, memory_percent, cpu_throttled_percent, pids_percent, pressure, host_busy]
+      properties:
+        quota_percent: {type: number, minimum: 0, maximum: 100}
+        memory_percent: {type: number, minimum: 0, maximum: 100}
+        cpu_throttled_percent: {type: number, minimum: 0, maximum: 100}
+        pids_percent: {type: number, minimum: 0, maximum: 100}
+        pressure:
+          type: object
+          additionalProperties: false
+          required: [cpu, memory, io]
+          properties:
+            cpu: {type: number, minimum: 0, maximum: 100}
+            memory: {type: number, minimum: 0, maximum: 100}
+            io: {type: number, minimum: 0, maximum: 100}
+        host_busy:
+          type: object
+          additionalProperties: false
+          required: [memory_full_avg60, io_some_avg60, cpu_some_avg60]
+          properties:
+            memory_full_avg60: {type: number, minimum: 0, maximum: 100}
+            io_some_avg60: {type: number, minimum: 0, maximum: 100}
+            cpu_some_avg60: {type: number, minimum: 0, maximum: 100}
+    PoolConfig:
+      type: object
+      additionalProperties: false
+      required: [enabled, hosts, warnings, sandboxes]
+      properties:
+        enabled: {type: boolean}
+        hosts: {type: array, items: {$ref: '#/components/schemas/PoolHostLimits'}}
+        warnings: {$ref: '#/components/schemas/PoolWarnings'}
+        sandboxes:
+          type: object
+          additionalProperties: false
+          required: [sizes, time_limit, idle_limit, extend, per_person, images]
+          properties:
+            sizes: { $ref: "#/components/schemas/PoolSizes" }
+            time_limit: {type: string, pattern: '^[1-9][0-9]*[smh]$'}
+            idle_limit: {type: string, pattern: '^[1-9][0-9]*[smh]$'}
+            extend: {type: string, pattern: '^[1-9][0-9]*[smh]$'}
+            per_person:
+              type: object
+              additionalProperties: false
+              required: [running, waiting]
+              properties: {running: {type: integer, minimum: 0}, waiting: {type: integer, minimum: 0}}
+            images:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [name, digest]
+                properties:
+                  name: {$ref: '#/components/schemas/Id'}
+                  digest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+    PoolMeter:
+      type: object
+      additionalProperties: false
+      required: [used, limit, warn]
+      properties:
+        used: {type: integer, minimum: 0}
+        limit: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+        warn: {type: boolean}
+    PoolPsi:
+      type: object
+      additionalProperties: false
+      required: [some, full]
+      properties:
+        some:
+          type: object
+          additionalProperties: false
+          required: [avg10, avg60]
+          properties:
+            avg10: {type: number, minimum: 0, maximum: 100}
+            avg60: {type: number, minimum: 0, maximum: 100}
+        full:
+          type: object
+          additionalProperties: false
+          required: [avg10, avg60]
+          properties:
+            avg10: {type: number, minimum: 0, maximum: 100}
+            avg60: {type: number, minimum: 0, maximum: 100}
+    PoolQuota:
+      type: object
+      additionalProperties: false
+      required: [notMeasured, disk, inodes, warnings]
+      properties:
+        notMeasured:
+          anyOf:
+          - {type: string, enum: [macos, windows, missing_files]}
+          - {type: 'null'}
+        disk: {anyOf: [{$ref: '#/components/schemas/PoolMeter'}, {type: 'null'}]}
+        inodes: {anyOf: [{$ref: '#/components/schemas/PoolMeter'}, {type: 'null'}]}
+        warnings:
+          type: object
+          additionalProperties: false
+          required: [memory, cpu, pids, pressure]
+          properties:
+            memory: {type: boolean}
+            cpu: {type: boolean}
+            pids: {type: boolean}
+            pressure: {type: boolean}
+    Resources:
+      type: object
+      additionalProperties: false
+      required: [measuredAt, notMeasured, disk, inodes, memory, cpu, pids, pressure]
+      properties:
+        measuredAt: {$ref: '#/components/schemas/Timestamp'}
+        notMeasured:
+          anyOf:
+          - {type: string, enum: [macos, windows, missing_files]}
+          - {type: 'null'}
+        disk: {anyOf: [{$ref: '#/components/schemas/PoolMeter'}, {type: 'null'}]}
+        inodes: {anyOf: [{$ref: '#/components/schemas/PoolMeter'}, {type: 'null'}]}
+        memory:
+          anyOf:
+          - type: object
+            additionalProperties: false
+            required: [used, limit, floor, oomKills, warn]
+            properties:
+              used: {type: integer, minimum: 0}
+              limit: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+              floor: {type: integer, minimum: 0}
+              oomKills: {type: integer, minimum: 0}
+              warn: {type: boolean}
+          - {type: 'null'}
+        cpu:
+          anyOf:
+          - type: object
+            additionalProperties: false
+            required: [throttledPercent, quotaUsec, periodUsec, warn]
+            properties:
+              throttledPercent: {type: number, minimum: 0, maximum: 100}
+              quotaUsec: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+              periodUsec: {type: integer, minimum: 0}
+              warn: {type: boolean}
+          - {type: 'null'}
+        pids: {anyOf: [{$ref: '#/components/schemas/PoolMeter'}, {type: 'null'}]}
+        pressure:
+          type: object
+          additionalProperties: false
+          required: [memory, cpu, io]
+          properties:
+            memory:
+              anyOf:
+              - type: object
+                additionalProperties: false
+                required: [sample, limit, warn]
+                properties:
+                  sample: {$ref: '#/components/schemas/PoolPsi'}
+                  limit: {type: number, minimum: 0, maximum: 100}
+                  warn: {type: boolean}
+              - {type: 'null'}
+            cpu:
+              anyOf:
+              - type: object
+                additionalProperties: false
+                required: [sample, limit, warn]
+                properties:
+                  sample: {$ref: '#/components/schemas/PoolPsi'}
+                  limit: {type: number, minimum: 0, maximum: 100}
+                  warn: {type: boolean}
+              - {type: 'null'}
+            io:
+              anyOf:
+              - type: object
+                additionalProperties: false
+                required: [sample, limit, warn]
+                properties:
+                  sample: {$ref: '#/components/schemas/PoolPsi'}
+                  limit: {type: number, minimum: 0, maximum: 100}
+                  warn: {type: boolean}
+              - {type: 'null'}
+    HostContention:
+      type: object
+      additionalProperties: false
+      required: [measuredAt, notMeasured, pressure, memAvailableBytes, poolMemoryUsedBytes, poolMemoryLimitBytes, freeSlots,
+        busy]
+      properties:
+        measuredAt: {$ref: '#/components/schemas/Timestamp'}
+        notMeasured:
+          anyOf:
+          - {type: string, enum: [macos, windows, missing_files]}
+          - {type: 'null'}
+        pressure:
+          type: object
+          additionalProperties: false
+          required: [memory, cpu, io]
+          properties:
+            memory: {anyOf: [{$ref: '#/components/schemas/PoolPsi'}, {type: 'null'}]}
+            cpu: {anyOf: [{$ref: '#/components/schemas/PoolPsi'}, {type: 'null'}]}
+            io: {anyOf: [{$ref: '#/components/schemas/PoolPsi'}, {type: 'null'}]}
+        memAvailableBytes: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+        poolMemoryUsedBytes: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+        poolMemoryLimitBytes: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+        freeSlots: {$ref: '#/components/schemas/PoolSlots'}
+        busy: {type: boolean}
+    PoolSandbox:
+      type: object
+      additionalProperties: false
+      required: [id, state, place, waitSeconds, machineId, endsAt, reason]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        state:
+          type: string
+          enum: [waiting, offered, starting, running, ending, ended, cleanup_failed]
+        place: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+        waitSeconds: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
+        machineId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
+        endsAt: {anyOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]}
+        reason: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
+    PoolWorkspace:
+      type: object
+      additionalProperties: false
+      required: [hostId, state]
+      properties:
+        hostId: {$ref: '#/components/schemas/Id'}
+        state:
+          type: string
+          enum: [asked, approved, ready_to_join, active, suspended, removed]
+    PoolView:
+      type: object
+      additionalProperties: false
+      required: [hosts, me]
+      properties:
+        hosts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            if: { properties: { level: { const: community } } }
+            then: { properties: { holders: { maxItems: 0 }, line: { maxItems: 0 } } }
+            required: [hostId, level, reporting, contention, policy, holders, line, heldCount, waitingCount]
+            properties:
+              hostId: {$ref: '#/components/schemas/Id'}
+              level: {type: string, enum: [staff, community]}
+              reporting: {type: boolean}
+              policy: { anyOf: [{ $ref: '#/components/schemas/PoolPolicy' }, { type: 'null' }] }
+              contention: {anyOf: [{$ref: '#/components/schemas/HostContention'}, {type: 'null'}]}
+              holders:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [id, personId, size, taskId]
+                  properties:
+                    id: {$ref: '#/components/schemas/Id'}
+                    personId: {$ref: '#/components/schemas/Id'}
+                    size: {type: string, enum: [small, large]}
+                    taskId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
+              line:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [id, personId, size, taskId]
+                  properties:
+                    id: {$ref: '#/components/schemas/Id'}
+                    personId: {$ref: '#/components/schemas/Id'}
+                    size: {type: string, enum: [small, large]}
+                    taskId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
+              heldCount: {type: integer, minimum: 0}
+              waitingCount: {type: integer, minimum: 0}
+        me:
+          type: object
+          additionalProperties: false
+          required: [workspaces]
+          properties:
+            workspaces:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [hostId, state, resources]
+                properties:
+                  hostId: {$ref: '#/components/schemas/Id'}
+                  state:
+                    type: string
+                    enum: [asked, approved, ready_to_join, active, suspended, removed]
+                  resources: {anyOf: [{$ref: '#/components/schemas/PoolQuota'}, {type: 'null'}]}
+    PoolWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [hostId]
+      properties: {hostId: {$ref: '#/components/schemas/Id'}}
+    PoolSandboxRequest:
+      type: object
+      additionalProperties: false
+      required: [hostId, size, image]
+      properties:
+        hostId: {$ref: '#/components/schemas/Id'}
+        size: {type: string, enum: [small, large]}
+        image: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        taskId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
+    PoolHostFacts:
+      type: object
+      additionalProperties: false
+      required: [limits, sizes, contention, workspaces, running]
+      properties:
+        limits: {$ref: '#/components/schemas/PoolHostLimits'}
+        sizes: { $ref: "#/components/schemas/PoolSizes" }
+        contention: {$ref: '#/components/schemas/HostContention'}
+        workspaces:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [personId, state, resources]
+            properties:
+              personId: {$ref: '#/components/schemas/Id'}
+              state:
+                type: string
+                enum: [asked, approved, ready_to_join, active, suspended, removed]
+              resources: {$ref: '#/components/schemas/PoolQuota'}
+        running: {type: array, items: {$ref: '#/components/schemas/Id'}}
+    PoolNextRequest:
+      type: object
+      additionalProperties: false
+      required: [size]
+      properties: {size: {type: string, enum: [small, large]}}
+    PoolOffer:
+      anyOf:
+      - type: object
+        additionalProperties: false
+        required: [id, personId, machineId, deadline, counter, sentAt, signature, bodyBase64]
+        properties:
+          id: {$ref: '#/components/schemas/Id'}
+          personId: {$ref: '#/components/schemas/Id'}
+          machineId: {$ref: '#/components/schemas/Id'}
+          deadline: {$ref: '#/components/schemas/Timestamp'}
+          counter: {type: string, pattern: '^[0-9]+$'}
+          sentAt: {$ref: '#/components/schemas/Timestamp'}
+          signature: {type: string, pattern: '^[A-Za-z0-9+/]{86}==$'}
+          bodyBase64: {type: string, contentEncoding: base64}
+      - {type: 'null'}
+    PoolStateUpdate:
+      type: object
+      additionalProperties: false
+      required: [state, machineId, reason]
+      properties:
+        state: {type: string, enum: [starting, running, ending, ended, cleanup_failed]}
+        machineId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
+        reason: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
     ChatPerson:
       type: object
       additionalProperties: false
@@ -2842,7 +3510,7 @@ components:
         kind:
           description: |
             One of the fixed section types: today, needs, machines, health, board, map, feed, task, chat, team,
-            knowledge. Clients ignore kinds they do not know.
+            knowledge, pool. Clients ignore kinds they do not know.
           not: { const: channel }
           type: string
           pattern: "^[a-z][a-z0-9_]{0,31}$"

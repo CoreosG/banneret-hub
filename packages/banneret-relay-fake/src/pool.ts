@@ -1,0 +1,310 @@
+// @effect-diagnostics globalDate:off nodeBuiltinImport:off - in-memory relay protocol fixture.
+import * as NodeCrypto from "node:crypto";
+import type {
+  PoolConfig,
+  PoolHostFacts,
+  PoolPolicy,
+  PoolSandbox,
+  PoolSandboxRequest,
+  PoolStateUpdate,
+  PoolView,
+  PoolWorkspace,
+} from "@t3tools/contracts";
+
+type Proof = {
+  machineId: string;
+  counter: string;
+  sentAt: string;
+  signature: string;
+  bodyBase64: string;
+};
+type Booking = {
+  owner: string;
+  request: PoolSandboxRequest;
+  proof: Proof;
+  view: PoolSandbox;
+  deadline: number;
+  offeredTo: string | null;
+};
+type PoolError =
+  | "pool_limit_reached"
+  | "level_not_offered"
+  | "not_found"
+  | "forbidden"
+  | "malformed";
+
+export function createPool(
+  config: PoolConfig | undefined,
+  fail: (code: PoolError, message: string) => never,
+) {
+  const seconds = (duration: string) =>
+    Number(duration.slice(0, -1)) *
+    (duration.endsWith("h") ? 3600 : duration.endsWith("m") ? 60 : 1);
+  const lifespan = seconds(config?.sandboxes.time_limit ?? "2h");
+  const extension = seconds(config?.sandboxes.extend ?? "1h");
+  const hosts = new Map<string, { facts: PoolHostFacts; received: number; policy: PoolPolicy }>();
+  function smallerCapacity(a: string, b: string) {
+    const bytes = (capacity: string) =>
+      BigInt(capacity.slice(0, -1)) * 1024n ** BigInt("KMG".indexOf(capacity.slice(-1)) + 1);
+    return bytes(a) <= bytes(b) ? a : b;
+  }
+  type Asked = { hostId: string; state: "asked"; id: string; createdAt: string };
+  const workspaces = new Map<string, Map<string, Asked>>();
+  const bookings = new Map<string, Booking>();
+  const waiting = (host: string) =>
+    [...bookings.values()].filter((b) => b.request.hostId === host && b.view.state === "waiting");
+  const refresh = () => {
+    const now = Date.now();
+    for (const b of bookings.values()) {
+      if (b.view.state === "offered" && now >= b.deadline) {
+        b.view = { ...b.view, state: "waiting" };
+        b.offeredTo = null;
+      }
+      if (b.view.state === "waiting") {
+        const place = waiting(b.request.hostId).indexOf(b) + 1;
+        b.view = { ...b.view, place, waitSeconds: (place - 1) * lifespan };
+      }
+    }
+  };
+  const mustHost = (id: string) =>
+    hosts.get(id) ?? fail("level_not_offered", "Host has not reported.");
+  const owned = (owner: string, id: string) => {
+    const b = bookings.get(id);
+    return b?.owner === owner ? b : fail("not_found", "Unknown sandbox.");
+  };
+  return {
+    report(host: string, facts: PoolHostFacts) {
+      if (host !== facts.limits.id) fail("forbidden", "This token belongs to another host.");
+      const configured = config?.hosts.find((h) => h.id === host);
+      if (!config || !configured || configured.level !== facts.limits.level)
+        return fail("level_not_offered", "Host level differs from relay configuration.");
+      const local = facts.limits;
+      const each = local.workspaces.each;
+      const specified = configured.workspaces.each;
+      const size = (key: "small" | "large") => {
+        const hostSize = facts.sizes[key],
+          relaySize = config.sandboxes.sizes[key];
+        return {
+          cpu: Math.min(hostSize.cpu, relaySize.cpu),
+          memory: smallerCapacity(hostSize.memory, relaySize.memory),
+          disk: smallerCapacity(hostSize.disk, relaySize.disk),
+        };
+      };
+      const policy: PoolPolicy = {
+        warnings: config.warnings,
+        sizes: { small: size("small"), large: size("large") },
+        limits: {
+          id: host,
+          level: local.level,
+          sandbox_slots: {
+            small: Math.min(local.sandbox_slots.small, configured.sandbox_slots.small),
+            large: Math.min(local.sandbox_slots.large, configured.sandbox_slots.large),
+          },
+          workspaces: {
+            max: Math.min(local.workspaces.max, configured.workspaces.max),
+            each: {
+              cpu: Math.min(each.cpu, specified.cpu),
+              tasks: Math.min(each.tasks, specified.tasks),
+              memory_floor: smallerCapacity(each.memory_floor, specified.memory_floor),
+              memory_max: smallerCapacity(each.memory_max, specified.memory_max),
+              disk: smallerCapacity(each.disk, specified.disk),
+            },
+          },
+        },
+      };
+      for (const w of facts.workspaces) workspaces.get(w.personId)?.delete(host);
+      hosts.set(host, { facts, received: Date.now(), policy });
+      return policy;
+    },
+    ask(owner: string, hostId: string): PoolWorkspace {
+      if (mustHost(hostId).facts.limits.level !== "staff")
+        fail("level_not_offered", "Workspaces require a staff host.");
+      const reported = mustHost(hostId).facts.workspaces.find((w) => w.personId === owner);
+      if (reported) return { hostId, state: reported.state };
+      const mine = workspaces.get(owner) ?? new Map<string, Asked>();
+      if (!mine.has(hostId))
+        mine.set(hostId, {
+          hostId,
+          state: "asked",
+          id: NodeCrypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+        });
+      workspaces.set(owner, mine);
+      return { hostId, state: "asked" };
+    },
+    needs() {
+      return [...workspaces].flatMap(([owner, requests]) =>
+        [...requests.values()].map((w) => ({
+          id: w.id,
+          createdAt: w.createdAt,
+          kind: "workspace_request",
+          title: `Workspace on ${w.hostId} requested by ${owner}`,
+        })),
+      );
+    },
+    list(owner: string): PoolView {
+      refresh();
+      const mine = new Map<string, PoolView["me"]["workspaces"][number]>();
+      for (const w of workspaces.get(owner)?.values() ?? [])
+        mine.set(w.hostId, { hostId: w.hostId, state: w.state, resources: null });
+      const rows = (config?.hosts ?? []).map(({ id: hostId, level }) => {
+        const report = hosts.get(hostId);
+        if (!report)
+          return {
+            hostId,
+            level,
+            reporting: false,
+            policy: null,
+            contention: null,
+            holders: [],
+            line: [],
+            heldCount: 0,
+            waitingCount: 0,
+          };
+        const { facts, received } = report;
+        const own = facts.workspaces.find((w) => w.personId === owner);
+        if (own) mine.set(hostId, { hostId, state: own.state, resources: own.resources });
+
+        const onHost = [...bookings.values()].filter((b) => b.request.hostId === hostId);
+        const visible = (bs: Booking[]) =>
+          level === "community"
+            ? []
+            : bs.map((b) => ({
+                id: b.view.id,
+                personId: b.owner,
+                size: b.request.size,
+                taskId: b.request.taskId ?? null,
+              }));
+        const held = onHost.filter((b) => b.view.state !== "waiting" && b.view.state !== "ended");
+        const line = waiting(hostId);
+        return {
+          hostId,
+          level,
+          reporting: Date.now() - received < 120000,
+          contention: facts.contention,
+          policy: report.policy,
+          holders: visible(held),
+          line: visible(line),
+          heldCount: held.length,
+          waitingCount: line.length,
+        };
+      });
+      return { hosts: rows, me: { workspaces: [...mine.values()] } };
+    },
+    enqueue(owner: string, request: PoolSandboxRequest, proof: Proof) {
+      mustHost(request.hostId);
+      refresh();
+      if (!config?.sandboxes.images.some((i) => i.digest === request.image))
+        fail("level_not_offered", "Unknown image digest.");
+      if (
+        [...bookings.values()].filter((b) => b.owner === owner && b.view.state === "waiting")
+          .length >= (config?.sandboxes.per_person.waiting ?? 1)
+      )
+        fail("pool_limit_reached", "One waiting request per person.");
+      const id = NodeCrypto.randomUUID();
+      const view: PoolSandbox = {
+        id,
+        state: "waiting",
+        place: waiting(request.hostId).length + 1,
+        waitSeconds: waiting(request.hostId).length * lifespan,
+        machineId: null,
+        endsAt: null,
+        reason: null,
+      };
+      bookings.set(id, { owner, request, view, proof, deadline: 0, offeredTo: null });
+      return view;
+    },
+    next(host: string, size: "small" | "large") {
+      refresh();
+      const report = mustHost(host);
+      const held = [...bookings.values()].filter(
+        (b) => b.offeredTo === host && b.request.size === size && b.view.state !== "ended",
+      );
+      const pending = held.filter((b) => !report.facts.running.includes(b.view.id));
+      if (
+        Date.now() - report.received >= 120000 ||
+        held.length >= report.policy.limits.sandbox_slots[size] ||
+        pending.length >= report.facts.contention.freeSlots[size]
+      )
+        return null;
+      const b = waiting(host).find(
+        (b) =>
+          b.request.size === size &&
+          [...bookings.values()].filter(
+            (active) =>
+              active.owner === b.owner &&
+              active.view.state !== "waiting" &&
+              active.view.state !== "ended",
+          ).length < (config?.sandboxes.per_person.running ?? 1),
+      );
+      if (!b) return null;
+      b.deadline = Date.now() + 60000;
+      b.offeredTo = host;
+      b.view = { ...b.view, state: "offered", place: null, waitSeconds: null };
+      return {
+        id: b.view.id,
+        personId: b.owner,
+        deadline: new Date(b.deadline).toISOString(),
+        ...b.proof,
+      };
+    },
+    read(owner: string, id: string) {
+      refresh();
+      return owned(owner, id).view;
+    },
+    cancel(owner: string, id: string) {
+      refresh();
+      const b = owned(owner, id);
+      if (b.view.state === "cleanup_failed") fail("forbidden", "Cleanup needs an admin.");
+      if (b.view.state !== "ended")
+        b.view = {
+          ...b.view,
+          state: b.view.state === "waiting" ? "ended" : "ending",
+          place: null,
+          waitSeconds: null,
+          reason: "cancelled",
+        };
+      return b.view;
+    },
+    extend(owner: string, id: string) {
+      refresh();
+      const b = owned(owner, id);
+      if (b.view.state !== "running" || !b.view.endsAt || waiting(b.request.hostId).length)
+        return fail("pool_limit_reached", "Extension unavailable.");
+      b.view = {
+        ...b.view,
+        endsAt: new Date(Date.parse(b.view.endsAt) + extension * 1000).toISOString(),
+      };
+      return b.view;
+    },
+    update(host: string, id: string, event: PoolStateUpdate) {
+      refresh();
+      const b = bookings.get(id);
+      if (!b || b.offeredTo !== host) return fail("not_found", "Unknown offer.");
+      const allowed: Record<PoolSandbox["state"], readonly PoolStateUpdate["state"][]> = {
+        waiting: [],
+        offered: ["starting"],
+        starting: ["running", "ending"],
+        running: ["ending"],
+        ending: ["ended", "cleanup_failed"],
+        ended: [],
+        cleanup_failed: ["ended"],
+      };
+      if (!allowed[b.view.state].includes(event.state))
+        fail("forbidden", "Invalid sandbox transition.");
+      if (event.state === "running" && !event.machineId)
+        fail("malformed", "Running needs a machine id.");
+      b.view = {
+        ...b.view,
+        state: event.state,
+        machineId: event.machineId,
+        reason: event.reason,
+        endsAt:
+          event.state === "running"
+            ? new Date(Date.now() + lifespan * 1000).toISOString()
+            : b.view.endsAt,
+      };
+      return b.view;
+    },
+  };
+}

@@ -374,3 +374,11 @@ Health appears when the operator enables a source. Each check names its source a
 Signed webhook alarms appear with their severity until resolved. Critical alarms also appear
 in Needs you for founders or configured recipients. Dashboard links open in the system browser.
 The [relay contract](relay-v1/README.md#optional-health-sources-dashboards-and-alarms) describes configuration and payloads.
+
+## Shared machines
+
+Each member has a separate OS account and signs in to Claude, Codex, Git and Banneret Hub in that account.
+Their sandboxes run as that user. The admin of this machine can read everything on it.
+
+Your desktop reads live resource measurements directly from your workspace Hub over the linked machine.
+The relay shows you your disk and inode quota and warning flags. Other members can see host pressure.

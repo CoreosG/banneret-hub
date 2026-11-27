@@ -11,7 +11,7 @@ when its copy differs from this one. `examples/` holds one valid payload per sch
 payloads the relay must refuse. `contract.test.ts` here, and `contract_test.go` in the mirror, prove the schema
 compiles, every example validates (and, in Go, decodes into the Go types), and every invalid example is refused.
 
-Every call starts from a Hub server. The relay never dials a machine and cannot run anything on one.
+Every call starts from a Hub or a pool host agent. The relay never dials a machine and cannot run anything on one.
 
 Rules marked [Orchestrator] were accepted by the founder on 2026-11-26.
 
@@ -1132,3 +1132,57 @@ and `/chat/deliveries`, which are the truth.
 past `after`; the Hub then reloads the conversation list and the open conversation.
 
 Message changes resolve to the current message, including its tombstone after deletion. Conversation changes carry a reference so each participant fetches their own view. A private cursor update reaches only the same person’s machines. A chat ask adds `ask` to its class 1 Needs item so the named person can answer by id.
+
+## Shared machines
+
+The relay advertises the signed-in section `{id:"pool",kind:"pool",version:1,flags:[]}` when
+`pool.enabled` is true. Configure the block using `PoolConfig` (see `examples/pool-config.json`).
+Host capacities are ceilings. Take the lower configured and reported limit. A host must independently
+verify its level, capacity and image list before accepting a request. Size suffixes K, M and G are binary.
+A schema change wipes the pool store.
+
+Host enrolment uses the existing signed start and poll bodies at `/pool/hosts/enroll/start` and
+`/pool/hosts/enroll/poll`. The machine environment ID names the configured host. A founder must
+confirm the pairing. Bind the resulting credential to that host and permit only host calls. Ordinary
+device tokens authorize the Hub calls. Scope sandbox reads, cancellation and extension to the owner.
+
+Every 30 seconds the host replaces its previous facts with one full report. Drop superseded samples.
+The facts response returns effective ceilings and warning thresholds as `PoolPolicy`. Signed-in Hubs
+read the same policy on the host row. Before the first report its policy is null.
+After two minutes without a report set `reporting:false`. A host that has never reported has null
+contention. The running array is the complete set of running sandbox IDs. The relay filters workspace
+rows by authenticated person ID before constructing `me.workspaces`. Staff hosts show current slot
+holders and the line. Community hosts return empty lists and counts only. Ended rows belong to the owner.
+
+Disk and memory values are bytes. PID and inode values are counts. A null limit is unlimited.
+A null sample is unavailable. Use UTC measurement times for host-wide and local samples only.
+Set `notMeasured` to macos, windows or missing_files when a source is unavailable, otherwise null. CPU throttling is the percentage of
+throttled periods in the last five minutes. PSI is the kernel percentage for some and full over 10 and
+60 seconds. The host uses aggregate PSI, available memory, pool memory and free slots. Set busy if
+any configured host threshold is exceeded. A person's Hub reads local Resources and sends them
+directly to that person's desktop. The host heartbeat can carry only disk, inodes and warning flags
+for that person. The memory warning also covers a new OOM kill. Never send human activity samples.
+
+A sandbox offer carries the original signed POST to `/relay/v1/pool/sandboxes` as standard base64 body
+bytes with the original signing headers. Pool calls have no query parameters. Hosts verify the signature
+with the requesting machine key already bound to that person, check the signed host, size and digest,
+and consume each signed request once. The offer deadline is 60 seconds. A host without an eligible
+request gets JSON null. Queue places start at 1. Wait estimates use seconds. An extension requires a
+running sandbox and an empty line. Use the normal error envelope with 409 pool_limit_reached or
+403 level_not_offered. The relay only records requests. All account and sandbox operations run on the host.
+
+| State | Event and next state | Storage and restart |
+| --- | --- | --- |
+| Workspace asked | Founder approves or declines | Relay keeps the request |
+| Approved | Admin creates the account and verifies limits | Relay keeps approval |
+| Ready to join | Member joins, or unused account expires after seven days | Host facts rebuild the row |
+| Active | Founder suspends, or member leaves | Host restarts the member's service |
+| Suspended | Admin resumes or removes the account | Locked account stays locked |
+| Removed | Purge home after 14 days | Host stores the purge date |
+| Sandbox waiting | Eligible host takes it, member cancels, or two hours elapse | Relay stores the queue order |
+| Offered | Host reports starting, or deadline restores original place | Relay persists the offer and deadline atomically |
+| Starting | Hub enrols and reports running, or startup fails after three minutes | Agent checks the host unit |
+| Running | Member ends it, limit expires, or host reboots | Agent reconciles the unit. Reboot ends it with host_restarted |
+| Ending | Verified cleanup gives ended, a failure gives cleanup_failed | Host resumes cleanup before reuse |
+| Cleanup failed | Admin verifies cleanup and closes the request | Host and relay keep the slot unavailable |
+| Ended | Delete after seven days | Relay retains the owner-only result |

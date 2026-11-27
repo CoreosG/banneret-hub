@@ -19,7 +19,13 @@ import type {
   ChatPatch,
   ChatPost,
   ChatRead,
+  PoolConfig,
+  PoolHostFacts,
+  PoolNextRequest,
+  PoolSandboxRequest,
+  PoolStateUpdate,
 } from "@t3tools/contracts";
+import { createPool } from "./pool.ts";
 import { openAlarmStore, type Alarm } from "./alarms.ts";
 import { publicKeyFromBase64, verify } from "./signing.ts";
 import { loadSpec, type SchemaName } from "./spec.ts";
@@ -40,6 +46,8 @@ export type Refusal =
 type Expiry = "code_expired" | "too_many_attempts" | "approval_expired";
 type PairingState = "pending" | "awaiting_approval" | "approved" | "refused" | "expired";
 type ErrorCode =
+  | "pool_limit_reached"
+  | "level_not_offered"
   | "malformed"
   | "rate_limited"
   | "too_large"
@@ -101,6 +109,7 @@ interface HealthSource {
 
 export interface FakeRelayOptions {
   readonly chat?: boolean;
+  readonly pool?: PoolConfig;
   readonly healthSources?: readonly HealthSource[];
   readonly criticalRecipients?: readonly string[];
   readonly dashboards?: ReadonlyArray<{ id: string; title: string; url: string; group?: string }>;
@@ -211,6 +220,7 @@ interface TeamState {
 }
 
 interface Pairing {
+  readonly poolHost: boolean;
   readonly id: string;
   readonly code: string;
   readonly publicKey: NodeCrypto.KeyObject;
@@ -225,6 +235,7 @@ interface Pairing {
 }
 
 interface Machine {
+  readonly poolHost: boolean;
   readonly id: string;
   readonly personId: string;
   readonly publicKey: NodeCrypto.KeyObject;
@@ -420,6 +431,8 @@ class RelayError extends Error {
 
 const STATUS: Record<ErrorCode, number> = {
   malformed: 400,
+  pool_limit_reached: 409,
+  level_not_offered: 403,
   rate_limited: 429,
   too_large: 413,
   unauthenticated: 401,
@@ -637,6 +650,8 @@ export interface FakeRelay {
 export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<FakeRelay> => {
   const publicOrigin =
     options.publicOrigin === undefined ? undefined : parsePublicOrigin(options.publicOrigin);
+  if (options.pool && spec.check("PoolConfig", options.pool))
+    throw new Error("Invalid pool configuration.");
   const board = options.board ?? { staleSeconds: 21600, expirySeconds: 86400 };
   if (spec.check("LeaseClocks", board) || board.expirySeconds <= board.staleSeconds)
     throw new Error("Invalid lease clocks.");
@@ -692,6 +707,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const people = new Map<string, Person>();
   const peopleByLogin = new Map<string, Person>();
+  const pool = createPool(options.pool, (code, message) => {
+    throw new RelayError(code, message);
+  });
+  const poolHosts = new Set(options.pool?.hosts.map((h) => h.id));
   const pairings = new Map<string, Pairing>();
   const machines = new Map<string, Machine>();
   const machinesByToken = new Map<string, Machine>();
@@ -821,6 +840,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     for (const machine of machines.values()) {
       if (
         machine.revokedAt !== null ||
+        machine.poolHost !== pairing.poolHost ||
         machine.facts.environmentId !== pairing.machine.environmentId
       )
         continue;
@@ -834,6 +854,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const machine: Machine = {
       id: randomId("m"),
       personId: person.id,
+      poolHost: pairing.poolHost,
       publicKey: pairing.publicKey,
       tokenHash: null,
       tokenUsed: false,
@@ -890,6 +911,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (identityHeader !== undefined && pairing.networkIdentity !== person.networkIdentity) {
       pairing.state = "refused";
       pairing.reason = "network_identity_mismatch";
+      return pairing.state;
+    }
+    if (pairing.poolHost && person.role !== "founder") {
+      pairing.state = "refused";
+      pairing.reason = "declined";
       return pairing.state;
     }
     if (input.awaitFounder === true && isNew) {
@@ -1015,7 +1041,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     readonly person: Person;
   }
 
-  const authenticate = (request: NodeHttp.IncomingMessage, body: Buffer): Caller => {
+  const authenticate = (
+    request: NodeHttp.IncomingMessage,
+    body: Buffer,
+    hostCall = false,
+  ): Caller => {
     const authorization = headerValue(request, "Authorization");
     const match = authorization === undefined ? null : /^Bearer (\S+)$/.exec(authorization);
     if (!match?.[1]) {
@@ -1027,6 +1057,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (!machine) throw new RelayError("unauthenticated", "Unknown device token.");
     if (machine.revokedAt !== null)
       throw new RelayError("token_revoked", "This machine was revoked; enrol again.");
+    if (machine.poolHost !== hostCall)
+      throw new RelayError("forbidden", "Wrong credential for this route.");
     const device = headerValue(request, "X-Banneret-Device");
     if (device === undefined || !ID_PATTERN.test(device) || device !== machine.id) {
       throw new RelayError(
@@ -1102,7 +1134,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const liveMachines = () =>
     [...machines.values()]
-      .filter((machine) => machine.revokedAt === null)
+      .filter((machine) => !machine.poolHost && machine.revokedAt === null)
       .toSorted(
         (a, b) =>
           (b.lastHeardAt ?? -1) - (a.lastHeardAt ?? -1) ||
@@ -1116,6 +1148,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     ...[...machines.values()]
       .filter(
         (machine) =>
+          !machine.poolHost &&
           machine.revokedAt !== null &&
           (machine.personId === viewer.id || viewer.role === "founder"),
       )
@@ -1174,6 +1207,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return byUrgency([
       ...(needs.get(person.id) ?? []),
       ...approvalNeeds(person),
+      ...(person.role === "founder" ? pool.needs().map((need, seq) => ({ ...need, seq })) : []),
       ...critical.map((a, seq) => ({
         seq,
         id: sha256Hex(Buffer.from(JSON.stringify([a.sourceId, a.id, a.firedAt]))),
@@ -2241,6 +2275,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                   },
                 ]
               : []),
+            ...(options.pool?.enabled ? [{ id: "pool", kind: "pool", version: 1, flags: [] }] : []),
             ...(sources.size ? [{ id: "health", kind: "health", version: 1, flags: [] }] : []),
             { id: "today", kind: "today", version: 1, flags: [] },
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
@@ -2277,7 +2312,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       return;
     }
 
-    if (method === "POST" && route === "/enroll/start") {
+    const isPool = route === "/pool" || route.startsWith("/pool/");
+    if (isPool && !options.pool?.enabled) throw new RelayError("not_found", "Pool is disabled.");
+    if (isPool && query.size)
+      throw new RelayError("malformed", "Pool calls take no query parameters.");
+    const hostEnroll = route.startsWith("/pool/hosts/enroll/");
+    if (method === "POST" && (route === "/enroll/start" || route === "/pool/hosts/enroll/start")) {
       const start = parseJson(body, "EnrolStartRequest") as {
         publicKey: string;
         machine: MachineFacts;
@@ -2288,7 +2328,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           field: "publicKey",
         });
       enrolmentSignature(request, publicKey, body);
+      if (hostEnroll && !poolHosts.has(start.machine.environmentId))
+        throw new RelayError("level_not_offered", "Unknown pool host.");
       const pairing: Pairing = {
+        poolHost: hostEnroll,
         id: randomId("pr"),
         code: confirmCode(),
         publicKey,
@@ -2309,14 +2352,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         state: "pending",
         retryAfterMs,
       };
-      if (autoApprove) confirmPairing(pairing.id, pairing.code, defaultPerson);
+      if (autoApprove && !hostEnroll) confirmPairing(pairing.id, pairing.code, defaultPerson);
       sendJson(response, 200, "EnrolStartResponse", reply);
       return;
     }
 
-    if (method === "POST" && route === "/enroll/poll") {
+    if (method === "POST" && (route === "/enroll/poll" || route === "/pool/hosts/enroll/poll")) {
       const poll = parseJson(body, "EnrolPollRequest") as { pairingId: string };
       const pairing = pairingById(poll.pairingId);
+      if (hostEnroll !== pairing.poolHost) throw new RelayError("not_found", "Unknown pairing.");
       enrolmentSignature(request, pairing.publicKey, body);
       const reply: Record<string, unknown> = {
         pairingId: pairing.id,
@@ -2337,7 +2381,61 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       return;
     }
 
-    const caller = authenticate(request, body);
+    const statePath = /^\/pool\/sandboxes\/([^/]+)\/state$/.exec(route);
+    const caller = authenticate(
+      request,
+      body,
+      isPool && (route.startsWith("/pool/hosts/") || !!statePath),
+    );
+    if (isPool) {
+      const owner = caller.person.id;
+      const host = caller.machine.facts.environmentId;
+      const sandbox = /^\/pool\/sandboxes\/([^/]+)(\/extend)?$/.exec(route);
+      if (method === "GET" && route === "/pool")
+        return sendJson(response, 200, "PoolView", pool.list(owner));
+      if (method === "POST" && route === "/pool/workspaces") {
+        const { hostId } = parseJson(body, "PoolWorkspaceRequest") as { hostId: string };
+        const workspace = pool.ask(owner, hostId);
+        refreshAllHeads();
+        return sendJson(response, 200, "PoolWorkspace", workspace);
+      }
+      if (method === "POST" && route === "/pool/sandboxes") {
+        const input = parseJson(body, "PoolSandboxRequest") as PoolSandboxRequest;
+        return sendJson(
+          response,
+          200,
+          "PoolSandbox",
+          pool.enqueue(owner, input, {
+            machineId: caller.machine.id,
+            ...signingHeaders(request),
+            bodyBase64: body.toString("base64"),
+          }),
+        );
+      }
+      if (sandbox?.[1]) {
+        if (method === "GET" && !sandbox[2])
+          return sendJson(response, 200, "PoolSandbox", pool.read(owner, sandbox[1]));
+        if (method === "DELETE" && !sandbox[2])
+          return sendJson(response, 200, "PoolSandbox", pool.cancel(owner, sandbox[1]));
+        if (method === "POST" && sandbox[2])
+          return sendJson(response, 200, "PoolSandbox", pool.extend(owner, sandbox[1]));
+      }
+      if (method === "POST" && route === "/pool/hosts/facts") {
+        const facts = parseJson(body, "PoolHostFacts") as PoolHostFacts;
+        return sendJson(response, 200, "PoolPolicy", pool.report(host, facts));
+      }
+      if (method === "POST" && route === "/pool/hosts/next") {
+        const { size } = parseJson(body, "PoolNextRequest") as PoolNextRequest;
+        return sendJson(response, 200, "PoolOffer", pool.next(host, size));
+      }
+      if (method === "POST" && statePath?.[1])
+        return sendJson(
+          response,
+          200,
+          "PoolSandbox",
+          pool.update(host, statePath[1], parseJson(body, "PoolStateUpdate") as PoolStateUpdate),
+        );
+    }
 
     if (options.chat && route.startsWith("/chat/")) {
       const { person } = caller;

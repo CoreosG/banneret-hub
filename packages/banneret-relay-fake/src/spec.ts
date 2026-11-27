@@ -84,6 +84,25 @@ export type SchemaName =
   | "GraveyardPage"
   | "SnapshotTeam"
   | "TaskRead"
+  | "PoolPolicy"
+  | "PoolSlots"
+  | "PoolHostLimits"
+  | "PoolWarnings"
+  | "PoolConfig"
+  | "PoolMeter"
+  | "PoolPsi"
+  | "PoolQuota"
+  | "Resources"
+  | "HostContention"
+  | "PoolSandbox"
+  | "PoolWorkspace"
+  | "PoolView"
+  | "PoolWorkspaceRequest"
+  | "PoolSandboxRequest"
+  | "PoolHostFacts"
+  | "PoolNextRequest"
+  | "PoolOffer"
+  | "PoolStateUpdate"
   | "Id";
 
 export interface SpecValidator {
@@ -184,6 +203,10 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "machines.json": "MachinesPage",
   "needs.json": "NeedsPage",
   "repositories.json": "RepositoriesPage",
+  "pool-resources-local.json": "Resources",
+  "pool.json": "PoolView",
+  "pool-config.json": "PoolConfig",
+  "pool-facts.json": "PoolHostFacts",
   "alarm.json": "Alarm",
   "today.json": "Today",
   "error.json": "Error",
@@ -212,7 +235,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
 };
 
 /** Invalid examples are refused facts, except the enrolment ones; the same rule as the Go contract test. */
-export const invalidExampleSchema = (file: string): SchemaName =>
+const baseInvalidExampleSchema = (file: string): SchemaName =>
   exampleSchemas[file] ??
   (file.startsWith("alarm-")
     ? "Alarm"
@@ -249,6 +272,12 @@ export const invalidExampleSchema = (file: string): SchemaName =>
                                   : file.startsWith("snapshot-health")
                                     ? "HealthBlock"
                                     : "FactsRequest");
+
+export const invalidExampleSchema = (file: string): SchemaName => {
+  if (file.startsWith("pool-facts-")) return "PoolHostFacts";
+  if (file.startsWith("pool-")) return "PoolView";
+  return baseInvalidExampleSchema(file);
+};
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

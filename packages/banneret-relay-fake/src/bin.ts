@@ -21,9 +21,10 @@ const { values } = NodeUtil.parseArgs({
 
 const settings: Pick<
   FakeRelayOptions,
-  "healthSources" | "dashboards" | "board" | "criticalRecipients" | "alarmDatabase"
+  "pool" | "healthSources" | "dashboards" | "board" | "criticalRecipients" | "alarmDatabase"
 > = values.config === undefined ? {} : JSON.parse(NodeFS.readFileSync(values.config, "utf8"));
 const relay = await startFakeRelay({
+  ...(settings.pool && { pool: settings.pool }),
   ...(settings.healthSources && { healthSources: settings.healthSources }),
   ...(settings.dashboards && { dashboards: settings.dashboards }),
   ...(settings.board && { board: settings.board }),

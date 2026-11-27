@@ -231,3 +231,32 @@ describe("chat privacy", () => {
     ]);
   });
 });
+
+it("keeps local resource samples out of relay payloads and quotas under me", () => {
+  const { components, paths } = readOpenApi() as {
+    components: Record<string, Record<string, unknown>>;
+    paths: Record<string, unknown>;
+  };
+  function inspect(node: unknown, path: string[], seen: Set<string>): void {
+    if (!node || typeof node !== "object") return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key !== "$ref" || typeof value !== "string") {
+        inspect(value, [...path, key], seen);
+        continue;
+      }
+      const [, group, name] = value.replace("#/", "").split("/");
+      if (!group || !name || seen.has(value)) continue;
+      expect(name).not.toBe("Resources");
+      if (name === "PoolQuota") {
+        if (path.includes("requestBody")) expect(path[0]).toBe("/pool/hosts/facts");
+        else {
+          expect(path.slice(0, 2)).toEqual(["/pool", "get"]);
+          expect(path).toContain("me");
+        }
+      }
+      inspect(components[group]?.[name], path, new Set([...seen, value]));
+    }
+  }
+  expect(paths["/pool"]).toBeDefined();
+  inspect(paths, [], new Set());
+});
