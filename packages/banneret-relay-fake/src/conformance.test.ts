@@ -1800,6 +1800,216 @@ describe("feed, graveyard, tasks and checked", () => {
   });
 });
 
+describe("lease protocol", () => {
+  interface LastRelease {
+    readonly by: { readonly login: string };
+    readonly reason: string;
+    readonly freeToContinue: boolean;
+    readonly reasonText?: string;
+    readonly note?: string;
+  }
+  interface Card {
+    readonly task: { readonly id: string };
+    readonly column: string;
+    readonly status: string;
+    readonly lease?: { readonly holder: { readonly login: string }; readonly state: string };
+    readonly lastRelease?: LastRelease;
+  }
+  interface FeedEntry {
+    readonly type: string;
+    readonly task?: { readonly id: string };
+    readonly author?: { readonly login: string };
+    readonly reason?: string;
+    readonly freeToContinue?: boolean;
+    readonly note?: string;
+  }
+  const id = () => `t_${randomText(5)}`;
+  const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+  const headFile = async (machine: Enrolled, kind: "board" | "feed", schema: string) => {
+    await client.rebuildSnapshot(machine.login);
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    expect(head.status, JSON.stringify(head.body)).toBe(200);
+    const ref = (head.body as { files: Record<string, string> }).files[kind] ?? "";
+    const file = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
+    expect(file.status, JSON.stringify(file.body)).toBe(200);
+    expectSchema(schema, file.body);
+    return file.body;
+  };
+  const cardFor = async (machine: Enrolled, taskId: string) =>
+    ((await headFile(machine, "board", "SnapshotBoard")) as { cards: Card[] }).cards.find(
+      (card) => card.task.id === taskId,
+    );
+  const releasesOf = async (machine: Enrolled, taskId: string) =>
+    ((await headFile(machine, "feed", "FeedPage")) as { entries: FeedEntry[] }).entries.filter(
+      (entry) => entry.type === "released" && entry.task?.id === taskId,
+    );
+
+  it("holds a task from its claim comment, assignee and claimed label", async () => {
+    const machine = await enrol();
+    const holder = newLogin();
+    const task = id();
+    await client.control("/board/seed", {
+      tasks: [
+        {
+          id: task,
+          title: "Claimed task",
+          comments: [{ author: holder, body: `claim: ${holder}/hub` }],
+          assignees: [holder],
+          labels: ["claimed"],
+        },
+      ],
+    });
+    const card = await cardFor(machine, task);
+    expect(card?.lease?.holder.login).toBe(holder);
+    expect(card?.lease?.state).toBe("active");
+    expect(card?.column).toBe("taken");
+    expect(card?.lastRelease).toBeUndefined();
+  });
+
+  it("frees a released task with lastRelease and one released feed entry", async () => {
+    const machine = await enrol();
+    const holder = newLogin();
+    const task = id();
+    await client.control("/board/seed", {
+      tasks: [
+        {
+          id: task,
+          title: "Handed over task",
+          comments: [{ author: holder, body: `claim: ${holder}/hub`, createdAt: ago(120) }],
+          assignees: [holder],
+          labels: ["claimed"],
+        },
+      ],
+    });
+    await client.control("/board/tracker", {
+      taskId: task,
+      comments: [
+        {
+          author: holder,
+          body: "release: out_of_usage · free to continue\n**Next:** wire the button.",
+        },
+      ],
+      assignees: [],
+      labels: [],
+    });
+    const card = await cardFor(machine, task);
+    expect(card?.lease).toBeUndefined();
+    expect(card?.column).toBe("free");
+    expect(card?.lastRelease).toMatchObject({
+      by: { login: holder },
+      reason: "out_of_usage",
+      freeToContinue: true,
+      note: "**Next:** wire the button.",
+    });
+    const read = await call(machine, "GET", `/relay/v1/tasks/${task}`);
+    expectSchema("TaskRead", read.body);
+    expect((read.body as { lastRelease?: LastRelease }).lastRelease?.note).toBe(
+      "**Next:** wire the button.",
+    );
+    const entries = await releasesOf(machine, task);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      author: { login: holder },
+      reason: "out_of_usage",
+      freeToContinue: true,
+    });
+  });
+
+  it("gives a same-second race to the lower comment id and marks the conflict", async () => {
+    const machine = await enrol();
+    const first = newLogin();
+    const second = newLogin();
+    const task = id();
+    const at = ago(5);
+    await client.control("/board/seed", {
+      tasks: [
+        {
+          id: task,
+          title: "Raced task",
+          comments: [
+            { id: "1002", author: first, body: `claim: ${first}/hub`, createdAt: at },
+            { id: "998", author: second, body: `claim: ${second}/hub`, createdAt: at },
+          ],
+          assignees: [first, second],
+          labels: ["claimed"],
+        },
+      ],
+    });
+    const card = await cardFor(machine, task);
+    expect(card?.lease).toMatchObject({ holder: { login: second }, state: "conflict" });
+    expect(card?.status).toBe("needs_you");
+    await client.control("/board/tracker", {
+      taskId: task,
+      comments: [{ author: first, body: `release: lost_claim · @${second}` }],
+      assignees: [second],
+    });
+    const after = await cardFor(machine, task);
+    expect(after?.lease).toMatchObject({ holder: { login: second }, state: "active" });
+    expect(await releasesOf(machine, task)).toHaveLength(0);
+  });
+
+  it("marks a take that never landed as incomplete after the settle window", async () => {
+    const machine = await enrol();
+    const holder = newLogin();
+    const settling = id();
+    const stuck = id();
+    await client.control("/board/seed", {
+      tasks: [
+        {
+          id: settling,
+          title: "Settling",
+          comments: [{ author: holder, body: `claim: ${holder}/hub`, createdAt: ago(10) }],
+        },
+        {
+          id: stuck,
+          title: "Stuck",
+          comments: [{ author: holder, body: `claim: ${holder}/hub`, createdAt: ago(120) }],
+        },
+      ],
+    });
+    expect((await cardFor(machine, settling))?.lease?.state).toBe("active");
+    const card = await cardFor(machine, stuck);
+    expect(card?.lease).toMatchObject({ holder: { login: holder }, state: "incomplete" });
+    expect(card?.column).toBe("stuck");
+  });
+
+  it("ignores another person's release and counts a founder's", async () => {
+    const machine = await enrol();
+    const founder = await enrol({ role: "founder" });
+    const holder = newLogin();
+    const stranger = newLogin();
+    const task = id();
+    await client.control("/board/seed", {
+      tasks: [
+        {
+          id: task,
+          title: "Founder release",
+          comments: [
+            { author: holder, body: `claim: ${holder}/hub`, createdAt: ago(300) },
+            { author: stranger, body: "release: done", createdAt: ago(200) },
+          ],
+          assignees: [holder],
+          labels: ["claimed"],
+        },
+      ],
+    });
+    expect((await cardFor(machine, task))?.lease?.holder.login).toBe(holder);
+    await client.control("/board/tracker", {
+      taskId: task,
+      comments: [{ author: founder.login, body: "release: deprioritised" }],
+      assignees: [],
+      labels: [],
+    });
+    const card = await cardFor(machine, task);
+    expect(card?.lease).toBeUndefined();
+    expect(card?.lastRelease).toMatchObject({
+      by: { login: founder.login },
+      reason: "deprioritised",
+      freeToContinue: false,
+    });
+  });
+});
+
 describe("map and the stage plan", () => {
   interface MapItem {
     readonly id: string;
