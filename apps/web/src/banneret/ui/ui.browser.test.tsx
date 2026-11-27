@@ -186,6 +186,22 @@ describe("RelativeTime", () => {
   });
 });
 
+describe("StatusLegend", () => {
+  it("counts the agent-at-work chip and dims it at zero, like a status", async () => {
+    await using screen = await render(
+      <>
+        <StatusLegend counts={{ needs_you: 1, planned: 0 }} atWorkCount={2} />
+        <StatusLegend counts={{ needs_you: 1 }} atWorkCount={0} />
+      </>,
+    );
+    const [busy, idle] = screen.container.querySelectorAll('[data-slot="legend-at-work"]');
+    expect(busy?.querySelector("[data-count]")?.textContent).toBe("2");
+    expect(busy?.className).not.toContain("opacity-45");
+    expect(idle?.querySelector("[data-count]")?.textContent).toBe("0");
+    expect(idle?.className).toContain("opacity-45");
+  });
+});
+
 describe("page pieces", () => {
   it("compose into a page with header, legend, section rows, empty states, health and facts", async () => {
     const onSelect = vi.fn();
