@@ -472,8 +472,7 @@ More valid line 1 examples: `release: done`, `release: other · not needed after
 `Release: done` (capital R), `claim: bob-example/hub` written by ada-example (not the author), `claim:` (no login).
 `release: DONE` and `release: vacation` are releases with reason `other`.
 
-**Labels.** `claimed` is on the issue while it is held. `paused` is on the task's open draft pull request after a
-release, and the next take removes it. The relay reads `claimed`; `paused` is for people and agents.
+**Labels.** `claimed` is on the issue while it is held. The relay reads `claimed`.
 
 **Edited comments do not count.** On GitHub anyone with write access can edit another person's comment, so an
 edited `claim:` could be turned into a `release: done`. A `claim:` or `release:` comment whose `updated_at` is later
@@ -543,8 +542,7 @@ with `freeToContinue` as written. Every reader of the protocol runs all of them:
 ### How the Hub writes
 
 Not part of the relay contract; it explains the states a relay sees. The Hub's `LeaseService`
-(`apps/server/src/banneret/lease/LeaseService.ts`) writes through the tracker's issue API and, for `paused`, its pull
-request API (GitHub's issue update resolves a number as an issue and refuses a pull request). It keeps one operation
+(`apps/server/src/banneret/lease/LeaseService.ts`) writes through the GitHub issue driver using the machine's own login. It keeps one operation
 per task in memory and nothing on disk; every step reads the issue again before it writes.
 
 - **Comments are only created.** The Hub never edits or deletes a protocol comment it wrote, and its
@@ -552,12 +550,10 @@ per task in memory and nothing on disk; every step reads the issue again before 
   record. It reads each comment's `updatedAt` from the tracker and passes it to the fold.
 - **Take:** read and fold, and stop unless the task is free and the person may comment, label and assign. Comment
   `claim: <login>/<agent>`. Assign the person and add `claimed` in one update, up to three tries; if all fail,
-  comment `release: take_failed`. Wait 10 seconds, read again: the earliest claim wins. The winner removes `paused`
-  from the task's open pull requests. The loser comments `release: lost_claim · @<winner>` and unassigns only
+  comment `release: take_failed`. Wait 10 seconds, read again: the earliest claim wins. The loser comments `release: lost_claim · @<winner>` and unassigns only
   themself; `claimed` stays.
 - **Release:** read and fold, and stop unless the person holds it. Comment the release first, since the reason is
-  the record. Then unassign the person, remove `claimed` unless another claim stands, and add `paused` to the open
-  draft pull request. A retry finds its own release comment and posts no second one.
+  the record. Then unassign the person, remove `claimed` unless another claim stands. A retry finds its own release comment and posts no second one.
 - **Finish** re-runs the steps after the comment. **Withdraw** comments `take_failed` (or `lost_claim` for a loser)
   and unassigns.
 
@@ -571,33 +567,14 @@ per task in memory and nothing on disk; every step reads the issue again before 
 | taking | read-back: my claim is earliest | taken |
 | taking | read-back: an earlier claim, `lost_claim` posted, unassigned | free for me |
 | taking | ... and the withdrawal fails | conflict, until Withdraw |
-| taken | release comment posted, then unassign, unlabel, pause the draft | free, `lastRelease` set |
+| taken | release comment posted, then unassign and unlabel | free, `lastRelease` set |
 | taken | a step after the release comment fails, or the Hub stops | incomplete after 60 s |
 | incomplete | Finish | taken or free |
 | incomplete | Withdraw | free |
 
 ### Which machine writes
 
-Also not part of the relay contract. The Hub client may be connected to several of the person's machines (a
-desktop and the servers it is linked to). A lease call runs on one of them, and that machine's server writes
-with its own tracker login. The client picks the machine per task, on every render, and stores nothing but
-the person's last choice per repository, in the browser:
-
-| Route | When | The Hub shows |
-|---|---|---|
-| none | no connected machine of the person has a project on the task's repository | "Take needs a project on <repo> on one of your machines." |
-| not-joined | only machines that have not joined this relay have one | "<machine> has the repository but has not joined <company>." Nothing is written. |
-| ready | one or more joined machines of the person have one | the lease buttons; a picker when there are several |
-
-- **The person's machine:** the relay knows it as the same login as the machine the page reads the task through.
-  A machine is left out only when that is provably someone else: its enrolment, on this relay or on another
-  relay both have joined, names another login.
-- **Default machine:** the one this window took the task on, then the last choice for the repository, then the
-  last machine used, then the page's own machine, then the first by name.
-- **The server refuses** a lease call that names a relay it has not joined, before reading the tracker.
-- **The claim** names the machine: `claim: <login>/<machine label>`, with the label made to fit `<agent>`. An agent
-  that takes a task through the agent toolkit writes from its own machine and names its session instead:
-  `claim: <login>/<provider>-<start of the thread id>`, such as `claim: ada-example/claude-1a2b3c4d`.
+The page defaults to its own machine. The picker offers connected machines where the same company relay knows the same person. Each machine checks enrolment, GitHub login and triage permission before writing. It addresses the issue by host, repository and number. No project is needed to claim or release. A browser remembers the machine selected for this task until reload.
 
 A second operation on a task while one runs is refused as busy. After a restart nothing is remembered: every task
 is what the tracker says, folded as above.

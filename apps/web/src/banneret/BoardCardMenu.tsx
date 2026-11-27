@@ -11,7 +11,6 @@ import { routeMachine, startLease, takeLabel, useLeaseCheck } from "./LeaseContr
 import { useLeaseRoute } from "./leaseMachineStore";
 import { routeProblem } from "./leaseRoute.logic";
 import { useLeaseEntry } from "./leaseStore";
-import { useTaskIssueRef } from "./useTaskIssueRef";
 
 function LeaseItems(props: {
   readonly target: RelayTarget;
@@ -19,8 +18,7 @@ function LeaseItems(props: {
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { card, target } = props;
-  const issueRef = useTaskIssueRef(target.environmentId, card.task);
-  const route = useLeaseRoute(target, card.task, issueRef);
+  const route = useLeaseRoute(target, card.task);
   const entry = useLeaseCheck(target, card.task.id, routeMachine(route), true);
   if (route.kind !== "ready") {
     return (

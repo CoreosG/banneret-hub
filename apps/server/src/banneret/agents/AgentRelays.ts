@@ -21,6 +21,8 @@ import { ProjectService } from "../../project/ProjectService.ts";
 import { BanneretEnrolment } from "../relay/Enrolment.ts";
 import { enterpriseRelayOf } from "../relay/Facts.ts";
 import { BanneretRelayFeed, type RelayMcpTool } from "../relay/RelayFeed.ts";
+import { ManagedProjectFolders } from "../../project/ManagedProjectFolders.ts";
+import { readDesignations } from "../OrchestratorState.ts";
 import * as Workspaces from "../Workspaces.ts";
 
 export interface AgentRelay {
@@ -94,6 +96,7 @@ export const layer = Layer.effect(
     const projects = yield* ProjectService;
     const enrolment = yield* BanneretEnrolment;
     const feed = yield* BanneretRelayFeed;
+    const folders = yield* ManagedProjectFolders;
     const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
     const context = yield* Effect.context<Effect.Services<ReturnType<typeof Workspaces.list>>>();
 
@@ -103,7 +106,18 @@ export const layer = Layer.effect(
       const project = yield* projects.getShell(thread.projectId);
       if (Option.isNone(project)) return null;
       const { workspaces } = yield* Workspaces.list().pipe(Effect.provideContext(context));
-      const relay = enterpriseRelayOf({ workspaces, project: project.value, environmentId });
+      let relay = enterpriseRelayOf({ workspaces, project: project.value, environmentId });
+      if (
+        !relay &&
+        !thread.archivedAt &&
+        !thread.deletedAt &&
+        (yield* folders.isScratchProject(thread.projectId))
+      ) {
+        const roles = yield* readDesignations.pipe(Effect.provideContext(context));
+        relay = workspaces.find(
+          (w) => !w.deleted && w.kind === "enterprise" && roles[w.id]?.main === threadId,
+        )?.relay;
+      }
       if (relay === undefined) return null;
       const view = yield* enrolment.status(relay.origin);
       if (view.state !== "configured" || view.me === undefined) return null;
@@ -138,7 +152,7 @@ export const layer = Layer.effect(
 
     const offerInputs = Effect.gen(function* () {
       const { workspaces } = yield* Workspaces.list().pipe(Effect.provideContext(context));
-      const inputs: Array<unknown> = [];
+      const inputs: Array<unknown> = [yield* readDesignations.pipe(Effect.provideContext(context))];
       for (const workspace of workspaces) {
         if (workspace.kind !== "enterprise" || workspace.relay === undefined || workspace.deleted)
           continue;

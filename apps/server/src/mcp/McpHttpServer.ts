@@ -61,7 +61,7 @@ import { HTML_RENDER_TOOL_NAME } from "@t3tools/shared/htmlRender";
 import { compactT3McpToolOutput } from "@t3tools/shared/toolOutput";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { MCP_TOOL_EXPOSURE_HEADER } from "@t3tools/provider-core/server/mcpSession";
-import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
+import * as OrchestratorMcpService from "../banneret/OrchestratorThreadList.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
 import * as FeedbackHandlers from "./toolkits/feedback/handlers.ts";

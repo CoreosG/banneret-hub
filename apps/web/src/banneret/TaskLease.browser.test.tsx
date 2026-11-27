@@ -4,6 +4,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   EnvironmentId,
   ProjectId,
+  ThreadId,
   type BanneretBoardCard,
   type BanneretFeedState,
   type TaskLeaseResult,
@@ -173,7 +174,7 @@ function setup(options: { issues?: boolean; localRepo?: boolean; server?: Linked
   useRelayFeedStore.setState({ feeds: {} });
   useEnrolmentStore.setState({ views: {} });
   useLeaseStore.setState({ entries: {} });
-  useLeaseMachineStore.setState({ byRepo: {}, last: null });
+  useLeaseMachineStore.setState({ choices: {} });
   openReleaseDialog(null);
   openLeaseConfirm(null);
   storeEnrolmentView(LOCAL, {
@@ -280,9 +281,17 @@ describe("Take", () => {
     await emit(feed([card()]));
 
     await userEvent.click(button("Take on desk"));
+    await userEvent.click(
+      page.getByTestId("lease-confirm-dialog").getByRole("button", { name: "Take on desk" }),
+    );
     expect(rpc.check).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
     // The claim names the machine it was taken on.
-    expect(rpc.take).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }), "desk");
+    expect(rpc.take).toHaveBeenCalledWith(
+      RELAY,
+      expect.objectContaining({ key: "2" }),
+      "desk",
+      "t_2",
+    );
     await expect
       .element(page.getByTestId("lease-progress"))
       .toHaveTextContent("Taking… confirming who claimed first.");
@@ -319,6 +328,9 @@ describe("Take", () => {
     await using _task = await openTask(card());
     await emit(feed([card()]));
     await userEvent.click(button("Take on desk"));
+    await userEvent.click(
+      page.getByTestId("lease-confirm-dialog").getByRole("button", { name: "Take on desk" }),
+    );
     await expect.element(page.getByText("bo-example took it first.")).toBeVisible();
     expect(document.querySelector('[data-testid="lease-buttons"] button')).toBeNull();
     expect(rpc.withdraw).not.toHaveBeenCalled();
@@ -347,6 +359,9 @@ describe("Take", () => {
     await using _task = await openTask(card());
     await emit(feed([card()]));
     await userEvent.click(button("Take on desk"));
+    await userEvent.click(
+      page.getByTestId("lease-confirm-dialog").getByRole("button", { name: "Take on desk" }),
+    );
 
     await expect
       .element(page.getByText("bo-example took it first. Withdraw your claim."))
@@ -385,6 +400,9 @@ describe("Take", () => {
     await using _task = await openTask(card());
     await emit(feed([card()]));
     await userEvent.click(button("Take on desk"));
+    await userEvent.click(
+      page.getByTestId("lease-confirm-dialog").getByRole("button", { name: "Take on desk" }),
+    );
     await expect
       .element(page.getByRole("alert"))
       .toHaveTextContent("The tracker's rate limit is used up. Try again in a few minutes.");
@@ -403,6 +421,9 @@ describe("Take", () => {
       await using _task = await openTask(card());
       await emit(feed([card()]));
       await userEvent.click(button("Take on desk"));
+      await userEvent.click(
+        page.getByTestId("lease-confirm-dialog").getByRole("button", { name: "Take on desk" }),
+      );
       await expect.element(page.getByRole("alert")).toBeVisible();
     }
     await using _again = await openTask(card());
@@ -683,19 +704,22 @@ describe("Task dialog facts", () => {
 describe("Machines", () => {
   const ON_SERVER = { environmentId: SERVER, relayOrigin: RELAY.relayOrigin };
 
-  it("offers Take when only a linked server has the repository, and runs it there", async () => {
-    const { emit, rpc } = setup({ localRepo: false, server: { me: ME, hasRepo: true } });
+  it("can claim from a linked machine without a checkout and skip the hand-off", async () => {
+    const { emit, rpc } = setup({ localRepo: false, server: { me: ME, hasRepo: false } });
     rpc.check.mockResolvedValue(ok(leaseStatus()));
     rpc.take.mockResolvedValue(result("taken", heldByMe));
     await using _task = await openTask(card());
     await emit(feed([card()]));
-
+    await userEvent.click(button("Take…"));
+    await userEvent.click(page.getByRole("radio", { name: "dev-server" }));
+    await userEvent.click(page.getByRole("checkbox", { name: "Just claim it" }));
     await userEvent.click(button("Take on dev-server"));
-    // One machine: no picker.
-    expect(document.querySelector('[data-testid="lease-confirm-dialog"]')).toBeNull();
-    const serverRef = expect.objectContaining({ projectId: serverProject.id, key: "2" });
-    expect(rpc.check).toHaveBeenCalledWith(ON_SERVER, serverRef);
-    expect(rpc.take).toHaveBeenCalledWith(ON_SERVER, serverRef, "dev-server");
+    expect(rpc.take).toHaveBeenCalledWith(
+      ON_SERVER,
+      expect.objectContaining({ key: "2" }),
+      "dev-server",
+      undefined,
+    );
     await expect.element(page.getByText("Taken by you.")).toBeVisible();
 
     // Release goes to the machine that took it, and says so.
@@ -715,7 +739,14 @@ describe("Machines", () => {
   it("asks which machine when two have the repository, and routes the take to the one picked", async () => {
     const { emit, rpc } = setup({ server: { me: ME, hasRepo: true } });
     rpc.check.mockResolvedValue(ok(leaseStatus()));
-    rpc.take.mockResolvedValue(result("taken", heldByMe));
+    rpc.take.mockResolvedValue(
+      ok({
+        outcome: "taken",
+        status: heldByMe,
+        orchestratorThreadId: ThreadId.make("routing"),
+        detail: "Taken. Sent to Project planning.",
+      }),
+    );
     await using _task = await openTask(card());
     await emit(feed([card()]));
 
@@ -723,7 +754,7 @@ describe("Machines", () => {
     await vi.waitFor(() => expect(rpc.check).toHaveBeenCalledTimes(1));
     expect(rpc.check).toHaveBeenCalledWith(
       RELAY,
-      expect.objectContaining({ projectId: project.id }),
+      expect.objectContaining({ scope: "example-org/example-app" }),
     );
     await userEvent.click(button("Take…"));
     const dialog = page.getByTestId("lease-confirm-dialog");
@@ -734,11 +765,18 @@ describe("Machines", () => {
     await userEvent.click(button("Take on dev-server"));
     expect(rpc.take).toHaveBeenCalledWith(
       ON_SERVER,
-      expect.objectContaining({ projectId: serverProject.id }),
+      expect.objectContaining({ scope: "example-org/example-app" }),
       "dev-server",
+      "t_2",
     );
-    // The choice is remembered for the repository.
-    expect(useLeaseMachineStore.getState().last).toBe(SERVER);
+    await expect
+      .element(page.getByTestId("lease-notice"))
+      .toHaveTextContent("Taken. Sent to Project planning. Open");
+    await expect
+      .element(page.getByRole("link", { name: "Open", exact: true }))
+      .toHaveAttribute("href", "/dev-server-env/routing");
+    // This task remembers the selected machine.
+    expect(Object.values(useLeaseMachineStore.getState().choices)).toContain(SERVER);
   });
 
   it("keeps the machine switch when the default machine cannot be reached", async () => {
@@ -759,7 +797,7 @@ describe("Machines", () => {
     await vi.waitFor(() =>
       expect(rpc.check).toHaveBeenLastCalledWith(
         ON_SERVER,
-        expect.objectContaining({ projectId: serverProject.id }),
+        expect.objectContaining({ scope: "example-org/example-app" }),
       ),
     );
     await expect.element(button("Take…")).toBeEnabled();
@@ -777,8 +815,8 @@ describe("Machines", () => {
     await expect
       .element(page.getByTestId("task-link-out"))
       .toHaveTextContent("No local project for example-appOpen on GitHub");
-    expect(rpc.check).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-testid="lease-buttons"]')).toBeNull();
+    expect(rpc.check).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
+    await expect.element(button("Take on desk")).toBeVisible();
   });
 
   it("says a server with the repository has not joined the company, and writes nothing", async () => {
@@ -786,10 +824,8 @@ describe("Machines", () => {
     rpc.check.mockResolvedValue(ok(leaseStatus()));
     await using _task = await openTask(card());
     await emit(feed([card()]));
-    await expect
-      .element(page.getByTestId("lease-route-problem"))
-      .toHaveTextContent("dev-server has the repository but has not joined Example Company.");
-    expect(document.querySelector('[data-testid="lease-buttons"]')).toBeNull();
-    for (const call of Object.values(rpc)) expect(call).not.toHaveBeenCalled();
+    await expect.element(button("Take on desk")).toBeVisible();
+    expect(rpc.check).toHaveBeenCalledTimes(1);
+    expect(rpc.take).not.toHaveBeenCalled();
   });
 });

@@ -1,19 +1,18 @@
-// Banneret Hub: which of this client's environments a task's take and release run on. The desktop is often
-// only the cockpit and the code lives on a linked server, so any connected environment of the same person,
-// joined to the same relay, with a project on the task's repository may carry the call; its server writes
-// with its own tracker login and its own checks apply. Nothing here is stored; see `LeaseRoute`.
-import { isStandaloneIssueLink, resolveIssueLinkTarget } from "@t3tools/client-runtime/issue-links";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { BanneretEnrolmentView, EnvironmentId, IssueRef } from "@t3tools/contracts";
+import {
+  IssueTrackerKind,
+  type BanneretEnrolmentView,
+  type EnvironmentId,
+  type TaskLeaseRef,
+  type BanneretBoardTask,
+} from "@t3tools/contracts";
 
 /** One environment that may carry the lease call for a task, with its own reference to the issue. */
 export interface LeaseMachine {
   readonly environmentId: EnvironmentId;
   /** The relay's label for the machine, else the environment's own name. */
   readonly label: string;
-  /** Resolved through this environment's own project: a project id means nothing on another server. */
-  readonly ref: IssueRef;
+  /** The tracker address is the same on every machine. */
+  readonly ref: Omit<TaskLeaseRef, "relayOrigin">;
 }
 
 /**
@@ -27,7 +26,7 @@ export type LeaseRoute =
   | { readonly kind: "none"; readonly repo: string }
   | {
       readonly kind: "not-joined";
-      /** Every machine that has the repository but has not joined, by label. */
+      /** Connected machines that have not joined, by label. */
       readonly machines: ReadonlyArray<string>;
       readonly company: string;
     }
@@ -43,7 +42,6 @@ export interface LeaseEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string | undefined;
   readonly issues: boolean;
-  readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly enrolments: ReadonlyArray<BanneretEnrolmentView>;
 }
 
@@ -59,29 +57,6 @@ const personByRelay = (enrolments: ReadonlyArray<BanneretEnrolmentView>) =>
     ),
   );
 
-/**
- * The environment's reference to the issue, only through a project of its own on the issue's repository
- * (its own remote or an upstream it tracks). A project on another repository of the same host lends its
- * login for reading, but the server refuses to write through it.
- */
-export function ownIssueRef(
-  url: string,
-  projects: ReadonlyArray<EnvironmentProject>,
-): IssueRef | null {
-  const target = resolveIssueLinkTarget({ url, projects });
-  if (target === null) return null;
-  const scope = target.ref.scope.toLowerCase();
-  const owns = sourceControlClients
-    .issueBindings(target.project.repositoryIdentity)
-    .some(
-      (binding) =>
-        String(binding.tracker) === String(target.ref.tracker) &&
-        (target.ref.host === undefined || binding.host === target.ref.host) &&
-        binding.scope.toLowerCase() === scope,
-    );
-  return owns ? target.ref : null;
-}
-
 /** The claim's `<agent>`: the machine's label, made to fit `[A-Za-z0-9._-]{1,64}`. */
 export function machineAgent(label: string): string {
   const slug = label
@@ -95,14 +70,10 @@ export function machineAgent(label: string): string {
 export interface LeaseRouteInput {
   /** The environment and relay the page reads the task through. */
   readonly page: { readonly environmentId: EnvironmentId; readonly relayOrigin: string };
-  readonly taskUrl: string;
-  /** "example-org/example-app", for the message when no machine has it. */
-  readonly repo: string;
+  readonly taskRef: BanneretBoardTask["ref"];
   readonly environments: ReadonlyArray<LeaseEnvironment>;
-  /** The page environment's own reference, which may come from a standalone tracker's bindings. */
-  readonly pageRef: IssueRef | null;
   readonly heldOn: EnvironmentId | null;
-  /** The person's last choice for this repository, then the last machine used for any. */
+  /** The person's explicit choice for this task in this window. */
   readonly preferred: ReadonlyArray<EnvironmentId>;
 }
 
@@ -121,15 +92,14 @@ export function leaseRoute(input: LeaseRouteInput): LeaseRoute {
   const unjoined: string[] = [];
   for (const environment of input.environments) {
     if (!environment.issues) continue;
-    const isPage = environment.environmentId === page.environmentId;
-    // A standalone tracker's link resolves only through bindings the page already read; a git host's
-    // link resolves from the projects alone.
-    const ref = isStandaloneIssueLink(input.taskUrl)
-      ? isPage
-        ? input.pageRef
-        : null
-      : ownIssueRef(input.taskUrl, environment.projects);
-    if (ref === null) continue;
+    if (input.taskRef.tracker !== "github") continue;
+    const { tracker, host, scope, key } = input.taskRef;
+    const ref = {
+      tracker: IssueTrackerKind.make(tracker),
+      ...(host === undefined ? {} : { host }),
+      scope,
+      key,
+    };
     const people = personByRelay(environment.enrolments);
     const label =
       environment.enrolments.find((view) => view.relayOrigin === page.relayOrigin)?.label ??
@@ -152,7 +122,7 @@ export function leaseRoute(input: LeaseRouteInput): LeaseRoute {
   const first = machines.toSorted((a, b) => a.label.localeCompare(b.label));
   if (first.length === 0) {
     return unjoined.length === 0
-      ? { kind: "none", repo: input.repo }
+      ? { kind: "none", repo: input.taskRef.scope }
       : { kind: "not-joined", machines: unjoined.toSorted((a, b) => a.localeCompare(b)), company };
   }
   const byId = (environmentId: EnvironmentId | null) =>
@@ -184,9 +154,9 @@ export const repoChoiceKey = (ref: { readonly tracker: string; readonly scope: s
 export function routeProblem(route: LeaseRoute): string | null {
   switch (route.kind) {
     case "none":
-      return `Take needs a project on ${route.repo} on one of your machines.`;
+      return `No joined machine can claim this task.`;
     case "not-joined":
-      return `${namesList(route.machines)} ${route.machines.length === 1 ? "has" : "have"} the repository but ${route.machines.length === 1 ? "has" : "have"} not joined ${route.company}.`;
+      return `${namesList(route.machines)} ${route.machines.length === 1 ? "has" : "have"} not joined ${route.company}.`;
     case "loading":
     case "ready":
       return null;

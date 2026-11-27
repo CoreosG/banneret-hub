@@ -5,10 +5,12 @@ import * as Rpc from "effect/rpc/Rpc";
 import * as Schema from "effect/Schema";
 
 import { AuthOrchestrationOperateScope, EnvironmentAuthorizationError } from "./auth.ts";
+import { ProjectId, ThreadId } from "./baseSchemas.ts";
 import { IssueRef } from "./issue.ts";
 import { LEASE_RELEASE_REASONS } from "./leaseProtocol.ts";
 
 export const TASK_LEASE_WS_METHODS = {
+  orchestrator: "leases.orchestrator",
   check: "leases.check",
   take: "leases.take",
   release: "leases.release",
@@ -86,6 +88,7 @@ export const TaskLeaseOutcome = Schema.Literals([
 export type TaskLeaseOutcome = typeof TaskLeaseOutcome.Type;
 
 export const TaskLeaseResult = Schema.Struct({
+  orchestratorThreadId: Schema.optional(ThreadId),
   outcome: TaskLeaseOutcome,
   detail: Schema.optional(Schema.String),
   status: TaskLeaseStatus,
@@ -109,17 +112,21 @@ const LeaseRpcError = Schema.Union([EnvironmentAuthorizationError, TaskLeaseErro
 
 /**
  * A task's issue, and the relay whose person acts on it: that relay's `me` decides the account and
- * founder checks. Without one (a Personal workspace) those checks are skipped.
+ * founder checks. A machine must be joined to act.
  */
 export const TaskLeaseRef = Schema.Struct({
-  ...IssueRef.fields,
-  relayOrigin: Schema.optional(Schema.String),
+  tracker: IssueRef.fields.tracker,
+  host: IssueRef.fields.host,
+  scope: IssueRef.fields.scope,
+  key: IssueRef.fields.key,
+  relayOrigin: Schema.NonEmptyString,
 });
 export type TaskLeaseRef = typeof TaskLeaseRef.Type;
 
 export const TaskLeaseTakeInput = Schema.Struct({
   ...TaskLeaseRef.fields,
-  /** The tool taking it, written into the claim: `hub` from the UI. */
+  /** A board task ID requests one hand-off after the claim succeeds. */
+  handoffTaskId: Schema.optional(Schema.NonEmptyString),
   agent: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,64}$/))),
 });
 export type TaskLeaseTakeInput = typeof TaskLeaseTakeInput.Type;
@@ -164,7 +171,29 @@ const WsTaskLeaseWithdrawRpc = Rpc.make(TASK_LEASE_WS_METHODS.withdraw, {
 });
 
 /** Spread into `WsRpcGroup` (through the relay group). */
+export const OrchestratorSelection = Schema.Union([
+  Schema.Struct({ relayOrigin: Schema.NonEmptyString, action: Schema.Literals(["get", "ensure"]) }),
+  Schema.Struct({
+    relayOrigin: Schema.NonEmptyString,
+    action: Schema.Literal("set"),
+    projectId: Schema.optional(ProjectId),
+    threadId: Schema.NullOr(ThreadId),
+  }),
+]);
+export type OrchestratorSelection = typeof OrchestratorSelection.Type;
+
+export const OrchestratorDesignations = Schema.Struct({
+  main: Schema.NullOr(ThreadId),
+  projects: Schema.Record(Schema.String, ThreadId),
+});
+export type OrchestratorDesignations = typeof OrchestratorDesignations.Type;
+
 export const TASK_LEASE_RPCS = [
+  Rpc.make(TASK_LEASE_WS_METHODS.orchestrator, {
+    payload: OrchestratorSelection,
+    success: OrchestratorDesignations,
+    error: LeaseRpcError,
+  }),
   WsTaskLeaseCheckRpc,
   WsTaskLeaseTakeRpc,
   WsTaskLeaseReleaseRpc,
@@ -174,6 +203,7 @@ export const TASK_LEASE_RPCS = [
 
 /** Every lease call writes to the tracker on the person's behalf, or reads for that, so all need operate. */
 export const TASK_LEASE_RPC_SCOPES = {
+  [TASK_LEASE_WS_METHODS.orchestrator]: AuthOrchestrationOperateScope,
   [TASK_LEASE_WS_METHODS.check]: AuthOrchestrationOperateScope,
   [TASK_LEASE_WS_METHODS.take]: AuthOrchestrationOperateScope,
   [TASK_LEASE_WS_METHODS.release]: AuthOrchestrationOperateScope,
@@ -182,6 +212,7 @@ export const TASK_LEASE_RPC_SCOPES = {
 } as const;
 
 export const TASK_LEASE_RPC_AGGREGATES = {
+  [TASK_LEASE_WS_METHODS.orchestrator]: "leases",
   [TASK_LEASE_WS_METHODS.check]: "leases",
   [TASK_LEASE_WS_METHODS.take]: "leases",
   [TASK_LEASE_WS_METHODS.release]: "leases",

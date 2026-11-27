@@ -585,7 +585,7 @@ function TaskPanelBody(props: {
   const enrolment = useEnrolmentView(environmentId, relayOrigin);
   const issueRef = useTaskIssueRef(environmentId, surface.task);
   const leases = feed.board?.leases === true;
-  const route = useLeaseRoute(target, surface.task, issueRef);
+  const route = useLeaseRoute(target, surface.task);
   const lease = useLeaseCheck(target, taskId, routeMachine(route), leases);
 
   // A thread's panel has no page following the feed, so the tab follows it while shown.

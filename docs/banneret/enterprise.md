@@ -108,27 +108,21 @@ own branch protection, rulesets and CODEOWNERS.
 
 ### Take and release
 
-You can take and release a task from the Hub when the relay parses leases and one of your machines has a project
-on the task's repository. Use **Take** in the Task tab, or the menu on a board card. The Hub writes a `claim:`
-comment, assigns you and adds the `claimed` label, all on your own tracker login. It then waits about 10 seconds
-and reads the issue again: if someone claimed first, they keep it and your claim is withdrawn.
+Choose **Take** from a board card or its Task tab. Any of your joined machines can claim, even without a checkout. The picker defaults to this machine. The selected machine uses its GitHub login to add a claim comment, assign you and label the issue `claimed`. The login must match your company identity and have triage access. The Hub waits about ten seconds and reads back the issue. The first valid claim wins. Edited claim and release comments do not count.
 
-The machine does not have to be the one in front of you. A desktop is often only the cockpit, and the code lives on
-a server it is linked to. Any connected machine counts when all of these hold:
+A successful Take sends the task to your orchestrator. Choose **Open** to follow it, or check **Just claim it** before confirming to skip the message. You can choose where to work later or ask your agent to move an ongoing task to another machine.
 
-- it has a project on the task's repository (a project on another repository does not count);
-- it is yours: the relay knows it as the same person as this one. Another person's machine is never used, the
-  same rule that keeps your agents off other people's machines;
-- it has joined the same company. If the only machine with the repository has not, the Hub says
-  "<machine> has the repository but has not joined <company>" and writes nothing.
+Each machine remembers one main orchestrator per company and one project orchestrator per project in that company. Use the thread menu to set or clear either role. The company sidebar pins the main thread above Today and marks project orchestrators beside their titles.
 
-The call runs on that machine's server, so it writes with that machine's tracker login, and its own checks apply:
-the right account, triage access, and the relay's person. The claim names the machine: `claim: <login>/<machine>`.
-
-With one such machine the button says **Take on <machine>**. With several, Take asks which one, starting from the
-one you used last for that repository, and the Task tab has a small **On <machine>** switch for the check. The
-Hub remembers the choice per repository in this browser. Release, Finish and Withdraw go to the machine you took
-the task on when this window knows it; otherwise they ask the same way.
+| State on the selected machine                           | Event               | Result                                                                                                                            |
+| ------------------------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Any                                                     | Set or clear a role | Replace or remove that role in this machine's workspace file.                                                                     |
+| Matching project orchestrator                           | Take                | Send the task and last hand-off to that project thread with `banneret_start_task`.                                                |
+| Main orchestrator only, or no matching project          | Take                | Send to the main thread with `banneret_route_task`.                                                                               |
+| Neither role can receive the task                       | Take                | Create a No project main thread with the person's default model and send there.                                                   |
+| Any                                                     | Just claim it       | Claim the issue and skip the message.                                                                                             |
+| Thread archived, deleted or moved outside its workspace | Next Take           | Skip the invalid designation and use the next destination.                                                                        |
+| Restart                                                 | Open workspace      | Read roles from local state and the lease from GitHub. Pending sends already accepted by the inbox follow normal thread delivery. |
 
 **Release** asks for a reason and an optional note (Goal, Done, Next). Turn on **Free to continue** to leave the
 task for someone else. It is on by default for Blocked, Handing over and Out of usage. Such tasks sit at the top

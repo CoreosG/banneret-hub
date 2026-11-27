@@ -41,9 +41,9 @@ import * as McpToolAccess from "../../mcp/McpToolAccess.ts";
 import { liveThreadShell } from "../../mcp/McpToolAccess.testkit.ts";
 import * as ThreadIssueService from "../../orchestration-v2/ThreadIssueService.ts";
 import * as ThreadManagementService from "../../orchestration-v2/ThreadManagementService.ts";
+import { ManagedProjectFolders } from "../../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
-import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as CommentEdits from "../lease/CommentEdits.ts";
 import * as LeaseService from "../lease/LeaseService.ts";
@@ -55,12 +55,13 @@ import {
   ME,
   newTracker,
   OTHER,
-  pullRequestService,
+  leaseTrackerLayer,
 } from "../lease/leaseTracker.testkit.ts";
 import * as Enrolment from "../relay/Enrolment.ts";
 import * as Facts from "../relay/Facts.ts";
 import * as RelayFeed from "../relay/RelayFeed.ts";
 import { type Forwarder, withFake } from "../relay/relayHarness.testkit.ts";
+import { saveDesignations } from "../OrchestratorState.ts";
 import * as Workspaces from "../Workspaces.ts";
 import * as AgentRelays from "./AgentRelays.ts";
 import * as AgentHandlers from "./handlers.ts";
@@ -82,6 +83,7 @@ const project = (id: string, root: string) =>
 
 const PROJECTS = new Map([
   ["project-company", project("project-company", "/work/company")],
+  ["scratch", project("scratch", "/scratch")],
   ["project-solo", project("project-solo", "/work/solo")],
   ["project-unjoined", project("project-unjoined", "/work/unjoined")],
 ]);
@@ -90,6 +92,8 @@ const PROJECTS = new Map([
 const THREAD_PROJECTS = new Map([
   ["thread-company1a2b3c4d", "project-company"],
   ["thread-solo", "project-solo"],
+  ["scratch-main", "scratch"],
+  ["scratch-solo", "scratch"],
   ["thread-unjoined", "project-unjoined"],
 ]);
 const COMPANY_THREAD = ThreadId.make("thread-company1a2b3c4d");
@@ -148,6 +152,10 @@ const threadIssuesLayer = Layer.mock(ThreadIssueService.ThreadIssueService)({
 
 const localLayer = (baseDir: string) =>
   Layer.mergeAll(
+    Layer.mock(ManagedProjectFolders)({
+      namedProjectsRoot: "/projects",
+      isScratchProject: (id) => Effect.succeed(id === "scratch"),
+    }),
     threadsLayer,
     threadIssuesLayer,
     projectsLayer,
@@ -315,6 +323,8 @@ describe("agent toolkit listing", () => {
   });
   const scopes = new Map([
     ["company", scopeFor("company", COMPANY_THREAD)],
+    ["scratch-main", scopeFor("scratch-main", "scratch-main")],
+    ["scratch-solo", scopeFor("scratch-solo", "scratch-solo")],
     ["solo", scopeFor("solo", "thread-solo")],
     ["unjoined", scopeFor("unjoined", "thread-unjoined")],
     ["broken", scopeFor("broken", "thread-broken")],
@@ -326,6 +336,10 @@ describe("agent toolkit listing", () => {
       const baseDir = yield* tempDir;
       const local = localLayer(baseDir);
       yield* writeWorkspaces(ORIGIN).pipe(Effect.provide(local));
+      yield* saveDesignations("ent-company", {
+        main: ThreadId.make("scratch-main"),
+        projects: {},
+      }).pipe(Effect.provide(local));
       const serverLayer = McpHttpServer.layerMcpTransport(
         Layer.mergeAll(
           McpHttpServer.toolkitRegistration(
@@ -412,6 +426,12 @@ describe("agent toolkit listing", () => {
                       .sort(),
                   ),
                 ),
+                prompts: rpc("prompts/list", {}).pipe(
+                  Effect.map(
+                    (body) => (body.result?.prompts ?? []) as ReadonlyArray<{ name: string }>,
+                  ),
+                ),
+                prompt: (name: string) => rpc("prompts/get", { name }),
                 resources: rpc("resources/list", {}).pipe(
                   Effect.map((body) =>
                     ((body.result?.resources ?? []) as ReadonlyArray<{ uri: string }>).map(
@@ -431,6 +451,33 @@ describe("agent toolkit listing", () => {
               "upstream_tool",
             ].sort(),
           );
+          expect((yield* company.prompts).map((prompt) => prompt.name)).toEqual(
+            expect.arrayContaining([
+              "banneret_start_task",
+              "banneret_move_task",
+              "banneret_route_task",
+            ]),
+          );
+          const procedure = JSON.stringify((yield* company.prompt("banneret_start_task")).result);
+          for (const instruction of [
+            "banneret_task",
+            "banneret://join",
+            "banneret_lease_take",
+            "t3_project_clone",
+            "hand-off",
+            "target machine",
+          ])
+            expect(procedure).toContain(instruction);
+          for (const [name, words] of [
+            [
+              "banneret_route_task",
+              ["t3_thread_send", "banneret_start_task", "linked", "projectOrchestratorFor"],
+            ],
+            ["banneret_move_task", ["handing_over", "Goal, Done, Next", "Push", "target machine"]],
+          ] as const) {
+            const body = JSON.stringify((yield* company.prompt(name)).result);
+            for (const word of words) expect(body).toContain(word);
+          }
           expect(yield* company.resources).toEqual([JOIN_URI]);
           const join = (yield* company.read).result!.contents as ReadonlyArray<{ text: string }>;
           expect(join[0]!.text).toBe(joinText({ company: "Example Company", login: ME }));
@@ -467,10 +514,14 @@ describe("agent toolkit listing", () => {
             (yield* company.call("banneret_lease_withdraw", { taskId: "t_free" })).error,
           ).toBeDefined();
 
+          const scratchMain = yield* session("scratch-main");
+          expect((yield* scratchMain.prompts).map((p) => p.name)).toContain("banneret_route_task");
           asked.length = 0;
-          for (const token of ["solo", "unjoined", "broken"]) {
+          for (const token of ["solo", "scratch-solo", "unjoined", "broken"]) {
             const other = yield* session(token);
             expect(yield* other.tools).toEqual(["upstream_tool"]);
+            expect(yield* other.prompts).toEqual([]);
+            expect((yield* other.prompt("banneret_start_task")).error).toBeDefined();
             expect(yield* other.resources).toEqual([]);
             expect((yield* other.call("banneret_board", {})).error).toBeDefined();
             expect((yield* other.read).error).toBeDefined();
@@ -625,7 +676,7 @@ describe("agent lease tools against the fake relay", () => {
       LeaseService.layerWith({ readBackDelay: 0 }).pipe(
         Layer.provide(
           Layer.mergeAll(
-            Layer.succeed(PullRequestService.PullRequestService, pullRequestService(tracker)),
+            leaseTrackerLayer(tracker),
             Layer.succeed(CommentEdits.CommentEdits, commentEdits(tracker)),
           ),
         ),

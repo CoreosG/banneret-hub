@@ -1,3 +1,4 @@
+import { OrchestratorMarker } from "../../banneret/OrchestratorMarker";
 import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { asLaunchingThread } from "@t3tools/client-runtime/state/thread-inbox";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
@@ -1138,6 +1139,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       dir={textDirection(thread.title)}
     >
       {thread.title}
+      <OrchestratorMarker thread={threadRef} />
       {isRegeneratingTitle ? (
         <ActivityShimmerOverlay className="truncate">{thread.title}</ActivityShimmerOverlay>
       ) : null}

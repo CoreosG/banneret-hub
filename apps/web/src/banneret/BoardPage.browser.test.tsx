@@ -771,10 +771,16 @@ describe("Enterprise board", () => {
       await userEvent.click(
         dialog.getByRole("button", { name: "Continue on Ada laptop", exact: true }),
       );
+      await userEvent.click(
+        page
+          .getByTestId("lease-confirm-dialog")
+          .getByRole("button", { name: "Take on Ada laptop" }),
+      );
       expect(rpc.take).toHaveBeenCalledWith(
         RELAY,
         expect.objectContaining({ key: "8" }),
         "Ada-laptop",
+        "8",
       );
     });
 
@@ -793,6 +799,11 @@ describe("Enterprise board", () => {
       await emit(state(["board"], boardRead(boardOf(cards()))));
       await userEvent.click(page.getByRole("button", { name: "Actions for Rate limits" }));
       await userEvent.click(page.getByRole("menuitem", { name: "Take on Ada laptop" }));
+      await userEvent.click(
+        page
+          .getByTestId("lease-confirm-dialog")
+          .getByRole("button", { name: "Take on Ada laptop" }),
+      );
       await vi.waitFor(() =>
         expect(cardOf("1").querySelector("[data-local-lease]")?.textContent).toBe(
           "Taking… confirming",

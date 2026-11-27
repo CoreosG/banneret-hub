@@ -10,7 +10,8 @@ import {
 import {
   TASK_LEASE_WS_METHODS,
   type EnvironmentId,
-  type IssueRef,
+  type TaskLeaseRef,
+  type ScopedThreadRef,
   type TaskLeaseReleaseInput,
   type TaskLeaseResult,
   type TaskLeaseStatus,
@@ -27,6 +28,7 @@ import {
   outcomeTone,
   type LeaseCallFailure,
 } from "./lease.logic";
+import { selectOrchestrator } from "./orchestratorStore";
 import { machineAgent, type LeaseMachine } from "./leaseRoute.logic";
 
 const checkCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
@@ -80,7 +82,7 @@ async function call<A>(run: Promise<AtomCommandResult<A, unknown>>): Promise<Lea
 export const leaseRpc = {
   check: (
     { environmentId, relayOrigin }: RelayTarget,
-    ref: IssueRef,
+    ref: LeaseMachine["ref"],
   ): Promise<LeaseCall<TaskLeaseStatus>> =>
     call(
       runAtomCommand(appAtomRegistry, checkCommand, {
@@ -91,13 +93,14 @@ export const leaseRpc = {
   /** `agent` names the machine in the claim line. */
   take: (
     { environmentId, relayOrigin }: RelayTarget,
-    ref: IssueRef,
+    ref: LeaseMachine["ref"],
     agent: string,
+    handoffTaskId?: string,
   ): Promise<LeaseCall<TaskLeaseResult>> =>
     call(
       runAtomCommand(appAtomRegistry, takeCommand, {
         environmentId,
-        input: { ...ref, relayOrigin, agent },
+        input: { ...ref, relayOrigin, agent, ...(handoffTaskId ? { handoffTaskId } : {}) },
       }),
     ),
   release: (
@@ -112,7 +115,7 @@ export const leaseRpc = {
     ),
   finish: (
     { environmentId, relayOrigin }: RelayTarget,
-    ref: IssueRef,
+    ref: LeaseMachine["ref"],
   ): Promise<LeaseCall<TaskLeaseResult>> =>
     call(
       runAtomCommand(appAtomRegistry, finishCommand, {
@@ -122,7 +125,7 @@ export const leaseRpc = {
     ),
   withdraw: (
     { environmentId, relayOrigin }: RelayTarget,
-    ref: IssueRef,
+    ref: LeaseMachine["ref"],
   ): Promise<LeaseCall<TaskLeaseResult>> =>
     call(
       runAtomCommand(appAtomRegistry, withdrawCommand, {
@@ -135,6 +138,7 @@ export const leaseRpc = {
 export type LeaseOperation = "take" | "release" | "finish" | "withdraw";
 
 export interface LeaseNotice {
+  readonly destination?: ScopedThreadRef;
   readonly tone: "ok" | "warn" | "error";
   readonly message: string;
   readonly at: number;
@@ -238,18 +242,19 @@ export async function runLease(
   taskId: string,
   machine: LeaseMachine,
   operation: LeaseOperation,
-  release?: Omit<TaskLeaseReleaseInput, keyof IssueRef | "relayOrigin">,
+  release?: Omit<TaskLeaseReleaseInput, keyof TaskLeaseRef | "relayOrigin">,
+  handoffTaskId?: string,
 ): Promise<LeaseCall<TaskLeaseResult>> {
   const where = on(target, machine);
   const ref = machine.ref;
   const call = (kind: LeaseOperation): Promise<LeaseCall<TaskLeaseResult>> => {
     switch (kind) {
       case "take":
-        return leaseRpc.take(where, ref, machineAgent(machine.label));
+        return leaseRpc.take(where, ref, machineAgent(machine.label), handoffTaskId);
       case "release":
         return release === undefined
           ? Promise.resolve({ ok: false, message: "Pick a reason to release the task." })
-          : leaseRpc.release(where, { ...ref, ...release });
+          : leaseRpc.release(where, { ...ref, ...release, relayOrigin: where.relayOrigin });
       case "finish":
         return leaseRpc.finish(where, ref);
       case "withdraw":
@@ -274,13 +279,30 @@ export async function runLease(
   const answer = await call(operation);
   if (answer.ok) {
     const result = answer.value;
+    if (result.orchestratorThreadId)
+      void selectOrchestrator(where, { action: "get", relayOrigin: where.relayOrigin });
     const message = outcomeMessage(result);
     settle(key, seq, () => ({
       seq,
       phase: { kind: "settled" },
       status: result.status,
       statusOn: machine.environmentId,
-      notice: message === null ? null : { tone: outcomeTone(result), message, at: Date.now() },
+      notice:
+        message === null
+          ? null
+          : {
+              tone: outcomeTone(result),
+              message,
+              at: Date.now(),
+              ...(result.orchestratorThreadId
+                ? {
+                    destination: {
+                      threadId: result.orchestratorThreadId,
+                      environmentId: machine.environmentId,
+                    },
+                  }
+                : {}),
+            },
       takenAt: result.outcome === "taken" ? Date.now() : null,
       heldOn: heldAfter(result, machine),
     }));

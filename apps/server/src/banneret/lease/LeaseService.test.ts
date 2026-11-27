@@ -106,8 +106,6 @@ describe("LeaseService take", () => {
         reason: "unavailable",
         detail: `The tracker is signed in as ${ME}, but the relay knows you as ${OTHER}.`,
       });
-      // Without a relay (a Personal workspace) no relay's person is checked.
-      expect((yield* wrong.check(ref)).availability).toBe("available");
 
       const noLabels = newTracker({
         capabilities: { comment: true, labels: false, assignees: true },
@@ -125,7 +123,7 @@ describe("LeaseService take", () => {
         yield* TestClock.setTime(EPOCH);
         const tracker = newTracker();
         // The default enrolment answers as a machine that never joined any relay.
-        const service = yield* leases(tracker);
+        const service = yield* leases(tracker, Layer.empty);
         const forCompany = { ...ref, relayOrigin: "https://relay.example" };
         expect(yield* failureOf(service.take(forCompany))).toEqual({
           reason: "unavailable",
@@ -316,7 +314,7 @@ describe("LeaseService take", () => {
     }),
   );
 
-  it.effect("removes paused from the task's open pull request when it wins", () =>
+  it.effect("leaves linked pull requests untouched when it wins", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(EPOCH);
       const tracker = newTracker({
@@ -327,7 +325,7 @@ describe("LeaseService take", () => {
       });
       const result = yield* (yield* leases(tracker)).take({ ...ref });
       expect(result.outcome).toBe("taken");
-      expect(tracker.prs.map((pr) => pr.labels)).toEqual([[], ["paused"]]);
+      expect(tracker.prs.map((pr) => pr.labels)).toEqual([["paused"], ["paused"]]);
     }),
   );
 
@@ -337,7 +335,7 @@ describe("LeaseService take", () => {
       const tracker = newTracker();
       const assigned = yield* Deferred.make<void>();
       tracker.afterUpdate = Deferred.succeed(assigned, undefined).pipe(Effect.asVoid);
-      const service = yield* leases(tracker, Layer.empty, "10 seconds");
+      const service = yield* leases(tracker, enrolledAs(ME), "10 seconds");
       const first = yield* Effect.forkChild(service.take({ ...ref }));
       // Assigned, the take waits for its read-back on the TestClock; until then it holds the task.
       yield* Deferred.await(assigned);
@@ -361,7 +359,7 @@ describe("LeaseService release", () => {
     return tracker;
   };
 
-  it.effect("writes the reason line first, then unassigns, unlabels and pauses the draft", () =>
+  it.effect("writes the reason line first, then unassigns and unlabels", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(EPOCH);
       const tracker = held();
@@ -378,7 +376,7 @@ describe("LeaseService release", () => {
       );
       expect(tracker.assignees).toEqual([]);
       expect(tracker.labels).toEqual(["bug"]);
-      expect(tracker.prs[0]?.labels).toEqual(["paused"]);
+      expect(tracker.prs[0]?.labels).toEqual([]);
       expect(result.status.lease).toBeNull();
       expect(result.status.lastRelease).toMatchObject({
         by: ME,
@@ -438,22 +436,6 @@ describe("LeaseService release", () => {
         "comment release: done",
       ]);
       expect(tracker.assignees).toEqual([]);
-    }),
-  );
-
-  it.effect("finishes a release whose draft pull request label failed", () =>
-    Effect.gen(function* () {
-      yield* TestClock.setTime(EPOCH);
-      const tracker = held();
-      tracker.failPrLabels = 1;
-      const service = yield* leases(tracker);
-      const first = yield* service.release({ ...ref, reason: "blocked", freeToContinue: true });
-      expect(first.outcome).toBe("incomplete");
-      expect(tracker.prs[0]?.labels).toEqual([]);
-      const finished = yield* service.finish(ref);
-      expect(finished.outcome).toBe("released");
-      expect(tracker.prs[0]?.labels).toEqual(["paused"]);
-      expect(tracker.writes.filter((write) => write.startsWith("comment"))).toHaveLength(1);
     }),
   );
 

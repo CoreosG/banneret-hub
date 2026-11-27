@@ -8,7 +8,7 @@ import {
   type BanneretFeedState,
   type IssueRef,
   OrchestratorMcpFailure,
-  type TaskLeaseRef,
+  IssueTrackerKind,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -135,8 +135,7 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * The lease reference for a board task: its issue, resolved through this machine's own project on that
-   * repository (preferring the thread's), and the relay whose person acts.
+   * The board names the issue directly. Only the relay supplies the person for the lease.
    */
   const leaseRef = Effect.fn("BanneretAgentTools.leaseRef")(function* (
     relay: AgentRelay,
@@ -156,31 +155,20 @@ const make = Effect.gen(function* () {
       });
     }
     const card = allBoardCards(board.value).find((candidate) => candidate.task.id === taskId);
-    const url =
-      card?.task.ref.url ?? (yield* feed.task(relay.relayOrigin, taskId)).value?.task.ref.url;
-    if (url === undefined) {
+    const task = card?.task ?? (yield* feed.task(relay.relayOrigin, taskId)).value?.task;
+    if (task === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: "task_not_found",
         message: `${relay.company}'s board has no task ${taskId}.`,
       });
     }
-    const resolved = yield* issues.resolveUrl(url, relay.projectId).pipe(
-      Effect.mapError(
-        (error) =>
-          new OrchestratorMcpFailure({
-            code: "orchestration_error",
-            message: `No project on this machine can reach ${url}: ${error.message}`,
-          }),
-      ),
-    );
-    const ref: IssueRef & { readonly host: string } = {
-      projectId: resolved.projectId,
-      tracker: resolved.tracker,
-      host: resolved.host,
-      scope: resolved.scope,
-      key: resolved.key,
+    return {
+      tracker: IssueTrackerKind.make(task.ref.tracker),
+      host: task.ref.host ?? "github.com",
+      scope: task.ref.scope,
+      key: task.ref.key,
+      relayOrigin: relay.relayOrigin,
     };
-    return { ...ref, relayOrigin: relay.relayOrigin } satisfies TaskLeaseRef;
   });
 
   /**
@@ -380,7 +368,8 @@ const make = Effect.gen(function* () {
         const { thread, relay } = yield* requireRelay;
         const { relayOrigin, ...ref } = yield* leaseRef(relay, taskId);
         const result = yield* leases.take({ ...ref, relayOrigin, agent: yield* agentFor(thread) });
-        if (result.outcome === "taken") yield* linkThread(thread.threadId, ref);
+        if (result.outcome === "taken")
+          yield* linkThread(thread.threadId, { ...ref, projectId: relay.projectId });
         return result;
       }),
     ),

@@ -40,7 +40,6 @@ export const BANNERET_AGENT_TOOLS = [
 export type BanneretAgentToolName = (typeof BANNERET_AGENT_TOOLS)[number];
 
 export const LEASE_LABEL_CLAIMED = "claimed";
-export const LEASE_LABEL_PAUSED = "paused";
 /** How long tracker state may disagree with the comments before the lease reads as `incomplete`. */
 const LEASE_SETTLE_MS = 60_000;
 /** The note after line 1 of a release, in UTF-8 bytes. */
