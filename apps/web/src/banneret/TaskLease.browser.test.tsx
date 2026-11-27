@@ -4,6 +4,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   EnvironmentId,
   ProjectId,
+  ThreadId,
   type BanneretBoardCard,
   type BanneretFeedState,
   type TaskLeaseResult,
@@ -738,7 +739,14 @@ describe("Machines", () => {
   it("asks which machine when two have the repository, and routes the take to the one picked", async () => {
     const { emit, rpc } = setup({ server: { me: ME, hasRepo: true } });
     rpc.check.mockResolvedValue(ok(leaseStatus()));
-    rpc.take.mockResolvedValue(result("taken", heldByMe));
+    rpc.take.mockResolvedValue(
+      ok({
+        outcome: "taken",
+        status: heldByMe,
+        orchestratorThreadId: ThreadId.make("routing"),
+        detail: "Taken. Sent to Project planning.",
+      }),
+    );
     await using _task = await openTask(card());
     await emit(feed([card()]));
 
@@ -761,7 +769,13 @@ describe("Machines", () => {
       "dev-server",
       "t_2",
     );
-    // The choice is remembered for the repository.
+    await expect
+      .element(page.getByTestId("lease-notice"))
+      .toHaveTextContent("Taken. Sent to Project planning. Open");
+    await expect
+      .element(page.getByRole("link", { name: "Open", exact: true }))
+      .toHaveAttribute("href", "/dev-server-env/routing");
+    // This task remembers the selected machine.
     expect(Object.values(useLeaseMachineStore.getState().choices)).toContain(SERVER);
   });
 
