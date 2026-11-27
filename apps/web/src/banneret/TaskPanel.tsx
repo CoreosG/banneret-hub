@@ -202,6 +202,8 @@ function taskFacts(
   const restsOn = card === null ? [] : restsOnItems(card.restsOn, view.cards);
   const preview = relayTask?.preview;
   const held = card?.lease;
+  // The relay's snapshot lags a take or release; the tracker's own answer is newer.
+  const checked = options.lease?.status?.lease ?? null;
   const release = options.leases
     ? lastReleaseView(options.lease?.status ?? null, card?.lastRelease)
     : null;
@@ -245,7 +247,16 @@ function taskFacts(
       label: "Owner",
       value:
         !options.leases || card === null ? undefined : held === undefined ? (
-          <span className={TYPE.meta}>Nobody holds it</span>
+          checked === null ? (
+            <span className={TYPE.meta}>Nobody holds it</span>
+          ) : (
+            <span className="flex flex-wrap items-center gap-2" data-testid="owner-from-tracker">
+              <span className="font-medium">{checked.holder}</span>
+              {checked.since === null ? null : (
+                <RelativeTime at={checked.since} prefix="claimed" className={TYPE.meta} />
+              )}
+            </span>
+          )
         ) : (
           <span className="flex flex-wrap items-center gap-2">
             <LeaseChip

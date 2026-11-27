@@ -90,8 +90,8 @@ function useLocalLease(
   const entry = useLeaseEntry(environmentId, card.task.id);
   const nowMs = useNowMs();
   if (entry?.phase.kind === "running" && entry.phase.operation === "take") return "taking";
-  const notice = entry?.notice;
-  return notice?.outcome === "taken" && nowMs - notice.at < TAKEN_OVERLAY_MS && !heldBy(card, me)
+  const takenAt = entry?.takenAt ?? null;
+  return takenAt !== null && nowMs - takenAt < TAKEN_OVERLAY_MS && !heldBy(card, me)
     ? "taken"
     : null;
 }

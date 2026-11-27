@@ -98,8 +98,6 @@ export type LeaseOperation = "take" | "release" | "finish" | "withdraw";
 export interface LeaseNotice {
   readonly tone: "ok" | "warn" | "error";
   readonly message: string;
-  /** The finished operation's outcome; absent for a failed call. */
-  readonly outcome?: TaskLeaseResult["outcome"];
   readonly at: number;
 }
 
@@ -114,6 +112,8 @@ export interface LeaseEntry {
   /** The server's last answer for this task; null before the first one. */
   readonly status: TaskLeaseStatus | null;
   readonly notice: LeaseNotice | null;
+  /** When this window last finished a take; the board shows "Taken by you" until the snapshot agrees. */
+  readonly takenAt: number | null;
 }
 
 interface LeaseStoreState {
@@ -140,11 +140,15 @@ export function useLeaseEntry(environmentId: string, taskId: string): LeaseEntry
   return useLeaseStore((state) => state.entries[leaseKey(environmentId, taskId)]);
 }
 
-/** Reads who holds the task now. Does nothing while an operation runs. */
+/**
+ * Reads who holds the task now. Does nothing while an operation runs. A check that opens the task
+ * clears the last notice; the check after a failed operation keeps it.
+ */
 export async function checkLease(
   environmentId: EnvironmentId,
   taskId: string,
   ref: IssueRef,
+  options: { readonly keepNotice?: boolean } = {},
 ): Promise<void> {
   const key = leaseKey(environmentId, taskId);
   const entry = entryOf(key);
@@ -154,7 +158,8 @@ export async function checkLease(
     seq,
     phase: { kind: "checking" },
     status: entry?.status ?? null,
-    notice: entry?.notice ?? null,
+    notice: options.keepNotice === true ? (entry?.notice ?? null) : null,
+    takenAt: entry?.takenAt ?? null,
   });
   const answer = await leaseRpc.check(environmentId, ref);
   settle(key, seq, (current) =>
@@ -176,6 +181,20 @@ export async function runLease(
   operation: LeaseOperation,
   release?: Omit<TaskLeaseReleaseInput, keyof IssueRef>,
 ): Promise<LeaseCall<TaskLeaseResult>> {
+  const call = (kind: LeaseOperation): Promise<LeaseCall<TaskLeaseResult>> => {
+    switch (kind) {
+      case "take":
+        return leaseRpc.take(environmentId, ref);
+      case "release":
+        return release === undefined
+          ? Promise.resolve({ ok: false, message: "Pick a reason to release the task." })
+          : leaseRpc.release(environmentId, { ...ref, ...release });
+      case "finish":
+        return leaseRpc.finish(environmentId, ref);
+      case "withdraw":
+        return leaseRpc.withdraw(environmentId, ref);
+    }
+  };
   const key = leaseKey(environmentId, taskId);
   const entry = entryOf(key);
   if (entry?.phase.kind === "running") {
@@ -187,15 +206,9 @@ export async function runLease(
     phase: { kind: "running", operation, startedAt: Date.now() },
     status: entry?.status ?? null,
     notice: null,
+    takenAt: entry?.takenAt ?? null,
   });
-  const answer =
-    operation === "release" && release !== undefined
-      ? await leaseRpc.release(environmentId, { ...ref, ...release })
-      : operation === "take"
-        ? await leaseRpc.take(environmentId, ref)
-        : operation === "finish"
-          ? await leaseRpc.finish(environmentId, ref)
-          : await leaseRpc.withdraw(environmentId, ref);
+  const answer = await call(operation);
   if (answer.ok) {
     const result = answer.value;
     const message = outcomeMessage(result);
@@ -203,10 +216,8 @@ export async function runLease(
       seq,
       phase: { kind: "settled" },
       status: result.status,
-      notice:
-        message === null
-          ? null
-          : { tone: outcomeTone(result), message, outcome: result.outcome, at: Date.now() },
+      notice: message === null ? null : { tone: outcomeTone(result), message, at: Date.now() },
+      takenAt: result.outcome === "taken" ? Date.now() : null,
     }));
     return answer;
   }
@@ -216,7 +227,7 @@ export async function runLease(
     notice: { tone: "error", message: answer.message, at: Date.now() },
   }));
   // The tracker may have changed before the call failed; read it again rather than guess.
-  await checkLease(environmentId, taskId, ref);
+  await checkLease(environmentId, taskId, ref, { keepNotice: true });
   return answer;
 }
 

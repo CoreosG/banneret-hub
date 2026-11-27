@@ -114,7 +114,8 @@ export function LeaseButtons(props: {
   const status = entry?.status ?? null;
   if (status === null) return null;
   const running = entry?.phase.kind === "running" ? entry.phase.operation : null;
-  const disabled = running !== null || status.busy;
+  // While a check runs the buttons still show the last answer, so they wait for the new one.
+  const disabled = running !== null || status.busy || entry?.phase.kind === "checking";
   const run = (operation: LeaseOperation) =>
     void runLease(props.environmentId, props.taskId, issueRef, operation);
   return (

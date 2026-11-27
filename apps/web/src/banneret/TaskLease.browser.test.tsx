@@ -232,6 +232,9 @@ describe("Take", () => {
     await expect.element(page.getByText("Taken by you.")).toBeVisible();
     await expect.element(button("Release…")).toBeVisible();
     expect(document.querySelector('[data-testid="lease-progress"]')).toBeNull();
+    // The board's snapshot lags the take; the owner fact follows the tracker's answer.
+    await expect.element(page.getByTestId("owner-from-tracker")).toBeVisible();
+    expect(page.getByTestId("owner-from-tracker").element().textContent).toContain(ME);
   });
 
   it("names who claimed first when the take loses, with Withdraw only while the claim stands", async () => {
@@ -326,6 +329,26 @@ describe("Take", () => {
       .toHaveTextContent("The tracker's rate limit is used up. Try again in a few minutes.");
     await vi.waitFor(() => expect(rpc.check).toHaveBeenCalledTimes(2));
     await expect.element(button("Take")).toBeEnabled();
+  });
+
+  it("does not show an old failure again when the task is opened later", async () => {
+    const { emit, rpc } = setup();
+    rpc.check.mockResolvedValue(ok(leaseStatus()));
+    rpc.take.mockResolvedValue({
+      ok: false,
+      message: "The tracker's rate limit is used up. Try again in a few minutes.",
+    });
+    {
+      await using _task = await openTask(card());
+      await emit(feed([card()]));
+      await userEvent.click(button("Take"));
+      await expect.element(page.getByRole("alert")).toBeVisible();
+    }
+    await using _again = await openTask(card());
+    await emit(feed([card()]));
+    await vi.waitFor(() => expect(rpc.check).toHaveBeenCalledTimes(3));
+    await expect.element(button("Take")).toBeEnabled();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("asks nothing of the tracker without the leases flag or a local project", async () => {
