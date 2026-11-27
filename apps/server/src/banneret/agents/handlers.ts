@@ -308,6 +308,67 @@ const make = Effect.gen(function* () {
         };
       }),
     ),
+    banneret_team: McpToolAccess.readsAsCaller(({ person }) =>
+      Effect.gen(function* () {
+        const { relay } = yield* requireRelay;
+        const state = yield* feedState(relay);
+        const team = state?.team ?? null;
+        if (team === null) {
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message: `${relay.company}'s relay does not offer a team view.`,
+          });
+        }
+        // Titles and leases come from the boards and the map the Hub already holds.
+        const cards = allBoardCards(state?.board?.value);
+        const titles = new Map<string, string>(
+          cards.map((card) => [card.task.id, card.task.title]),
+        );
+        for (const item of state?.map?.value?.items ?? []) {
+          if (item.task !== undefined && !titles.has(item.task.id)) {
+            titles.set(item.task.id, item.task.title);
+          }
+        }
+        const people = (team.value?.people ?? []).filter(
+          (entry) => person === undefined || same(entry.login, person),
+        );
+        return {
+          ...companyOf(relay),
+          fetchedAt: team.fetchedAt,
+          ...problemOf(team),
+          people: people.map((entry) => {
+            const labels = new Map(entry.machines.map((machine) => [machine.id, machine.label]));
+            return {
+              login: entry.login,
+              role: entry.role,
+              machines: entry.machines.map((machine) => ({
+                label: machine.label,
+                online: machine.connected,
+              })),
+              leases: cards.flatMap((card) =>
+                card.lease !== undefined && same(card.lease.holder.login, entry.login)
+                  ? [{ taskId: card.task.id, title: card.task.title, state: card.lease.state }]
+                  : [],
+              ),
+              sessions: entry.sessions.map((session) => {
+                const title = session.taskId === undefined ? undefined : titles.get(session.taskId);
+                return {
+                  id: session.id,
+                  ...(session.parentId === undefined ? {} : { parentId: session.parentId }),
+                  machine: labels.get(session.machineId) ?? session.machineId,
+                  provider: session.provider,
+                  state: session.state,
+                  ...(session.waiting === undefined ? {} : { waiting: session.waiting }),
+                  ...(session.taskId === undefined ? {} : { taskId: session.taskId }),
+                  ...(title === undefined ? {} : { taskTitle: title }),
+                  since: session.since,
+                };
+              }),
+            };
+          }),
+        };
+      }),
+    ),
     banneret_lease_check: McpToolAccess.readsAsCaller(({ taskId }) =>
       Effect.gen(function* () {
         const { relay } = yield* requireRelay;

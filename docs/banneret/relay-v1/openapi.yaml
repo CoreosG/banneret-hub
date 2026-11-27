@@ -1353,6 +1353,9 @@ components:
             graveyard:
               description: Present when the `feed` section carries the flag `graveyard`. The latest 100 entries.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
+            team:
+              description: Present when the relay advertises the `team` section. Every person and their live agent sessions (SnapshotTeam).
+              allOf: [{ $ref: "#/components/schemas/FileRef" }]
           patternProperties:
             "^board\\.[A-Za-z0-9_-]{1,64}$":
               description: |
@@ -1818,6 +1821,67 @@ components:
       properties:
         items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Repository" } }
         truncated: { type: boolean }
+    SnapshotTeam:
+      description: |
+        Who is working on what (README, "Team"): every staff member the relay knows, each with their live agent
+        sessions. Relay-wide: every caller gets the same file. Machines come from the `machines` file and leases from
+        the board files, so neither is repeated here. No field changes on every heartbeat. Closed, and no title,
+        prompt, branch or path of any kind.
+      type: object
+      additionalProperties: false
+      required: [people]
+      properties:
+        people: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/TeamPerson" } }
+    TeamPerson:
+      description: One person, in login order. A person with no live session has an empty `sessions`.
+      type: object
+      additionalProperties: false
+      required: [id, login, role, sessions]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        login: { $ref: "#/components/schemas/Login" }
+        role: { $ref: "#/components/schemas/Role" }
+        sessions: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TeamSession" } }
+    TeamSession:
+      description: |
+        One live agent session of the person, from their machines' latest heartbeats. Stopped sessions, sessions of
+        revoked machines and sessions of machines not heard from for 24 hours are left out.
+      type: object
+      additionalProperties: false
+      required: [id, machineId, provider, state, since]
+      properties:
+        id:
+          description: The session's `sessionId` from the facts, opaque.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        parentId:
+          description: The parent session (a helper's orchestrator), present only when that session is listed too.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        machineId:
+          description: The machine that reported it; the same id as in the `machines` file.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        provider:
+          description: Open set. Known values `claude`, `codex`.
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        state:
+          description: |
+            Open set. Known values: `working` (a run is going), `waiting` (blocked on a permission or a question from
+            its person, with `processRunning` true), `idle` (open, waiting for its person's next message: a fact
+            `idle`, or any other `waiting`), `not_heard_from` (its machine has not been heard from for 90 seconds).
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        waiting:
+          description: What a `waiting` session waits on. Present only when `state` is `waiting`.
+          type: string
+          enum: [permission, question]
+        taskId:
+          description: The board task it works on, when the relay knows it (from the fact's `taskId` or its branch).
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        since:
+          description: When the session entered its current state. For `not_heard_from`, when its machine was last heard.
+          allOf: [{ $ref: "#/components/schemas/Timestamp" }]
+      allOf:
+        - if: { properties: { state: { const: waiting } } }
+          then: { required: [waiting] }
+          else: { not: { required: [waiting] } }
     NeedsChangedEvent:
       type: object
       required: [at, count]

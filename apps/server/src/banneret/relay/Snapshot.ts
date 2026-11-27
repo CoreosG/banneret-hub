@@ -22,6 +22,9 @@ import type {
   BanneretMap,
   BanneretMapItem,
   BanneretTask,
+  BanneretTeam,
+  BanneretTeamMachine,
+  BanneretTeamSession,
 } from "@t3tools/contracts";
 import {
   allBoardCards,
@@ -532,6 +535,87 @@ export function reshapeTask(body: unknown): BanneretTask | undefined {
         }),
   };
 }
+
+const teamSession = (value: unknown): BanneretTeamSession | undefined => {
+  const source = fields(value);
+  const id = text(source?.id, 64);
+  const machineId = text(source?.machineId, 64);
+  const provider = text(source?.provider, 32);
+  const state = text(source?.state, 32);
+  const since = text(source?.since, 64);
+  if (
+    id === undefined ||
+    machineId === undefined ||
+    provider === undefined ||
+    state === undefined ||
+    since === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    id,
+    ...optional("parentId", text(source?.parentId, 64)),
+    machineId,
+    provider,
+    state,
+    ...optional("waiting", text(source?.waiting, 32)),
+    ...optional("taskId", text(source?.taskId, 64)),
+    since,
+  };
+};
+
+/** Live machines from the `machines` file (SnapshotMachines), by owner id. Revoked ones are left out. */
+const machinesByOwner = (
+  body: unknown,
+): ReadonlyMap<string, ReadonlyArray<BanneretTeamMachine>> => {
+  const byOwner = new Map<string, Array<BanneretTeamMachine>>();
+  for (const value of list(fields(body)?.items, 500)) {
+    const source = fields(value);
+    const id = text(source?.id, 64);
+    const owner = text(source?.ownerId, 64);
+    const label = text(source?.label, 64);
+    if (id === undefined || owner === undefined || label === undefined) continue;
+    if (source?.revokedAt !== undefined && source.revokedAt !== null) continue;
+    const machine = {
+      id,
+      label,
+      kind: text(source?.kind, 32) ?? "",
+      connected: source?.connected === true,
+    };
+    byOwner.set(owner, [...(byOwner.get(owner) ?? []), machine]);
+  }
+  return byOwner;
+};
+
+/**
+ * The `team` file (SnapshotTeam) joined with the `machines` file: each person with their live machines and
+ * sessions. Undefined when the team file is not one; a missing machines file leaves `machines` empty.
+ */
+export function reshapeTeam(teamBody: unknown, machinesBody: unknown): BanneretTeam | undefined {
+  const source = fields(teamBody);
+  if (source === undefined || !Array.isArray(source.people)) return undefined;
+  const machines = machinesByOwner(machinesBody);
+  return {
+    people: defined(
+      list(source.people, 500).map((value) => {
+        const person = fields(value);
+        const id = text(person?.id, 64);
+        const login = text(person?.login, 64);
+        if (id === undefined || login === undefined) return undefined;
+        return {
+          id,
+          login,
+          role: text(person?.role, 32) ?? "limited_staff",
+          machines: machines.get(id) ?? [],
+          sessions: defined(list(person?.sessions, 100).map(teamSession)),
+        };
+      }),
+    ),
+  };
+}
+
+/** What the Team page shows, as one comparable string: an unchanged read publishes nothing. */
+export const teamViewKey = (team: BanneretTeam): string => JSON.stringify(team);
 
 /** Live means an agent session is working or waiting; idle, stopped and unheard ones are not. */
 const LIVE_WORK = new Set(["working", "waiting"]);

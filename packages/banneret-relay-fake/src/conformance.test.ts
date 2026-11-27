@@ -151,6 +151,7 @@ const firstBoardRef = async (machine: Enrolled, files: Readonly<Record<string, s
 interface ListedMachine {
   readonly id: string;
   readonly connected: boolean;
+  readonly lastHeardAt?: string | null;
   readonly revocable?: boolean;
   readonly revokedAt?: string;
 }
@@ -2493,6 +2494,130 @@ describe("map and the stage plan", () => {
     await client.control("/map/seed", { plan: null });
     expect(await mapSection(machine)).toBeUndefined();
     expect((await headFiles(machine)).map).toBeUndefined();
+  });
+});
+
+describe("team", () => {
+  interface TeamSession {
+    readonly id: string;
+    readonly parentId?: string;
+    readonly machineId: string;
+    readonly provider: string;
+    readonly state: string;
+    readonly waiting?: string;
+    readonly taskId?: string;
+    readonly since: string;
+  }
+  interface TeamFile {
+    readonly people: ReadonlyArray<{
+      readonly id: string;
+      readonly login: string;
+      readonly role: string;
+      readonly sessions: ReadonlyArray<TeamSession>;
+    }>;
+  }
+
+  const readTeam = async (machine: Enrolled) => {
+    await client.rebuildSnapshot(machine.login);
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    expect(head.status, JSON.stringify(head.body)).toBe(200);
+    const ref = (head.body as { files: Record<string, string> }).files.team;
+    expect(ref, "the head names team").toBeDefined();
+    const file = await call(machine, "GET", `/relay/v1/snapshot/files/${(ref ?? "").slice(7)}`);
+    expect(file.status, JSON.stringify(file.body)).toBe(200);
+    expectSchema("SnapshotTeam", file.body);
+    return file.body as TeamFile;
+  };
+  const sessionsOf = async (machine: Enrolled, reader = machine) =>
+    (await readTeam(reader)).people.find((person) => person.login === machine.login)?.sessions;
+  const sendFacts = async (machine: Enrolled, activity: ReadonlyArray<Record<string, unknown>>) => {
+    const body = { ...factsFor(machine), activity };
+    const sent = await call(machine, "POST", "/relay/v1/facts", body);
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+  };
+  const exampleActivity = () =>
+    (readExample("facts-request.json") as { activity: Array<Record<string, unknown>> }).activity;
+
+  it("advertises the team section and names the team file in the head", async () => {
+    const machine = await enrol();
+    const reply = await call(machine, "GET", "/relay/v1/capabilities");
+    expectSchema("Capabilities", reply.body);
+    const sections = (reply.body as { sections: Array<{ kind: string }> }).sections;
+    expect(sections.some((section) => section.kind === "team")).toBe(true);
+    const team = await readTeam(machine);
+    const me = team.people.find((person) => person.login === machine.login);
+    expect(me?.role).toBe("founder");
+    expect(me?.sessions).toEqual([]);
+  });
+
+  it("lists every live session with its parent, leaves stopped ones out, and carries no titles or branches", async () => {
+    const machine = await enrol();
+    const other = await enrol({ role: "limited_staff" });
+    await sendFacts(machine, exampleActivity());
+    const sessions = await sessionsOf(machine, other);
+    expect(sessions?.map((session) => [session.id, session.state])).toEqual([
+      ["s_q8Lm2Vx", "working"],
+      ["s_h3Pw7Nc", "waiting"],
+    ]);
+    const helper = sessions?.find((session) => session.id === "s_h3Pw7Nc");
+    expect(helper?.parentId).toBe("s_q8Lm2Vx");
+    expect(helper?.waiting).toBe("permission");
+    expect(helper?.machineId).toBe(machine.machineId);
+    expect(sessions?.[0]?.taskId).toBe("t_K9w3Ls");
+    const raw = JSON.stringify(await readTeam(other));
+    expect(raw).not.toContain("work/42-guild-invites");
+    expect(raw).not.toContain("th_01JDX3K9");
+  });
+
+  it("reads a finished turn as idle, not waiting", async () => {
+    const machine = await enrol();
+    await sendFacts(machine, [
+      {
+        sessionId: "s_idle01",
+        threadId: "th_idle01",
+        projectKey: `sha256:${"a".repeat(64)}`,
+        provider: "codex",
+        state: "waiting",
+        waiting: "input",
+        processRunning: false,
+        startedAt: "2026-11-26T09:00:00Z",
+        lastSeenAt: "2026-11-26T09:05:00Z",
+      },
+    ]);
+    const sessions = await sessionsOf(machine);
+    expect(sessions).toHaveLength(1);
+    expect(sessions?.[0]?.state).toBe("idle");
+    expect(sessions?.[0]?.waiting).toBeUndefined();
+  });
+
+  it("keeps since while the state holds, and moves it when the state changes", async () => {
+    const machine = await enrol();
+    const working = exampleActivity().slice(0, 1);
+    await sendFacts(machine, working);
+    // A minute back, still heard from: the state's start moves back with it.
+    await client.control("/machines/age", { machineId: machine.machineId, seconds: 60 });
+    const first = (await sessionsOf(machine))?.[0]?.since;
+    await sendFacts(machine, working);
+    expect((await sessionsOf(machine))?.[0]?.since).toBe(first);
+    await sendFacts(machine, [
+      { ...working[0], state: "waiting", waiting: "question", processRunning: true },
+    ]);
+    const moved = (await sessionsOf(machine))?.[0];
+    expect(moved?.state).toBe("waiting");
+    expect(moved?.since).not.toBe(first);
+  });
+
+  it("marks sessions not heard from after 90 seconds, and drops them after 24 hours", async () => {
+    const machine = await enrol();
+    await sendFacts(machine, exampleActivity());
+    await client.control("/machines/age", { machineId: machine.machineId, seconds: 120 });
+    const unheard = await sessionsOf(machine);
+    expect(unheard?.map((session) => session.state)).toEqual(["not_heard_from", "not_heard_from"]);
+    expect(unheard?.every((session) => session.waiting === undefined)).toBe(true);
+    const listed = (await listMachines(machine)).find((entry) => entry.id === machine.machineId);
+    expect(unheard?.[0]?.since).toBe(listed?.lastHeardAt);
+    await client.control("/machines/age", { machineId: machine.machineId, seconds: 24 * 3600 });
+    expect(await sessionsOf(machine)).toEqual([]);
   });
 });
 

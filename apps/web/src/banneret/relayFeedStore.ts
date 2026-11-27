@@ -1,6 +1,6 @@
 // Banneret Hub: this client's copy of the relay feed for each environment and relay (one per
 // Enterprise workspace joined on that environment). The server makes every relay call; the client follows the `banneretRelay.feed` stream (Today and Needs you refetched on a
-// new revision; board, map, feed and graveyard ride on it) and reads older pages on request. A failed
+// new revision; board, map, feed, graveyard and team ride on it) and reads older pages on request. A failed
 // read keeps the last good copy, so screens show old data with its age rather than nothing.
 import {
   type AtomCommandResult,
@@ -23,6 +23,7 @@ import {
   type BanneretFeedNeedsRead,
   type BanneretFeedToday,
   type BanneretFeedTodayRead,
+  type BanneretTeamRead,
 } from "@t3tools/contracts";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { create } from "zustand";
@@ -158,6 +159,8 @@ export interface EnvironmentFeed {
   readonly graveyard: BanneretGraveyardRead | null;
   readonly graveyardOlder: OlderPages<BanneretGraveyardEntry> | null;
   readonly graveyardOlderProblem: FeedProblem | null;
+  /** The team file with each person's machines; null when the relay offers no team or it is not read yet. */
+  readonly team: BanneretTeamRead | null;
   /** A read that failed without any answer from this environment. */
   readonly unreachable: boolean;
 }
@@ -184,6 +187,7 @@ const EMPTY_FEED: EnvironmentFeed = {
   graveyard: null,
   graveyardOlder: null,
   graveyardOlderProblem: null,
+  team: null,
   unreachable: false,
 };
 
@@ -352,6 +356,7 @@ function applyState(target: RelayTarget, state: BanneretFeedState) {
     needsCount: state.needsCount,
     board: state.board,
     map: state.map,
+    team: state.team,
   });
   const seen = seenRevisions.get(relayKey(target));
   seenRevisions.set(relayKey(target), state.revision);

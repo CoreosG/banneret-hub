@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 export const MAX_TABS = 20;
 export const TABS_STORAGE_KEY = "banneret.tabs.v1";
 
-const PAGE_PATHS = ["/today", "/board", "/map", "/feed", "/needs"] as const;
+const PAGE_PATHS = ["/today", "/board", "/map", "/feed", "/needs", "/team"] as const;
 export type PagePath = (typeof PAGE_PATHS)[number];
 
 const TabThreadRef = Schema.Struct({ environmentId: Schema.String, threadId: Schema.String });
@@ -228,6 +228,8 @@ export function pageTitle(path: PagePath): string {
       return "Feed";
     case "/needs":
       return "Needs";
+    case "/team":
+      return "Team";
   }
 }
 

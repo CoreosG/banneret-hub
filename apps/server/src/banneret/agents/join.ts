@@ -15,7 +15,7 @@ export const joinText = (input: {
 
 You work for ${input.login} at ${input.company}. Each task on the company board has a lease: a claim on its tracker issue that says who works on it. You hold a lease as ${input.login}, through the banneret_* tools.
 
-1. Check before you start. Find work with banneret_board (column free, or mine) or banneret_needs, and read a task with banneret_task. Call banneret_lease_check once on the task you pick.
+1. Check before you start. Find work with banneret_board (column free, or mine) or banneret_needs, and read a task with banneret_task. banneret_team shows what every person's agents work on now, so you can avoid doubling up. Call banneret_lease_check once on the task you pick.
 2. Tell ${input.login} first. Say which task you are about to take before you take it, unless ${input.login} already told you to work on it.
 3. Take before you edit. Call banneret_lease_take and change nothing for the task until the outcome is taken. If someone else holds it, pick another task.
 4. Release with a reason when you stop, for any reason. Call banneret_lease_release with done, blocked, handing_over, out_of_usage, wrong_approach, duplicate, deprioritised or other (with reasonText), and a short note.

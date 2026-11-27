@@ -10,7 +10,8 @@
     { "id": "board", "kind": "board", "version": 2, "flags": ["leases", "checked", "boards"], "params": {"staleSeconds":21600,"expirySeconds":86400} },
     { "id": "map", "kind": "map", "version": 1, "flags": ["rests_on"] },
     { "id": "feed", "kind": "feed", "version": 1, "flags": ["graveyard"] },
-    { "id": "task", "kind": "task", "version": 1, "flags": [] }
+    { "id": "task", "kind": "task", "version": 1, "flags": [] },
+    { "id": "team", "kind": "team", "version": 1, "flags": [] }
   ],
   "dashboards": [{"id":"metrics","title":"Metrics","url":"https://metrics.example.org"}],
   "mcpTools": [
@@ -20,7 +21,8 @@
     { "name": "banneret_lease_check", "description": "Who holds a task now.", "role": "limited_staff" },
     { "name": "banneret_lease_take", "description": "Take a task.", "role": "limited_staff" },
     { "name": "banneret_lease_release", "description": "Release a task with a reason.", "role": "limited_staff" },
-    { "name": "banneret_lease_withdraw", "description": "Undo a half-done take.", "role": "limited_staff" }
+    { "name": "banneret_lease_withdraw", "description": "Undo a half-done take.", "role": "limited_staff" },
+    { "name": "banneret_team", "description": "Who is working on what.", "role": "limited_staff" }
   ],
   "adapters": [
     { "role": "work_tracker", "kind": "github", "version": 1 },

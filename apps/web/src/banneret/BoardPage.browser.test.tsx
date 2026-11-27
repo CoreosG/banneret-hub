@@ -178,6 +178,7 @@ const state = (sections: string[], board: BanneretFeedBoardRead | null): Bannere
   map: null,
   feed: null,
   graveyard: null,
+  team: null,
 });
 
 function setup() {

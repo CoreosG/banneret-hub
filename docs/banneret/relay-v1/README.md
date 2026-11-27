@@ -290,7 +290,8 @@ Error `code` is an open set too. A client treats an unknown error code by its HT
 
 `GET /snapshot/head` and `GET /snapshot/files/{sha256}` give the same facts as `GET /needs`,
 `GET /today` (working, stuck, health), `GET /machines` and `GET /repositories`, packed as files a client can cache
-forever. They carry nothing those calls do not already return to the same caller.
+forever. Those files carry nothing those calls do not already return to the same caller. The files the table below marks
+as snapshot only (the boards, the map and the team) have no live call.
 
 - **Per person.** The head belongs to the caller's person. Every machine of one person gets the same head. Files are
   stored once by hash, so two people with identical bytes share one stored file. A file is readable only while one
@@ -300,7 +301,7 @@ forever. They carry nothing those calls do not already return to the same caller
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
   `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `boards` is `SnapshotBoards`, each
-  `board.<id>` is `SnapshotBoard`, and `map`, `feed` and `graveyard` are `SnapshotMap`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know.
+  `board.<id>` is `SnapshotBoard`, and `map`, `feed` and `graveyard` are `SnapshotMap`, `FeedPage` and `GraveyardPage`, and `team` is `SnapshotTeam`. A client ignores keys under `files` it does not know.
 - **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
   head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
   fetch its files.
@@ -339,6 +340,7 @@ What the files hold, and who sees what, is the same as the live calls:
 | map | none (snapshot only) | nothing (relay-wide) |
 | feed | `GET /feed` | nothing (relay-wide) |
 | graveyard | `GET /graveyard` | nothing (relay-wide) |
+| team | none (snapshot only) | nothing (relay-wide) |
 
 "No titles" means no title, text or path that a Hub reported (a heartbeat never carries them). The tracker titles that
 `GET /needs` and `GET /today` already return to staff stay in the needs and work files.
@@ -730,6 +732,55 @@ unless capabilities carry the section.
   characters) and `note` (at most 2,048) when the release had them. Every other type carries none of the four.
 - **Graveyard entry.** `{task{id, title, ref, openedAt, closedAt}, cause, ruledAt, by?{id, login}, link?}`. `cause` is always present:
   the Hub shows it, so a task never sits in the graveyard without a reason.
+
+## Team
+
+A relay that serves it advertises the section `{kind:"team", version:1, flags:[]}` and names the `team` file in the
+snapshot head. A Hub does not read the file unless capabilities carry the section. It answers "who is working on what
+right now": every person and their live agent sessions. The relay builds it from the heartbeats it already receives.
+
+**The file.** `SnapshotTeam` is `{people[{id, login, role, sessions[{id, parentId?, machineId, provider, state,
+waiting?, taskId?, since}]}]}`. Objects are closed.
+
+- `people` lists every staff member the relay knows (everyone who has signed in and is not removed), in login order,
+  at most 500. A person with no live session has an empty `sessions`.
+- A session is one activity fact, reduced. `id` is the fact's `sessionId` and `parentId` its `parentSessionId`, present
+  only when that session is listed too. That makes the working tree: person, their orchestrator sessions, the helpers
+  under each.
+- `machineId` is the machine that reported it, as in the `machines` file. `provider` is an open token.
+- `taskId` is the board task the session works on: the fact's `taskId`, or the task the relay matched by branch and
+  `projectKey`, as for the working-now block. Absent when it knows none.
+- **No titles, prompts, branches or paths.** The Hub names the task from the board or the map it already holds.
+- **Not repeated here:** machines (owner, online, version, sandbox) are in the `machines` file, and leases and
+  assignees are in the board files.
+- **No churn.** No field changes on every heartbeat. `since` is when the session entered its current state, so the
+  file, and the head, change only when a state does.
+
+**State.** `state` is an open token. The relay sets it from the session's latest fact and its machine:
+
+| `state` | When |
+|---|---|
+| `working` | The fact says `working`. |
+| `waiting` | The fact says `waiting` on a `permission` or a `question`, and `processRunning` is true. `waiting` carries which. |
+| `idle` | The fact says `idle`, or any other `waiting` (such as a finished turn, `waiting` on `input` with `processRunning` false, that waits for the person's next message). |
+| `not_heard_from` | The session's machine has not been heard from for 90 seconds. `since` is when it was last heard. |
+
+How each session moves:
+
+| Event | The session |
+|---|---|
+| A heartbeat carries it | Takes the state above. `since` moves only when the state changed. |
+| A heartbeat no longer carries it | Ended: it leaves the file. |
+| The fact says `stopped` | Left out. |
+| Its machine is silent for more than 90 seconds | `not_heard_from`, with `since` the last-heard time. |
+| Its machine is silent for 24 hours, or is revoked | Left out. |
+| Its person is removed from staff | The person and their sessions leave the file. |
+| The relay restarts | It may keep `since` in memory only. After a restart, `since` starts again at the first heartbeat that carries the session. |
+
+**How a Hub groups it.** Not part of the contract. The Hub counts only sessions without a listed parent, and gives
+each the most urgent state in its own subtree, so a helper waiting on a permission under a working orchestrator shows
+as waiting. A waiting session of the viewer's own is **Needs you**, someone else's is **Waiting on someone else**,
+then **Not heard from** and **Working**. Idle sessions show only in the expanded tree.
 
 ## Task
 

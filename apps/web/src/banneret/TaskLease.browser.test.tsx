@@ -125,6 +125,7 @@ const feed = (cards: BanneretBoardCard[], leases = true): BanneretFeedState => (
   },
   feed: null,
   graveyard: null,
+  team: null,
 });
 
 const NO_ACTIONS = { take: false, release: false, finish: false, withdraw: false };

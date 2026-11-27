@@ -170,13 +170,41 @@ The **Feed** is the company's activity, newest first: claims taken and released,
 opened and merged, and tasks built, checked or sent back. The **Graveyard** lists tasks ruled dead, each with
 the reason. A task never sits there without one. A text box narrows the entries already loaded.
 
+### Team
+
+**Team** answers "who is working on what right now". It is the first page to open when you join a company.
+
+- **One row per person:** their role, their machines with a dot for online or offline, the tasks they hold a
+  claim on, and their live agents counted by state.
+- **Four states, most urgent first:**
+  - **Needs you:** one of your own agents waits on your permission or your answer.
+  - **Waiting on someone else:** another person's agent waits on them.
+  - **Not heard from:** the agent's machine has gone quiet for 90 seconds. It is drawn grey and dashed, never as
+    stopped, because the agent may still be running.
+  - **Working:** a run is going.
+- **Helpers count under their lead.** A lead session takes the most urgent state among its helpers, so a helper
+  waiting on a permission makes its lead "waiting". An idle agent, one that finished its turn and waits for a next
+  message, shows only when you expand the person.
+- **Expand a person** to see the working tree: each lead agent, the helpers under it, and the task each one works
+  on, with its machine and how long it has been in its state. A task opens in the Task dialog. A claim chip opens
+  its task too.
+- **Find a person** filters by login, role, machine, or a task they hold or work on. The filter and the expanded
+  person are part of the page address. `/` search finds people as well.
+
+The page uses only what the relay already sends: the relay's team file for people and sessions, its machines list,
+and the boards for claims and task titles. It makes no tracker call and never checks a claim, so opening it costs
+nothing. When the relay cannot be reached, it keeps showing what the relay last said, with its age.
+
+Two people with several machines each is the shape Banneret runs. A larger company sees the same page with more
+rows; the filter is there for that.
+
 ### Search
 
-Press **/** anywhere outside a text box to search the company: the cards of every board, the Map's items and the
-Feed's entries, grouped by kind. The **Search** button at the top of each company page and "Search the company…"
+Press **/** anywhere outside a text box to search the company: the cards of every board, the Map's items, the
+Feed's entries and the people on Team, grouped by kind. The **Search** button at the top of each company page and "Search the company…"
 in the command palette open it too. The key is the one your keyboard layout types `/` with, AltGr included. Use the arrow keys and **Enter** to open a result. A card or an item with a task
 opens in the Task tab. A Map item opens its neighbourhood on the Map (without rests-on: its task, or the Map
-filtered to it), and a Feed entry without a task opens its link. Search looks only at what the Hub already holds, so it asks the relay for nothing.
+filtered to it), and a Feed entry without a task opens its link. A person opens on Team, expanded. Search looks only at what the Hub already holds, so it asks the relay for nothing.
 
 ### The Task tab
 
@@ -190,8 +218,8 @@ that tracker, the tab shows one row that links to the issue instead.
 
 ### The open tabs bar
 
-A bar above the main view keeps your open threads and workspace pages (Today, Needs you, Board, Map, Feed) as
-tabs. A page tab keeps the page's board and filters.
+A bar above the main view keeps your open threads and workspace pages (Today, Needs you, Board, Map, Feed, Team)
+as tabs. A page tab keeps the page's board and filters.
 
 - Click a tab to open it. Double-click keeps a preview tab. Pin keeps a tab for good.
 - Middle-click closes. Drag reorders.
@@ -226,7 +254,8 @@ A joined machine sends the relay facts and usage every 30 seconds, and nothing e
   the repository name;
 - how much of each usage window your own Claude and Codex logins have used.
 
-It never sends prompts, replies, code, thread titles, local paths or remote URLs. The only thread content that
+It never sends prompts, replies, code, thread titles, local paths or remote URLs. Everyone at the company sees
+each session's state, provider, machine and task on the Team page, never its content. The only thread content that
 ever leaves a machine is a thread its owner chose to share. Solo projects send nothing. See
 [privacy.md](privacy.md) for the full notice.
 
@@ -244,7 +273,7 @@ Banneret built this for its own team, but nothing in it is specific to Banneret.
   [`stage-plan.schema.json`](relay-v1/stage-plan.schema.json). For example, Banneret generates its stage plan
   from its knowledge base. Yours can come from anywhere.
 - **Sections a relay does not advertise are simply hidden.** A small relay can serve only Today and Needs you.
-  The Board, Map, Feed, Graveyard and Task screens appear only when the relay offers them.
+  The Board, Map, Feed, Graveyard, Team and Task screens appear only when the relay offers them.
 - **Self-hosters own their data's durability.** See [You own your data](#you-own-your-data).
 
 ## The stage plan
