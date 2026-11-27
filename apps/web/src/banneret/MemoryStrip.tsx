@@ -1,3 +1,4 @@
+import { MemoryPreferences } from "./MemoryPreferences";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import {
   type MemoryReviewNote,
@@ -66,7 +67,7 @@ export function MemoryStrip({
   }, [environmentId, threadId, allowed, designated, revision, working].join(":"));
   const counts = state.value;
   const resolved = counts !== undefined;
-  const visible = allowed && counts != null;
+  const visible = allowed && counts != null && !counts.cardsOnly;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- other chats can change these server counts while this thread is idle
   useEffect(() => {
     if (!visible) return;
@@ -95,7 +96,8 @@ export function MemoryStrip({
       });
   }, [allowed, resolved, visible, environmentId, threadId]);
   const loadNotes =
-    visible && (query !== undefined || expanded || counts.proposed + counts.disputed > 0);
+    (allowed && counts?.cardsOnly) ||
+    (visible && (query !== undefined || expanded || counts.proposed + counts.disputed > 0));
   const notes = useChatRead(
     async () => {
       if (!loadNotes) return [];
@@ -176,6 +178,7 @@ export function MemoryStrip({
             <span>Stored unencrypted on this machine</span>
           </button>
           {loadNotes && notes.error && <p role="alert">{notes.error}</p>}
+          {expanded && writable && <MemoryPreferences key={memoryThreadKey(ref)} {...ref} />}
           {expanded && notes.value && (
             <MemoryNotes expanded notes={notes.value} writable={writable} apply={apply} />
           )}

@@ -1,3 +1,5 @@
+import { knowledgeConfigured } from "../memory/KbIndex.ts";
+import * as Path from "effect/Path";
 import { pluginHandlers } from "../plugins/registry.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
@@ -790,6 +792,36 @@ export const rpcHandlers = {
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),
+  "memory.preferences": Effect.fn("BanneretMemory.preferences")(
+    function* ({ threadId }: { threadId: ThreadId }) {
+      return yield* (yield* reviewAccess(threadId)).open((s) => ({
+        folders: s.folders(),
+        nudges: s.nudges(threadId),
+      }));
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
+  "memory.configure": Effect.fn("BanneretMemory.configure")(
+    function* ({
+      threadId,
+      folders,
+      nudges,
+    }: {
+      threadId: ThreadId;
+      folders: readonly string[];
+      nudges: boolean;
+    }) {
+      const path = yield* Path.Path;
+      if (folders.some((f) => !path.isAbsolute(f)))
+        return yield* new TaskLeaseError({
+          reason: "failed",
+          detail: "Choose absolute knowledge folder paths.",
+        });
+      yield* (yield* reviewAccess(threadId)).open((s) => s.configure(threadId, folders, nudges));
+      knowledgeConfigured();
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
   "memory.targets": Effect.fn("BanneretMemory.targets")(
     function* () {
       const roles = Object.values(yield* readDesignations);
@@ -844,15 +876,27 @@ export const rpcHandlers = {
   ),
   "memory.list": Effect.fn("BanneretMemory.list")(
     function* ({ threadId, pendingOnly }: { threadId: ThreadId; pendingOnly: boolean }) {
-      const access = yield* reviewAccess(threadId);
-      return yield* access.open((s) => s.list(pendingOnly));
+      const access = yield* memoryAccess(
+        threadId,
+        yield* (yield* ServerEnvironment).getEnvironmentId,
+      );
+      return yield* access.open((s) => {
+        if (access.orchestrator) return s.list(pendingOnly, access.main);
+        const keys = s.correctionKeys(threadId);
+        return s.list(true).filter((n) => keys.has(n.key));
+      });
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),
   "memory.review": Effect.fn("BanneretMemory.review")(
     function* ({ threadId, key, version, action }: typeof memoryReviewInput.Type) {
-      const access = yield* reviewAccess(threadId);
-      return yield* access.open((s) => s.review(key, version, action));
+      const access = yield* memoryAccess(
+        threadId,
+        yield* (yield* ServerEnvironment).getEnvironmentId,
+      );
+      return yield* access.open((s) =>
+        s.reviewInChat(key, version, action, threadId, access.orchestrator, access.main),
+      );
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),
@@ -861,7 +905,11 @@ export const rpcHandlers = {
     function* ({ threadId }: { threadId: ThreadId }) {
       const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;
       const access = yield* memoryAccess(threadId, environmentId);
-      return access.orchestrator ? yield* access.open((store) => store.counts()) : null;
+      return yield* access.open((store) => {
+        if (access.orchestrator) return store.counts(access.main);
+        const proposed = store.correctionKeys(threadId).size;
+        return proposed ? { cardsOnly: true, total: proposed, proposed, disputed: 0 } : null;
+      });
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),

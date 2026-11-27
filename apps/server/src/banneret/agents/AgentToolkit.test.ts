@@ -1,3 +1,4 @@
+import { memoryAccess } from "../memory/access.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off globalJsonInEffect:off globalTimersInEffect:off globalFetch:off globalFetchInEffect:off - a real HTTP relay (the fake) behind a recording forwarder.
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -385,6 +386,19 @@ describe("agent toolkit listing", () => {
         disableListenLog: true,
         disableLogger: true,
       }).pipe(Layer.build);
+      return {
+        configureKnowledge: Effect.gen(function* () {
+          const folder = baseDir + "/knowledge";
+          const fs = yield* FileSystem.FileSystem;
+          yield* fs.makeDirectory(folder);
+          yield* fs.writeFileString(
+            folder + "/guide.md",
+            "# Releases\nThe release colour is amber.",
+          );
+          const access = yield* memoryAccess(COMPANY_THREAD, EnvironmentId.make(ENVIRONMENT));
+          yield* access.open((store) => store.configure("scratch-main", [folder], false));
+        }).pipe(Effect.provide(Layer.merge(local, enrolmentStub))),
+      };
     });
 
   it.effect(
@@ -393,7 +407,7 @@ describe("agent toolkit listing", () => {
       Effect.scoped(
         Effect.gen(function* () {
           relayTools = ALL_TOOLS;
-          yield* serveAgents({});
+          const { configureKnowledge } = yield* serveAgents({});
           const httpClient = yield* HttpClient.HttpClient;
           const session = (token: string) =>
             Effect.gen(function* () {
@@ -572,6 +586,14 @@ describe("agent toolkit listing", () => {
           }
           // Neither the Solo thread nor the thread of a relay this machine never joined asked any relay.
           expect(asked).toEqual([]);
+          yield* configureKnowledge;
+          expect(yield* company.tools).toContain("banneret_kb_search");
+          const hits = yield* company.call("banneret_kb_search", { query: "amber" });
+          expect(hits.result?.structuredContent).toMatchObject({
+            data: expect.stringContaining('"heading":"Releases"'),
+          });
+          expect(yield* solo.tools).not.toContain("banneret_kb_search");
+          expect((yield* solo.call("banneret_kb_search", { query: "amber" })).error).toBeDefined();
         }),
       ).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

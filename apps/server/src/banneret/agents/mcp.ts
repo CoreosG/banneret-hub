@@ -1,3 +1,4 @@
+import { knowledgeRevision } from "../memory/KbIndex.ts";
 import { memoryAccess, offersHubMemory } from "../memory/access.ts";
 import * as SandboxHandoff from "./SandboxHandoff.ts";
 import * as Context from "effect/Context";
@@ -29,6 +30,11 @@ const offeredOnly = McpServer.visibility(
         const caller = Option.getOrUndefined(scope);
         const thread = caller?.thread;
         if (!caller || !thread) return false;
+        if (target === "banneret_kb_search")
+          return yield* memoryAccess(thread.threadId, caller.environmentId).pipe(
+            Effect.flatMap((a) => a.open((s) => s.folders().length > 0)),
+            Effect.provideContext(memoryContext),
+          );
         if (memoryNames.includes(target))
           return yield* offersHubMemory(thread.threadId, caller.environmentId).pipe(
             Effect.provideContext(memoryContext),
@@ -113,10 +119,13 @@ const relistOnOfferChange = (every: Duration.Input) =>
       const relays = yield* AgentRelays.BanneretAgentRelays;
       const server = yield* McpServer.McpServer;
       let last = yield* relays.offerInputs;
+      let lastKnowledge = knowledgeRevision;
       yield* Effect.sleep(every).pipe(
         Effect.andThen(relays.offerInputs),
         Effect.flatMap((next) => {
-          if (next === undefined || next === last) return Effect.void;
+          if ((next === undefined || next === last) && lastKnowledge === knowledgeRevision)
+            return Effect.void;
+          lastKnowledge = knowledgeRevision;
           last = next;
           // Forget kept offers first, so the list this notice prompts reads the new offer.
           return Effect.andThen(

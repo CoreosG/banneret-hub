@@ -42,7 +42,7 @@ function MemoryReview({
       <p className="whitespace-pre-wrap">{note.text}</p>
       {proposed && (
         <p className="text-xs text-muted-foreground">
-          Source: {note.source}
+          Source: <span className="whitespace-pre-line">{note.source}</span>
           <br />
           Why: {note.why || "No reason supplied."}
         </p>

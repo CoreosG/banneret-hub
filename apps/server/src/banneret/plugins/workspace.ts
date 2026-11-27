@@ -26,6 +26,7 @@ export const threadWorkspace = Effect.fn("Banneret.threadWorkspace")(function* (
     projectKey: project.value.repositoryIdentity
       ? projectKeyFromRemote(project.value.repositoryIdentity.locator.remoteUrl)
       : null,
+    main: roles?.main === threadId,
     orchestrator: roles?.main === threadId || roles?.projects[projectId] === threadId,
   };
 });

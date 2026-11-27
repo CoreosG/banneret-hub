@@ -1,3 +1,4 @@
+import { nudge } from "./memory/nudge.ts";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -55,15 +56,18 @@ export const lifecycle = Layer.effectDiscard(
     const orchestrator = yield* OrchestratorV2;
     yield* orchestrator.streamDomainEvents.pipe(
       Stream.runForEach((event) =>
-        event.type === "thread.settled" ||
-        event.type === "thread.archived" ||
-        event.type === "thread.deleted"
-          ? clearThreadDesignations(event.threadId).pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("Could not clear thread designation", error),
-              ),
-            )
-          : Effect.void,
+        Effect.andThen(
+          nudge(event),
+          event.type === "thread.settled" ||
+            event.type === "thread.archived" ||
+            event.type === "thread.deleted"
+            ? clearThreadDesignations(event.threadId).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("Could not clear thread designation", error),
+                ),
+              )
+            : Effect.void,
+        ),
       ),
       Effect.forkScoped,
     );
