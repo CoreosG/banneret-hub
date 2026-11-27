@@ -321,8 +321,6 @@ export const NodesIssueComment = Schema.Struct({
   body: Schema.String,
   /** Identifies the date and time when the object was created. */
   createdAt: Shared.DateTime,
-  /** Identifies the date and time when the object was last updated. */
-  updatedAt: Shared.DateTime,
   /** The HTTP URL for this issue comment */
   url: Shared.URI,
   /** A list of reactions grouped by content left on the subject. */
@@ -621,7 +619,7 @@ export const IssueDetail = GraphQL.query("IssueDetail", {
     ],
     selections: [
       { name: "viewer", body: ["{login}"] },
-      { name: "repository", body: ["(owner:$", "owner", " name:$", "name", "){viewerPermission issue(number:$", "number", "){...IssueRow assignees(first:100){pageInfo{hasNextPage endCursor}nodes{login name avatarUrl}}labels(first:100){pageInfo{hasNextPage endCursor}nodes{name color}}body viewerCanUpdate viewerCanClose viewerCanReopen...Reactions comments(last:100){totalCount pageInfo{hasPreviousPage startCursor}nodes{id author{__typename login avatarUrl}body createdAt updatedAt url...Reactions}}closedByPullRequestsReferences(first:20 includeClosedPrs:true){pageInfo{hasNextPage endCursor}nodes{number title url state isDraft repository{nameWithOwner}}}timelineItems(last:100 itemTypes:[CLOSED_EVENT REOPENED_EVENT LABELED_EVENT UNLABELED_EVENT ASSIGNED_EVENT UNASSIGNED_EVENT RENAMED_TITLE_EVENT CROSS_REFERENCED_EVENT]){nodes{__typename...on ClosedEvent{id createdAt actor{__typename login avatarUrl}}...on ReopenedEvent{id createdAt actor{__typename login avatarUrl}}...on LabeledEvent{id createdAt actor{__typename login avatarUrl}label{name}}...on UnlabeledEvent{id createdAt actor{__typename login avatarUrl}label{name}}...on AssignedEvent{id createdAt actor{__typename login avatarUrl}assignee{__typename...on User{login name}...on Bot{login}}}...on UnassignedEvent{id createdAt actor{__typename login avatarUrl}assignee{__typename...on User{login name}...on Bot{login}}}...on RenamedTitleEvent{id createdAt actor{__typename login avatarUrl}currentTitle}...on CrossReferencedEvent{id createdAt actor{__typename login avatarUrl}source{__typename...on PullRequest{number title url state isDraft repository{nameWithOwner}}...on Issue{number url repository{nameWithOwner}}}}}}}}"] }
+      { name: "repository", body: ["(owner:$", "owner", " name:$", "name", "){viewerPermission issue(number:$", "number", "){...IssueRow assignees(first:100){pageInfo{hasNextPage endCursor}nodes{login name avatarUrl}}labels(first:100){pageInfo{hasNextPage endCursor}nodes{name color}}body viewerCanUpdate viewerCanClose viewerCanReopen...Reactions comments(last:100){totalCount pageInfo{hasPreviousPage startCursor}nodes{id author{__typename login avatarUrl}body createdAt url...Reactions}}closedByPullRequestsReferences(first:20 includeClosedPrs:true){pageInfo{hasNextPage endCursor}nodes{number title url state isDraft repository{nameWithOwner}}}timelineItems(last:100 itemTypes:[CLOSED_EVENT REOPENED_EVENT LABELED_EVENT UNLABELED_EVENT ASSIGNED_EVENT UNASSIGNED_EVENT RENAMED_TITLE_EVENT CROSS_REFERENCED_EVENT]){nodes{__typename...on ClosedEvent{id createdAt actor{__typename login avatarUrl}}...on ReopenedEvent{id createdAt actor{__typename login avatarUrl}}...on LabeledEvent{id createdAt actor{__typename login avatarUrl}label{name}}...on UnlabeledEvent{id createdAt actor{__typename login avatarUrl}label{name}}...on AssignedEvent{id createdAt actor{__typename login avatarUrl}assignee{__typename...on User{login name}...on Bot{login}}}...on UnassignedEvent{id createdAt actor{__typename login avatarUrl}assignee{__typename...on User{login name}...on Bot{login}}}...on RenamedTitleEvent{id createdAt actor{__typename login avatarUrl}currentTitle}...on CrossReferencedEvent{id createdAt actor{__typename login avatarUrl}source{__typename...on PullRequest{number title url state isDraft repository{nameWithOwner}}...on Issue{number url repository{nameWithOwner}}}}}}}}"] }
     ],
     fragments: [
       { name: "IssueRow", body: ["on Issue{number title url state stateReason createdAt updatedAt closedAt author{__typename login avatarUrl...on User{name}}}"] },
@@ -679,7 +677,7 @@ export const IssueComments = GraphQL.query("IssueComments", {
     ],
     selections: [
       { name: "viewer", body: ["{login}"] },
-      { name: "repository", body: ["(owner:$", "owner", " name:$", "name", "){issue(number:$", "number", "){comments(last:100 before:$", "cursor", "){pageInfo{hasPreviousPage startCursor}nodes{id author{__typename login avatarUrl}body createdAt updatedAt url...Reactions}}}}"] }
+      { name: "repository", body: ["(owner:$", "owner", " name:$", "name", "){issue(number:$", "number", "){comments(last:100 before:$", "cursor", "){pageInfo{hasPreviousPage startCursor}nodes{id author{__typename login avatarUrl}body createdAt url...Reactions}}}}"] }
     ],
     fragments: [
       { name: "Reactions", body: ["on Reactable{__typename reactionGroups{content viewerHasReacted reactors(first:10){totalCount nodes{__typename...on User{login}...on Bot{login}...on Organization{login}...on Mannequin{login}}}}}"] }

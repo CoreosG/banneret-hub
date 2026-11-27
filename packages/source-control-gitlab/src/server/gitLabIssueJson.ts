@@ -65,7 +65,6 @@ const RawNoteSchema = Schema.Struct({
   body: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(RawUserSchema)),
   created_at: Schema.String,
-  updated_at: Schema.optional(Schema.String),
   /** True for the notes GitLab writes itself ("closed", "assigned to @x"), which are events. */
   system: Schema.optional(Schema.Boolean),
 });
@@ -320,7 +319,6 @@ export function decodeIssueNotesJson(raw: string): Result.Result<GitLabIssueNote
         author: toActor(value.author),
         body,
         createdAt: value.created_at,
-        updatedAt: value.updated_at ?? value.created_at,
         url: null,
       });
     }

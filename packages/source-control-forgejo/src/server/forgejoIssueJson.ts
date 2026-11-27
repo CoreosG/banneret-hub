@@ -113,8 +113,6 @@ export function forgejoIssueComment(comment: typeof ForgejoComment.Type): IssueC
     author: forgejoActor(comment.user),
     body: comment.body,
     createdAt: toIsoUtc(comment.created_at),
-    // Forgejo comments are not lease comments here, so the edit time is not read.
-    updatedAt: toIsoUtc(comment.created_at),
     url: comment.html_url || null,
   };
 }

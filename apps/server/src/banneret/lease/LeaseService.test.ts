@@ -20,6 +20,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as IssueService from "../../issue/IssueService.ts";
 import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
 import * as BanneretEnrolment from "../relay/Enrolment.ts";
+import * as CommentEdits from "./CommentEdits.ts";
 import * as LeaseService from "./LeaseService.ts";
 
 // An in-memory issue behind the issue and pull request services: the boundary LeaseService writes through.
@@ -60,6 +61,10 @@ interface FakeTracker {
   afterUpdate: Effect.Effect<void>;
   writes: Array<string>;
   nextId: number;
+  /** Milliseconds after its creation each edited comment was edited, by REST id. */
+  edits: Map<string, number>;
+  /** REST ids the edit-time read no longer finds, as after a deletion. */
+  gone: Set<string>;
 }
 
 const newTracker = (overrides: Partial<FakeTracker> = {}): FakeTracker => ({
@@ -79,6 +84,8 @@ const newTracker = (overrides: Partial<FakeTracker> = {}): FakeTracker => ({
   afterUpdate: Effect.void,
   writes: [],
   nextId: 5000,
+  edits: new Map(),
+  gone: new Set(),
   ...overrides,
 });
 
@@ -98,9 +105,9 @@ const addCommentAt = (
     author: { login: author, name: null, avatarUrl: null },
     body,
     createdAt: new Date(atMs).toISOString(),
-    updatedAt: new Date(atMs + editedAfterMs).toISOString(),
     url: `https://github.com/example-org/example-app/issues/7#issuecomment-${id}`,
   });
+  if (editedAfterMs > 0) tracker.edits.set(String(id), editedAfterMs);
 };
 
 const refused = (operation: string) =>
@@ -205,6 +212,25 @@ const pullRequestService = (tracker: FakeTracker) =>
       }),
   }) as unknown as PullRequestService.PullRequestService["Service"];
 
+/** GitHub's REST times for the asked comments the tracker still has. */
+const commentEdits = (tracker: FakeTracker) =>
+  CommentEdits.CommentEdits.of({
+    read: (input) =>
+      Effect.sync(() => {
+        const times = new Map<string, { createdAt: string; updatedAt: string }>();
+        for (const comment of tracker.comments) {
+          const id = /#issuecomment-(\d+)$/.exec(comment.url ?? "")?.[1];
+          if (id === undefined || !input.commentIds.includes(id) || tracker.gone.has(id)) continue;
+          const created = Date.parse(comment.createdAt);
+          times.set(id, {
+            createdAt: comment.createdAt,
+            updatedAt: new Date(created + (tracker.edits.get(id) ?? 0)).toISOString(),
+          });
+        }
+        return times;
+      }),
+  });
+
 const enrolledAs = (login: string, role = "limited_staff") =>
   Layer.succeed(BanneretEnrolment.BanneretEnrolment, {
     ...BanneretEnrolment.BanneretEnrolment.defaultValue(),
@@ -223,6 +249,7 @@ const leases = (
           Layer.mergeAll(
             Layer.succeed(IssueService.IssueService, issueService(tracker)),
             Layer.succeed(PullRequestService.PullRequestService, pullRequestService(tracker)),
+            Layer.succeed(CommentEdits.CommentEdits, commentEdits(tracker)),
             enrolment,
           ),
         ),
@@ -264,6 +291,19 @@ describe("LeaseService take", () => {
       const service = yield* leases(tracker);
       const read = yield* service.check(ref);
       expect(read.lease).toBeNull();
+      expect(tracker.writes).toEqual([]);
+    }),
+  );
+
+  it.effect("fails the read when a claim is gone by the time its edit time is read", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(EPOCH);
+      const tracker = newTracker();
+      addComment(tracker, OTHER, `claim: ${OTHER}/hub`, 30);
+      tracker.gone.add(String(tracker.nextId - 1));
+      const service = yield* leases(tracker);
+      const failure = yield* failureOf(service.check(ref));
+      expect(failure.reason).toBe("failed");
       expect(tracker.writes).toEqual([]);
     }),
   );
@@ -343,7 +383,6 @@ describe("LeaseService take", () => {
         author: { login: OTHER, name: null, avatarUrl: null },
         body: `claim: ${OTHER}/hub`,
         createdAt: at,
-        updatedAt: at,
         url: "https://github.com/example-org/example-app/issues/7#issuecomment-998",
       });
       tracker.comments.push({
@@ -351,7 +390,6 @@ describe("LeaseService take", () => {
         author: { login: ME, name: null, avatarUrl: null },
         body: `claim: ${ME}/hub`,
         createdAt: at,
-        updatedAt: at,
         url: "https://github.com/example-org/example-app/issues/7#issuecomment-1002",
       });
       tracker.assignees = [ME, OTHER];

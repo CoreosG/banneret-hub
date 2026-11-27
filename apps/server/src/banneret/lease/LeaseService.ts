@@ -9,6 +9,7 @@ import {
   checkReleaseComment,
   LEASE_LABEL_CLAIMED,
   LEASE_LABEL_PAUSED,
+  parseLeaseLine,
   type IssueComment,
   type IssueDetail,
   IssueOperationError,
@@ -32,6 +33,7 @@ import * as Schema from "effect/Schema";
 import * as IssueService from "../../issue/IssueService.ts";
 import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
 import * as BanneretEnrolment from "../relay/Enrolment.ts";
+import * as CommentEdits from "./CommentEdits.ts";
 
 /** How long a take waits before reading back who claimed first. */
 const READ_BACK_DELAY = Duration.seconds(10);
@@ -125,6 +127,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   const issues = yield* IssueService.IssueService;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const enrolment = yield* BanneretEnrolment.BanneretEnrolment;
+  const commentEdits = yield* CommentEdits.CommentEdits;
   const readBackDelay = options.readBackDelay ?? READ_BACK_DELAY;
   // The one operation running per task. In memory only; a restart forgets it, and the tracker keeps the truth.
   const operations = new Map<string, string>();
@@ -147,17 +150,45 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
       comments.push(...next.comments);
       cursor = next.nextCursor;
     }
+    // Edit times are read after every comment page, so an edit made before a body was read shows.
+    const leaseLines = comments.filter((comment) => parseLeaseLine(comment.body) !== null);
+    const edits = yield* commentEdits
+      .read({
+        tracker: detail.tracker,
+        host: detail.host,
+        scope: detail.scope,
+        commentIds: leaseLines.map(protocolCommentId),
+      })
+      .pipe(Effect.mapError(failed));
+    const isLeaseLine = new Set(leaseLines);
+    const foldComments = [];
+    for (const comment of comments) {
+      const id = protocolCommentId(comment);
+      let updatedAt = comment.createdAt;
+      if (edits !== null && isLeaseLine.has(comment)) {
+        const times = edits.get(id);
+        // Dropping the comment could make a held task read as free, so the read fails instead.
+        if (times === undefined) {
+          return yield* new TaskLeaseError({
+            reason: "failed",
+            detail: "A lease comment changed while it was read. Try again.",
+          });
+        }
+        if (Date.parse(times.updatedAt) > Date.parse(times.createdAt)) updatedAt = times.updatedAt;
+      }
+      foldComments.push({
+        id,
+        author: comment.author?.login ?? null,
+        createdAt: comment.createdAt,
+        updatedAt,
+        body: comment.body,
+      });
+    }
     const status = yield* enrolment.status;
     const me = status.me;
     const now = yield* DateTime.now;
     const fold = foldLease({
-      comments: comments.map((comment) => ({
-        id: protocolCommentId(comment),
-        author: comment.author?.login ?? null,
-        createdAt: comment.createdAt,
-        updatedAt: comment.updatedAt,
-        body: comment.body,
-      })),
+      comments: foldComments,
       assignees: detail.assignees.map((actor) => actor.login),
       labels: detail.labels.map((label) => label.name),
       // The Hub knows only its own person's role, so it sees no other founder's release.
@@ -644,7 +675,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
 export const layerWith = (options: Partial<LeaseServiceOptions>) =>
   Layer.effect(LeaseService, make(options));
 
-export const layer = layerWith({});
+export const layer = layerWith({}).pipe(Layer.provide(CommentEdits.layer));
 
 /** Handlers for the lease RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {

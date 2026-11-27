@@ -10,6 +10,7 @@ import { HttpClient } from "effect/http";
 
 import { definition } from "../shared/definition.ts";
 
+import * as BanneretCommentEdits from "./banneretCommentEdits.ts";
 import * as GitHubAppAccess from "./GitHubAppAccess.ts";
 import * as GitHubAppSignIn from "./GitHubAppSignIn.ts";
 import * as GitHubMediaFetch from "./gitHubMediaFetch.ts";
@@ -112,6 +113,7 @@ const makeInstance = Effect.gen(function* () {
       signIn: makeSignIn,
       isRepositoryStarred: makeIsRepositoryStarred,
       starRepository: makeStarRepository,
+      banneretCommentEdits: BanneretCommentEdits.make,
     }),
     services,
   );
