@@ -324,6 +324,11 @@ export interface RelayEnrolment {
   /** An effect that completes at the next change of this relay's view or files, or driver step. */
   readonly nextChange: Effect.Effect<Effect.Effect<void>>;
   /** RelayFeed seam: a signed GET, only while configured. */
+  readonly signedChat: (
+    method: "GET" | "PUT" | "POST" | "PATCH" | "DELETE",
+    path: string,
+    body?: unknown,
+  ) => Effect.Effect<RelayReply, RelayCallError>;
   readonly signedGet: (
     target: string,
     options?: { readonly ifNoneMatch?: string; readonly maxResponseBytes?: number },
@@ -778,7 +783,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
   /** A call with the device token. `counter_reused` gets one retry with a fresh counter. */
   const signedCall = Effect.fn("BanneretEnrolment.signedCall")(function* (
     from: Enrolled,
-    method: "GET" | "DELETE" | "POST",
+    method: "GET" | "PUT" | "DELETE" | "POST" | "PATCH",
     target: string,
     ifNoneMatch?: string,
     body?: unknown,
@@ -1452,6 +1457,17 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     revokeMachine,
     matchProjects: matchRepositories,
     nextChange: Effect.sync(() => Deferred.await(changeSignal)),
+    signedChat: (method, path, body) =>
+      Effect.flatMap(configuredNow, (from) =>
+        signedCall(
+          from,
+          method,
+          "/relay/v1/chat/" +
+            path.replace(/\/members\/@me$/, "/members/" + encodeURIComponent(from.me.id)),
+          undefined,
+          body,
+        ),
+      ),
     signedGet: (target, options = {}) =>
       Effect.flatMap(configuredNow, (from) =>
         signedCall(from, "GET", target, options.ifNoneMatch, undefined, options.maxResponseBytes),

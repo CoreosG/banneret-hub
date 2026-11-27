@@ -158,6 +158,55 @@ const eventsRequests = (relay: Forwarder) =>
   relay.requests.filter((request) => request.url === "/relay/v1/events");
 
 describe("BanneretRelayFeed", () => {
+  it.live("recovers channel messages written while the event stream is disconnected", () =>
+    withFake(
+      (fake, relay) =>
+        onFreshHub(
+          Effect.gen(function* () {
+            const feed = yield* RelayFeed.BanneretRelayFeed;
+            const client = yield* subscribe;
+            yield* join(fake, relay);
+            yield* client.next(isLive, "chat live");
+            expect(yield* feed.chat(relay.origin, { kind: "join", id: "c_general" })).toMatchObject(
+              { ok: true },
+            );
+            relay.intercept = (r) => (r.url === "/relay/v1/events" ? { status: 503 } : undefined);
+            yield* Effect.promise(() => relay.close());
+            yield* client.next(isDown, "chat down");
+            yield* Effect.promise(() => relay.reopen());
+            for (const text of ["First missed post", "Second missed post"]) {
+              expect(
+                yield* feed.chat(relay.origin, {
+                  kind: "post",
+                  id: "c_general",
+                  text,
+                  key: text.replaceAll(" ", "-"),
+                }),
+              ).toMatchObject({ ok: true });
+            }
+            const recovered: string[] = [];
+            relay.rewrite = (req, body) => {
+              if (req.url.startsWith("/relay/v1/chat/changes?"))
+                for (const change of JSON.parse(body).items) {
+                  if (change.kind === "message.created") recovered.push(change.message.text);
+                }
+              return body;
+            };
+            relay.intercept = undefined;
+            yield* client.next(isLive, "chat reconnected");
+            expect(recovered).toEqual(["First missed post", "Second missed post"]);
+            expect(
+              yield* feed.chat(relay.origin, { kind: "messages", id: "c_general" }),
+            ).toMatchObject({
+              ok: true,
+              value: { items: [{ text: "Second missed post" }, { text: "First missed post" }] },
+            });
+          }),
+        ),
+      { chat: true },
+    ),
+  );
+
   it.live("makes no relay call while the environment has not joined, nor after Leave", () =>
     withFake((fake, relay) =>
       onFreshHub(

@@ -8,6 +8,8 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - packages/banneret-relay-fake/**
+      - scripts/banneret/chat-browser.mjs
       - apps/web/**
       - packages/contracts/**
       - packages/client-runtime/**
@@ -17,6 +19,8 @@ on:
   push:
     branches: [main]
     paths:
+      - packages/banneret-relay-fake/**
+      - scripts/banneret/chat-browser.mjs
       - apps/web/**
       - packages/contracts/**
       - packages/client-runtime/**
@@ -48,7 +52,7 @@ jobs:
       - name: Setup dependencies
         uses: ./.github/actions/setup-ci-deps
         with:
-          install-args: --filter @t3tools/web...
+          install-args: --filter @t3tools/web... --filter @t3tools/banneret-relay-fake...
           save-pnpm-store: "false"
 
       - name: Resolve Playwright version

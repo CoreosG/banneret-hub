@@ -15,7 +15,7 @@ export type TabThreadRef = typeof TabThreadRef.Type;
 
 const Tab = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(["thread", "page"]),
+  kind: Schema.Literals(["thread", "page", "chat"]),
   href: Schema.String,
   workspaceId: Schema.NullOr(Schema.String),
   threadRef: Schema.NullOr(TabThreadRef),
@@ -48,7 +48,7 @@ export type TabTarget =
       readonly promotedFrom?: string | undefined;
     }
   | {
-      readonly kind: "page";
+      readonly kind: "page" | "chat";
       /** The page path plus its search, so a tab keeps the page's filters. */
       readonly href: string;
       readonly workspaceId: string | null;
@@ -59,6 +59,11 @@ export type TabTarget =
 const pagePath = (href: string) => href.split(/[?#]/, 1)[0] ?? href;
 
 export function tabKey(tab: Pick<Tab, "kind" | "href" | "threadRef" | "workspaceId">): string {
+  if (tab.kind === "chat") {
+    const [path, search] = tab.href.split("?");
+    const thread = new URLSearchParams(search).get("thread");
+    return "chat:" + tab.workspaceId + ":" + path?.slice(10) + (thread ? "/" + thread : "");
+  }
   if (tab.kind === "page") return `page:${tab.workspaceId ?? ""}:${pagePath(tab.href)}`;
   return tab.threadRef === null
     ? `href:${tab.href}`
@@ -70,7 +75,7 @@ function targetTab(target: TabTarget, id: string, now: number): Tab {
     id,
     kind: target.kind,
     href: target.href,
-    workspaceId: target.kind === "page" ? target.workspaceId : null,
+    workspaceId: target.kind !== "thread" ? target.workspaceId : null,
     threadRef: target.kind === "thread" ? target.threadRef : null,
     title: target.title,
     pinned: false,

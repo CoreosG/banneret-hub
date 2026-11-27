@@ -9,6 +9,8 @@
 // task for the Task tab, are read on request.
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
+  type ChannelAction,
+  type ChannelResult,
   type BanneretEnrolmentView,
   type BanneretFeedBoardRead,
   type BanneretFeedDeepLink,
@@ -42,6 +44,7 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import { catchUpChat, channelAction, chatUnavailable } from "./ChatSync.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import { BanneretEnrolment, type RelayEnrolment } from "./Enrolment.ts";
 import { RelayCallError, type RelayReply } from "./RelayClient.ts";
@@ -85,6 +88,7 @@ const DEFAULT_OPTIONS: RelayFeedOptions = {
 
 /** One relay's feed. */
 interface RelayFeedInstance {
+  readonly chat: (action: ChannelAction) => Effect.Effect<ChannelResult>;
   readonly today: (since?: string) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (cursor: string | undefined) => Effect.Effect<BanneretFeedNeedsRead>;
   /** An older feed page, from a `nextCursor`. */
@@ -106,6 +110,7 @@ export interface RelayMcpTool {
 
 /** Every call names its relay; a relay this environment has no enrolment with answers as not joined. */
 interface FeedService {
+  readonly chat: (origin: string, action: ChannelAction) => Effect.Effect<ChannelResult>;
   readonly today: (relayOrigin: string, since?: string) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (
     relayOrigin: string,
@@ -146,6 +151,7 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
   "t3/banneret/relay/RelayFeed/BanneretRelayFeed",
   {
     defaultValue: () => ({
+      chat: () => Effect.succeed(chatUnavailable),
       today: () => Effect.succeed(NOT_JOINED),
       needs: () => Effect.succeed(NOT_JOINED),
       feedPage: () => Effect.succeed(NOT_JOINED),
@@ -552,6 +558,9 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   // the document changed, even when the stream missed `capabilities.changed` or the read failed.
   let sectionsVersion: string | undefined;
   // Never reset, so a client can tell any two states apart.
+  let chatFlags: ReadonlyArray<string> = [];
+  let chatSeq = 0;
+  let chatRevision = 0;
   let revision = 0;
   let needsCount: number | null = null;
   let today: {
@@ -607,6 +616,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     sectionsKnown,
     sections,
     needsCount,
+    ...(sections.includes("chat") ? { chatRevision, chatFlags } : {}),
     revision,
     board,
     map: mapRead,
@@ -749,6 +759,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         Effect.suspend(() => {
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
+          chatFlags = sectionFlags(reply.body, "chat") ?? [];
           sectionsKnown = true;
           const dashboards = defined(
             list(fields(reply.body)?.dashboards, 32).map((value) => {
@@ -798,6 +809,15 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     yield* publishSnapshot;
   });
 
+  const syncChat = Effect.fn("RelayFeed.syncChat")(function* (key: string, inline?: number) {
+    if (!sections.includes("chat") || !stillJoined(key)) return;
+    const next = inline === chatSeq + 1 ? inline : yield* catchUpChat(enrolment, chatSeq);
+    if (!stillJoined(key)) return;
+    chatSeq = next;
+    chatRevision++;
+    yield* publishSnapshot;
+  });
+
   const handleMessage = Effect.fn("BanneretRelayFeed.handleMessage")(function* (
     key: string,
     message: SseMessage,
@@ -806,6 +826,9 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     if (message.id !== undefined && message.id !== "") lastEventId = message.id;
     const data = parseData(message.data);
     switch (message.event) {
+      case "chat.changed":
+        yield* syncChat(key, typeof data?.seq === "number" && data.change ? data.seq : undefined);
+        return;
       case "needs.changed": {
         const count = data?.count;
         if (typeof count === "number" && Number.isInteger(count) && count >= 0) needsCount = count;
@@ -823,6 +846,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         // The relay cannot replay what this server missed: refetch everything.
         needsCount = null;
         yield* refreshSections(key);
+        yield* syncChat(key);
         wakeSnapshot();
         yield* bump;
         return;
@@ -835,7 +859,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   /** One connection: open, read until it ends or goes quiet. Fails with the reason it stopped. */
   const connectOnce = Effect.fn("BanneretRelayFeed.connectOnce")(function* (
     key: string,
-    opened: Effect.Effect<void>,
+    opened: Effect.Effect<void, RelayCallError>,
   ) {
     const target = "/relay/v1/events";
     const signed = yield* enrolment.signStream(target);
@@ -1264,6 +1288,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       const outcome = yield* connectOnce(
         key,
         Effect.gen(function* () {
+          yield* syncChat(key);
           connections += 1;
           delay = 0;
           yield* setLive(key, true);
@@ -1315,6 +1340,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         teamSignature = "";
         lastHint = undefined;
         yield* enrolment.setBoardTasks([]);
+        chatSeq = 0;
         joined = next;
         lastEventId = undefined;
         live = false;
@@ -1372,6 +1398,10 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   );
 
   const service: RelayFeedInstance = {
+    chat: (action) =>
+      joined && sections.includes("chat")
+        ? channelAction(enrolment.signedChat, action)
+        : Effect.succeed(chatUnavailable),
     today: readToday,
     needs: readNeeds,
     feedPage: readFeedPage,
@@ -1439,6 +1469,10 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   });
 
   const service: FeedService = {
+    chat: (origin, action) =>
+      Effect.flatMap(feedFor(origin), (feed) =>
+        feed ? feed.chat(action) : Effect.succeed(chatUnavailable),
+      ),
     today: (relayOrigin, since) => notJoined(relayOrigin, (feed) => feed.today(since)),
     needs: (relayOrigin, cursor) => notJoined(relayOrigin, (feed) => feed.needs(cursor)),
     feedPage: (relayOrigin, cursor) => notJoined(relayOrigin, (feed) => feed.feedPage(cursor)),
@@ -1471,6 +1505,8 @@ export const layer = layerWith({});
 
 /** Handlers for the feed RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
+  [BANNERET_RELAY_FEED_WS_METHODS.chat]: (input: { relayOrigin: string; action: ChannelAction }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) => feed.chat(input.relayOrigin, input.action)),
   [BANNERET_RELAY_FEED_WS_METHODS.today]: (input: {
     readonly relayOrigin: string;
     readonly since?: string | undefined;

@@ -1,6 +1,7 @@
 // Banneret Hub: the company rows above the thread list (Today, Needs you with its count, the Board,
 // the Map, the Feed and the Team), shown only for an Enterprise workspace this machine has joined, and only for sections the
 // relay offers. Board, Map and Feed open with the filters last set on them in this window.
+import { ChannelRows } from "./chat/ChannelRows";
 import { useEffect } from "react";
 import { useConnectedEnvironmentIds } from "../state/environments";
 import { relayKey, useEnrolmentStore } from "./enrolmentStore";
@@ -163,6 +164,15 @@ export function EnterpriseSidebarRows() {
           </SidebarMenuItem>
         ) : null}
       </SidebarMenu>
+      {feed.sectionsKnown && feed.sections.includes("chat") && (
+        <ChannelRows
+          key={relayKey(enterprise.target)}
+          enterprise={enterprise}
+          onOpen={() => {
+            if (isMobile) setOpenMobile(false);
+          }}
+        />
+      )}
     </SidebarGroup>
   );
 }
