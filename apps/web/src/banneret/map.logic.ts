@@ -78,30 +78,6 @@ export function spineStates(progress: ReadonlyArray<StageProgress>): ReadonlyArr
   });
 }
 
-/** An item on one side of a rests-on link; `item` is null when the plan names an id the map lacks. */
-export interface RestsOnEntry {
-  readonly id: string;
-  readonly item: BanneretMapItem | null;
-}
-
-export interface RestsOnView {
-  /** What the item rests on, in its `restsOn` order. */
-  readonly restsOn: ReadonlyArray<RestsOnEntry>;
-  /** What rests on the item, in map order. */
-  readonly dependants: ReadonlyArray<BanneretMapItem>;
-}
-
-export function restsOnView(map: BanneretMap, itemId: string): RestsOnView {
-  const byId = new Map(map.items.map((item) => [item.id, item] as const));
-  const item = byId.get(itemId);
-  return {
-    restsOn: [...new Set(item?.restsOn ?? [])].map((id) => ({ id, item: byId.get(id) ?? null })),
-    dependants: map.items.filter(
-      (candidate) => candidate.id !== itemId && candidate.restsOn.includes(itemId),
-    ),
-  };
-}
-
 /**
  * What a `blocked` item waits on: its first direct blocker's title (its id when the map lacks that
  * item) and how many more there are; null for any other status or an empty `blockedBy`.

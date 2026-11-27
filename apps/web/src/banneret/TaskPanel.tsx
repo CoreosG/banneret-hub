@@ -14,6 +14,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { ExternalLinkIcon, SquareArrowOutUpRightIcon } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect } from "react";
 
 import { IssueDetailPanel } from "../components/issue/IssueDetailPanel";
@@ -28,10 +29,11 @@ import { useLeaseRoute } from "./leaseMachineStore";
 import { routeProblem, type LeaseRoute } from "./leaseRoute.logic";
 import type { LeaseEntry } from "./leaseStore";
 import { blockedByName } from "./map.logic";
+import { mapItemForTask, neighbourhoodSearch } from "./mapGraph.logic";
 import { useEnvironmentFeed, watchFeed } from "./relayFeedStore";
 import { safeLinkOut } from "./relayFeed.logic";
 import { checkedView, previewStateLabel, restsOnItems, trackerName } from "./task.logic";
-import { useTaskRead } from "./taskStore";
+import { openTaskDialog, useTaskRead } from "./taskStore";
 import { decodeTaskSurface, type TaskIdentity, type TaskSurface } from "./taskSurface";
 import { LeaseChip } from "./ui/Chips";
 import { EMPTY_NONE, EMPTY_NOT_KNOWN } from "./ui/labels";
@@ -180,6 +182,26 @@ function LastReleaseValue(props: { readonly release: LastReleaseView }) {
   );
 }
 
+/** A fact that opens a map item's neighbourhood, or plain text when there is none to open. */
+function MapLink(props: {
+  readonly itemId: string | null;
+  readonly showOnMap: ((itemId: string) => void) | null;
+  readonly children: ReactNode;
+}) {
+  const { itemId, showOnMap } = props;
+  if (itemId === null || showOnMap === null) return <>{props.children}</>;
+  return (
+    <button
+      type="button"
+      data-map-link={itemId}
+      onClick={() => showOnMap(itemId)}
+      className="cursor-pointer text-left underline decoration-border underline-offset-2 hover:decoration-foreground"
+    >
+      {props.children}
+    </button>
+  );
+}
+
 interface TaskView {
   readonly task: TaskIdentity;
   readonly card: BanneretBoardCard | BanneretTask | null;
@@ -197,6 +219,8 @@ function taskFacts(
     readonly leases: boolean;
     readonly signOff: boolean;
     readonly lease: LeaseEntry | undefined;
+    /** Opens a map item's neighbourhood; null when the relay offers none. */
+    readonly showOnMap: ((itemId: string) => void) | null;
   },
 ): ReadonlyArray<Fact> {
   const { card, mapItem, map, relayTask } = view;
@@ -287,7 +311,16 @@ function taskFacts(
           </span>
         ),
     },
-    { label: "Stage", value: stage?.title, empty: "Not on the map" },
+    {
+      label: "Stage",
+      empty: "Not on the map",
+      value:
+        stage === null || mapItem === null ? undefined : (
+          <MapLink itemId={mapItem.id} showOnMap={options.showOnMap}>
+            {stage.title}
+          </MapLink>
+        ),
+    },
     {
       label: "Preview",
       empty: relayTask === null ? EMPTY_NOT_KNOWN : EMPTY_NONE,
@@ -307,7 +340,12 @@ function taskFacts(
           <span className="flex flex-col">
             {restsOn.map((item) => (
               <span key={item.id} data-rests-on={item.id} className="break-words">
-                {item.title ?? item.id}
+                <MapLink
+                  itemId={mapItemForTask(map, item.id)?.id ?? null}
+                  showOnMap={options.showOnMap}
+                >
+                  {item.title ?? item.id}
+                </MapLink>
               </span>
             ))}
           </span>
@@ -575,10 +613,19 @@ function TaskPanelBody(props: {
           : read.kind === "done" && answer === null && !known
             ? "The task could not be read."
             : null;
+  const navigate = useNavigate();
+  const showOnMap =
+    feed.map?.restsOn === true
+      ? (itemId: string) => {
+          openTaskDialog(null);
+          void navigate({ to: "/map", search: neighbourhoodSearch(itemId) } as never);
+        }
+      : null;
   const facts = taskFacts(view, {
     leases,
     signOff: enrolment?.me?.role === "founder",
     lease,
+    showOnMap,
   });
   return (
     <div

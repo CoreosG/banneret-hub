@@ -1,60 +1,47 @@
-// Banneret Hub: the build map from the relay's snapshot `map` file, with a Rests-on view when the map
-// section flags `rests_on`. The relay computes every stage, status and counter; this page only draws
-// them. An item with a task opens its Task tab. Relay strings stay text. A text filter (`q` in the URL)
-// hides the items that do not match.
-import type { BanneretBoardTask, BanneretMap, BanneretMapItem } from "@t3tools/contracts";
-import { ArrowRightIcon, CheckIcon, ChevronDownIcon } from "lucide-react";
-import { type CSSProperties, type ReactNode, useState } from "react";
+// Banneret Hub: the build map from the relay's snapshot `map` file: List, Stages and, when the map
+// section flags `rests_on`, Neighbourhood. The relay computes every status and counter; this page
+// only draws them. Picking an item opens its neighbourhood, else its task. The view, its stage or
+// item and the List filter (`q`) live in the URL.
+import type { BanneretMap, BanneretMapItem } from "@t3tools/contracts";
+import { CheckIcon, XIcon } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { isElectron } from "../env";
 import { Button } from "../components/ui/button";
-import {
-  Combobox,
-  ComboboxEmpty,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxPopup,
-  ComboboxSearchInput,
-  ComboboxTrigger,
-} from "../components/ui/combobox";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
-import { taskRef } from "./board.logic";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { mapItemText, matchesText, queryFromUrl } from "./boards.logic";
 import { FeedStatus } from "./FeedParts";
 import {
   blockedByLabel,
-  blockedByName,
   mapNotMeasured,
   mapStages,
-  restsOnView,
   spineStates,
   stageProgress,
   type MapStageView,
-  type RestsOnEntry,
   type SpineState,
 } from "./map.logic";
+import { mapViewFromUrl, mapViewPatch, type MapView, type MapViewState } from "./mapGraph.logic";
+import { defaultCentre, NeighbourhoodView } from "./MapNeighbourhoodView";
+import { StageBubbles } from "./MapStagesView";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { MapItemCard } from "./ui/MapItemCard";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
 import { RelativeTime } from "./ui/RelativeTime";
 import { legendStatuses } from "./ui/status";
-import { StatusIcon } from "./ui/StatusPill";
 import { StatusLegend } from "./ui/StatusLegend";
-import { TaskCard } from "./ui/TaskCard";
 import {
   LAYOUT_MAP_STAGE,
   LAYOUT_MAP_STAGES,
   LAYOUT_PAGE,
   LAYOUT_PROGRESS_BAR,
-  LAYOUT_RESTS_ON,
   RADIUS_PANEL,
   TYPE,
-  toneProps,
 } from "./ui/tokens";
 import { FilterBox } from "./ui/FilterBox";
 import { rememberFilters } from "./filterMemory";
@@ -62,8 +49,8 @@ import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
 import { useUrlSearch } from "./useUrlSearch";
 
-type View = "map" | "rests_on";
-type OpenTask = (task: BanneretBoardTask) => void;
+/** What picking an item does; undefined leaves it inert. */
+type PickItem = (item: BanneretMapItem) => (() => void) | undefined;
 
 const PLAN_REASONS: Readonly<Record<string, string>> = {
   malformed: "the build plan breaks a rule",
@@ -79,7 +66,7 @@ function MapItem(props: {
   readonly map: BanneretMap;
   readonly item: BanneretMapItem;
   readonly atWork: ReadonlySet<string>;
-  readonly onOpen: OpenTask;
+  readonly onPick: PickItem;
 }) {
   const { item } = props;
   const { task } = item;
@@ -98,7 +85,8 @@ function MapItem(props: {
         why={item.statusWhy}
         note={blockedBy ?? undefined}
         atWork={isAtWork(item, props.atWork)}
-        onOpen={task === undefined ? undefined : () => props.onOpen(task)}
+        onBoard={task !== undefined}
+        onOpen={props.onPick(item)}
       />
     </li>
   );
@@ -109,7 +97,7 @@ function StageRow(props: {
   readonly stage: MapStageView;
   readonly spine: SpineState;
   readonly atWork: ReadonlySet<string>;
-  readonly onOpen: OpenTask;
+  readonly onPick: PickItem;
 }) {
   const { stage } = props;
   const { built, total } = stageProgress(stage.counts);
@@ -168,7 +156,7 @@ function StageRow(props: {
               map={props.map}
               item={item}
               atWork={props.atWork}
-              onOpen={props.onOpen}
+              onPick={props.onPick}
             />
           ))}
         </ul>
@@ -180,7 +168,7 @@ function StageRow(props: {
 function BuildMapView(props: {
   readonly map: BanneretMap;
   readonly atWork: ReadonlySet<string>;
-  readonly onOpen: OpenTask;
+  readonly onPick: PickItem;
   readonly query: string;
 }) {
   const all = mapStages(props.map);
@@ -207,89 +195,49 @@ function BuildMapView(props: {
           stage={stage}
           spine={state}
           atWork={props.atWork}
-          onOpen={props.onOpen}
+          onPick={props.onPick}
         />
       ))}
     </ol>
   );
 }
 
-const stageTitleOf = (map: BanneretMap, item: BanneretMapItem) =>
-  map.stages.find((stage) => stage.id === item.stageId)?.title ?? "Other";
-
-/** One card beside the picked item. A click makes it the picked item. */
-function SideCard(props: {
+/** The stage a bubble expands to: its items, each opening its neighbourhood or its task. */
+function StagePanel(props: {
   readonly map: BanneretMap;
-  readonly entry: RestsOnEntry;
-  readonly directBlocker: boolean;
+  readonly stage: MapStageView;
   readonly atWork: ReadonlySet<string>;
-  readonly onPick: (id: string) => void;
+  readonly onPick: PickItem;
+  readonly onClose: () => void;
 }) {
-  const { entry } = props;
-  if (entry.item === null) {
-    return (
-      <li data-item-id={entry.id}>
-        <p className="rounded-lg border border-dashed p-3 text-muted-foreground text-xs">
-          {entry.id} is not on this map.
-        </p>
-      </li>
-    );
-  }
-  const { item } = entry;
-  const ref = item.task === undefined ? undefined : taskRef(item.task);
+  const { stage } = props;
+  const { built, total } = stageProgress(stage.counts);
   return (
-    <li data-item-id={item.id}>
-      <TaskCard
-        title={item.title}
-        status={item.status}
-        why={item.statusWhy}
-        refLabel={ref?.repo}
-        refNumber={ref?.number}
-        atWork={isAtWork(item, props.atWork)}
-        blockedBy={blockedByName(props.map, item) ?? undefined}
-        lease={
-          props.directBlocker ? (
-            <span
-              data-direct-blocker
-              className="inline-flex h-5 items-center self-start rounded-md border px-1.5 font-medium text-2xs"
-              {...toneProps("warn", "edge", "fg")}
-            >
-              Blocks it directly
-            </span>
-          ) : undefined
-        }
-        footer={stageTitleOf(props.map, item)}
-        className={item.task === undefined ? "border-dashed" : ""}
-        onOpen={() => props.onPick(item.id)}
-      />
-    </li>
-  );
-}
-
-function SideColumn(props: {
-  readonly map: BanneretMap;
-  readonly label: string;
-  readonly empty: string;
-  readonly entries: ReadonlyArray<RestsOnEntry>;
-  readonly blockers: ReadonlySet<string>;
-  readonly atWork: ReadonlySet<string>;
-  readonly onPick: (id: string) => void;
-}) {
-  return (
-    <section aria-label={props.label} className="flex min-w-0 flex-col gap-2">
-      <h3 className="font-medium text-2xs text-muted-foreground uppercase tracking-wider">
-        {props.label} · {props.entries.length}
-      </h3>
-      {props.entries.length === 0 ? (
-        <QuietLine fact={props.empty} />
+    <section
+      aria-label={stage.title}
+      data-stage-panel={stage.id}
+      className="flex flex-col gap-3 border bg-card p-4"
+      {...RADIUS_PANEL}
+    >
+      <div className="flex items-center gap-3">
+        <h2 className={TYPE.cardTitle}>{stage.title}</h2>
+        <span className={`${TYPE.meta} tabular-nums`}>
+          {total === 0 ? "Nothing to build" : `${built}/${total} built`}
+        </span>
+        <span className="flex-1" />
+        <Button variant="ghost" size="icon-sm" aria-label="Close stage" onClick={props.onClose}>
+          <XIcon aria-hidden />
+        </Button>
+      </div>
+      {stage.items.length === 0 ? (
+        <p className={TYPE.meta}>Nothing planned in this stage.</p>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {props.entries.map((entry) => (
-            <SideCard
-              key={entry.id}
+        <ul className="flex min-w-0 flex-wrap content-start gap-2">
+          {stage.items.map((item) => (
+            <MapItem
+              key={item.id}
               map={props.map}
-              entry={entry}
-              directBlocker={props.blockers.has(entry.id)}
+              item={item}
               atWork={props.atWork}
               onPick={props.onPick}
             />
@@ -297,141 +245,6 @@ function SideColumn(props: {
         </ul>
       )}
     </section>
-  );
-}
-
-/** The item picker: a searchable list of every item, its stage as the second line. */
-function ItemPicker(props: {
-  readonly map: BanneretMap;
-  readonly selected: BanneretMapItem;
-  readonly onPick: (id: string) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const needle = query.trim().toLowerCase();
-  const items = props.map.items;
-  const filtered = items.filter((item) =>
-    `${item.title} ${stageTitleOf(props.map, item)}`.toLowerCase().includes(needle),
-  );
-  return (
-    <Combobox
-      items={items}
-      filteredItems={filtered}
-      filter={null}
-      autoHighlight
-      itemToStringLabel={(item) => item.title}
-      isItemEqualToValue={(a, b) => a.id === b.id}
-      value={props.selected}
-      onOpenChange={(open) => {
-        if (!open) setQuery("");
-      }}
-      onValueChange={(item) => {
-        if (item) props.onPick(item.id);
-      }}
-    >
-      <ComboboxTrigger
-        aria-label={`Item: ${props.selected.title}`}
-        render={<Button variant="outline" size="sm" />}
-        className="min-w-0 max-w-80"
-      >
-        <StatusIcon status={props.selected.status} />
-        <span className="min-w-0 truncate">{props.selected.title}</span>
-        <ChevronDownIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
-      </ComboboxTrigger>
-      <ComboboxPopup align="start" className="w-96">
-        <ComboboxSearchInput
-          aria-label="Search items"
-          placeholder={`Search ${items.length} items`}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <ComboboxEmpty>No items match.</ComboboxEmpty>
-        <ComboboxList>
-          {(item: BanneretMapItem) => (
-            <ComboboxItem key={item.id} value={item}>
-              <StatusIcon status={item.status} />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate">{item.title}</span>
-                <span className="truncate text-muted-foreground text-xs">
-                  {stageTitleOf(props.map, item)}
-                </span>
-              </span>
-            </ComboboxItem>
-          )}
-        </ComboboxList>
-      </ComboboxPopup>
-    </Combobox>
-  );
-}
-
-function RestsOnTab(props: {
-  readonly map: BanneretMap;
-  readonly atWork: ReadonlySet<string>;
-  readonly onOpen: OpenTask;
-}) {
-  const { map } = props;
-  const [chosen, setChosen] = useState<string | null>(null);
-  const selected =
-    map.items.find((item) => item.id === chosen) ??
-    map.items.find((item) => item.restsOn.length > 0) ??
-    map.items[0]!;
-  const view = restsOnView(map, selected.id);
-  const { task } = selected;
-  const ref = task === undefined ? undefined : taskRef(task);
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className={TYPE.meta}>Item</span>
-        <ItemPicker map={map} selected={selected} onPick={setChosen} />
-        <span className={TYPE.meta}>
-          {stageTitleOf(map, selected)} · rests on {view.restsOn.length} · unblocks{" "}
-          {view.dependants.length}
-        </span>
-      </div>
-      <div className="border bg-muted" {...RADIUS_PANEL} {...LAYOUT_RESTS_ON}>
-        <SideColumn
-          map={map}
-          label="Needs these first"
-          empty="Nothing. This can start now."
-          entries={view.restsOn}
-          blockers={new Set(selected.blockedBy)}
-          atWork={props.atWork}
-          onPick={setChosen}
-        />
-        <span aria-hidden data-slot="rests-on-arrow">
-          <ArrowRightIcon className="size-4" />
-        </span>
-        <section aria-label="Picked item" data-item-id={selected.id}>
-          <TaskCard
-            title={selected.title}
-            status={selected.status}
-            why={selected.statusWhy}
-            refLabel={ref?.repo}
-            refNumber={ref?.number}
-            atWork={isAtWork(selected, props.atWork)}
-            blockedBy={blockedByName(map, selected) ?? undefined}
-            footer={stageTitleOf(map, selected)}
-            className={
-              task === undefined
-                ? "border-dashed p-4"
-                : "border-primary p-4 ring-3 ring-primary/20 hover:border-primary"
-            }
-            onOpen={task === undefined ? undefined : () => props.onOpen(task)}
-          />
-        </section>
-        <span aria-hidden data-slot="rests-on-arrow">
-          <ArrowRightIcon className="size-4" />
-        </span>
-        <SideColumn
-          map={map}
-          label="Unblocks these"
-          empty="Nothing waits on this."
-          entries={view.dependants.map((item) => ({ id: item.id, item }))}
-          blockers={new Set()}
-          atWork={props.atWork}
-          onPick={setChosen}
-        />
-      </div>
-    </div>
   );
 }
 
@@ -503,12 +316,21 @@ function mapSummary(map: BanneretMap, stageCount: number): ReactNode {
   );
 }
 
+const VIEW_LABELS: Readonly<Record<MapView, string>> = {
+  list: "List",
+  stages: "Stages",
+  neighbourhood: "Neighbourhood",
+};
+
 export function MapPage() {
   const enterprise = useEnterpriseFeed();
   const openTask = useOpenTask(enterprise?.target ?? null);
-  const [view, setView] = useState<View>("map");
   const [rawSearch, setSearch] = useUrlSearch();
   const query = queryFromUrl(rawSearch);
+  const state = mapViewFromUrl(rawSearch);
+  const motion = !useMediaQuery("(prefers-reduced-motion: reduce)");
+  const go = (patch: Partial<MapViewState>, replace = false) =>
+    setSearch(mapViewPatch(patch), { replace });
   if (enterprise === null) {
     return (
       <MapFrame>
@@ -534,7 +356,17 @@ export function MapPage() {
   const atWork = new Set(read?.atWork ?? []);
   const hasItems = map !== null && map.items.length > 0;
   const restsOnOffered = read?.restsOn === true && hasItems;
-  const active: View = view === "rests_on" && restsOnOffered ? "rests_on" : "map";
+  const views: ReadonlyArray<MapView> = restsOnOffered
+    ? ["list", "stages", "neighbourhood"]
+    : ["list", "stages"];
+  const active: MapView = hasItems && views.includes(state.view) ? state.view : "list";
+  // Picking an item opens its neighbourhood when the relay offers one; otherwise only a task opens.
+  const pickItem: PickItem = (item) => {
+    if (restsOnOffered)
+      return () => go({ view: "neighbourhood", item: item.id, open: [], all: false });
+    const { task } = item;
+    return task === undefined ? undefined : () => openTask(task);
+  };
 
   let body: ReactNode;
   if (map === null) {
@@ -553,6 +385,62 @@ export function MapPage() {
     const statuses = legendStatuses(map.counters.byStatus).filter(
       (status) => read?.checked === true || status !== "checked",
     );
+    let view: ReactNode;
+    if (active === "neighbourhood") {
+      const centre = map.items.find((item) => item.id === state.item) ?? defaultCentre(map);
+      view = (
+        <NeighbourhoodView
+          map={map}
+          centre={centre}
+          open={state.open}
+          showAll={state.all}
+          atWork={atWork}
+          motion={motion}
+          onOpenTask={openTask}
+          onCentre={(id) => go({ item: id, open: [], all: false })}
+          onToggleOpen={(id) =>
+            go(
+              {
+                item: centre.id,
+                open: state.open.includes(id)
+                  ? state.open.filter((other) => other !== id)
+                  : [...state.open, id],
+              },
+              true,
+            )
+          }
+          onShowAll={(all) => go({ item: centre.id, all }, true)}
+        />
+      );
+    } else if (active === "stages") {
+      const stage = mapStages(map).find((entry) => entry.id === state.stage) ?? null;
+      view = (
+        <div className="flex flex-col gap-4">
+          <StageBubbles
+            map={map}
+            selected={stage?.id ?? null}
+            motion={motion}
+            onSelect={(id) => go({ stage: id }, true)}
+          />
+          {stage === null ? (
+            <p className={TYPE.meta}>
+              Bubbles follow the plan order. Size is the item count; the ring and dots show status.
+              Select a stage to see its items.
+            </p>
+          ) : (
+            <StagePanel
+              map={map}
+              stage={stage}
+              atWork={atWork}
+              onPick={pickItem}
+              onClose={() => go({ stage: null }, true)}
+            />
+          )}
+        </div>
+      );
+    } else {
+      view = <BuildMapView map={map} atWork={atWork} onPick={pickItem} query={query} />;
+    }
     body = (
       <>
         {mapNotMeasured(map) ? <NotMeasuredNote map={map} /> : null}
@@ -561,11 +449,7 @@ export function MapPage() {
           statuses={statuses}
           atWorkCount={map.items.filter((item) => isAtWork(item, atWork)).length}
         />
-        {active === "rests_on" ? (
-          <RestsOnTab map={map} atWork={atWork} onOpen={openTask} />
-        ) : (
-          <BuildMapView map={map} atWork={atWork} onOpen={openTask} query={query} />
-        )}
+        {view}
       </>
     );
   }
@@ -576,7 +460,7 @@ export function MapPage() {
         title="Build map"
         summary={hasItems ? mapSummary(map, mapStages(map).length) : undefined}
       >
-        {hasItems && active === "map" ? (
+        {hasItems && active === "list" ? (
           <FilterBox
             label="Filter the map"
             placeholder="Filter the map"
@@ -587,18 +471,21 @@ export function MapPage() {
             }}
           />
         ) : null}
-        {restsOnOffered ? (
+        {hasItems ? (
           <ToggleGroup
             aria-label="Map views"
             variant="segmented"
             value={[active]}
             onValueChange={(value) => {
-              const next = value[0];
-              if (next === "map" || next === "rests_on") setView(next);
+              const next = views.find((view) => view === value[0]);
+              if (next !== undefined) go({ view: next });
             }}
           >
-            <Toggle value="map">Build map</Toggle>
-            <Toggle value="rests_on">Rests on</Toggle>
+            {views.map((view) => (
+              <Toggle key={view} value={view}>
+                {VIEW_LABELS[view]}
+              </Toggle>
+            ))}
           </ToggleGroup>
         ) : null}
       </PageHeader>

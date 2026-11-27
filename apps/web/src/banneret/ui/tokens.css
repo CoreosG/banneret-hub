@@ -261,48 +261,199 @@
     background: var(--success);
   }
 
-  /* Rests on: what comes first, an arrow, the picked item, an arrow, what it unblocks. Narrow,
-     the three stack and the arrows point down. */
-  [data-layout="rests-on"] {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1.1fr) 56px minmax(0, 1fr);
-    align-items: center;
-    padding: 1.25rem;
+  [data-tone-look~="fill"] {
+    fill: var(--tone);
   }
 
-  [data-slot="rests-on-arrow"] {
+  [data-tone-look~="stroke"] {
+    stroke: var(--tone);
+  }
+
+  /* Stages: one bubble per stage in plan order. The ring shows the status mix, the dots the items. */
+  [data-layout="stage-bubbles"] {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  [data-slot="stage-spine"] {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 2;
+    stroke-dasharray: 4 5;
+  }
+
+  [data-slot="stage-spine"][data-spine="done"] {
+    stroke: color-mix(in srgb, var(--success) 55%, transparent);
+    stroke-dasharray: none;
+  }
+
+  [data-slot="stage-bundle"] {
+    fill: none;
+    stroke: var(--muted-foreground);
+    stroke-opacity: 0.16;
+    stroke-linecap: round;
+  }
+
+  [data-slot="stage-bundle"][data-blocking] {
+    stroke: var(--warning);
+    stroke-opacity: 0.4;
+  }
+
+  [data-slot="stage-bundle"][data-near] {
+    stroke-opacity: 0.55;
+  }
+
+  [data-slot="stage-bubble"] {
+    cursor: pointer;
+    outline: none;
+  }
+
+  [data-slot="bubble-hull"] {
+    fill: color-mix(in srgb, var(--foreground) 4%, var(--background));
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+
+  [data-slot="stage-bubble"]:hover [data-slot="bubble-hull"] {
+    fill: color-mix(in srgb, var(--foreground) 7%, var(--background));
+  }
+
+  /* The current stage: a dashed halo, as the List's spine rings its node. */
+  [data-slot="bubble-halo"] {
+    fill: none;
+    stroke: var(--primary);
+    stroke-opacity: 0.6;
+    stroke-width: 1.5;
+    stroke-dasharray: 3 4;
+  }
+
+  [data-slot="stage-bubble"][aria-pressed="true"] [data-slot="bubble-hull"] {
+    stroke: var(--primary);
+    stroke-width: 2.5;
+  }
+
+  [data-slot="stage-bubble"]:focus-visible [data-slot="bubble-hull"] {
+    stroke: var(--ring);
+    stroke-width: 3;
+  }
+
+  [data-has-selection] [data-slot="stage-bubble"][aria-pressed="false"] {
+    opacity: 0.5;
+  }
+
+  [data-slot="bubble-ring"] {
+    fill: none;
+    stroke-width: 5;
+  }
+
+  [data-slot="bubble-ring"][data-status="blocked"] {
+    stroke-dasharray: 3 2;
+  }
+
+  [data-slot="bubble-dot"][data-status="blocked"],
+  [data-slot="bubble-dot"][data-status="ruled_dead"] {
+    fill: none;
+    stroke: var(--tone);
+    stroke-width: 1.25;
+  }
+
+  [data-slot="bubble-title"] {
+    fill: var(--foreground);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  [data-slot="bubble-meta"] {
+    fill: var(--muted-foreground);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Neighbourhood: blockers on the left, what rests on them on the right. Edges are SVG under the
+     node buttons; a wide graph scrolls inside its panel, never the page. */
+  [data-layout="neighbourhood"] {
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    align-self: stretch;
-    color: var(--muted-foreground);
+    overflow: auto;
+    padding: 0.25rem;
   }
 
-  [data-slot="rests-on-arrow"]::before {
-    content: "";
+  [data-slot="graph-canvas"] {
+    position: relative;
+    margin-inline: auto;
+  }
+
+  [data-slot="graph-edges"] {
     position: absolute;
-    left: 6px;
-    right: 6px;
+    inset: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  [data-slot="graph-edge"] {
+    fill: none;
+    stroke: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+    stroke-width: 1.5;
+  }
+
+  [data-slot="graph-edge"][data-blocking] {
+    stroke: var(--warning);
+    stroke-width: 2.25;
+  }
+
+  [data-slot="graph-edge"][data-blocking="chain"] {
+    stroke-dasharray: 6 4;
+  }
+
+  [data-slot="graph-arrow"] {
+    fill: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+  }
+
+  [data-slot="graph-arrow"][data-blocking] {
+    fill: var(--warning);
+  }
+
+  [data-slot="graph-node"] {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+  }
+
+  [data-slot="graph-node"][data-side="centre"] > button:first-child {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+
+  [data-slot="graph-node"][data-status="ruled_dead"] [data-slot="node-title"] {
+    text-decoration: line-through;
+  }
+
+  [data-slot="node-expand"] {
+    position: absolute;
     top: 50%;
-    height: 1px;
-    background: var(--input);
+    translate: 0 -50%;
   }
 
-  [data-slot="rests-on-arrow"] > svg {
-    position: relative;
-    background: var(--muted);
+  [data-side="up"] > [data-slot="node-expand"] {
+    right: calc(100% + 4px);
   }
 
-  @media (max-width: 48rem) {
-    [data-layout="rests-on"] {
-      grid-template-columns: minmax(0, 1fr);
-      row-gap: 0.75rem;
+  [data-side="down"] > [data-slot="node-expand"] {
+    left: calc(100% + 4px);
+  }
+
+  /* One short entrance when a graph view opens; none for people who ask for less motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    [data-motion="on"] {
+      animation: map-graph-enter 180ms ease-out;
     }
+  }
 
-    [data-slot="rests-on-arrow"] {
-      transform: rotate(90deg);
-      height: 1.5rem;
+  @keyframes map-graph-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.985);
     }
   }
 }

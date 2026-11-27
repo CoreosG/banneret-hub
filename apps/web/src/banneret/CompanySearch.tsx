@@ -1,7 +1,7 @@
-// Banneret Hub: the `/` search over the active workspace's company. It looks through the snapshot
-// data the feed already holds (every board's cards, the map's items, the feed's entries, and whatever
-// other sources add) and asks the relay for nothing. Enter opens the highlighted result: a card or a
-// task in the Task dialog, a map item without a task on the Map, a feed entry without a task at its link.
+// Banneret Hub: the `/` search over the active workspace's company, through the snapshot data the feed
+// already holds; it asks the relay for nothing. Enter opens the highlighted result: a card in the Task
+// dialog, a map item in its Map neighbourhood (else its task or the filtered Map), a feed entry in its
+// task or at its link.
 import type { BanneretBoardTask } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { SearchIcon } from "lucide-react";
@@ -14,6 +14,7 @@ import { cn } from "../lib/utils";
 import { taskRef } from "./board.logic";
 import { opensSearch, searchCompany } from "./boards.logic";
 import { mergeFeedEntries } from "./feed.logic";
+import { neighbourhoodSearch } from "./mapGraph.logic";
 import { safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
 import {
@@ -76,7 +77,9 @@ const boardsMapFeed: CompanySearchSource = ({ query, enterprise, openTask, navig
         detail: stage === undefined ? "Build map" : `Build map · ${stage.title}`,
         status: item.status,
         open: () => {
-          if (item.task !== undefined) openTask(item.task);
+          if (feed.map?.restsOn === true)
+            void navigate({ to: "/map", search: neighbourhoodSearch(item.id) } as never);
+          else if (item.task !== undefined) openTask(item.task);
           else void navigate({ to: "/map", search: { q: item.title } } as never);
         },
       };

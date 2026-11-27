@@ -140,15 +140,29 @@ follow the same rules as these buttons. Paste one line into each repository's ag
 ### Map and Rests-on
 
 The Map shows the build in stages. Each item has a status, and each item can rest on other items. If something
-an item rests on needs you, was sent back or was ruled dead, the item that rests on it needs you too, and the
+an item rests on needs you, was sent back or was ruled dead, the item that rests on it is blocked, and the
 reason names the blocker. The map is drawn from a [stage plan](#the-stage-plan). If the plan is broken, the Map
 says so. It never shows a broken plan as an empty one.
 
-The line on the left marks progress. The current stage is the first one that is not fully built. A later stage
-that is already built keeps its check, but the line does not fill through it: it was built ahead of an earlier
-stage.
+The Map has three views. The view, the stage or item you picked and the filter are part of the page address,
+so a link, a reload or a tab keeps them.
 
-The Map has a text box too. It hides the items that do not match, and the stages left empty.
+- **List** shows one row per stage on a line that marks progress. The current stage is the first one that is
+  not fully built. A later stage that is already built keeps its check, but the line does not fill through it:
+  it was built ahead of an earlier stage. The text box hides the items that do not match, and the stages left
+  empty.
+- **Stages** draws each stage as a bubble, in plan order. A bigger bubble holds more items. The ring shows how
+  many items are in each status, and each dot is one item. Lines join stages whose items rest on each other.
+  A line turns amber while something on it blocks. Select a stage to see its items.
+- **Neighbourhood** shows one item in the middle. What it rests on is on the left and what rests on it is on
+  the right, two steps each way. Arrows point from a blocker to the item waiting on it. An amber arrow means
+  the blocker needs you, was sent back or was dropped. A dashed amber arrow means the blocker is itself
+  blocked. The small round button at a node's outer edge shows the next step out, and pressing it again hides
+  that step. The target button puts that node in the middle. A node with a task opens the task. The
+  Neighbourhood view appears only when the relay offers rests-on.
+
+Picking an item in the List, in a stage, in search or in a task's **Rests on** opens its neighbourhood. If the
+relay does not offer rests-on, an item with a task opens the task instead.
 
 ### Feed and Graveyard
 
@@ -161,14 +175,14 @@ the reason. A task never sits there without one. A text box narrows the entries 
 Press **/** anywhere outside a text box to search the company: the cards of every board, the Map's items and the
 Feed's entries, grouped by kind. The **Search** button at the top of each company page and "Search the company…"
 in the command palette open it too. The key is the one your keyboard layout types `/` with, AltGr included. Use the arrow keys and **Enter** to open a result. A card or an item with a task
-opens in the Task tab. A Map item without a task opens the Map filtered to it, and a Feed entry without a task opens
-its link. Search looks only at what the Hub already holds, so it asks the relay for nothing.
+opens in the Task tab. A Map item opens its neighbourhood on the Map (without rests-on: its task, or the Map
+filtered to it), and a Feed entry without a task opens its link. Search looks only at what the Hub already holds, so it asks the relay for nothing.
 
 ### The Task tab
 
 Opening a task shows its status, who holds it, when it opened and closed, every linked pull request and its
 checks, its stage on the Map, its preview when there is one, who checked it, what it rests on, and the last
-release with its note. Below that is the work tracker's own issue thread and composer.
+release with its note. The stage and each item it rests on open that item's neighbourhood on the Map. Below that is the work tracker's own issue thread and composer.
 
 **Edits there are made on GitHub as you.** (It says the tracker's name, which is GitHub by default.) They use
 your own login, and the board's rules for claims and sign-off still apply. If none of your projects here is on

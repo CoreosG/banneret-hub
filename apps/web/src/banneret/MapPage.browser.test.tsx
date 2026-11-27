@@ -242,6 +242,34 @@ const stageRow = (title: string) =>
   document.querySelector<HTMLElement>(`li[data-stage-id][aria-label="${title}"]`)!;
 const viewToggle = (name: string) => page.getByRole("button", { name, exact: true });
 const picker = () => page.getByRole("combobox", { name: /^Item:/ });
+const node = (id: string) =>
+  document.querySelector<HTMLElement>(`[data-slot="graph-node"][data-item-id="${id}"]`);
+const centre = () =>
+  document.querySelector<HTMLElement>('[data-slot="graph-node"][data-side="centre"]');
+const nodeIds = () =>
+  [...document.querySelectorAll("[data-slot=graph-node]")]
+    .map((entry) => entry.getAttribute("data-item-id")!)
+    .toSorted();
+const sideIds = (side: string) =>
+  [...document.querySelectorAll(`[data-slot=graph-node][data-side="${side}"]`)].map((entry) =>
+    entry.getAttribute("data-item-id"),
+  );
+const edge = (key: string) => {
+  const [from, to] = key.split(">");
+  return document.querySelector<SVGPathElement>(
+    `path[data-slot="graph-edge"][data-from="${from}"][data-to="${to}"]`,
+  );
+};
+const edges = () =>
+  Object.fromEntries(
+    [...document.querySelectorAll('path[data-slot="graph-edge"][data-from]')].map((path) => [
+      `${path.getAttribute("data-from")}>${path.getAttribute("data-to")}`,
+      path.getAttribute("data-blocking"),
+    ]),
+  );
+const bubbles = () => [...document.querySelectorAll("[data-slot=stage-bubble]")];
+const bubble = (id: string) =>
+  document.querySelector<SVGGElement>(`[data-slot="stage-bubble"][data-stage-id="${id}"]`);
 
 async function pick(title: string) {
   await userEvent.click(picker());
@@ -402,53 +430,202 @@ describe("Enterprise build map", () => {
       .toBeVisible();
   });
 
-  it("puts the picked item between what it needs first and what it unblocks", async () => {
+  it("centres the neighbourhood on an item, with blockers left, dependants right and amber blocking arrows", async () => {
     using stack = new DisposableStack();
-    const { emit, screen } = await openMap(stack);
+    const { emit, router, screen } = await openMap(stack);
     await using _screen = screen;
     await emit(state(["map"], mapRead(MAP())));
-    await userEvent.click(viewToggle("Rests on"));
-    await expect.element(viewToggle("Rests on")).toHaveAttribute("aria-pressed", "true");
-    expect(document.querySelector("select")).toBeNull();
+    await userEvent.click(viewToggle("Neighbourhood"));
+    await expect.element(viewToggle("Neighbourhood")).toHaveAttribute("aria-pressed", "true");
+    expect(router.state.location.search).toEqual({ view: "neighbourhood" });
 
-    const needs = () => page.getByRole("region", { name: "Needs these first" }).element();
-    const unblocks = () => page.getByRole("region", { name: "Unblocks these" }).element();
-    const centre = () => page.getByRole("region", { name: "Picked item" }).element();
-    const ids = (scope: Element) =>
-      [...scope.querySelectorAll("[data-item-id]")].map((row) => row.getAttribute("data-item-id"));
-    const direct = () =>
-      [...needs().querySelectorAll("[data-direct-blocker]")].map((mark) =>
-        mark.closest("[data-item-id]")?.getAttribute("data-item-id"),
-      );
-
-    // The first item that rests on something is picked first.
+    // The first item that rests on something is the default centre.
     await expect.element(picker()).toHaveTextContent("Guild invites");
-    expect(centre().getAttribute("data-item-id")).toBe("invites");
+    expect(centre()?.getAttribute("data-item-id")).toBe("invites");
 
-    // The picker searches by title.
     await pick("Rate limits");
-    await vi.waitFor(() => expect(centre().getAttribute("data-item-id")).toBe("rate-limits"));
-    expect(ids(needs())).toEqual(["profile"]);
-    expect(ids(unblocks())).toEqual(["polish"]);
-    expect(centre().textContent).toContain("Blocked by Profile blocks");
-    expect(direct()).toEqual(["profile"]);
+    await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("rate-limits"));
+    expect(router.state.location.search).toEqual({ view: "neighbourhood", item: "rate-limits" });
+    expect(sideIds("up")).toEqual(["profile"]);
+    expect(sideIds("down")).toEqual(["polish"]);
+    // Blocker to dependant; the root cause is amber and solid, the blocked link amber and dashed.
+    expect(edges()).toEqual({ "profile>rate-limits": "root", "rate-limits>polish": "chain" });
+    const stroke = (key: string) => getComputedStyle(edge(key)!).strokeDasharray;
+    expect(stroke("profile>rate-limits")).toBe("none");
+    expect(stroke("rate-limits>polish")).not.toBe("none");
 
-    // A side card becomes the picked item; only the direct blocker is marked.
-    await userEvent.click(unblocks().querySelector('[data-item-id="polish"] button')!);
-    await vi.waitFor(() => expect(centre().getAttribute("data-item-id")).toBe("polish"));
-    expect(ids(needs())).toEqual(["rate-limits", "sign-in"]);
-    expect(direct()).toEqual(["rate-limits"]);
-    expect(page.getByRole("dialog").elements()).toHaveLength(0);
+    // Polish rests on Rate limits (blocked) and Sign-in page (checked, so not blocking).
+    await pick("Polish");
+    await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("polish"));
+    expect(edges()).toEqual({
+      "profile>rate-limits": "root",
+      "rate-limits>polish": "chain",
+      "sign-in>polish": null,
+    });
+    expect(getComputedStyle(edge("sign-in>polish")!).stroke).not.toBe(
+      getComputedStyle(edge("profile>rate-limits")!).stroke,
+    );
+    expect(node("profile")?.getAttribute("data-side")).toBe("up");
+    expect(Number(node("profile")!.style.getPropertyValue("--x").replace("px", ""))).toBeLessThan(
+      Number(node("rate-limits")!.style.getPropertyValue("--x").replace("px", "")),
+    );
+  });
 
-    await pick("Sign-in page");
-    await vi.waitFor(() => expect(ids(unblocks())).toEqual(["invites", "polish"]));
-    expect(ids(needs())).toEqual([]);
-    expect(needs().textContent).toContain("Nothing. This can start now.");
+  it("opens a node one hop further, closes it again, and keeps both in the URL", async () => {
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openMap(stack, "/map?view=neighbourhood&item=e");
+    await using _screen = screen;
+    const chain: BanneretMap = {
+      ...MAP(),
+      stages: [{ id: "s1", title: "Foundations", order: 1 }],
+      items: ["a", "b", "c", "d", "e", "f", "g"].map((id, index, ids) =>
+        item(id, "s1", `Step ${id}`, "planned", "Open.", {
+          restsOn: index === 0 ? [] : [ids[index - 1]!],
+        }),
+      ),
+    };
+    await emit(state(["map"], mapRead(chain)));
+    await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("e"));
+    expect(nodeIds()).toEqual(["c", "d", "e", "f", "g"]);
 
-    // The picked item with a task opens it.
-    await userEvent.click(centre().querySelector("button")!);
+    const expander = page.getByRole("button", { name: "Show 1 more that Step c rests on" });
+    await userEvent.click(expander);
+    await vi.waitFor(() => expect(nodeIds()).toEqual(["b", "c", "d", "e", "f", "g"]));
+    expect(router.state.location.search).toEqual({ view: "neighbourhood", item: "e", open: "c" });
+    await userEvent.click(page.getByRole("button", { name: "Show 1 more that Step b rests on" }));
+    await vi.waitFor(() => expect(nodeIds()).toEqual(["a", "b", "c", "d", "e", "f", "g"]));
+    expect(router.state.location.search).toMatchObject({ open: "c,b" });
+
+    await userEvent.click(page.getByRole("button", { name: "Hide what is that Step c rests on" }));
+    await vi.waitFor(() => expect(nodeIds()).toEqual(["c", "d", "e", "f", "g"]));
+    expect(router.state.location.search).toMatchObject({ open: "b" });
+
+    // The target button centres on a node and starts its neighbourhood afresh.
+    await userEvent.click(page.getByRole("button", { name: "Centre on Step g" }));
+    await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("g"));
+    expect(router.state.location.search).toEqual({ view: "neighbourhood", item: "g" });
+    // A node without a task centres on it when clicked.
+    await userEvent.click(node("f")!.querySelector("button")!);
+    await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("f"));
+  });
+
+  it("opens the task of a node that has one, reachable by keyboard", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openMap(stack, "/map?view=neighbourhood&item=polish");
+    await using _screen = screen;
+    await emit(state(["map"], mapRead(MAP())));
+    await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("polish"));
+    const signIn = page.getByRole("button", { name: /^Sign-in page, Checked\./ });
+    await expect.element(signIn).toBeVisible();
+    expect(signIn.element().getAttribute("aria-label")).toContain("Opens its task");
+    (signIn.element() as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
     const dialog = page.getByRole("dialog");
     await expect.element(dialog.getByRole("heading", { name: "Sign-in page" })).toBeVisible();
+    expect(document.querySelector('[data-task-panel="t_signin"]')).not.toBeNull();
+  });
+
+  it("shows stages as bubbles in plan order, sized and ringed by status, and expands one", async () => {
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openMap(stack);
+    await using _screen = screen;
+    await emit(state(["map"], mapRead(MAP())));
+    await userEvent.click(viewToggle("Stages"));
+    await vi.waitFor(() => expect(bubbles()).toHaveLength(3));
+    expect(router.state.location.search).toEqual({ view: "stages" });
+    expect(bubbles().map((bubble) => bubble.getAttribute("data-stage-id"))).toEqual([
+      "s1",
+      "s2",
+      "s3",
+    ]);
+    const radius = (id: string) =>
+      Number(bubble(id)!.querySelector("[data-slot=bubble-hull]")!.getAttribute("r"));
+    expect(radius("s2")).toBeGreaterThan(radius("s1"));
+    expect(radius("s1")).toBeGreaterThan(radius("s3"));
+    const ring = (id: string) =>
+      [...bubble(id)!.querySelectorAll("[data-slot=bubble-ring]")].map((segment) =>
+        segment.getAttribute("data-status"),
+      );
+    expect(ring("s1")).toEqual(["checked", "built"]);
+    expect(ring("s2")).toEqual(["sent_back", "needs_you", "blocked", "planned"]);
+    expect(bubble("s2")!.querySelectorAll("[data-slot=bubble-dot]")).toHaveLength(5);
+    expect(bubble("s2")!.getAttribute("aria-label")).toContain(
+      "Stage 2, Social: 5 items, 0 of 5 built.",
+    );
+    // The link between Foundations and Social does not block; it is drawn once.
+    expect(
+      [...document.querySelectorAll("[data-slot=stage-bundle]")].map((path) => [
+        path.getAttribute("data-from"),
+        path.getAttribute("data-to"),
+        path.hasAttribute("data-blocking"),
+      ]),
+    ).toEqual([["s1", "s2", false]]);
+
+    // Keyboard: Enter expands a stage, and its items open their neighbourhood.
+    (bubble("s2") as unknown as HTMLElement).focus();
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(bubble("s2")!.getAttribute("aria-pressed")).toBe("true"));
+    expect(router.state.location.search).toEqual({ view: "stages", stage: "s2" });
+    const panel = page.getByRole("region", { name: "Social" });
+    await expect.element(panel).toBeVisible();
+    expect(
+      [...panel.element().querySelectorAll("[data-item-id]")].map((row) =>
+        row.getAttribute("data-item-id"),
+      ),
+    ).toEqual(["invites", "profile", "rate-limits", "polish", "docs"]);
+    await userEvent.click(panel.element().querySelector('[data-item-id="docs"] button')!);
+    await vi.waitFor(() =>
+      expect(router.state.location.search).toEqual({
+        view: "neighbourhood",
+        item: "docs",
+        stage: "s2",
+      }),
+    );
+    expect(centre()?.getAttribute("data-item-id")).toBe("docs");
+    await expect
+      .element(page.getByText("Docs rests on nothing and nothing rests on it."))
+      .toBeVisible();
+
+    // Back restores the stage; a second press on the bubble closes it.
+    router.history.back();
+    await vi.waitFor(() => expect(bubble("s2")?.getAttribute("aria-pressed")).toBe("true"));
+    await userEvent.click(page.getByRole("button", { name: "Close stage" }));
+    await vi.waitFor(() => expect(router.state.location.search).toEqual({ view: "stages" }));
+  });
+
+  it("opens the neighbourhood when an item is picked in the List", async () => {
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openMap(stack);
+    await using _screen = screen;
+    await emit(state(["map"], mapRead(MAP())));
+    await userEvent.click(cardOf("polish")!);
+    await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("polish"));
+    expect(router.state.location.search).toEqual({ view: "neighbourhood", item: "polish" });
+    expect(page.getByRole("dialog").elements()).toHaveLength(0);
+  });
+
+  it("plays its one entrance only when motion is welcome", async () => {
+    using stack = new DisposableStack();
+    const real = window.matchMedia.bind(window);
+    const reduce = vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      query === "(prefers-reduced-motion: reduce)"
+        ? ({
+            ...real(query),
+            matches: true,
+            media: query,
+            addEventListener: () => {},
+            removeEventListener: () => {},
+          } as MediaQueryList)
+        : real(query),
+    );
+    stack.defer(() => reduce.mockRestore());
+    const { emit, screen } = await openMap(stack, "/map?view=stages");
+    await using _screen = screen;
+    await emit(state(["map"], mapRead(MAP())));
+    await vi.waitFor(() => expect(bubbles()).toHaveLength(3));
+    const canvas = document.querySelector<SVGElement>('[data-layout="stage-bubbles"]')!;
+    expect(canvas.getAttribute("data-motion")).toBe("off");
+    expect(getComputedStyle(canvas).animationName).toBe("none");
   });
 
   it("rings an item whose task has a live agent session in the work file", async () => {
@@ -469,11 +646,11 @@ describe("Enterprise build map", () => {
     );
   });
 
-  it("opens the Task tab from an item with a task; an item without one is not clickable", async () => {
+  it("opens the Task tab from an item when the relay offers no neighbourhood", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openMap(stack);
     await using _screen = screen;
-    await emit(state(["map"], mapRead(MAP())));
+    await emit(state(["map"], mapRead(MAP(), { restsOn: false })));
     await expect.element(page.getByText("Polish")).toBeVisible();
 
     expect(itemRow("polish")!.querySelector("button")).toBeNull();
@@ -508,12 +685,13 @@ describe("Enterprise build map", () => {
     await expect.element(sidebar().getByRole("button", { name: "Map" })).toBeVisible();
     await expect.element(page.getByText("Loading…")).toBeVisible();
 
-    // Without the rests_on flag there is no Rests-on view.
+    // Without the rests_on flag there is no Neighbourhood view; Stages needs only the plan.
     await emit(state(["map"], mapRead(MAP(), { restsOn: false })));
     await expect.element(page.getByText("Polish")).toBeVisible();
-    expect(viewToggle("Rests on").elements()).toHaveLength(0);
+    expect(viewToggle("Neighbourhood").elements()).toHaveLength(0);
+    await expect.element(viewToggle("Stages")).toBeVisible();
     await emit(state(["map"], mapRead(MAP())));
-    await expect.element(viewToggle("Rests on")).toBeVisible();
+    await expect.element(viewToggle("Neighbourhood")).toBeVisible();
 
     const empty: BanneretMap = {
       state: "ok",
@@ -527,7 +705,8 @@ describe("Enterprise build map", () => {
     expect(
       page.getByText("This relay has no build plan yet.").element().closest("[data-slot]"),
     ).toHaveAttribute("data-slot", "quiet-line");
-    expect(viewToggle("Rests on").elements()).toHaveLength(0);
+    expect(viewToggle("Neighbourhood").elements()).toHaveLength(0);
+    expect(viewToggle("Stages").elements()).toHaveLength(0);
 
     await emit(
       state(
@@ -607,8 +786,10 @@ describe("Enterprise build map", () => {
       expect(row.querySelector("a")).toBeNull();
     }
     expect(document.querySelector('[role="main"] img')).toBeNull();
-    await userEvent.click(viewToggle("Rests on"));
+    await userEvent.click(viewToggle("Neighbourhood"));
     await expect.element(picker()).toBeVisible();
+    await userEvent.click(viewToggle("Stages"));
+    await vi.waitFor(() => expect(bubbles()).toHaveLength(1));
     expect(document.querySelector('[role="main"] img')).toBeNull();
     expect(document.querySelector('[role="main"] a')).toBeNull();
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined();

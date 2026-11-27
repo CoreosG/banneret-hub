@@ -5,8 +5,8 @@ import { statusView } from "./status";
 import { StatusIcon } from "./StatusPill";
 
 /**
- * With `onOpen` the item opens its task. Without it the item has no task yet: dashed, muted and
- * not clickable. `why` is the tooltip, never printed. `note` is one short muted fact after the title
+ * `onBoard` says the item has a task; without one it is dashed and muted. `onOpen` makes it a
+ * button (by default only an item on the board is one). `why` is the tooltip, never printed. `note` is one short muted fact after the title
  * ("Blocked by Sign-in page"). `atWork` rings the status icon while an agent works on the item.
  */
 export function MapItemCard(props: {
@@ -16,16 +16,18 @@ export function MapItemCard(props: {
   readonly why?: string | undefined;
   readonly note?: string | undefined;
   readonly atWork?: boolean;
+  readonly onBoard?: boolean;
   readonly onOpen?: (() => void) | undefined;
   readonly className?: string;
 }) {
   const view = statusView(props.status);
-  const onBoard = props.onOpen !== undefined;
+  const onBoard = props.onBoard ?? props.onOpen !== undefined;
+  const clickable = props.onOpen !== undefined;
   const className = cn(
     "inline-flex h-7.5 min-w-0 max-w-full items-center gap-1.5 rounded-lg border px-2 text-left text-xs",
-    onBoard
-      ? "cursor-pointer bg-card outline-none hover:border-input hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      : "border-dashed text-muted-foreground",
+    onBoard ? "bg-card" : "border-dashed text-muted-foreground",
+    clickable &&
+      "cursor-pointer outline-none hover:border-input hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     props.className,
   );
   const content = (
@@ -59,7 +61,7 @@ export function MapItemCard(props: {
   const tip = onBoard ? why : why === "" ? "Not on the board yet" : `Not on the board yet. ${why}`;
   const shared = { className, "data-slot": "map-item", "data-status": props.status };
   if (tip === "") {
-    return onBoard ? (
+    return clickable ? (
       <button type="button" {...shared} onClick={props.onOpen}>
         {content}
       </button>
@@ -71,7 +73,7 @@ export function MapItemCard(props: {
     <Tooltip>
       <TooltipTrigger
         render={
-          onBoard ? (
+          clickable ? (
             <button type="button" {...shared} onClick={props.onOpen} />
           ) : (
             <span {...shared} />
