@@ -50,5 +50,29 @@ export function useEnterpriseFeed(): EnterpriseFeed | null {
 
   return target === null || workspace === null || enrolment === null
     ? null
-    : { environmentId: target.environmentId, target, workspace, enrolment, feed };
+    : {
+        environmentId: target.environmentId,
+        target,
+        workspace,
+        enrolment,
+        feed:
+          enrolment.me?.admission === "outside"
+            ? {
+                ...feed,
+                sectionsKnown: true,
+                chatFlags: feed.chatFlags?.filter((flag) => flag !== "group_dms") ?? [],
+                sections: feed.sections.filter(
+                  (s) =>
+                    !["team", "pool", "health"].includes(s) ||
+                    enrolment.me?.permissions.includes("hub." + s),
+                ),
+                team: enrolment.me.permissions.includes("hub.team") ? feed.team : null,
+                needs:
+                  feed.needs?.filter(
+                    (item) =>
+                      item.kind !== "health" || enrolment.me?.permissions.includes("hub.health"),
+                  ) ?? null,
+              }
+            : feed,
+      };
 }

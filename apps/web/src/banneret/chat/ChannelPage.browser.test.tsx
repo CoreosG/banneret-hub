@@ -20,7 +20,8 @@ import { act, render } from "../../../test/render";
 import { SidebarProvider } from "../../components/ui/sidebar";
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../../state/environments";
 import { storeEnrolmentView } from "../enrolmentStore";
-import { feedRpc } from "../relayFeedStore";
+import { ChannelRows } from "./ChannelRows";
+import { useEnvironmentFeed, feedRpc } from "../relayFeedStore";
 import { useWorkspacesStore } from "../workspacesStore";
 import { EnterpriseSidebarRows } from "../EnterpriseSidebarRows";
 import { TabsFrame } from "../tabs/TabsFrame";
@@ -35,6 +36,7 @@ const decodeConversations = Schema.decodeUnknownSync(ChatConversations);
 declare module "vite-plus/test/browser" {
   interface BrowserCommands {
     companyChat: {
+      (op: "outsideStart"): Promise<typeof import("@t3tools/contracts").RelayMe.Type>;
       (op: "start"): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
       (op: "call" | "leo", arg: ChannelAction): Promise<ChannelResult>;
       (op: "ask"): Promise<BanneretFeedNeedsItem>;
@@ -321,4 +323,52 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await proof("agent-dm");
   await act(() => useWorkspacesStore.setState({ activeId: null }));
   await expect.element(screen.getByText("Channels", { exact: true })).not.toBeInTheDocument();
+});
+
+it("offers an outsider only one DM recipient from their joined channels", async () => {
+  const me = await commands.companyChat("outsideStart");
+  await using resources = new AsyncDisposableStack();
+  resources.defer(() => commands.companyChat("stop"));
+  using rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => {
+    const reply = await commands.companyChat("call", action);
+    if (!reply.ok) throw new Error(reply.message);
+    return reply.value;
+  });
+  const target = { environmentId: EnvironmentId.make("local"), relayOrigin: "https://chat.test" };
+  function Picker() {
+    const feed = useEnvironmentFeed(null);
+    return (
+      <SidebarProvider>
+        <ChannelRows
+          onOpen={() => {}}
+          enterprise={{
+            environmentId: target.environmentId,
+            target,
+            workspace: {
+              id: "ent-rosa",
+              kind: "enterprise",
+              name: "Company",
+              updatedAt: "2026-11-27T00:00:00Z",
+              projectKeys: [],
+            },
+            enrolment: {
+              state: "configured",
+              workspaceId: "ent-rosa",
+              relayOrigin: target.relayOrigin,
+              me,
+            },
+            feed: { ...feed, chatFlags: ["channels", "private_channels", "dms", "group_dms"] },
+          }}
+        />
+      </SidebarProvider>
+    );
+  }
+  await using screen = await render(<Picker />);
+  await expect.element(screen.getByText("launch", { exact: true })).toBeVisible();
+  await screen.getByRole("button", { name: "Start direct message" }).click();
+  await expect.element(screen.getByRole("radio", { name: "ana" })).toBeVisible();
+  expect(screen.getByRole("radio").elements()).toHaveLength(1);
+  expect(screen.getByRole("checkbox").elements()).toHaveLength(0);
+  expect(screen.getByRole("button", { name: "Create channel" }).elements()).toHaveLength(0);
+  expect(rpc).toHaveBeenCalledWith(target, expect.objectContaining({ kind: "members" }));
 });

@@ -182,7 +182,10 @@ function setup(displayName = "Example Company") {
     revokeMachine: vi.spyOn(enrolmentRpc, "revokeMachine"),
     matchProjects: vi.spyOn(enrolmentRpc, "matchProjects").mockImplementation(async () => ({
       ok: true,
-      value: { matched: ["git@github.com:example-org/alpha.git"] },
+      value: {
+        repositories: ["example-org/alpha"],
+        matched: ["git@github.com:example-org/alpha.git"],
+      },
     })),
   };
   vi.mocked(useProjects).mockReturnValue(projects);
@@ -434,6 +437,10 @@ describe("EnterpriseWizard", () => {
   it.each([
     ["declined", "A founder declined this machine. Relay sign-in: Not available."],
     ["code_expired", "The code expired before it was confirmed. Join again."],
+    [
+      "outside_identity_mismatch",
+      "Signed in as rosa-dev. Access refused. Your network account does not match the registered account. Ask a founder.",
+    ],
   ])("returns to the address with the reason after %s", async (reason, message) => {
     using stack = new DisposableStack();
     await prepareScreen(stack);
@@ -444,7 +451,10 @@ describe("EnterpriseWizard", () => {
     await userEvent.click(page.getByRole("button", { name: "Continue" }));
     await userEvent.click(page.getByRole("button", { name: "Join Example Company" }));
     await expect.element(page.getByLabelText("Confirm code")).toBeVisible();
-    await server.setView(none(reason));
+    await server.setView({
+      ...none(reason),
+      ...(reason.startsWith("outside_") && { refusedLogin: "rosa-dev" }),
+    });
     await expect.element(page.getByRole("status")).toHaveTextContent(message);
     await expect.element(page.getByLabelText("Relay address")).toHaveValue(ORIGIN);
   });

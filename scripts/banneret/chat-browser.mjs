@@ -6,7 +6,7 @@ import {
 } from "../../packages/banneret-relay-fake/src/index.ts";
 import { callChannel } from "../../packages/contracts/src/banneretChat.ts";
 let session;
-async function enrol(relay, login) {
+async function enrol(relay, login, admission = "member") {
   const client = new RelayClient(relay.url),
     key = generateMachineKey();
   const start = await client.send(key, "POST", "/relay/v1/enroll/start", {
@@ -24,7 +24,11 @@ async function enrol(relay, login) {
       },
     },
   });
-  relay.approve(start.body.confirmCode, { login, role: "founder" });
+  relay.approve(start.body.confirmCode, {
+    login,
+    admission,
+    role: admission === "outside" ? "outside" : "founder",
+  });
   const approved = await client.send(key, "POST", "/relay/v1/enroll/poll", {
     body: { pairingId: start.body.pairingId },
   });
@@ -51,6 +55,25 @@ async function enrol(relay, login) {
   return Object.assign(run, { me, call });
 }
 export async function command(op, arg) {
+  if (op === "outsideStart") {
+    const relay = await startFakeRelay({ chat: true, autoApprove: false });
+    try {
+      const ana = await enrol(relay, "ana");
+      const guest = await enrol(relay, "rosa-dev", "outside");
+      await enrol(relay, "kim");
+      const { body: channel } = await ana.call("POST", "chat/conversations", {
+        kind: "channel",
+        name: "launch",
+        template: "shared",
+      });
+      await ana.call("PUT", "chat/conversations/" + channel.id + "/members/" + guest.me.id, {});
+      session = { relay, ada: guest };
+      return guest.me;
+    } catch (error) {
+      await relay.close();
+      throw error;
+    }
+  }
   if (op === "start") {
     const relay = await startFakeRelay({ chat: true, autoApprove: false });
     session = { relay };

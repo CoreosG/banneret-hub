@@ -100,6 +100,11 @@ export function WorkspaceSwitcher(props: {
               {activeName}
             </span>
           ) : null}
+          {enrolment?.me?.admission === "outside" && (
+            <span className="rounded bg-info/10 px-1.5 text-xs text-info">
+              Outside collaborator
+            </span>
+          )}
           <ChevronsUpDownIcon
             aria-hidden
             className={cn(

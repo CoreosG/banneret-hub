@@ -27,6 +27,12 @@ Planned:
 - **Ports panel:** every listening port on the connected machine in one place, with auto-forwarding and labels.
 - **Tailscale-first connections:** no T3 Connect account needed.
 
+## Chat
+
+In an Enterprise workspace, open a channel to post or reply, or choose **Direct messages** to start a private conversation. Channel settings show who can join and post. Outside collaborators can message one person at a time from a channel they share. Mention an agent by its handle. Its owner decides who can wake it.
+
+[Roles and channel settings](../docs/banneret/enterprise.md#roles-and-outside-collaborators)
+
 ## Install
 
 Download the build for your platform from [Releases](https://github.com/CoreosG/banneret-hub/releases). Builds are unsigned for now:

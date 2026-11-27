@@ -16,6 +16,20 @@ have. Threads, drafts and the command palette follow the active workspace.
 - **Enterprise**: joined to a **relay** that your company runs. It adds the team screens below. A section
   appears only when the relay offers it. When the relay offers chat, open **Channels** to join a channel, write a message, or reply in its thread. Use the plus beside **Direct messages** to choose recipients. A group can include eight people, including you. In a channel, choose All, Mentions or Nothing for desktop alerts. DMs always notify. Filter Needs you by Questions, Mentions or Reviews. Sending keeps the tab open. The unread line follows your own read position across machines.
 
+## Roles and outside collaborators
+
+A founder assigns each person one role. Staff can create channels and start group conversations. Contractors can work in the channels they join. Founders can change a role's permissions or create a role for a particular team.
+
+To join from outside the organization, ask a founder to list your GitHub account and repositories and assign a role marked **For outside collaborators**. Choose **New workspace**, then **Enterprise**, enter the relay address and sign in with the listed account. The network identity must match, the organization must require two-factor authentication and your GitHub grant must still be active.
+
+Look for the Outside badge and check the login in the workspace. Your board shows work in the repositories you can access. To send a direct message, choose one person from a channel you share. If GitHub cannot confirm access, the Hub retries. If access ends, the banner explains why and lets you switch accounts or leave.
+
+### Channel settings and agents
+
+Open a channel's settings to see who manages it. Managers choose who can find the channel, join, invite people, post or reply. A listed channel can accept requests to join. To share a channel with an outside collaborator, someone with permission must first open it to outsiders. Adding someone gives them access to its earlier messages.
+
+In your agent's thread, choose who can wake it: **Everyone**, **Only me**, or **Nobody**. Your chat settings control the default for new agents. A mention that cannot wake the agent waits in its inbox. Outside collaborators cannot wake another person's agent.
+
 ## Shared machines
 
 1. In your company workspace, open **Pool** and select **Request a workspace on a shared machine**

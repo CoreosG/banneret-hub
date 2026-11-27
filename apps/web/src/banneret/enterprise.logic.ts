@@ -43,9 +43,25 @@ export function wizardStep(view: BanneretEnrolmentView | null): WizardStep {
   }
 }
 
+const outsideReasons: Readonly<Record<string, string>> = {
+  outside_grant_lost: "GitHub no longer lists you as a collaborator on an approved repository.",
+  outside_entry_removed: "Your account was removed from the outside collaborator list.",
+  outside_2fa_off: "The organization no longer requires two-factor authentication.",
+  outside_identity_mismatch: "Your network account does not match the registered account.",
+};
+
+export function outsideRefusal(view: BanneretEnrolmentView) {
+  const reason = outsideReasons[view.reason ?? ""];
+  return typeof reason === "string"
+    ? `Signed in as ${view.refusedLogin ?? view.me?.login ?? "an unknown account"}. Access refused. ${reason} Ask a founder.`
+    : null;
+}
+
 /** Why the last enrolment ended (state `none`), in plain words. */
 export function lastResultMessage(view: BanneretEnrolmentView | null): string | null {
   if (view === null || view.state !== "none" || view.reason === undefined) return null;
+  const outside = outsideRefusal(view);
+  if (outside) return outside;
   const account = `Relay sign-in: ${view.refusedLogin ?? "Not available"}.`;
   switch (view.reason) {
     case "cancelled":
@@ -94,6 +110,8 @@ export function joinAgainNotice(view: BanneretEnrolmentView): string {
 }
 
 export function revokedMessage(view: BanneretEnrolmentView): string {
+  const outside = outsideRefusal(view);
+  if (outside) return outside;
   return view.reason === "replaced"
     ? "This machine was replaced by a newer enrolment"
     : `This machine was removed from ${view.displayName ?? "the company"}`;
@@ -194,6 +212,11 @@ export function healthLine(view: BanneretEnrolmentView): EnrolmentLine {
   switch (view.health) {
     case "healthy":
       return { tone: "ok", text: connectedLine(view.me) };
+    case "outside_check_pending":
+      return {
+        tone: "warn",
+        text: `GitHub access could not be checked. Retrying.${view.lastOkAt ? " Last checked at " + timeOf(view.lastOkAt) + "." : ""}`,
+      };
     case "unreachable":
       return {
         tone: "warn",

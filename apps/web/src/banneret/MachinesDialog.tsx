@@ -147,7 +147,12 @@ function CompanyMachines(props: {
   const { environmentId } = props;
   const target = { environmentId, relayOrigin: props.origin };
   const feed = useEnvironmentFeed(target);
-  const pool = usePoolResources(target, feed.sections.includes("pool"));
+  const me = useEnrolmentView(environmentId, props.origin)?.me;
+  const outside = me?.admission === "outside";
+  const pool = usePoolResources(
+    target,
+    feed.sections.includes("pool") && (!outside || me.permissions.includes("hub.pool")),
+  );
   const [items, setItems] = useState<ReadonlyArray<BanneretRelayMachine> | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -206,49 +211,61 @@ function CompanyMachines(props: {
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : (
         <ul aria-label="Machines" className="flex flex-col rounded-md border">
-          {items.map((machine) => (
-            <li key={machine.id} className="flex items-center gap-2 px-2.5 py-2 not-last:border-b">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm">
-                  {machine.label}
-                  {machine.thisMachine && environmentId === props.primary ? (
-                    <span className="ml-1.5 text-muted-foreground text-xs">This machine</span>
-                  ) : null}
-                </p>
-                <p className="truncate text-muted-foreground text-xs">
-                  {[
-                    cleanLogin(machine.ownerLogin),
-                    machine.kind,
-                    machine.hostname,
-                    machineStatus(machine),
-                  ]
-                    .filter((part) => part !== "")
-                    .join(" \u00b7 ")}
-                </p>
-                {machine.revokedAt === undefined && (
-                  <MachineResources
-                    target={target}
-                    machineId={machine.id}
-                    hostId={machine.poolHostId}
-                    owner={machine.ownerLogin}
-                    pool={pool}
-                  />
-                )}
-              </div>
-              {machine.revocable && !machine.thisMachine ? (
-                <Button
-                  size="xs"
-                  type="button"
-                  variant={confirming === machine.id ? "destructive" : "destructive-outline"}
-                  onClick={() =>
-                    confirming === machine.id ? void revoke(machine.id) : setConfirming(machine.id)
-                  }
-                >
-                  {confirming === machine.id ? "Remove for good" : "Remove"}
-                </Button>
-              ) : null}
-            </li>
-          ))}
+          {items
+            .filter(
+              (machine) =>
+                !outside ||
+                me.permissions.includes("hub.machinesAll") ||
+                machine.ownerLogin === me.login,
+            )
+            .map((machine) => (
+              <li
+                key={machine.id}
+                className="flex items-center gap-2 px-2.5 py-2 not-last:border-b"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">
+                    {machine.label}
+                    {machine.thisMachine && environmentId === props.primary ? (
+                      <span className="ml-1.5 text-muted-foreground text-xs">This machine</span>
+                    ) : null}
+                  </p>
+                  <p className="truncate text-muted-foreground text-xs">
+                    {[
+                      cleanLogin(machine.ownerLogin),
+                      machine.kind,
+                      machine.hostname,
+                      machineStatus(machine),
+                    ]
+                      .filter((part) => part !== "")
+                      .join(" \u00b7 ")}
+                  </p>
+                  {machine.revokedAt === undefined && (
+                    <MachineResources
+                      target={target}
+                      machineId={machine.id}
+                      hostId={machine.poolHostId}
+                      owner={machine.ownerLogin}
+                      pool={pool}
+                    />
+                  )}
+                </div>
+                {machine.revocable && !machine.thisMachine ? (
+                  <Button
+                    size="xs"
+                    type="button"
+                    variant={confirming === machine.id ? "destructive" : "destructive-outline"}
+                    onClick={() =>
+                      confirming === machine.id
+                        ? void revoke(machine.id)
+                        : setConfirming(machine.id)
+                    }
+                  >
+                    {confirming === machine.id ? "Remove for good" : "Remove"}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
         </ul>
       )}
       {nextCursor !== null ? (
@@ -266,6 +283,7 @@ function CompanyMachines(props: {
 }
 
 export function LeavePanel(props: {
+  readonly switchAccount: boolean;
   readonly selectedId: EnvironmentId | undefined;
   readonly origin: string;
   readonly onClose: () => void;
@@ -299,7 +317,9 @@ export function LeavePanel(props: {
     if (!keepWorkspace && useWorkspacesStore.getState().activeId === view?.workspaceId)
       setActiveWorkspace(null);
     void loadEnvironmentWorkspaces(environmentId);
-    props.onClose();
+    if (props.switchAccount)
+      openWorkspaceDialog({ kind: "enterprise", environmentId, origin: props.origin });
+    else props.onClose();
   };
 
   return (
