@@ -89,3 +89,18 @@ for (const { name } of skills) {
 ```
 
 Check discovery separately with your MCP client. For tasks, exercise competing actors, retry a claim and verify that only the holder can release. For memory, repeat a use in one chat, propose a note, and flag it. Verify the stored trust and use count after each call.
+
+## Test your plugin
+
+Download `banneret-plugin-check.mjs` from the [fork releases](https://github.com/CoreosG/banneret-hub/releases). Run it with Node.js 22.18 or newer and your manifest. The file includes its dependencies and talks directly to your MCP server.
+
+```sh
+node banneret-plugin-check.mjs --manifest plugin.json -- node server.mjs
+node banneret-plugin-check.mjs --manifest plugin.json --url https://example.org/mcp --json
+```
+
+Use a disposable workspace. For skills, seed at least one entry. The checker compares discovery, tool output, resource text and SKILL.md metadata. For memory it creates a unique project proposal, searches and uses it twice in the same chat, then flags it. The disputed test note remains for inspection.
+
+For tasks, seed an unclaimed task visible to two distinct actors and pass its ID with `--task-id T42`. Set `BANNERET_CHECK_TOKEN` and `BANNERET_CHECK_PEER_TOKEN` to their credentials. HTTP uses bearer authentication. For stdio the checker starts one process per actor with its credential in `PLUGIN_TOKEN`. Both processes must share the same test store. If your server needs additional environment configuration, launch it through a wrapper. The checker exercises discovery, reads, tool errors, holder retries and release permissions. It sends concurrent claims when the manifest declares atomic claims.
+
+A failing check prints a hint and exits with status 1. Use `--json` for a report with a `passed` boolean and individual check statuses. Capabilities without a published contract show as skipped. A pass requires at least one tested provider contract.

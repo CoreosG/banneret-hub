@@ -5,13 +5,18 @@
   "exports": "./src/index.ts",
   "scripts": {
     "typecheck": "effect-tsgo tsrs --noEmit",
-    "test": "vp test run --config ../../vite.config.ts --dir ."
+    "test": "vp test run --config ../../vite.config.ts --dir .",
+    "build:checker": "node checker/build.mjs",
+    "check:plugin": "node checker/cli.mjs"
   },
   "dependencies": {
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@types/node": "catalog:",
-    "vite-plus": "catalog:"
+    "esbuild": "0.28.2",
+    "vite-plus": "catalog:",
+    "yaml": "2.9.0"
   }
 }
