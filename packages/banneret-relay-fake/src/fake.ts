@@ -4,6 +4,7 @@ import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
 
 import {
+  BANNERET_AGENT_TOOLS,
   foldLease,
   type LeaseComment,
   type LeaseFoldResult,
@@ -1740,13 +1741,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { id: "feed", kind: "feed", version: 1, flags: ["graveyard"] },
             { id: "task", kind: "task", version: 1, flags: [] },
           ],
-          mcpTools: [
-            {
-              name: "needs_list",
-              description: "List the caller's needs-you items.",
-              role: "limited_staff",
-            },
-          ],
+          // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
+          mcpTools: BANNERET_AGENT_TOOLS.map((name) => ({
+            name,
+            description: "A Banneret Hub agent tool.",
+            role: "limited_staff",
+          })),
           adapters: [
             { role: "work_tracker", kind: "none" },
             { role: "staff_directory", kind: "none" },

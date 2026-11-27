@@ -143,6 +143,33 @@ export class BanneretFacts extends Context.Service<
 const newestFirst = (a: BanneretWorkspace, b: BanneretWorkspace) =>
   a.updatedAt === b.updatedAt ? a.id.localeCompare(b.id) : a.updatedAt > b.updatedAt ? -1 : 1;
 
+/** Each project key's workspace: the newest live workspace that claims it, as the web's `resolveWorkspaces`. */
+const ownersByKey = (workspaces: ReadonlyArray<BanneretWorkspace>) => {
+  const owner = new Map<string, BanneretWorkspace>();
+  for (const workspace of workspaces
+    .filter((candidate) => candidate.deleted !== true)
+    .toSorted(newestFirst)) {
+    for (const key of workspace.projectKeys) if (!owner.has(key)) owner.set(key, workspace);
+  }
+  return owner;
+};
+
+/** The one workspace a project belongs to, or undefined when none or more than one claims it. */
+const ownerOf = (
+  owner: ReadonlyMap<string, BanneretWorkspace>,
+  project: FactsProject,
+  environmentId: string,
+) => {
+  const identity = project.repositoryIdentity ?? null;
+  const keys = [
+    `path:${environmentId}:${normalizeProjectPathForComparison(project.workspaceRoot)}`,
+    ...(identity === null ? [] : [`repo:${repositoryGroupingKeyOf(identity)}`]),
+  ];
+  const owners = new Set(keys.flatMap((key) => owner.get(key) ?? []));
+  const [only] = owners;
+  return owners.size === 1 ? only : undefined;
+};
+
 /**
  * The projects of this relay's Enterprise workspace, with their `projectKey`. Claims resolve as the
  * web's `resolveWorkspaces` does (newest workspace wins a key). A project any other workspace also
@@ -154,23 +181,12 @@ export function enterpriseProjects(input: {
   readonly relayOrigin: string;
   readonly environmentId: string;
 }): Map<string, string> {
-  const owner = new Map<string, BanneretWorkspace>();
-  for (const workspace of input.workspaces
-    .filter((candidate) => candidate.deleted !== true)
-    .toSorted(newestFirst)) {
-    for (const key of workspace.projectKeys) if (!owner.has(key)) owner.set(key, workspace);
-  }
+  const owner = ownersByKey(input.workspaces);
   const result = new Map<string, string>();
   for (const project of input.projects) {
     const identity = project.repositoryIdentity ?? null;
-    const keys = [
-      `path:${input.environmentId}:${normalizeProjectPathForComparison(project.workspaceRoot)}`,
-      ...(identity === null ? [] : [`repo:${repositoryGroupingKeyOf(identity)}`]),
-    ];
-    const owners = new Set(keys.flatMap((key) => owner.get(key) ?? []));
-    const [only] = owners;
+    const only = ownerOf(owner, project, input.environmentId);
     if (
-      owners.size !== 1 ||
       only === undefined ||
       only.kind !== "enterprise" ||
       only.relay?.origin !== input.relayOrigin ||
@@ -183,6 +199,19 @@ export function enterpriseProjects(input: {
     if (projectKey !== null) result.set(project.id, projectKey);
   }
   return result;
+}
+
+/**
+ * The relay of the Enterprise workspace a project belongs to, by the same claims as `enterpriseProjects`.
+ * Undefined for a Solo project, or one that no workspace or more than one claims.
+ */
+export function enterpriseRelayOf(input: {
+  readonly workspaces: ReadonlyArray<BanneretWorkspace>;
+  readonly project: FactsProject;
+  readonly environmentId: string;
+}): { readonly origin: string; readonly displayName: string } | undefined {
+  const only = ownerOf(ownersByKey(input.workspaces), input.project, input.environmentId);
+  return only?.kind === "enterprise" ? only.relay : undefined;
 }
 
 const providerName = (driver: string): "claude" | "codex" | null =>

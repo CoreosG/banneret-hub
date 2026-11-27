@@ -13,8 +13,13 @@
     { "id": "task", "kind": "task", "version": 1, "flags": [] }
   ],
   "mcpTools": [
-    { "name": "needs_list", "description": "List the caller's needs-you items.", "role": "limited_staff",
-      "inputSchema": { "type": "object", "properties": { "cursor": { "type": "string" } }, "additionalProperties": false } }
+    { "name": "banneret_board", "description": "The company's task board.", "role": "limited_staff" },
+    { "name": "banneret_needs", "description": "What waits on the caller.", "role": "limited_staff" },
+    { "name": "banneret_task", "description": "One board task.", "role": "limited_staff" },
+    { "name": "banneret_lease_check", "description": "Who holds a task now.", "role": "limited_staff" },
+    { "name": "banneret_lease_take", "description": "Take a task.", "role": "limited_staff" },
+    { "name": "banneret_lease_release", "description": "Release a task with a reason.", "role": "limited_staff" },
+    { "name": "banneret_lease_withdraw", "description": "Undo a half-done take.", "role": "limited_staff" }
   ],
   "adapters": [
     { "role": "work_tracker", "kind": "github", "version": 1 },

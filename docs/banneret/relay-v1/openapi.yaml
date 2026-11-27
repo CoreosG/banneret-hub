@@ -683,7 +683,10 @@ components:
           maxItems: 64
           items: { $ref: "#/components/schemas/Section" }
         mcpTools:
-          description: Present only for an authenticated caller. The toolkit lists exactly these.
+          description: |
+            Present only for an authenticated caller. The Hub offers its agents exactly the tools named here that it
+            implements (the `banneret_*` agent toolkit); for those it keeps its own description and schema, and the
+            entry only switches the tool on and sets its role. A name the Hub does not implement is ignored.
           type: array
           maxItems: 256
           items: { $ref: "#/components/schemas/McpTool" }

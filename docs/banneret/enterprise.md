@@ -121,6 +121,10 @@ If a step fails half way, the task shows **Finish** and **Withdraw**. You need t
 and the tracker login must be the one the relay knows. When either is missing, the Hub says so and writes
 nothing.
 
+**Agents take tasks too.** Coding agents in your company's threads get tools for the board and for leases, and
+follow the same rules as these buttons. Paste one line into each repository's agent instructions. See
+[Agents and leases](agents.md).
+
 ### Map and Rests-on
 
 The Map shows the build in stages. Each item has a status, and each item can rest on other items. If something
