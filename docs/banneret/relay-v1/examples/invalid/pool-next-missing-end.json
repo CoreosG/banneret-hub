@@ -1,0 +1,10 @@
+{
+  "offer": null,
+  "directives": [
+    {
+      "sandboxId": "sb_a",
+      "offerId": "o_a",
+      "action": "extend"
+    }
+  ]
+}

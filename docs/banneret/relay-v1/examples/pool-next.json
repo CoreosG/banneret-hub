@@ -1,0 +1,11 @@
+{
+  "offer": null,
+  "directives": [
+    {
+      "sandboxId": "sb_a",
+      "offerId": "o_a",
+      "action": "extend",
+      "endsAt": "2026-11-27T13:00:00Z"
+    }
+  ]
+}

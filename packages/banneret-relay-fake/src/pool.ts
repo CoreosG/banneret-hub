@@ -3,7 +3,9 @@ import * as NodeCrypto from "node:crypto";
 import type {
   PoolConfig,
   PoolHostFacts,
-  PoolPolicy,
+  PoolCurrent,
+  PoolDirective,
+  PoolLimitsPolicy,
   PoolSandbox,
   PoolSandboxRequest,
   PoolStateUpdate,
@@ -23,6 +25,7 @@ type Booking = {
   request: PoolSandboxRequest;
   proof: Proof;
   view: PoolSandbox;
+  directive?: PoolDirective;
   deadline: number;
   offerId: string | null;
 };
@@ -36,14 +39,17 @@ type PoolError =
 
 export function createPool(
   config: PoolConfig | undefined,
-  fail: (code: PoolError, message: string) => never,
+  fail: (code: PoolError, message: string, current?: PoolCurrent) => never,
 ) {
   const seconds = (duration: string) =>
     Number(duration.slice(0, -1)) *
     (duration.endsWith("h") ? 3600 : duration.endsWith("m") ? 60 : 1);
   const lifespan = seconds(config?.sandboxes.time_limit ?? "2h");
   const extension = seconds(config?.sandboxes.extend ?? "1h");
-  const hosts = new Map<string, { facts: PoolHostFacts; received: number; policy: PoolPolicy }>();
+  const hosts = new Map<
+    string,
+    { facts: PoolHostFacts; received: number; policy: PoolLimitsPolicy }
+  >();
   function smallerCapacity(a: string, b: string) {
     const bytes = (capacity: string) =>
       BigInt(capacity.slice(0, -1)) * 1024n ** BigInt("KMG".indexOf(capacity.slice(-1)) + 1);
@@ -52,6 +58,14 @@ export function createPool(
   type Asked = { hostId: string; state: "asked"; id: string; createdAt: string };
   const workspaces = new Map<string, Map<string, Asked>>();
   const bookings = new Map<string, Booking>();
+  function directives(host: string) {
+    const pending: PoolDirective[] = [];
+    for (const b of bookings.values()) {
+      if (b.request.hostId === host && b.directive) pending.push(b.directive);
+      if (pending.length === 100) break;
+    }
+    return pending;
+  }
   const waiting = (host: string) =>
     [...bookings.values()].filter((b) => b.request.hostId === host && b.view.state === "waiting");
   const refresh = () => {
@@ -91,7 +105,7 @@ export function createPool(
           disk: smallerCapacity(hostSize.disk, relaySize.disk),
         };
       };
-      const policy: PoolPolicy = {
+      const policy: PoolLimitsPolicy = {
         warnings: config.warnings,
         sizes: { small: size("small"), large: size("large") },
         limits: {
@@ -115,7 +129,7 @@ export function createPool(
       };
       for (const w of facts.workspaces) workspaces.get(w.personId)?.delete(host);
       hosts.set(host, { facts, received: Date.now(), policy });
-      return policy;
+      return { ...policy, directives: directives(host) };
     },
     ask(owner: string, hostId: string): PoolWorkspace {
       if (mustHost(hostId).facts.limits.level !== "staff")
@@ -225,13 +239,13 @@ export function createPool(
           b.request.size === size &&
           b.view.state !== "ended",
       );
-      const pending = held.filter((b) => !report.facts.running.includes(b.view.id));
+      const pending = held.filter((b) => b.view.state === "offered");
       if (
         Date.now() - report.received >= 120000 ||
         held.length >= report.policy.limits.sandbox_slots[size] ||
         pending.length >= report.facts.contention.freeSlots[size]
       )
-        return null;
+        return { offer: null, directives: directives(host) };
       const b = waiting(host).find(
         (b) =>
           b.request.size === size &&
@@ -242,16 +256,19 @@ export function createPool(
               active.view.state !== "ended",
           ).length < (config?.sandboxes.per_person.running ?? 1),
       );
-      if (!b) return null;
+      if (!b) return { offer: null, directives: directives(host) };
       b.deadline = Date.now() + 60000;
       b.offerId = NodeCrypto.randomUUID();
       b.view = { ...b.view, state: "offered", place: null, waitSeconds: null };
       return {
-        id: b.view.id,
-        offerId: b.offerId,
-        personId: b.owner,
-        deadline: new Date(b.deadline).toISOString(),
-        ...b.proof,
+        directives: directives(host),
+        offer: {
+          id: b.view.id,
+          offerId: b.offerId,
+          personId: b.owner,
+          deadline: new Date(b.deadline).toISOString(),
+          ...b.proof,
+        },
       };
     },
     read(owner: string, id: string) {
@@ -262,6 +279,8 @@ export function createPool(
       refresh();
       const b = owned(owner, id);
       if (b.view.state === "cleanup_failed") fail("forbidden", "Cleanup needs an admin.");
+      if (b.offerId && b.view.state !== "ended" && b.view.state !== "ending")
+        b.directive = { sandboxId: id, offerId: b.offerId, action: "cancel" };
       if (b.view.state !== "ended")
         b.view = {
           ...b.view,
@@ -275,12 +294,16 @@ export function createPool(
     extend(owner: string, id: string) {
       refresh();
       const b = owned(owner, id);
-      if (b.view.state !== "running" || !b.view.endsAt || waiting(b.request.hostId).length)
+      if (
+        !b.offerId ||
+        b.view.state !== "running" ||
+        !b.view.endsAt ||
+        waiting(b.request.hostId).length
+      )
         return fail("pool_limit_reached", "Extension unavailable.");
-      b.view = {
-        ...b.view,
-        endsAt: new Date(Date.parse(b.view.endsAt) + extension * 1000).toISOString(),
-      };
+      const endsAt = new Date(Date.parse(b.view.endsAt) + extension * 1000).toISOString();
+      b.directive = { sandboxId: id, offerId: b.offerId, action: "extend", endsAt };
+      b.view = { ...b.view, endsAt };
       return b.view;
     },
     expireOffer(id: string) {
@@ -293,7 +316,28 @@ export function createPool(
       refresh();
       const b = bookings.get(id);
       if (!b || b.request.hostId !== host) return fail("not_found", "Unknown offer.");
-      if (b.offerId !== event.offerId) return fail("stale_offer", "Offer is no longer current.");
+      const current = {
+        sandboxId: id,
+        state: b.view.state,
+        ...(b.offerId && { offerId: b.offerId }),
+      };
+      if (b.offerId !== event.offerId)
+        return fail("stale_offer", "Offer is no longer current.", current);
+      if (event.endsAt !== undefined) {
+        if (
+          b.view.state !== "running" ||
+          event.state !== "running" ||
+          event.endsAt !== b.view.endsAt ||
+          event.machineId !== b.view.machineId
+        )
+          return fail("forbidden", "Extension does not match the running sandbox.", current);
+        delete b.directive;
+        return b.view;
+      }
+      if (event.state === "ending" && b.view.state === "ending") {
+        delete b.directive;
+        return b.view;
+      }
       const allowed: Record<PoolSandbox["state"], readonly PoolStateUpdate["state"][]> = {
         waiting: [],
         offered: ["starting"],
@@ -304,9 +348,10 @@ export function createPool(
         cleanup_failed: ["ended"],
       };
       if (!allowed[b.view.state].includes(event.state))
-        fail("forbidden", "Invalid sandbox transition.");
+        return fail("forbidden", "Invalid sandbox transition.", current);
       if (event.state === "running" && !event.machineId)
         fail("malformed", "Running needs a machine id.");
+      delete b.directive;
       b.view = {
         ...b.view,
         state: event.state,

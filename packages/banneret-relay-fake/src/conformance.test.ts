@@ -5,7 +5,7 @@ import type {
   PoolConfig,
   PoolHostFacts,
   PoolSandbox,
-  PoolOffer,
+  PoolNextResponse,
   PoolView,
 } from "@t3tools/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -3100,8 +3100,8 @@ describe("shared machines", () => {
     expectError(await call(colleague, "GET", prefix + path), 404, "not_found");
     expect((await hub("GET", path)).body).toMatchObject({ place: 1, state: "waiting" });
     const offered = await hostCall("/hosts/next", { size: "small" });
-    expectSchema("PoolOffer", offered.body);
-    const offer = offered.body as NonNullable<PoolOffer>;
+    expectSchema("PoolNextResponse", offered.body);
+    const offer = (offered.body as PoolNextResponse).offer!;
     expect(offer.id).toBe(id);
     expect(Buffer.from(offer.bodyBase64, "base64").toString()).toBe(JSON.stringify(request));
     const signer = publicKeyFromBase64(owner.key.publicKey);
@@ -3121,9 +3121,21 @@ describe("shared machines", () => {
         ),
     ).toBe(true);
     await client.control("/pool/offer/expire", { sandboxId: id });
+    const late = await hostCall(path + "/state", {
+      state: "starting",
+      offerId: offer.offerId,
+      machineId: null,
+      reason: null,
+    });
+    expectError(late, 409, "stale_offer");
+    expectSchema("PoolStateRefusal", late.body);
+    expect((late.body as { current: unknown }).current).toEqual({
+      sandboxId: id,
+      state: "waiting",
+    });
     const renewed = await hostCall("/hosts/next", { size: "small" });
-    expectSchema("PoolOffer", renewed.body);
-    const current = renewed.body as NonNullable<PoolOffer>;
+    expectSchema("PoolNextResponse", renewed.body);
+    const current = (renewed.body as PoolNextResponse).offer!;
     expect(current.id).toBe(id);
     expect(current.offerId).not.toBe(offer.offerId);
     const before = await hub("GET", path);
@@ -3137,10 +3149,55 @@ describe("shared machines", () => {
     expectError(await report("starting", offer.offerId), 409, "stale_offer");
     expect((await hub("GET", path)).body).toEqual(before.body);
     expect((await report("starting")).body).toMatchObject({ state: "starting" });
-    expect((await report("running")).body).toMatchObject({ state: "running" });
-    expect((await hub("POST", path + "/extend")).body).toMatchObject({ state: "running" });
+    const invalid = await report("ended");
+    expectError(invalid, 403, "forbidden");
+    expectSchema("PoolStateRefusal", invalid.body);
+    expect(invalid.body).toMatchObject({
+      current: { sandboxId: id, offerId: current.offerId, state: "starting" },
+    });
+    const running = (await report("running")).body as PoolSandbox;
+    const extended = (await hub("POST", path + "/extend")).body as PoolSandbox;
+    expect(Date.parse(extended.endsAt!) - Date.parse(running.endsAt!)).toBe(3600000);
+    const next = () => hostCall("/hosts/next", { size: "small" });
+    const booking = { sandboxId: id, offerId: current.offerId };
+    const extend = { ...booking, action: "extend", endsAt: extended.endsAt };
+    expect((await next()).body).toEqual({ offer: null, directives: [extend] });
+    const heldFacts = {
+      ...facts,
+      contention: { ...facts.contention, freeSlots: { small: 1, large: 1 } },
+    };
+    expect((await hostCall("/hosts/facts", heldFacts)).body).toMatchObject({
+      directives: [extend],
+    });
+    expect(JSON.stringify((await hub("GET", "")).body)).not.toContain(current.offerId);
+    const acknowledge = (endsAt: string | null) =>
+      hostCall(path + "/state", {
+        offerId: current.offerId,
+        state: "running",
+        machineId: owner.machineId,
+        reason: null,
+        endsAt,
+      });
+    expectError(await acknowledge(running.endsAt), 403, "forbidden");
+    expect((await next()).body).toMatchObject({ directives: [extend] });
+    expect((await acknowledge(extended.endsAt)).body).toMatchObject({ endsAt: extended.endsAt });
+    expect((await next()).body).toEqual({ offer: null, directives: [] });
     expect((await hub("DELETE", path)).body).toMatchObject({ state: "ending" });
+    const cancel = { ...booking, action: "cancel" };
+    expect((await next()).body).toMatchObject({ directives: [cancel] });
+    expect((await hostCall("/hosts/facts", heldFacts)).body).toMatchObject({
+      directives: [cancel],
+    });
+    expect((await report("ending")).body).toMatchObject({ state: "ending" });
+    expect((await next()).body).toMatchObject({ directives: [] });
+    await hostCall("/hosts/facts", heldFacts);
+    const another = await call(colleague, "POST", prefix + "/sandboxes", request);
+    expect((await next()).body).toMatchObject({ offer: { id: (another.body as PoolSandbox).id } });
+    const third = await enrol();
+    expect((await call(third, "POST", prefix + "/sandboxes", request)).body).toMatchObject({
+      state: "waiting",
+    });
+    expect((await next()).body).toEqual({ offer: null, directives: [] });
     expect((await report("ended")).body).toMatchObject({ state: "ended" });
-    expect((await hostCall("/hosts/next", { size: "small" })).body).toBeNull();
   });
 });

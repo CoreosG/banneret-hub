@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "stale_offer",
+    "message": "Offer expired.",
+    "retryable": false
+  },
+  "current": {
+    "sandboxId": "sb_a",
+    "state": "waiting"
+  }
+}

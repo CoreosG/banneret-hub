@@ -24,6 +24,7 @@ import type {
   PoolNextRequest,
   PoolSandboxRequest,
   PoolStateUpdate,
+  PoolCurrent,
 } from "@t3tools/contracts";
 import { createPool } from "./pool.ts";
 import { openAlarmStore, type Alarm } from "./alarms.ts";
@@ -423,11 +424,18 @@ class RelayError extends Error {
   readonly status: number;
   readonly code: ErrorCode;
   readonly details: Record<string, unknown> | undefined;
-  constructor(code: ErrorCode, message: string, details?: Record<string, unknown>) {
+  readonly current?: PoolCurrent;
+  constructor(
+    code: ErrorCode,
+    message: string,
+    details?: Record<string, unknown>,
+    current?: PoolCurrent,
+  ) {
     super(message);
     this.code = code;
     this.status = STATUS[code];
     this.details = details;
+    if (current) this.current = current;
   }
 }
 
@@ -710,8 +718,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const people = new Map<string, Person>();
   const peopleByLogin = new Map<string, Person>();
-  const pool = createPool(options.pool, (code, message) => {
-    throw new RelayError(code, message);
+  const pool = createPool(options.pool, (code, message, current) => {
+    throw new RelayError(code, message, undefined, current);
   });
   const poolHosts = new Set(options.pool?.hosts.map((h) => h.id));
   const pairings = new Map<string, Pairing>();
@@ -2125,6 +2133,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   const sendError = (response: NodeHttp.ServerResponse, error: RelayError) => {
     const body = {
+      ...(error.current && { current: error.current }),
       error: {
         code: error.code,
         message: error.message,
@@ -2441,7 +2450,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       if (method === "POST" && route === "/pool/hosts/next") {
         const { size } = parseJson(body, "PoolNextRequest") as PoolNextRequest;
-        return sendJson(response, 200, "PoolOffer", pool.next(host, size));
+        return sendJson(response, 200, "PoolNextResponse", pool.next(host, size));
       }
       if (method === "POST" && statePath?.[1])
         return sendJson(
