@@ -339,8 +339,11 @@
     stroke-width: 3;
   }
 
-  [data-has-selection] [data-slot="stage-bubble"][aria-pressed="false"] {
-    opacity: 0.5;
+  /* With a stage selected the others fade; their hulls stay opaque so lines stay behind them. */
+  [data-has-selection]
+    [data-slot="stage-bubble"][aria-pressed="false"]
+    > :not([data-slot="bubble-hull"]) {
+    opacity: 0.45;
   }
 
   [data-slot="bubble-ring"] {

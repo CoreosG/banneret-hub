@@ -416,12 +416,6 @@ export function MapPage() {
       const stage = mapStages(map).find((entry) => entry.id === state.stage) ?? null;
       view = (
         <div className="flex flex-col gap-4">
-          <StageBubbles
-            map={map}
-            selected={stage?.id ?? null}
-            motion={motion}
-            onSelect={(id) => go({ stage: id }, true)}
-          />
           {stage === null ? (
             <p className={TYPE.meta}>
               Bubbles follow the plan order. Size is the item count; the ring and dots show status.
@@ -436,6 +430,12 @@ export function MapPage() {
               onClose={() => go({ stage: null }, true)}
             />
           )}
+          <StageBubbles
+            map={map}
+            selected={stage?.id ?? null}
+            motion={motion}
+            onSelect={(id) => go({ stage: id }, true)}
+          />
         </div>
       );
     } else {
