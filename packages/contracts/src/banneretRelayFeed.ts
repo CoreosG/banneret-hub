@@ -7,7 +7,10 @@ import * as Schema from "effect/Schema";
 
 import { AuthOrchestrationOperateScope, EnvironmentAuthorizationError } from "./auth.ts";
 
+import { ChannelAction, ChannelResult } from "./banneretChat.ts";
+
 export const BANNERET_RELAY_FEED_WS_METHODS = {
+  chat: "banneretRelay.chat",
   today: "banneretRelay.today",
   needs: "banneretRelay.needs",
   feed: "banneretRelay.feed",
@@ -553,6 +556,8 @@ export const BanneretFeedState = Schema.Struct({
   sections: Schema.Array(Schema.String),
   /** The open needs-you count from the last `needs.changed`, if one arrived. */
   needsCount: Schema.NullOr(Schema.Number),
+  chatFlags: Schema.optional(Schema.Array(Schema.String)),
+  chatRevision: Schema.optional(Schema.Number),
   revision: Schema.Number,
   /** Null while the relay advertises no board section, or before it was looked at. */
   board: Schema.NullOr(BanneretFeedBoardRead),
@@ -607,6 +612,11 @@ const WsBanneretRelayTaskRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.task, {
 });
 
 export const BANNERET_RELAY_FEED_RPCS = [
+  Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.chat, {
+    payload: Schema.Struct({ relayOrigin: Schema.String, action: ChannelAction }),
+    success: ChannelResult,
+    error: EnvironmentAuthorizationError,
+  }),
   WsBanneretRelayTodayRpc,
   WsBanneretRelayNeedsRpc,
   WsBanneretRelayFeedRpc,
@@ -616,6 +626,7 @@ export const BANNERET_RELAY_FEED_RPCS = [
 ] as const;
 
 export const BANNERET_RELAY_FEED_RPC_SCOPES = {
+  [BANNERET_RELAY_FEED_WS_METHODS.chat]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.today]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: AuthOrchestrationOperateScope,
@@ -625,6 +636,7 @@ export const BANNERET_RELAY_FEED_RPC_SCOPES = {
 } as const;
 
 export const BANNERET_RELAY_FEED_RPC_AGGREGATES = {
+  [BANNERET_RELAY_FEED_WS_METHODS.chat]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.today]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: "banneret-relay",

@@ -143,6 +143,8 @@ const browserTestProject = {
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
       commands: {
+        companyChat: async (_, ...args: [string, unknown?]) =>
+          (await import("../../scripts/banneret/chat-browser.mjs")).command(...args),
         // Playwright's mouse outlives each test, so whatever mounts under its last
         // position starts hovered. test/browserSetup.ts parks it off the page before each test.
         resetPointer: async ({ page }) => {

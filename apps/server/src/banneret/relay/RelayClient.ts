@@ -41,7 +41,7 @@ export type RelaySigner =
 
 export interface RelayRequest {
   readonly origin: string;
-  readonly method: "GET" | "POST" | "DELETE";
+  readonly method: "GET" | "PUT" | "POST" | "PATCH" | "DELETE";
   /** Path and query exactly as sent and signed. */
   readonly target: string;
   readonly body?: unknown;

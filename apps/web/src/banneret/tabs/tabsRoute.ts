@@ -15,6 +15,13 @@ import { closeInactive, observeRoute, useTabsStore } from "./tabsStore";
 function readRouteTarget(router: AnyRouter): TabTarget | null | "modal" {
   const { pathname, searchStr } = router.state.location;
   if (isAppModalPage(pathname)) return "modal";
+  if (pathname.startsWith("/channels/"))
+    return {
+      kind: "chat",
+      href: pathname + searchStr,
+      workspaceId: useWorkspacesStore.getState().activeId,
+      title: "Channel",
+    };
   if (isPagePath(pathname)) {
     return {
       kind: "page",

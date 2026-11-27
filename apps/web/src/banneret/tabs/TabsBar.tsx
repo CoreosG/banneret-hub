@@ -28,6 +28,7 @@ import { cn } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { readEnvironment, useConnectedEnvironmentIds } from "../../state/environments";
 import { environmentShell } from "../../state/shell";
+import { useEnterpriseFeed } from "../useEnterpriseFeed";
 import { setActiveWorkspace, useWorkspaces } from "../workspacesStore";
 import type { Tab } from "./tabs.logic";
 import { syncTabsWithRoute } from "./tabsRoute";
@@ -251,7 +252,15 @@ function TabItem(props: {
 }
 
 export function TabsBar() {
-  const tabs = useTabsStore((state) => state.tabs);
+  const allTabs = useTabsStore((state) => state.tabs);
+  const enterprise = useEnterpriseFeed();
+  const tabs = allTabs.filter(
+    (tab) =>
+      tab.kind !== "chat" ||
+      (tab.workspaceId === enterprise?.workspace.id &&
+        enterprise.feed.sectionsKnown &&
+        enterprise.feed.sections.includes("chat")),
+  );
   const activeId = useTabsStore((state) => state.activeId);
   const connected = useConnectedEnvironmentIds();
   const workspaces = useWorkspaces();

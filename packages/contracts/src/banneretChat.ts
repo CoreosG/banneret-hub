@@ -350,3 +350,101 @@ export const ChatLimits = Schema.Struct({
   retentionDays: Schema.Struct({ channels: Schema.Int, dms: Schema.Int }),
 });
 export type ChatLimits = typeof ChatLimits.Type;
+
+const Id = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/));
+const Page = { cursor: Schema.optionalKey(Schema.String) };
+export const ChannelAction = Schema.Union([
+  Schema.Struct({ kind: Schema.Literals(["join", "leave", "follow", "unfollow"]), id: Id }),
+  Schema.Struct({
+    kind: Schema.Literal("reaction"),
+    id: Id,
+    emoji: Schema.String,
+    add: Schema.Boolean,
+  }),
+  Schema.Struct({ kind: Schema.Literal("list"), ...Page }),
+  Schema.Struct({
+    kind: Schema.Literals(["messages", "thread", "members", "replyPreview"]),
+    id: Id,
+    ...Page,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("create"),
+    name: Schema.String,
+    purpose: Schema.String,
+    private: Schema.Boolean,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("post"),
+    id: Id,
+    root: Schema.optionalKey(Id),
+    text: Schema.String,
+    key: Schema.String,
+  }),
+  Schema.Struct({ kind: Schema.Literal("edit"), id: Id, text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("delete"), id: Id }),
+  Schema.Struct({ kind: Schema.Literal("read"), read: ChatRead }),
+]);
+export type ChannelAction = typeof ChannelAction.Type;
+export const ChannelResult = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), value: Schema.Unknown }),
+  Schema.Struct({ ok: Schema.Literal(false), message: Schema.String }),
+]);
+export type ChannelResult = typeof ChannelResult.Type;
+
+/** The device RPC permits only the people-channel calls implemented by the Hub. */
+export function callChannel<A>(
+  action: ChannelAction,
+  call: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => A,
+): A {
+  const page =
+    "cursor" in action && action.cursor
+      ? "?limit=100&cursor=" + encodeURIComponent(action.cursor)
+      : "?limit=100";
+
+  switch (action.kind) {
+    case "follow":
+    case "unfollow":
+      return call(action.kind === "follow" ? "PUT" : "DELETE", "threads/" + action.id + "/follow");
+    case "reaction":
+      return call(
+        action.add ? "PUT" : "DELETE",
+        "messages/" + action.id + "/reactions/" + encodeURIComponent(action.emoji),
+      );
+    case "join":
+    case "leave":
+      return call(
+        action.kind === "join" ? "PUT" : "DELETE",
+        "conversations/" + action.id + "/members/@me",
+      );
+    case "list":
+      return call("GET", "conversations" + page);
+    case "members":
+    case "messages":
+      return call("GET", "conversations/" + action.id + "/" + action.kind + page);
+    case "replyPreview":
+      return call("GET", "threads/" + action.id + "?limit=3");
+    case "thread":
+      return call("GET", "threads/" + action.id + page);
+    case "post":
+      return call("POST", "messages", {
+        conversationId: action.id,
+        threadRootId: action.root,
+        text: action.text,
+        key: action.key,
+      });
+    case "create":
+      return call("POST", "conversations", {
+        kind: "channel",
+        name: action.name,
+        purpose: action.purpose,
+        private: action.private,
+        agents: "off",
+      });
+    case "edit":
+      return call("PATCH", "messages/" + action.id, { text: action.text });
+    case "delete":
+      return call("DELETE", "messages/" + action.id);
+    case "read":
+      return call("POST", "read", action.read);
+  }
+}

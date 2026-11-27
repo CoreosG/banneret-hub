@@ -2930,6 +2930,33 @@ describe("chat contract", () => {
     }
     expectSchema("ChatMessage", root.body);
     const message = root.body as { id: string; seq: number };
+    const members = await call(owner, "GET", path + "/conversations/" + id + "/members");
+    expectSchema("ChatMembers", members.body);
+    const self = (members.body as { items: { id: string }[] }).items[0]!.id;
+    expect(
+      (await call(owner, "PUT", path + "/conversations/" + id + "/members/" + self)).status,
+    ).toBe(204);
+    expect((await call(owner, "DELETE", path + "/threads/" + message.id + "/follow")).status).toBe(
+      204,
+    );
+    expect((await call(owner, "PUT", path + "/threads/" + message.id + "/follow")).status).toBe(
+      204,
+    );
+    const caps = await call(owner, "GET", "/relay/v1/capabilities");
+    if (
+      (caps.body as { sections: { kind: string; flags: string[] }[] }).sections
+        .find((s) => s.kind === "chat")
+        ?.flags.includes("reactions")
+    ) {
+      const reactionPath =
+        path + "/messages/" + message.id + "/reactions/" + encodeURIComponent("👍");
+      expect((await call(owner, "PUT", reactionPath)).body).toMatchObject({
+        reactions: [{ emoji: "👍", count: 1, mine: true }],
+      });
+      expect((await call(otherMachine, "DELETE", reactionPath)).body).toMatchObject({
+        reactions: [],
+      });
+    }
     expect((await call(owner, "POST", path + "/messages", post)).body).toEqual(root.body);
     await call(owner, "POST", path + "/messages", {
       ...post,

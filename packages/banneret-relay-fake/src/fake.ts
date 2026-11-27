@@ -2007,6 +2007,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     | Exclude<ChatChange, MessageChange>
     | { seq: number; kind: MessageChange["kind"]; messageId: string };
   const changes: { channel: Channel; person?: string; value: StoredChange }[] = [];
+  const follows = new Map<string, Set<string>>();
+  const reactions = new Map<string, Map<string, Set<string>>>();
+  const messageView = (m: ChatMessage, person: string): ChatMessage => ({
+    ...m,
+    reactions: [...(reactions.get(m.id) ?? [])]
+      .filter(([, ids]) => ids.size > 0)
+      .map(([emoji, ids]) => ({ emoji, count: ids.size, mine: ids.has(person) })),
+  });
   let chatSeq = 0;
   if (options.chat)
     channels.set("c_general", {
@@ -2037,15 +2045,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         ? { kind: value.kind, seq: value.seq, messageId: value.message.id }
         : value;
     changes.push({ channel, value: stored, ...(person ? { person } : {}) });
-    const event =
-      Buffer.byteLength(JSON.stringify(value)) <= 8192
-        ? { seq: value.seq, change: value }
-        : { seq: value.seq };
     for (const stream of streams) {
       if (
         (person === undefined || person === stream.personId) &&
         visible(channel, stream.personId)
       ) {
+        const change =
+          "message" in value
+            ? { ...value, message: messageView(value.message, stream.personId) }
+            : value;
+        const inline = { seq: value.seq, change };
+        const event =
+          Buffer.byteLength(JSON.stringify(inline)) <= 8192 ? inline : { seq: value.seq };
         stream.response.write(`event: chat.changed\ndata: ${JSON.stringify(event)}\n\n`);
       }
     }
@@ -2271,7 +2282,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     id: "chat",
                     kind: "chat",
                     version: 1,
-                    flags: ["channels", "private_channels", "threads"],
+                    flags: ["channels", "private_channels", "threads", "reactions"],
                   },
                 ]
               : []),
@@ -2481,13 +2492,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             (!row.person || row.person === person.id) &&
             visible(row.channel, person.id),
         );
-        const items = rows
-          .slice(0, limit)
-          .map(({ value }) =>
-            "messageId" in value
-              ? { kind: value.kind, seq: value.seq, message: messageFor(value.messageId) }
-              : value,
-          );
+        const items = rows.slice(0, limit).map(({ value }) =>
+          "messageId" in value
+            ? {
+                kind: value.kind,
+                seq: value.seq,
+                message: messageView(messageFor(value.messageId), person.id),
+              }
+            : value,
+        );
         return send("ChatChanges", {
           items,
           nextSeq: rows.length > limit ? items.at(-1)?.seq : chatSeq,
@@ -2595,7 +2608,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                   ? rows.slice(0, index)
                   : rows.slice(Math.max(0, index - Math.floor(pageParams(query).limit / 2)));
           }
-          return send("ChatMessages", paged(rows));
+          return send("ChatMessages", paged(rows.map((m) => messageView(m, person.id))));
         }
       }
       if (resource === "threads" && id && !action && method === "GET") {
@@ -2603,8 +2616,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (root.threadRootId)
           throw new RelayError("malformed", "A reply cannot be a thread root.");
         return send("ChatThread", {
-          root,
-          ...paged([...messages.values()].filter((m) => m.threadRootId === id)),
+          root: messageView(root, person.id),
+          ...paged(
+            [...messages.values()]
+              .filter((m) => m.threadRootId === id)
+              .map((m) => messageView(m, person.id)),
+          ),
         });
       }
       if (resource === "messages" && !id && method === "POST") {
@@ -2638,6 +2655,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           deleted: false,
         };
         messages.set(m.id, m);
+        const subscribers = follows.get(root?.id ?? m.id) ?? new Set<string>();
+        subscribers.add(person.id);
+        for (const mention of mentions) subscribers.add(mention.id);
+        follows.set(root?.id ?? m.id, subscribers);
         postKeys.set(key, m.id);
         if (root)
           messages.set(root.id, {
@@ -2667,13 +2688,49 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               editedAt: iso(Date.now()),
             }
           : { ...base, text: "", mentions: [], deleted: true };
+        if (!input) reactions.delete(id);
         messages.set(id, edited);
         chatChange(channelFor(m.conversationId), {
           kind: input ? "message.edited" : "message.deleted",
           seq: ++chatSeq,
           message: edited,
         });
-        return send("ChatMessage", edited);
+        return send("ChatMessage", messageView(edited, person.id));
+      }
+      if (
+        resource === "threads" &&
+        action === "follow" &&
+        (method === "DELETE" || method === "PUT")
+      ) {
+        const root = messageFor(id);
+        if (root.threadRootId) throw new RelayError("malformed", "Choose the thread root.");
+        const ids = follows.get(id) ?? new Set<string>();
+        if (method === "PUT") ids.add(person.id);
+        else ids.delete(person.id);
+        follows.set(id, ids);
+        response.writeHead(204).end();
+        return;
+      }
+      if (
+        resource === "messages" &&
+        action === "reactions" &&
+        memberId &&
+        (method === "PUT" || method === "DELETE")
+      ) {
+        const m = messageFor(id);
+        const c = channelFor(m.conversationId);
+        if (m.deleted || !c.members.has(person.id))
+          throw new RelayError("forbidden", "Cannot react to this message.");
+        const emoji = decodeURIComponent(memberId);
+        const counts = reactions.get(id) ?? new Map<string, Set<string>>();
+        const ids = counts.get(emoji) ?? new Set<string>();
+        if (method === "PUT") ids.add(person.id);
+        else ids.delete(person.id);
+        if (ids.size) counts.set(emoji, ids);
+        else counts.delete(emoji);
+        reactions.set(id, counts);
+        chatChange(c, { kind: "reaction", seq: ++chatSeq, refId: id, conversationId: c.id });
+        return send("ChatMessage", messageView(m, person.id));
       }
       if (resource === "read" && !id && method === "POST") {
         const input = parseJson(body, "ChatRead") as ChatRead;
