@@ -1474,7 +1474,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   const addLock = yield* Semaphore.make(1);
 
   // Start-up: one instance per state file whose name matches the origin inside it. Anything else
-  // in the directory (and the single-relay `enrolment.json` of earlier versions) is ignored.
+  // in the directory is ignored.
   const names = yield* fs.readDirectory(relaysDir).pipe(Effect.orElseSucceed(() => []));
   for (const name of [...names].toSorted()) {
     const match = /^([0-9a-f]{16})\.json$/.exec(name);
