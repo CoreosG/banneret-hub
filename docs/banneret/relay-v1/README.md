@@ -348,7 +348,10 @@ A relay that serves the board advertises the section `{kind:"board", flags:["lea
 (plus the flag `checked` when it applies the sign-off rule below)
 and names the `board` file in the snapshot head. A Hub does not
 read the board unless capabilities carry the section. The board is snapshot-only: the relay computes it, the Hub
-draws it. Writes (take, release, hand-off) are not part of this contract.
+draws it. The flag `leases` also means the relay parses the lease protocol below. There is no second flag.
+
+The relay only reads. Take and release are written to the work tracker by the Hub, on the person's own login (see
+"Lease protocol"). The relay has no write endpoint for them.
 
 **The file.** `SnapshotBoard` is `{state, notMeasured, columns[], cards[]}`.
 
@@ -365,6 +368,8 @@ draws it. Writes (take, release, hand-off) are not part of this contract.
   when the relay has read them. There is no card-level `pr` or `checks`.
 - `lease` is `{holder{id, login}, state, since, lastSignalAt, staleAt, expiresAt}`. A card with no `lease` is
   Free. A relay that cannot read claims says so in the board's `state` and `notMeasured`, never as a lease state.
+- `lastRelease` is `{by{id, login}, at, reason, freeToContinue, reasonText?, note?}`: the latest counted release,
+  present while no claim stands (see "Lease protocol"). The same object is on `GET /tasks/{taskId}`.
 - The "agent at work" ring is not in the file. The Hub derives it from the `work` file, joined by task id.
 
 **Status.** `status` is an open string; a client accepts values it does not know. One vocabulary serves the board,
@@ -388,14 +393,129 @@ waits on a dependency and nobody can act on it directly. A tracker label named `
 so it gives `needs_you`, not `blocked`. A client shows `blocked` as "Blocked by <title>", or "Blocked" where space is
 short, and its mark is ⊘.
 
-**Lease state.** `state` is an open string; known values `active`, `stale`, `expired`, `paused`, `conflict`. Time
-runs from `lastSignalAt`, the latest heartbeat, push or comment:
+**Lease state.** `state` is an open string; known values `active`, `stale`, `expired`, `paused`, `conflict`,
+`incomplete`. Time runs from `lastSignalAt`, the latest heartbeat, push or comment:
 
 - `staleAt` is `lastSignalAt` plus 6 hours. After it the lease is `stale` and the card is in Stuck.
 - `expiresAt` is `lastSignalAt` plus 24 hours. After it the lease is `expired`.
 - An expired lease stays in Stuck. It is never shown as Free while the tracker still names the assignee, because
   only a release on the tracker frees the task.
 - `paused` and `conflict` (two holders claim one task) come from the claims, not from time.
+- `incomplete` comes from the lease protocol: the tracker's assignee and `claimed` label disagree with the claim
+  comments for longer than the settle window. A take or release stopped half way, and the Hub offers Finish and
+  Withdraw. `conflict` and `incomplete` are never aged into `stale` or `expired`.
+
+## Lease protocol
+
+A take or a release is a comment on the tracker issue plus an assignee and label change, all written by the Hub on
+the person's own login. Line 1 of the comment is the machine format; there is no hidden marker and no local
+journal. The relay derives everything from the issue's comments, assignees and labels.
+
+**Comments.** Only line 1 counts. It is matched exactly, in lower case, after trimming spaces. The separator is
+` · ` (a middle dot with a space on each side).
+
+| Line 1 | Meaning |
+|---|---|
+| `claim: <login>/<agent>` | A take. `<login>` must be the comment's author, or the line is ignored. `<agent>` is a tool name such as `hub` (`[A-Za-z0-9._-]{1,64}`); `claim: <login>` alone is also read. |
+| `release: <reason>[ · <text>][ · free to continue]` | A release. The rest of the comment is the note. |
+| `release: lost_claim[ · <text>]`, `release: take_failed[ · <text>]` | A withdrawal by the Hub. Never a release. |
+
+Reason ids are `done`, `blocked`, `handing_over`, `out_of_usage`, `wrong_approach`, `duplicate`, `deprioritised`
+and `other`. The id is matched exactly. An unknown id reads as `other`, with the raw text after `release:` in
+`reasonText`. For a known id, the text after it is `reasonText`. `reasonText` is cut to 200 characters on read. The
+note is everything after line 1, cut to 2 KB (2,048 UTF-8 bytes) on read. Both are plain text: a client shows them
+as written and renders no markup. The Hub refuses to write a longer note or text.
+
+A full release comment:
+
+```
+release: out_of_usage · free to continue
+**Goal:** Limit invites per guild.
+**Done:** Counter and tests.
+**Next:** Return 429 from the invite route.
+Follow-ups: #51, #52
+```
+
+More valid line 1 examples: `release: done`, `release: other · not needed after the redesign`,
+`release: blocked · waiting on #12 · free to continue`, `claim: ada-example/hub`. Lines that are not protocol lines:
+`Release: done` (capital R), `claim: bob-example/hub` written by ada-example (not the author), `claim:` (no login).
+`release: DONE` and `release: vacation` are releases with reason `other`.
+
+**Labels.** `claimed` is on the issue while it is held. `paused` is on the task's open draft pull request after a
+release, and the next take removes it. The relay reads `claimed`; `paused` is for people and agents.
+
+**The fold.** Comments are read in order of `created_at`, then comment id. On GitHub the comment id is the numeric
+REST id (`databaseId`, the number in `#issuecomment-<id>`), compared as a number; never the GraphQL node id. Other
+trackers compare their ids as numbers when both are digits, otherwise as strings.
+
+1. A claim stands from its comment until its author withdraws it or a counted release ends it. A person with a
+   standing claim who claims again changes nothing.
+2. The holder is the earliest standing claim. More than one standing claim is `conflict`: the earliest claim wins,
+   and every later claimant is in conflict until they withdraw.
+3. A `release:` counts only when the holder writes it, or when a founder writes it about someone else's lease (a
+   founder release). It ends the holder's claim, and the next standing claim, if any, becomes the holder.
+4. A `release:` by any other claimant, and `lost_claim` or `take_failed` by any claimant, withdraws only that
+   author's claim. The system reasons are never accepted as a release reason from a comment, so they never set
+   `lastRelease` and never make a feed entry.
+5. Everything else is ignored, including a release by someone who neither holds the lease nor is a founder.
+
+**Settle window: 60 seconds.** A standing holder should be assigned and the issue should carry `claimed`. When no
+claim stands, nobody should be assigned. When that disagrees, the lease is `incomplete`, but only once 60 seconds
+have passed since the claim (or, with no standing claim, since the last protocol comment). Inside the window the
+relay shows the claim as `active`, or the release as done, because the Hub writes the comment first and the
+assignee a moment later. An `incomplete` lease with no standing claim is held by the released holder when they are
+still assigned or `claimed` is still on, otherwise by the first assignee. An assignee with no claim comment at all
+is `incomplete` too; its `since` is when the relay saw the assignment.
+
+**lastRelease.** The latest counted release, present while no claim stands. A withdrawn claim does not hide it; a
+standing claim does. `freeToContinue` is true only when line 1 says free to continue **and** nobody is assigned now.
+
+**Feed.** Every counted release is a `released` entry with the release's author, `reason` and `freeToContinue` as
+written, and `reasonText` and `note` when present. Withdrawals make no entry.
+
+**Shared fold fixtures.** `fixtures/lease-fold/*.json` are cases of `{name, description, input{comments[{id, author,
+createdAt, body}], assignees, labels, founders, now}, expected{lease, lastRelease, releases}}`. `lease` is
+`{holder, state, since, claimants}` (logins; `since` is null when no claim comment backs it) or null for free.
+`releases` lists every counted release in order, `{by, holder, at, reason, freeToContinue, reasonText?, note?}`,
+with `freeToContinue` as written. Every reader of the protocol runs all of them: the Hub
+(`packages/contracts/src/leaseProtocol.ts`, run by the fake relay's tests) and the Go relay. Time-based states
+(`stale`, `expired`) are applied after the fold and are not in the fixtures.
+
+### How the Hub writes
+
+Not part of the relay contract; it explains the states a relay sees. The Hub's `LeaseService`
+(`apps/server/src/banneret/lease/LeaseService.ts`) writes through the tracker's issue API and, for `paused`, its pull
+request API (GitHub's issue update resolves a number as an issue and refuses a pull request). It keeps one operation
+per task in memory and nothing on disk; every step reads the issue again before it writes.
+
+- **Take:** read and fold, and stop unless the task is free and the person may comment, label and assign. Comment
+  `claim: <login>/<agent>`. Assign the person and add `claimed` in one update, up to three tries; if all fail,
+  comment `release: take_failed`. Wait 10 seconds, read again: the earliest claim wins. The winner removes `paused`
+  from the task's open pull requests. The loser comments `release: lost_claim · @<winner>` and unassigns only
+  themself; `claimed` stays.
+- **Release:** read and fold, and stop unless the person holds it. Comment the release first, since the reason is
+  the record. Then unassign the person, remove `claimed` unless another claim stands, and add `paused` to the open
+  draft pull request. A retry finds its own release comment and posts no second one.
+- **Finish** re-runs the steps after the comment. **Withdraw** comments `take_failed` (or `lost_claim` for a loser)
+  and unassigns.
+
+| From | Event | To |
+|---|---|---|
+| free | take refused by the pre-read (held, no permission, wrong account) | free; nothing written |
+| free | claim comment fails | free; nothing written |
+| free | claim posted | taking (in memory) |
+| taking | assign and label fail three times, `take_failed` posted | free |
+| taking | ... and `take_failed` fails too, or the Hub stops | incomplete after 60 s |
+| taking | read-back: my claim is earliest | taken |
+| taking | read-back: an earlier claim, `lost_claim` posted, unassigned | free for me |
+| taking | ... and the withdrawal fails | conflict, until Withdraw |
+| taken | release comment posted, then unassign, unlabel, pause the draft | free, `lastRelease` set |
+| taken | a step after the release comment fails, or the Hub stops | incomplete after 60 s |
+| incomplete | Finish | taken or free |
+| incomplete | Withdraw | free |
+
+A second operation on a task while one runs is refused as busy. After a restart nothing is remembered: every task
+is what the tracker says, folded as above.
 
 **Heartbeat from facts.** An activity fact refreshes a lease only when **all** of these hold:
 
@@ -518,18 +638,21 @@ unless capabilities carry the section.
   continues in the call. A cursor is opaque, and a page can shift when new entries arrive.
 - **Derived only.** The relay builds entries from tracker and relay events. A client cannot write one; written
   entries (comments, announcements) wait for a later minor version.
-- **Feed entry.** `{id, type, at, author?{id, login}, importance, summary, link?, task?{id, title, ref, openedAt, closedAt}, status?}`.
+- **Feed entry.** `{id, type, at, author?{id, login}, importance, summary, link?, task?{id, title, ref, openedAt, closedAt}, status?, reason?, freeToContinue?, reasonText?, note?}`.
   Objects are closed. `type` is an open string; known values `taken`, `released`, `lease_expired`, `pr_opened`,
   `pr_merged`, `built`, `checked`, `sent_back`, `ruled_dead`, `comment`. `importance` is an open string; known
   values `high`, `normal`, `low`. `status` is the task's status when the entry was made, in the board vocabulary.
-  `author` is absent for something the relay noticed itself. `summary` is one plain sentence.
+  `author` is absent for something the relay noticed itself. `summary` is one plain sentence. A `released` entry
+  requires `reason` (an open token, see "Lease protocol") and `freeToContinue`, and carries `reasonText` (at most 200
+  characters) and `note` (at most 2,048) when the release had them. Every other type carries none of the four.
 - **Graveyard entry.** `{task{id, title, ref, openedAt, closedAt}, cause, ruledAt, by?{id, login}, link?}`. `cause` is always present:
   the Hub shows it, so a task never sits in the graveyard without a reason.
 
 ## Task
 
 A relay that serves it advertises the section `{kind:"task", flags:[]}`. `GET /tasks/{taskId}` is
-signed and returns one board card (every field of `BoardCard`) plus two optional fields:
+signed and returns one board card (every field of `BoardCard`, `lastRelease` with its `note` included) plus two
+optional fields:
 
 - `preview?{state, url?}`: `state` is an open string, known values `building`, `ready`, `failed`; `url` is present
   when the preview can be opened.

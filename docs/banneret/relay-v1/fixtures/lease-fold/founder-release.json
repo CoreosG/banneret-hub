@@ -1,0 +1,42 @@
+{
+  "name": "founder-release",
+  "description": "A founder releases someone else's lease: it counts, by the founder, ending the holder's claim.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "bob-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: bob-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:05:00Z",
+        "body": "release: deprioritised"
+      }
+    ],
+    "assignees": [],
+    "labels": [],
+    "founders": ["ada-example"],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": {
+      "by": "ada-example",
+      "at": "2026-11-20T10:05:00Z",
+      "reason": "deprioritised",
+      "freeToContinue": false
+    },
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "bob-example",
+        "at": "2026-11-20T10:05:00Z",
+        "reason": "deprioritised",
+        "freeToContinue": false
+      }
+    ]
+  }
+}

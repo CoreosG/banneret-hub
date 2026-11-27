@@ -1343,6 +1343,7 @@ components:
           allOf: [{ $ref: "#/components/schemas/OpenToken" }]
         statusWhy: { description: "One plain sentence that says why the card has this status.", type: string, minLength: 1, maxLength: 240 }
         lease: { $ref: "#/components/schemas/BoardLease" }
+        lastRelease: { $ref: "#/components/schemas/LeaseLastRelease" }
         prs: { $ref: "#/components/schemas/BoardPrs" }
         restsOn:
           description: Ids of the tasks this one rests on.
@@ -1377,8 +1378,9 @@ components:
     BoardLease:
       description: |
         Present only on a held task; a task with no lease is Free. `state` is an open string with known values
-        `active`, `stale`, `expired`, `paused` and `conflict`. A relay that cannot read claims says so in the board's
-        `notMeasured`, never as a lease state.
+        `active`, `stale`, `expired`, `paused`, `conflict` and `incomplete` (README, "Lease protocol": the tracker's
+        assignee and `claimed` label disagree with the claim comments for longer than the 60 s settle window). A relay
+        that cannot read claims says so in the board's `notMeasured`, never as a lease state.
       type: object
       additionalProperties: false
       required: [holder, state, since, lastSignalAt, staleAt, expiresAt]
@@ -1389,6 +1391,28 @@ components:
         lastSignalAt: { description: "The last heartbeat, push or comment.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
         staleAt: { description: "`lastSignalAt` plus 6 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
         expiresAt: { description: "`lastSignalAt` plus 24 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+    LeaseReason:
+      description: |
+        Why a lease was released. Open string; known values `done`, `blocked`, `handing_over`, `out_of_usage`,
+        `wrong_approach`, `duplicate`, `deprioritised` and `other`. The system-only `lost_claim` and `take_failed`
+        are withdrawals, never a release reason, so they never appear here.
+      allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+    LeaseLastRelease:
+      description: |
+        The latest counted release of the task (README, "Lease protocol"), present while no claim stands. Text is
+        plain: a client shows `reasonText` and `note` as written and renders no markup.
+      type: object
+      additionalProperties: false
+      required: [by, at, reason, freeToContinue]
+      properties:
+        by: { description: "Who released it: the holder, or a founder.", allOf: [{ $ref: "#/components/schemas/PersonRef" }] }
+        at: { $ref: "#/components/schemas/Timestamp" }
+        reason: { $ref: "#/components/schemas/LeaseReason" }
+        freeToContinue:
+          description: Written as free to continue, and nobody is assigned to the task now.
+          type: boolean
+        reasonText: { description: "The text after the reason id, or the raw text of an unknown one.", type: string, minLength: 1, maxLength: 200 }
+        note: { description: "The comment after line 1: Goal, Done, Next and follow-ups.", type: string, minLength: 1, maxLength: 2048 }
     BoardPrs:
       description: |
         Every pull request linked to the task, oldest first; empty when none is linked. The board status rules read
@@ -1521,10 +1545,25 @@ components:
           items: { $ref: "#/components/schemas/FeedEntry" }
         nextCursor: { type: [string, "null"] }
     FeedEntry:
-      description: "Closed, like a board card; an unknown field is a defect in the relay."
+      description: |
+        Closed, like a board card; an unknown field is a defect in the relay. A `released` entry carries `reason`
+        and `freeToContinue` (as written on line 1 of the release), and `reasonText` and `note` when the comment had
+        them; no other type carries any of the four.
       type: object
       additionalProperties: false
       required: [id, type, at, importance, summary]
+      if:
+        properties: { type: { const: released } }
+        required: [type]
+      then:
+        required: [reason, freeToContinue]
+      else:
+        not:
+          anyOf:
+            - required: [reason]
+            - required: [freeToContinue]
+            - required: [reasonText]
+            - required: [note]
       properties:
         id: { $ref: "#/components/schemas/Id" }
         type:
@@ -1545,6 +1584,10 @@ components:
         status:
           description: The task's status when the entry was made; the vocabulary of the board card.
           allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        reason: { $ref: "#/components/schemas/LeaseReason" }
+        freeToContinue: { type: boolean }
+        reasonText: { type: string, minLength: 1, maxLength: 200 }
+        note: { type: string, minLength: 1, maxLength: 2048 }
     GraveyardPage:
       description: |
         The `graveyard` snapshot file and the response of `GET /graveyard`: tasks ruled dead, newest
@@ -1581,6 +1624,7 @@ components:
         status: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
         statusWhy: { type: string, minLength: 1, maxLength: 240 }
         lease: { $ref: "#/components/schemas/BoardLease" }
+        lastRelease: { $ref: "#/components/schemas/LeaseLastRelease" }
         prs: { $ref: "#/components/schemas/BoardPrs" }
         restsOn:
           type: array

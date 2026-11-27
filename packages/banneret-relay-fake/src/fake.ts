@@ -3,6 +3,12 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
 
+import {
+  foldLease,
+  type LeaseComment,
+  type LeaseFoldResult,
+} from "@t3tools/contracts/leaseProtocol";
+
 import { publicKeyFromBase64, verify } from "./signing.ts";
 import { loadSpec, type SchemaName } from "./spec.ts";
 import { checkStagePlan, type StagePlan } from "./stage-plan.ts";
@@ -215,6 +221,22 @@ interface FeedRecord {
   readonly summary: string;
   readonly taskId: string | null;
   readonly status: string | null;
+  /** Only on `released` entries (README, Lease protocol). */
+  readonly release?: {
+    readonly reason: string;
+    readonly freeToContinue: boolean;
+    readonly reasonText?: string;
+    readonly note?: string;
+  };
+}
+
+/** The tracker issue behind a task, when a test seeds one: the lease comes from the fold, not from `holder`. */
+interface TrackerIssue {
+  comments: Array<LeaseComment>;
+  assignees: Array<string>;
+  labels: Array<string>;
+  /** How many counted releases already made a feed entry. */
+  releasesFed: number;
 }
 
 interface GraveyardRecord {
@@ -259,6 +281,7 @@ interface BoardTask {
   preview: { readonly state: string; readonly url?: string } | null;
   checked: CheckedRecord | null;
   readonly forcedLeaseState: "paused" | "conflict" | null;
+  readonly tracker: TrackerIssue | null;
   readonly branch: string | null;
   readonly projectKey: string | null;
   readonly restsOn: ReadonlyArray<string>;
@@ -1091,9 +1114,23 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     closedAt: null,
   });
 
-  const cardView = (task: BoardTask, index: number, now: number) => {
-    const lease =
-      task.holder === null
+  // README, Lease protocol. Founders are the enrolled people holding the founder role.
+  const foldTracker = (tracker: TrackerIssue, now: number): LeaseFoldResult =>
+    foldLease({
+      comments: tracker.comments,
+      assignees: tracker.assignees,
+      labels: tracker.labels,
+      founders: [...peopleByLogin.values()]
+        .filter((person) => person.role === "founder" && person.removed !== true)
+        .map((person) => person.login),
+      now: iso(now),
+    });
+
+  // The lease a card shows. A tracker-backed task folds its comments; `active` then ages from the holder's latest
+  // comment or heartbeat, while `conflict` and `incomplete` never age.
+  const leaseOf = (task: BoardTask, now: number) => {
+    if (task.tracker === null) {
+      return task.holder === null
         ? undefined
         : {
             holder: task.holder,
@@ -1103,6 +1140,45 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             staleAt: iso(task.lastSignalAt + LEASE_STALE_MS),
             expiresAt: iso(task.lastSignalAt + LEASE_EXPIRES_MS),
           };
+    }
+    const folded = foldTracker(task.tracker, now).lease;
+    if (folded === null) return undefined;
+    const holder = folded.holder;
+    const latestComment = task.tracker.comments
+      .filter(
+        (comment) =>
+          comment.author !== null && comment.author.toLowerCase() === holder.toLowerCase(),
+      )
+      .reduce((latest, comment) => Math.max(latest, Date.parse(comment.createdAt)), 0);
+    const since = folded.since === null ? task.since : Date.parse(folded.since);
+    const lastSignalAt = Math.max(latestComment, task.lastSignalAt, since);
+    const age = now - lastSignalAt;
+    return {
+      holder: personRefFor(holder),
+      state:
+        folded.state !== "active"
+          ? folded.state
+          : age >= LEASE_EXPIRES_MS
+            ? "expired"
+            : age >= LEASE_STALE_MS
+              ? "stale"
+              : "active",
+      since: iso(since),
+      lastSignalAt: iso(lastSignalAt),
+      staleAt: iso(lastSignalAt + LEASE_STALE_MS),
+      expiresAt: iso(lastSignalAt + LEASE_EXPIRES_MS),
+    };
+  };
+
+  const lastReleaseOf = (task: BoardTask, now: number) => {
+    if (task.tracker === null) return undefined;
+    const last = foldTracker(task.tracker, now).lastRelease;
+    return last === null ? undefined : { ...last, by: personRefFor(last.by) };
+  };
+
+  const cardView = (task: BoardTask, index: number, now: number) => {
+    const lease = leaseOf(task, now);
+    const lastRelease = lastReleaseOf(task, now);
     // A held task that is not active is in Stuck, never Free; a held task never sits in Free.
     const held = lease !== undefined;
     const column =
@@ -1115,15 +1191,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const statusWhy =
       held && lease.state === "conflict"
         ? "Two people claim this task."
-        : held && (lease.state === "stale" || lease.state === "expired")
-          ? `${task.holder?.login ?? "The holder"} has been quiet, so the claim is ${lease.state}.`
-          : (STATUS_WHY[status] ?? STATUS_WHY.planned ?? "");
+        : held && lease.state === "incomplete"
+          ? `A take or release by ${lease.holder.login} did not finish on the tracker.`
+          : held && (lease.state === "stale" || lease.state === "expired")
+            ? `${lease.holder.login} has been quiet, so the claim is ${lease.state}.`
+            : (STATUS_WHY[status] ?? STATUS_WHY.planned ?? "");
     return {
       task: taskRefView(task, index),
       column,
       status,
       statusWhy,
       ...(lease === undefined ? {} : { lease }),
+      ...(lastRelease === undefined ? {} : { lastRelease }),
       prs: task.prs.map((pr) => ({
         number: pr.number,
         url: prUrl(pr.number),
@@ -1315,6 +1394,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             task: taskRefView(task, index),
           }),
       ...(record.status === null ? {} : { status: record.status }),
+      ...record.release,
     };
   };
   const graveyardEntryView = (record: GraveyardRecord) => {
@@ -1779,7 +1859,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       for (const fact of facts.activity) {
         if (fact.state === "stopped" && fact.processRunning !== true) continue;
         for (const task of boardTasks) {
-          if (task.holder === null || task.holder.id !== caller.person.id) continue;
+          if (leaseOf(task, Date.now())?.holder.id !== caller.person.id) continue;
           const byTask = fact.taskId !== undefined && fact.taskId === task.id;
           const byBranch =
             fact.taskId === undefined &&
@@ -1889,6 +1969,77 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     throw new RelayError("not_found", `No ${method} ${route} in relay v1.`);
+  };
+
+  // README, Lease protocol: a seeded tracker issue. Comments get ids 1000, 1001, ... in seed order and the time of
+  // the call unless the test names them.
+  const seedNames = (value: unknown, name: string): Array<string> => {
+    if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))
+      throw new RelayError("malformed", `${name} must be a list of names.`);
+    return value as Array<string>;
+  };
+  const seedComments = (value: unknown, now: number, offset: number): Array<LeaseComment> => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new RelayError("malformed", "comments must be a list.");
+    return value.map((entry: Record<string, unknown>, index) => {
+      if (typeof entry.body !== "string" || typeof entry.author !== "string")
+        throw new RelayError("malformed", "A comment has an author login and a body.");
+      const at = entry.createdAt === undefined ? now : Date.parse(String(entry.createdAt));
+      if (!Number.isFinite(at)) throw new RelayError("malformed", "createdAt must be a timestamp.");
+      return {
+        id: entry.id === undefined ? String(1000 + offset + index) : String(entry.id),
+        author: entry.author,
+        createdAt: iso(at),
+        body: entry.body,
+      };
+    });
+  };
+  const seedTracker = (raw: Record<string, unknown>, now: number): TrackerIssue | null =>
+    raw.comments === undefined && raw.assignees === undefined && raw.labels === undefined
+      ? null
+      : {
+          comments: seedComments(raw.comments, now, 0),
+          assignees: raw.assignees === undefined ? [] : seedNames(raw.assignees, "assignees"),
+          labels: raw.labels === undefined ? [] : seedNames(raw.labels, "labels"),
+          releasesFed: 0,
+        };
+  const REASON_WORDS: Readonly<Record<string, string>> = {
+    done: "done",
+    blocked: "blocked",
+    handing_over: "handing over",
+    out_of_usage: "out of usage",
+    wrong_approach: "wrong approach",
+    duplicate: "duplicate",
+    deprioritised: "deprioritised",
+    other: "other",
+  };
+  // Every counted release becomes one `released` feed entry, newest first; withdrawals make none.
+  const feedReleases = (task: BoardTask) => {
+    if (task.tracker === null) return;
+    const { releases } = foldTracker(task.tracker, Date.now());
+    const fresh = releases.slice(task.tracker.releasesFed);
+    task.tracker.releasesFed = releases.length;
+    for (const release of fresh) {
+      feedRecords.unshift({
+        id: randomId("f"),
+        type: "released",
+        at: Date.parse(release.at),
+        author: personRefFor(release.by),
+        importance: "normal",
+        summary:
+          `${release.by} released ${task.title}: ${REASON_WORDS[release.reason] ?? release.reason}` +
+          (release.freeToContinue ? ", free to continue." : "."),
+        taskId: task.id,
+        status: task.status,
+        release: {
+          reason: release.reason,
+          freeToContinue: release.freeToContinue,
+          ...(release.reasonText === undefined ? {} : { reasonText: release.reasonText }),
+          ...(release.note === undefined ? {} : { note: release.note }),
+        },
+      });
+    }
+    feedRecords.sort((left, right) => right.at - left.at);
   };
 
   const handleControl = async (
@@ -2042,6 +2193,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 return id;
               })());
         const forced = raw.leaseState === "paused" || raw.leaseState === "conflict";
+        const tracker = seedTracker(raw, now);
+        if (tracker !== null && (login !== null || forced))
+          throw new RelayError(
+            "malformed",
+            "A task with comments, assignees or labels gets its lease from them; drop holder and leaseState.",
+          );
         return {
           id: String(raw.id),
           title: String(raw.title ?? raw.id),
@@ -2060,16 +2217,39 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               : null,
           checked: null,
           forcedLeaseState: forced ? (raw.leaseState as "paused" | "conflict") : null,
+          tracker,
           branch: raw.branch === undefined ? null : String(raw.branch),
           projectKey: raw.projectKey === undefined ? null : String(raw.projectKey),
           restsOn: Array.isArray(raw.restsOn) ? raw.restsOn.map(String) : [],
           since: now,
-          lastSignalAt: now,
+          // A tracker-backed lease is signalled by its holder's comments and heartbeats only.
+          lastSignalAt: tracker === null ? now : 0,
         };
       });
+      for (const task of boardTasks) feedReleases(task);
       boardSeeded = true;
       refreshAllHeads();
       reply({ tasks: boardTasks.length });
+      return;
+    }
+    if (request.method === "POST" && route === "/board/tracker") {
+      const task = boardTasks.find((candidate) => candidate.id === String(input.taskId));
+      if (task === undefined) throw new RelayError("not_found", "No such task.");
+      if (task.tracker === null)
+        throw new RelayError(
+          "malformed",
+          "That task was seeded without comments, assignees or labels.",
+        );
+      const now = Date.now();
+      task.tracker.comments.push(
+        ...seedComments(input.comments, now, task.tracker.comments.length),
+      );
+      if (input.assignees !== undefined)
+        task.tracker.assignees = seedNames(input.assignees, "assignees");
+      if (input.labels !== undefined) task.tracker.labels = seedNames(input.labels, "labels");
+      feedReleases(task);
+      refreshAllHeads();
+      reply({ comments: task.tracker.comments.length });
       return;
     }
     if (request.method === "POST" && route === "/map/seed") {
@@ -2127,6 +2307,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         summary: `Feed entry ${index + 1} of ${count}.`,
         taskId,
         status: task?.status ?? null,
+        ...(String(input.type ?? "built") === "released"
+          ? { release: { reason: "done", freeToContinue: false } }
+          : {}),
       }));
       refreshAllHeads();
       reply({ entries: feedRecords.length });
@@ -2197,11 +2380,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
     if (request.method === "POST" && route === "/lease/age") {
       const task = boardTasks.find((candidate) => candidate.id === String(input.taskId));
-      if (task === undefined || task.holder === null)
+      if (task === undefined || leaseOf(task, Date.now()) === undefined)
         throw new RelayError("not_found", "That task has no lease.");
       const shift = Number(input.hours) * 3_600_000;
       task.lastSignalAt -= shift;
       task.since -= shift;
+      // A tracker-backed lease ages from its comments, so they move back too.
+      if (task.tracker !== null) {
+        task.tracker.comments = task.tracker.comments.map((comment) => ({
+          ...comment,
+          createdAt: iso(Date.parse(comment.createdAt) - shift),
+        }));
+      }
       refreshAllHeads();
       reply({});
       return;

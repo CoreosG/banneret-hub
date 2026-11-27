@@ -1,0 +1,49 @@
+{
+  "name": "free-to-continue-then-taken",
+  "description": "A free to continue release followed by a new take: the take holds it and lastRelease is gone.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:02:00Z",
+        "body": "release: out_of_usage · free to continue\n**Next:** finish the tests."
+      },
+      {
+        "id": "12",
+        "author": "bob-example",
+        "createdAt": "2026-11-20T10:10:00Z",
+        "body": "claim: bob-example/hub"
+      }
+    ],
+    "assignees": ["bob-example"],
+    "labels": ["claimed"],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "bob-example",
+      "state": "active",
+      "since": "2026-11-20T10:10:00Z",
+      "claimants": ["bob-example"]
+    },
+    "lastRelease": null,
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:02:00Z",
+        "reason": "out_of_usage",
+        "freeToContinue": true,
+        "note": "**Next:** finish the tests."
+      }
+    ]
+  }
+}

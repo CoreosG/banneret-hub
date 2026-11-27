@@ -1,0 +1,177 @@
+{
+  "name": "release-each-reason",
+  "description": "Eight take and release rounds, one per reason id. Every release counts; the last is lastRelease.",
+  "input": {
+    "comments": [
+      {
+        "id": "100",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "101",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:02:00Z",
+        "body": "release: done"
+      },
+      {
+        "id": "102",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:03:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "103",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:04:00Z",
+        "body": "release: blocked"
+      },
+      {
+        "id": "104",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:05:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "105",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:06:00Z",
+        "body": "release: handing_over"
+      },
+      {
+        "id": "106",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:07:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "107",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:08:00Z",
+        "body": "release: out_of_usage"
+      },
+      {
+        "id": "108",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:09:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "109",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:10:00Z",
+        "body": "release: wrong_approach"
+      },
+      {
+        "id": "110",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:11:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "111",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:12:00Z",
+        "body": "release: duplicate"
+      },
+      {
+        "id": "112",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:13:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "113",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:14:00Z",
+        "body": "release: deprioritised"
+      },
+      {
+        "id": "114",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:15:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "115",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:16:00Z",
+        "body": "release: other · not needed after the redesign"
+      }
+    ],
+    "assignees": [],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": {
+      "by": "ada-example",
+      "at": "2026-11-20T10:16:00Z",
+      "reason": "other",
+      "freeToContinue": false,
+      "reasonText": "not needed after the redesign"
+    },
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:02:00Z",
+        "reason": "done",
+        "freeToContinue": false
+      },
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:04:00Z",
+        "reason": "blocked",
+        "freeToContinue": false
+      },
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:06:00Z",
+        "reason": "handing_over",
+        "freeToContinue": false
+      },
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:08:00Z",
+        "reason": "out_of_usage",
+        "freeToContinue": false
+      },
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:10:00Z",
+        "reason": "wrong_approach",
+        "freeToContinue": false
+      },
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:12:00Z",
+        "reason": "duplicate",
+        "freeToContinue": false
+      },
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:14:00Z",
+        "reason": "deprioritised",
+        "freeToContinue": false
+      },
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:16:00Z",
+        "reason": "other",
+        "freeToContinue": false,
+        "reasonText": "not needed after the redesign"
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "release-done",
+  "description": "The holder releases as done; tracker cleaned up: free with lastRelease.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:05:00Z",
+        "body": "release: done"
+      }
+    ],
+    "assignees": [],
+    "labels": ["bug"],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": {
+      "by": "ada-example",
+      "at": "2026-11-20T10:05:00Z",
+      "reason": "done",
+      "freeToContinue": false
+    },
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:05:00Z",
+        "reason": "done",
+        "freeToContinue": false
+      }
+    ]
+  }
+}

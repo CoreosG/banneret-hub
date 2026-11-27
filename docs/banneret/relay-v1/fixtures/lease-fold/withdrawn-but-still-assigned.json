@@ -1,0 +1,34 @@
+{
+  "name": "withdrawn-but-still-assigned",
+  "description": "A withdrawn take whose assignee was never removed, after the window: incomplete with no claim behind it.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:02:00Z",
+        "body": "release: take_failed"
+      }
+    ],
+    "assignees": ["ada-example"],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "ada-example",
+      "state": "incomplete",
+      "since": null,
+      "claimants": []
+    },
+    "lastRelease": null,
+    "releases": []
+  }
+}

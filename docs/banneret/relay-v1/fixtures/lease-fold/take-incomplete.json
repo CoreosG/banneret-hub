@@ -1,0 +1,28 @@
+{
+  "name": "take-incomplete",
+  "description": "A claim older than 60 s whose assignee and label never landed: incomplete.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      }
+    ],
+    "assignees": [],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "ada-example",
+      "state": "incomplete",
+      "since": "2026-11-20T10:01:00Z",
+      "claimants": ["ada-example"]
+    },
+    "lastRelease": null,
+    "releases": []
+  }
+}

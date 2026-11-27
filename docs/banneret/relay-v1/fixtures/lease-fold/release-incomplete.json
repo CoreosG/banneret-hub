@@ -1,0 +1,47 @@
+{
+  "name": "release-incomplete",
+  "description": "The holder released but is still assigned after the window: incomplete, held by the releaser since the claim.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:05:00Z",
+        "body": "release: blocked · free to continue"
+      }
+    ],
+    "assignees": ["ada-example"],
+    "labels": ["claimed"],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "ada-example",
+      "state": "incomplete",
+      "since": "2026-11-20T10:01:00Z",
+      "claimants": []
+    },
+    "lastRelease": {
+      "by": "ada-example",
+      "at": "2026-11-20T10:05:00Z",
+      "reason": "blocked",
+      "freeToContinue": false
+    },
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:05:00Z",
+        "reason": "blocked",
+        "freeToContinue": true
+      }
+    ]
+  }
+}

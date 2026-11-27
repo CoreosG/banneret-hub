@@ -1,0 +1,188 @@
+{
+  "state": "ok",
+  "notMeasured": [],
+  "columns": [
+    {
+      "id": "free",
+      "title": "Free"
+    },
+    {
+      "id": "taken",
+      "title": "Taken"
+    },
+    {
+      "id": "validating",
+      "title": "Validating"
+    },
+    {
+      "id": "stuck",
+      "title": "Stuck"
+    },
+    {
+      "id": "shipped",
+      "title": "Shipped"
+    }
+  ],
+  "cards": [
+    {
+      "task": {
+        "id": "t_R4k1Vd",
+        "title": "Rate limits",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "51",
+          "url": "https://github.com/example-org/example-app/issues/51"
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
+      },
+      "column": "free",
+      "status": "planned",
+      "statusWhy": "Open and free to continue from bo-example.",
+      "lastRelease": {
+        "by": {
+          "id": "p_Wm4c9B",
+          "login": "bo-example"
+        },
+        "at": "2026-11-25T17:30:00Z",
+        "reason": "out_of_usage",
+        "note": "**Goal:** Limit invites per guild.\n**Done:** Counter and tests.\n**Next:** Return 429 from the invite route."
+      },
+      "prs": [],
+      "restsOn": [
+        "t_K9w3Ls"
+      ]
+    },
+    {
+      "task": {
+        "id": "t_K9w3Ls",
+        "title": "Guild invites",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "42",
+          "url": "https://github.com/example-org/example-app/issues/42"
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
+      },
+      "column": "taken",
+      "status": "planned",
+      "statusWhy": "Open and ada-example is working on it.",
+      "lease": {
+        "holder": {
+          "id": "p_7Hq2xK",
+          "login": "ada-example"
+        },
+        "state": "active",
+        "since": "2026-11-26T08:00:00Z",
+        "lastSignalAt": "2026-11-26T09:58:00Z",
+        "staleAt": "2026-11-26T15:58:00Z",
+        "expiresAt": "2026-11-27T09:58:00Z"
+      },
+      "prs": [],
+      "restsOn": []
+    },
+    {
+      "task": {
+        "id": "t_P5n2Hd",
+        "title": "Profile blocks",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "47",
+          "url": "https://github.com/example-org/example-app/issues/47"
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
+      },
+      "column": "stuck",
+      "status": "needs_you",
+      "statusWhy": "Required checks are failing on pull request 88.",
+      "lease": {
+        "holder": {
+          "id": "p_3Nc8vR",
+          "login": "bo-example"
+        },
+        "state": "stale",
+        "since": "2026-11-25T20:00:00Z",
+        "lastSignalAt": "2026-11-26T03:00:00Z",
+        "staleAt": "2026-11-26T09:00:00Z",
+        "expiresAt": "2026-11-27T03:00:00Z"
+      },
+      "prs": [
+        {
+          "number": 86,
+          "url": "https://github.com/example-org/example-app/pull/86",
+          "state": "closed"
+        },
+        {
+          "number": 88,
+          "url": "https://github.com/example-org/example-app/pull/88",
+          "state": "open",
+          "checks": {
+            "state": "failing"
+          }
+        }
+      ],
+      "restsOn": []
+    },
+    {
+      "task": {
+        "id": "t_M2x8Qe",
+        "title": "Search filters",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "44",
+          "url": "https://github.com/example-org/example-app/issues/44"
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": "2026-11-26T08:20:00Z"
+      },
+      "column": "validating",
+      "status": "built",
+      "statusWhy": "The pull request merged and nobody has checked it yet.",
+      "prs": [
+        {
+          "number": 85,
+          "url": "https://github.com/example-org/example-app/pull/85",
+          "state": "merged",
+          "checks": {
+            "state": "passing"
+          }
+        }
+      ],
+      "restsOn": []
+    },
+    {
+      "task": {
+        "id": "t_Z7b4Nf",
+        "title": "Sign-in page",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "39",
+          "url": "https://github.com/example-org/example-app/issues/39"
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": "2026-11-25T16:00:00Z"
+      },
+      "column": "shipped",
+      "status": "checked",
+      "statusWhy": "A founder checked it after the merge.",
+      "prs": [
+        {
+          "number": 80,
+          "url": "https://github.com/example-org/example-app/pull/80",
+          "state": "merged",
+          "checks": {
+            "state": "passing"
+          }
+        }
+      ],
+      "restsOn": []
+    }
+  ]
+}
