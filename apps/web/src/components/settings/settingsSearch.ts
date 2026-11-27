@@ -836,13 +836,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("enter return command ctrl multiline prompt new line composer")],
   },
   {
-    id: "use-banneret-memory",
-    title: msg("Use Banneret memory"),
-    to: "/settings/chat",
-    searchTerms: ["Claude Codex memory"],
-    scope: "environment-defaults",
-  },
-  {
     id: "follow-up-behavior",
     title: msg("Follow-up behavior"),
     to: "/settings/chat",

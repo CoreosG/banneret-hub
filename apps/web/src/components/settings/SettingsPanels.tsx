@@ -1353,7 +1353,6 @@ export function ChatSettingsPanel() {
       </SettingsSection>
 
       <MemorySettings />
-
       <SettingsSection id="follow-ups" title={gt("Follow-ups")}>
         <SettingsRow
           {...setting("follow-up-behavior")}

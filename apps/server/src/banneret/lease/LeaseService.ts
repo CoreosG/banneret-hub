@@ -1,4 +1,5 @@
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
+import { memorySettingsHandlers } from "../memory/providerMemoryPolicy.ts";
 import { memoryAccess } from "../memory/access.ts";
 // The tracker holds claim and release state. One operation per task runs in memory.
 // See docs/banneret/relay-v1/README.md, "How the Hub writes".
@@ -741,7 +742,8 @@ export const rpcHandlers = {
       );
     },
   ),
-  [TASK_LEASE_WS_METHODS.memorySummary]: Effect.fn("BanneretMemory.summary")(
+  ...memorySettingsHandlers,
+  "memory.summary": Effect.fn("BanneretMemory.summary")(
     function* ({ threadId }: { threadId: ThreadId }) {
       const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;
       const access = yield* memoryAccess(threadId, environmentId);

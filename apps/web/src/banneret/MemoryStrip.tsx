@@ -1,5 +1,5 @@
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import { TASK_LEASE_WS_METHODS, type ScopedThreadRef } from "@t3tools/contracts";
+import { type ScopedThreadRef } from "@t3tools/contracts";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useChatRead } from "./chat/client";
@@ -10,7 +10,7 @@ import { useAtomValue } from "@effect/atom-react";
 
 const summary = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:memory-summary",
-  tag: TASK_LEASE_WS_METHODS.memorySummary,
+  tag: "memory.summary",
 });
 
 export function MemoryStrip({ environmentId, threadId }: ScopedThreadRef) {

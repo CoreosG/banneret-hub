@@ -1,4 +1,4 @@
-import { providerMemoryPolicy } from "../../banneret/memory/providerMemoryPolicy.ts";
+import { claudeMemoryEnvironment } from "../../banneret/memory/providerMemoryPolicy.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import {
   compactDynamicToolOutput,
@@ -6174,6 +6174,7 @@ function claudeProposedPlan(input: unknown): string | null {
 }
 
 export interface ClaudeAdapterV2Options {
+  readonly stateDir?: string;
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClaudeSettings;
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
@@ -6215,7 +6216,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   // `onElicitation` shows T3 Code's own requests and passes on the person's answer to each.
   yield* mcpSessions.showsApprovalRequests(adapterOptions.instanceId);
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const memoryPolicy = yield* providerMemoryPolicy;
   const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
   const { attachmentsDir, fileSystem, path, random, idAllocator, queryRunner } = adapterOptions;
   const loadModelCatalog = (
@@ -14175,7 +14175,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { sdkSettings: claudeSdkLaunchArgSettings(launchArgSettings) }),
             environment: claudeQueryEnvironment(
-              { ...adapterOptions.environment, ...(yield* memoryPolicy).claudeEnv },
+              yield* claudeMemoryEnvironment(adapterOptions),
               turnInput.appThread,
               turnInput.appThread.lineage.relationshipToParent === "subagent"
                 ? yield* resolveSubagentPromptCacheTtl(turnInput.runtimePolicy.cwd)
@@ -16071,6 +16071,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       instanceId,
       settings: { ...config, enabled, binaryPath },
       environment: claudeEnvironment,
+      stateDir: serverConfig.stateDir,
       attachmentsDir: serverConfig.attachmentsDir,
       fileSystem,
       path,
