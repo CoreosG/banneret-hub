@@ -1183,13 +1183,16 @@ The offer deadline is 60 seconds. Hosts include the offerId in every state updat
 offerId returns 409 `stale_offer`. A forbidden transition for the current offer returns 403 `forbidden`.
 Both include `{error, current: {sandboxId, state, offerId?}}`. A late `starting` after expiry gets the
 current `waiting` state without an offerId. Abort that local start and accept future offers for the same sandbox.
+If the owner cancels before the host acknowledges, the relay ends the sandbox with reason `cancelled`,
+releases the slot immediately and sends no directive. A late host state update gets 409 `stale_offer`
+with current state `ended`.
 An unknown sandbox or a sandbox assigned to a different host returns 404 without its state.
 
 Host facts replies include `directives`. Host next replies contain `{offer, directives}`, with a null
 offer when no request is eligible. Both carry up to 100 pending directives for that host across sizes.
 Apply each directive to its matching booking and post the resulting state. For `extend`, set the timer
 to the absolute `endsAt` and report `running` with that exact timestamp and the running machineId.
-For `cancel`, stop the booking and report `ending`, then report the cleanup outcome. Polls repeat
+For a `cancel` directive on an acknowledged booking, stop the booking and report `ending`, then report the cleanup outcome. Polls repeat
 directives until confirmed. A newer extension replaces the pending deadline and cancel supersedes extend.
 
 For each size, the host reports `freeSlots` as its local slot capacity minus all locally held slots
@@ -1209,8 +1212,8 @@ running sandbox and an empty line. Use the normal error envelope with 409 pool_l
 | Suspended | Admin resumes or removes the account | Locked account stays locked |
 | Removed | Purge home after 14 days | Host stores the purge date |
 | Sandbox waiting | Eligible host takes it, member cancels, or two hours elapse | Relay stores the queue order |
-| Offered | Host reports starting with the current offerId, or deadline restores original place | Relay reserves one reported free slot until acknowledgement or expiry |
-| Starting | Hub enrols and reports running, or startup fails after three minutes | Starting, running, ending and cleanup_failed each occupy a local slot in freeSlots accounting |
+| Offered | Host acknowledges with starting, expiry restores the original queue place, or owner cancellation moves it to ended | Relay releases the offer reservation on cancellation or expiry |
+| Starting | Hub enrols and reports running, owner cancellation starts ending, or startup fails after three minutes | Starting, running, ending and cleanup_failed each occupy a local slot in freeSlots accounting |
 | Running | Apply extend and confirm running with endsAt, or enter ending on cancel, expiry or reboot | Agent reconciles the unit. Reboot ends it with host_restarted |
 | Ending | Verified cleanup gives ended, a failure gives cleanup_failed | Host resumes cleanup before reuse |
 | Cleanup failed | Admin verifies cleanup and closes the request | Host and relay keep the slot unavailable |
