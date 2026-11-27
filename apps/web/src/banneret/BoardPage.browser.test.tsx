@@ -27,7 +27,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
 import { useProjects, useServerConfigs } from "../state/entities";
-import { usePrimaryEnvironmentId } from "../state/environments";
+import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
 import { BoardPage } from "./BoardPage";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
@@ -187,6 +187,7 @@ function setup() {
   openTaskDialog(null);
   storeEnrolmentView(LOCAL, configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
+  vi.mocked(useConnectedEnvironmentIds).mockReturnValue([LOCAL]);
   const listeners = new Set<(event: BanneretFeedState) => void>();
   const nothing = { joined: true, value: null, fetchedAt: null };
   vi.spyOn(feedRpc, "today").mockResolvedValue(nothing);
@@ -680,8 +681,14 @@ describe("Enterprise board", () => {
           }),
         },
       });
-      await userEvent.click(dialog.getByRole("button", { name: "Continue", exact: true }));
-      expect(rpc.take).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "8" }));
+      await userEvent.click(
+        dialog.getByRole("button", { name: "Continue on Ada laptop", exact: true }),
+      );
+      expect(rpc.take).toHaveBeenCalledWith(
+        RELAY,
+        expect.objectContaining({ key: "8" }),
+        "Ada-laptop",
+      );
     });
 
     it("takes from the card menu, showing the read-back on the card until the board agrees", async () => {
@@ -698,7 +705,7 @@ describe("Enterprise board", () => {
       await using _screen = screen;
       await emit(state(["board"], boardRead(boardOf(cards()))));
       await userEvent.click(page.getByRole("button", { name: "Actions for Rate limits" }));
-      await userEvent.click(page.getByRole("menuitem", { name: "Take" }));
+      await userEvent.click(page.getByRole("menuitem", { name: "Take on Ada laptop" }));
       await vi.waitFor(() =>
         expect(cardOf("1").querySelector("[data-local-lease]")?.textContent).toBe(
           "Taking… confirming",

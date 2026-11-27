@@ -1,7 +1,7 @@
-// Banneret Hub: take and release from the Task dialog and the Board. The server's LeaseService writes
-// to the tracker; this keeps one in-memory entry per task so the dialog and the card show the same
-// operation. Phases: checking, running, settled; no check starts while an operation runs, and an
-// answer whose sequence number is no longer the latest is dropped.
+// Banneret Hub: take and release from the Task dialog and the Board. The server's LeaseService writes to
+// the tracker; one in-memory entry per page relay and task keeps the dialog and the card on the same
+// operation (checking, running, settled; a stale answer is dropped by its sequence number). Each call runs
+// on the machine leaseRoute.logic picked, with that machine's own reference.
 import {
   type AtomCommandResult,
   createEnvironmentRpcCommand,
@@ -9,6 +9,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   TASK_LEASE_WS_METHODS,
+  type EnvironmentId,
   type IssueRef,
   type TaskLeaseReleaseInput,
   type TaskLeaseResult,
@@ -26,6 +27,7 @@ import {
   outcomeTone,
   type LeaseCallFailure,
 } from "./lease.logic";
+import { machineAgent, type LeaseMachine } from "./leaseRoute.logic";
 
 const checkCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret-lease:check",
@@ -86,14 +88,16 @@ export const leaseRpc = {
         input: { ...ref, relayOrigin },
       }),
     ),
+  /** `agent` names the machine in the claim line. */
   take: (
     { environmentId, relayOrigin }: RelayTarget,
     ref: IssueRef,
+    agent: string,
   ): Promise<LeaseCall<TaskLeaseResult>> =>
     call(
       runAtomCommand(appAtomRegistry, takeCommand, {
         environmentId,
-        input: { ...ref, relayOrigin, agent: "hub" },
+        input: { ...ref, relayOrigin, agent },
       }),
     ),
   release: (
@@ -144,11 +148,18 @@ export type LeasePhase =
 export interface LeaseEntry {
   readonly seq: number;
   readonly phase: LeasePhase;
-  /** The server's last answer for this task; null before the first one. */
+  /** The last answer for this task, from `statusOn`; null before the first one there. */
   readonly status: TaskLeaseStatus | null;
+  /** The machine that gave `status`: a check on another machine starts from nothing. */
+  readonly statusOn: EnvironmentId | null;
   readonly notice: LeaseNotice | null;
   /** When this window last finished a take; the board shows "Taken by you" until the snapshot agrees. */
   readonly takenAt: number | null;
+  /**
+   * The machine this window took the task on; release, finish and withdraw go there. Set by a take that
+   * won or stopped half way, cleared by a release, withdrawal or lost race, forgotten on reload.
+   */
+  readonly heldOn: EnvironmentId | null;
 }
 
 interface LeaseStoreState {
@@ -182,21 +193,24 @@ export function useLeaseEntry(target: RelayTarget, taskId: string): LeaseEntry |
 export async function checkLease(
   target: RelayTarget,
   taskId: string,
-  ref: IssueRef,
+  machine: LeaseMachine,
   options: { readonly keepNotice?: boolean } = {},
 ): Promise<void> {
   const key = leaseKey(target, taskId);
   const entry = entryOf(key);
   if (entry?.phase.kind === "running") return;
   const seq = (entry?.seq ?? 0) + 1;
+  const sameMachine = entry?.statusOn === machine.environmentId;
   put(key, {
     seq,
     phase: { kind: "checking" },
-    status: entry?.status ?? null,
+    status: sameMachine ? (entry?.status ?? null) : null,
+    statusOn: machine.environmentId,
     notice: options.keepNotice === true ? (entry?.notice ?? null) : null,
     takenAt: entry?.takenAt ?? null,
+    heldOn: entry?.heldOn ?? null,
   });
-  const answer = await leaseRpc.check(target, ref);
+  const answer = await leaseRpc.check(on(target, machine), machine.ref);
   settle(key, seq, (current) =>
     answer.ok
       ? { ...current, phase: { kind: "settled" }, status: answer.value }
@@ -208,26 +222,38 @@ export async function checkLease(
   );
 }
 
-/** Runs one operation. A second one on the same task while it runs does nothing. */
+/** The call's target: the machine's environment, acting for the page's relay. */
+const on = (target: RelayTarget, machine: LeaseMachine): RelayTarget => ({
+  environmentId: machine.environmentId,
+  relayOrigin: target.relayOrigin,
+});
+
+/** Which machine holds the task after an operation's answer. */
+const heldAfter = (result: TaskLeaseResult, machine: LeaseMachine): EnvironmentId | null =>
+  result.outcome === "taken" || result.outcome === "incomplete" ? machine.environmentId : null;
+
+/** Runs one operation on `machine`. A second one on the same task while it runs does nothing. */
 export async function runLease(
   target: RelayTarget,
   taskId: string,
-  ref: IssueRef,
+  machine: LeaseMachine,
   operation: LeaseOperation,
   release?: Omit<TaskLeaseReleaseInput, keyof IssueRef | "relayOrigin">,
 ): Promise<LeaseCall<TaskLeaseResult>> {
+  const where = on(target, machine);
+  const ref = machine.ref;
   const call = (kind: LeaseOperation): Promise<LeaseCall<TaskLeaseResult>> => {
     switch (kind) {
       case "take":
-        return leaseRpc.take(target, ref);
+        return leaseRpc.take(where, ref, machineAgent(machine.label));
       case "release":
         return release === undefined
           ? Promise.resolve({ ok: false, message: "Pick a reason to release the task." })
-          : leaseRpc.release(target, { ...ref, ...release });
+          : leaseRpc.release(where, { ...ref, ...release });
       case "finish":
-        return leaseRpc.finish(target, ref);
+        return leaseRpc.finish(where, ref);
       case "withdraw":
-        return leaseRpc.withdraw(target, ref);
+        return leaseRpc.withdraw(where, ref);
     }
   };
   const key = leaseKey(target, taskId);
@@ -239,9 +265,11 @@ export async function runLease(
   put(key, {
     seq,
     phase: { kind: "running", operation, startedAt: Date.now() },
-    status: entry?.status ?? null,
+    status: entry?.statusOn === machine.environmentId ? (entry?.status ?? null) : null,
+    statusOn: machine.environmentId,
     notice: null,
     takenAt: entry?.takenAt ?? null,
+    heldOn: entry?.heldOn ?? null,
   });
   const answer = await call(operation);
   if (answer.ok) {
@@ -251,8 +279,10 @@ export async function runLease(
       seq,
       phase: { kind: "settled" },
       status: result.status,
+      statusOn: machine.environmentId,
       notice: message === null ? null : { tone: outcomeTone(result), message, at: Date.now() },
       takenAt: result.outcome === "taken" ? Date.now() : null,
+      heldOn: heldAfter(result, machine),
     }));
     return answer;
   }
@@ -262,7 +292,7 @@ export async function runLease(
     notice: { tone: "error", message: answer.message, at: Date.now() },
   }));
   // The tracker may have changed before the call failed; read it again rather than guess.
-  await checkLease(target, taskId, ref, { keepNotice: true });
+  await checkLease(target, taskId, machine, { keepNotice: true });
   return answer;
 }
 
@@ -272,7 +302,11 @@ export interface ReleaseTarget {
   readonly relay: RelayTarget;
   readonly taskId: string;
   readonly title: string;
-  readonly ref: IssueRef;
+  /** The machines that may release it, and the one picked when the dialog opened. */
+  readonly machines: ReadonlyArray<LeaseMachine>;
+  readonly chosen: LeaseMachine;
+  /** The chosen machine holds the claim, so the dialog offers no other. */
+  readonly held: boolean;
 }
 
 export const useReleaseDialogStore = create<{ readonly target: ReleaseTarget | null }>(() => ({
@@ -281,4 +315,22 @@ export const useReleaseDialogStore = create<{ readonly target: ReleaseTarget | n
 
 export function openReleaseDialog(target: ReleaseTarget | null): void {
   useReleaseDialogStore.setState({ target });
+}
+
+/** A take, finish or withdraw waiting for the person to pick the machine; null when none is. */
+export interface LeaseConfirmTarget {
+  readonly relay: RelayTarget;
+  readonly taskId: string;
+  readonly title: string;
+  readonly operation: "take" | "finish" | "withdraw";
+  readonly machines: ReadonlyArray<LeaseMachine>;
+  readonly chosen: LeaseMachine;
+}
+
+export const useLeaseConfirmStore = create<{ readonly target: LeaseConfirmTarget | null }>(() => ({
+  target: null,
+}));
+
+export function openLeaseConfirm(target: LeaseConfirmTarget | null): void {
+  useLeaseConfirmStore.setState({ target });
 }

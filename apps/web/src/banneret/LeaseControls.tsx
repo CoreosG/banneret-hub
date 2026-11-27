@@ -1,7 +1,8 @@
-// Banneret Hub: Take, Release, Finish and Withdraw for one task, the Release dialog, and the line that
-// says how the last change went. Every button follows the server's `leases.check` answer; nothing here
-// decides who may do what.
-import type { IssueRef, TaskLeaseStatus } from "@t3tools/contracts";
+// Banneret Hub: Take, Release, Finish and Withdraw for one task, the Release dialog, the machine picker,
+// and the line that says how the last change went. Every button follows the server's `leases.check`
+// answer from the machine the route picked; nothing here decides who may do what.
+import type { EnvironmentId, TaskLeaseStatus } from "@t3tools/contracts";
+import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import { Button } from "../components/ui/button";
@@ -16,6 +17,7 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
 import { Radio, RadioGroup } from "../components/ui/radio-group";
 import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
@@ -34,10 +36,14 @@ import {
 } from "./lease.logic";
 import { type RelayTarget, relayKey } from "./enrolmentStore";
 import "./lease.css";
+import { chooseLeaseMachine } from "./leaseMachineStore";
+import type { LeaseMachine, LeaseRoute } from "./leaseRoute.logic";
 import {
   checkLease,
+  openLeaseConfirm,
   openReleaseDialog,
   runLease,
+  useLeaseConfirmStore,
   useLeaseEntry,
   useReleaseDialogStore,
   type LeaseEntry,
@@ -52,33 +58,223 @@ const RUNNING_WORDS: Readonly<Record<LeaseOperation, string>> = {
   withdraw: "Withdrawing…",
 };
 
-/** Reads the lease when the task is shown; the tracker may have changed since the last read. */
+/** The machine a ready route runs on, or null when it cannot run. */
+export const routeMachine = (route: LeaseRoute): LeaseMachine | null =>
+  route.kind === "ready" ? route.chosen : null;
+
+/**
+ * Reads the lease when the task is shown, on the route's machine; the tracker may have changed since
+ * the last read. Picking another machine reads again there.
+ */
 export function useLeaseCheck(
   target: RelayTarget,
   taskId: string,
-  ref: IssueRef | null,
+  machine: LeaseMachine | null,
   enabled: boolean,
 ): LeaseEntry | undefined {
   const entry = useLeaseEntry(target, taskId);
   const { environmentId, relayOrigin } = target;
-  // Compared field by field: a new object for the same issue must not read again.
-  const projectId = ref?.projectId ?? null;
-  const tracker = ref?.tracker ?? null;
-  const host = ref?.host;
-  const scope = ref?.scope ?? "";
-  const key = ref?.key ?? "";
+  // Compared field by field: a new object for the same machine and issue must not read again.
+  const on = machine?.environmentId ?? null;
+  const label = machine?.label ?? "";
+  const projectId = machine?.ref.projectId ?? null;
+  const tracker = machine?.ref.tracker ?? null;
+  const host = machine?.ref.host;
+  const scope = machine?.ref.scope ?? "";
+  const key = machine?.ref.key ?? "";
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the tracker's lease when the task is shown
   useEffect(() => {
-    if (!enabled || projectId === null || tracker === null) return;
+    if (!enabled || on === null || projectId === null || tracker === null) return;
     void checkLease({ environmentId, relayOrigin }, taskId, {
-      projectId,
-      tracker,
-      ...(host === undefined ? {} : { host }),
-      scope,
-      key,
+      environmentId: on,
+      label,
+      ref: { projectId, tracker, ...(host === undefined ? {} : { host }), scope, key },
     });
-  }, [environmentId, relayOrigin, taskId, enabled, projectId, tracker, host, scope, key]);
+  }, [
+    environmentId,
+    relayOrigin,
+    taskId,
+    enabled,
+    on,
+    label,
+    projectId,
+    tracker,
+    host,
+    scope,
+    key,
+  ]);
   return entry;
+}
+
+/**
+ * Starts an operation from a button or menu item. Take asks which machine when several qualify; finish
+ * and withdraw ask only when the machine holding the claim is not known; release opens its dialog.
+ */
+export function startLease(
+  props: {
+    readonly target: RelayTarget;
+    readonly taskId: string;
+    readonly title: string;
+    readonly route: Extract<LeaseRoute, { kind: "ready" }>;
+  },
+  operation: LeaseOperation,
+): void {
+  const { target, taskId, title, route } = props;
+  if (operation === "release") {
+    openReleaseDialog({
+      relay: target,
+      taskId,
+      title,
+      machines: route.machines,
+      chosen: route.chosen,
+      held: route.held,
+    });
+    return;
+  }
+  const ask = route.machines.length > 1 && (operation === "take" || !route.held);
+  if (ask) {
+    openLeaseConfirm({
+      relay: target,
+      taskId,
+      title,
+      operation,
+      machines: route.machines,
+      chosen: route.chosen,
+    });
+    return;
+  }
+  if (operation === "take") chooseLeaseMachine(route.chosen.ref, route.chosen.environmentId);
+  void runLease(target, taskId, route.chosen, operation);
+}
+
+/** "Take on dev-server" with one machine; "Take…" when the next step asks which. */
+export function takeLabel(route: Extract<LeaseRoute, { kind: "ready" }>, continues: boolean) {
+  const verb = continues ? "Continue" : "Take";
+  return route.machines.length > 1 ? `${verb}…` : `${verb} on ${route.chosen.label}`;
+}
+
+/** Switches the machine checks and operations run on, while several qualify and none holds the claim. */
+function MachineSwitcher(props: {
+  readonly route: Extract<LeaseRoute, { kind: "ready" }>;
+  readonly disabled?: boolean;
+}) {
+  const { route } = props;
+  if (route.machines.length < 2 || route.held) return null;
+  return (
+    <Menu>
+      <MenuTrigger
+        disabled={props.disabled}
+        render={
+          <button
+            type="button"
+            data-testid="lease-machine-switcher"
+            aria-label={`Machine: ${route.chosen.label}`}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-muted-foreground text-xs outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          />
+        }
+      >
+        On {route.chosen.label}
+        <ChevronDownIcon aria-hidden className="size-3" />
+      </MenuTrigger>
+      <MenuPopup align="end" sideOffset={4}>
+        {route.machines.map((machine) => (
+          <MenuItem
+            key={machine.environmentId}
+            onClick={() => chooseLeaseMachine(machine.ref, machine.environmentId)}
+          >
+            {machine.label}
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+/** The machines a take or release may run on, as radio buttons. */
+function MachinePicker(props: {
+  readonly machines: ReadonlyArray<LeaseMachine>;
+  readonly value: EnvironmentId;
+  readonly onChange: (machine: LeaseMachine) => void;
+}) {
+  return (
+    <fieldset className="flex flex-col gap-2" data-testid="lease-machine-picker">
+      <legend className="mb-2 font-medium text-sm">Machine</legend>
+      <RadioGroup
+        aria-label="Machine"
+        value={props.value}
+        onValueChange={(value) => {
+          const machine = props.machines.find((candidate) => candidate.environmentId === value);
+          if (machine !== undefined) props.onChange(machine);
+        }}
+      >
+        {props.machines.map((machine) => (
+          <label key={machine.environmentId} className="flex items-center gap-2 text-sm">
+            <Radio value={machine.environmentId} />
+            {machine.label}
+          </label>
+        ))}
+      </RadioGroup>
+    </fieldset>
+  );
+}
+
+const CONFIRM_WORDS = {
+  take: { title: "Take task", action: "Take", running: "Taking…" },
+  finish: { title: "Finish the change", action: "Finish", running: "Finishing…" },
+  withdraw: { title: "Withdraw your claim", action: "Withdraw", running: "Withdrawing…" },
+} as const;
+
+/** Asks which machine a take, finish or withdraw runs on. Mounted once, beside the Task dialog. */
+export function LeaseConfirmHost() {
+  const target = useLeaseConfirmStore((state) => state.target);
+  if (target === null) return null;
+  return (
+    <LeaseConfirmDialog
+      key={`${relayKey(target.relay)}\u0000${target.taskId}\u0000${target.operation}`}
+    />
+  );
+}
+
+function LeaseConfirmDialog() {
+  const target = useLeaseConfirmStore((state) => state.target)!;
+  const [machine, setMachine] = useState<LeaseMachine>(target.chosen);
+  const words = CONFIRM_WORDS[target.operation];
+  const confirm = () => {
+    openLeaseConfirm(null);
+    if (target.operation === "take") chooseLeaseMachine(machine.ref, machine.environmentId);
+    void runLease(target.relay, target.taskId, machine, target.operation);
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) openLeaseConfirm(null);
+      }}
+    >
+      <DialogPopup className="max-w-md" data-testid="lease-confirm-dialog">
+        <DialogHeader>
+          <DialogTitle>{words.title}</DialogTitle>
+          <DialogDescription className="break-words">{target.title}</DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <MachinePicker
+            machines={target.machines}
+            value={machine.environmentId}
+            onChange={setMachine}
+          />
+          <p className="mt-3 text-muted-foreground text-xs">
+            The machine writes with its own tracker login.
+          </p>
+        </DialogPanel>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => openLeaseConfirm(null)}>
+            Cancel
+          </Button>
+          <Button onClick={confirm}>{`${words.action} on ${machine.label}`}</Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
 }
 
 /** The status shown with the controls: the check's own one-line reason when take and release are off. */
@@ -107,40 +303,36 @@ export function LeaseButtons(props: {
   readonly target: RelayTarget;
   readonly taskId: string;
   readonly title: string;
-  readonly issueRef: IssueRef;
+  readonly route: Extract<LeaseRoute, { kind: "ready" }>;
   readonly entry: LeaseEntry | undefined;
   /** The last holder left notes for whoever continues: Take reads "Continue". */
   readonly continues: boolean;
 }) {
-  const { entry, issueRef } = props;
-  const status = entry?.status ?? null;
-  if (status === null) return null;
+  const { entry } = props;
   const running = entry?.phase.kind === "running" ? entry.phase.operation : null;
+  const switchable = props.route.machines.length > 1 && !props.route.held;
+  // The switcher stays while the chosen machine's check failed, so another machine can be picked.
+  if (entry?.status == null) {
+    return switchable ? (
+      <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="lease-buttons">
+        <MachineSwitcher route={props.route} disabled={running !== null} />
+      </div>
+    ) : null;
+  }
+  const status = entry.status;
   // While a check runs the buttons still show the last answer, so they wait for the new one.
-  const disabled = running !== null || status.busy || entry?.phase.kind === "checking";
-  const run = (operation: LeaseOperation) =>
-    void runLease(props.target, props.taskId, issueRef, operation);
+  const disabled = running !== null || status.busy || entry.phase.kind === "checking";
+  const run = (operation: LeaseOperation) => startLease(props, operation);
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="lease-buttons">
+      <MachineSwitcher route={props.route} disabled={disabled} />
       {status.actions.take ? (
         <Button size="sm" disabled={disabled} onClick={() => run("take")}>
-          {running === "take" ? "Taking…" : props.continues ? "Continue" : "Take"}
+          {running === "take" ? "Taking…" : takeLabel(props.route, props.continues)}
         </Button>
       ) : null}
       {status.actions.release ? (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={disabled}
-          onClick={() =>
-            openReleaseDialog({
-              relay: props.target,
-              taskId: props.taskId,
-              title: props.title,
-              ref: issueRef,
-            })
-          }
-        >
+        <Button size="sm" variant="outline" disabled={disabled} onClick={() => run("release")}>
           {running === "release" ? "Releasing…" : "Release…"}
         </Button>
       ) : null}
@@ -348,6 +540,8 @@ function ReleaseDialog() {
   const target = useReleaseDialogStore((state) => state.target)!;
   const entry = useLeaseEntry(target.relay, target.taskId);
   const [form, setForm] = useState<ReleaseForm>(emptyReleaseForm);
+  const [machine, setMachine] = useState<LeaseMachine>(target.chosen);
+  const pick = !target.held && target.machines.length > 1;
   const [failure, setFailure] = useState<string | null>(null);
   const running = entry?.phase.kind === "running";
   const problem = releaseFormProblem(form);
@@ -357,7 +551,7 @@ function ReleaseDialog() {
     const answer = await runLease(
       target.relay,
       target.taskId,
-      target.ref,
+      machine,
       "release",
       releaseInput({ ...form, reason: form.reason }),
     );
@@ -377,6 +571,19 @@ function ReleaseDialog() {
           <DialogDescription className="break-words">{target.title}</DialogDescription>
         </DialogHeader>
         <DialogPanel>
+          {pick ? (
+            <div className="mb-4">
+              <MachinePicker
+                machines={target.machines}
+                value={machine.environmentId}
+                onChange={setMachine}
+              />
+            </div>
+          ) : (
+            <p className="mb-4 text-muted-foreground text-xs" data-testid="release-machine">
+              Releases on {machine.label}.
+            </p>
+          )}
           <ReleaseFormBody form={form} onChange={setForm} />
           {failure === null ? null : (
             <p role="alert" className="mt-3 text-xs" {...toneProps("error", "fg")}>

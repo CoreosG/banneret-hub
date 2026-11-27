@@ -1,14 +1,16 @@
 // Banneret Hub: a board card's menu. Take, Continue, Release, Finish and Withdraw follow the server's
-// `leases.check`, read only when the menu opens, never for every card on the board.
+// `leases.check`, read only when the menu opens, never for every card on the board, on the machine the
+// route picked (leaseRoute.logic).
 import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
 import { EllipsisVerticalIcon } from "lucide-react";
 
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../components/ui/menu";
-import { taskRef } from "./board.logic";
 import type { RelayTarget } from "./enrolmentStore";
 import { isFreeToContinue } from "./lease.logic";
-import { useLeaseCheck } from "./LeaseControls";
-import { openReleaseDialog, runLease, useLeaseEntry } from "./leaseStore";
+import { routeMachine, startLease, takeLabel, useLeaseCheck } from "./LeaseControls";
+import { useLeaseRoute } from "./leaseMachineStore";
+import { routeProblem } from "./leaseRoute.logic";
+import { useLeaseEntry } from "./leaseStore";
 import { useTaskIssueRef } from "./useTaskIssueRef";
 
 function LeaseItems(props: {
@@ -18,11 +20,12 @@ function LeaseItems(props: {
 }) {
   const { card, target } = props;
   const issueRef = useTaskIssueRef(target.environmentId, card.task);
-  const entry = useLeaseCheck(target, card.task.id, issueRef, true);
-  if (issueRef === null) {
+  const route = useLeaseRoute(target, card.task, issueRef);
+  const entry = useLeaseCheck(target, card.task.id, routeMachine(route), true);
+  if (route.kind !== "ready") {
     return (
       <MenuItem disabled data-testid="lease-menu-off">
-        Take needs a local project for {taskRef(card.task).repo}
+        {routeProblem(route) ?? "Checking who holds it…"}
       </MenuItem>
     );
   }
@@ -42,26 +45,20 @@ function LeaseItems(props: {
     );
   }
   const running = entry?.phase.kind === "running" || status.busy;
-  const run = (operation: "take" | "finish" | "withdraw") =>
-    void runLease(target, card.task.id, issueRef, operation);
+  const run = (operation: "take" | "release" | "finish" | "withdraw") =>
+    startLease({ target, taskId: card.task.id, title: card.task.title, route }, operation);
   const items = [
     status.actions.take
       ? isFreeToContinue(card)
         ? // Continue shows the last holder's note first, in the Task dialog, then takes from there.
           { id: "continue", label: "Continue…", act: () => props.onOpen(card.task) }
-        : { id: "take", label: "Take", act: () => run("take") }
+        : { id: "take", label: takeLabel(route, false), act: () => run("take") }
       : null,
     status.actions.release
       ? {
           id: "release",
           label: "Release…",
-          act: () =>
-            openReleaseDialog({
-              relay: target,
-              taskId: card.task.id,
-              title: card.task.title,
-              ref: issueRef,
-            }),
+          act: () => run("release"),
         }
       : null,
     status.actions.finish ? { id: "finish", label: "Finish", act: () => run("finish") } : null,

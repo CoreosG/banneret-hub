@@ -148,6 +148,16 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     new TaskLeaseError({ reason: "failed", detail: describeError(error) });
 
   const read = Effect.fn("LeaseService.read")(function* (ref: IssueRef) {
+    const relayOrigin = yield* ActingRelay;
+    const me = relayOrigin === undefined ? undefined : (yield* enrolment.status(relayOrigin)).me;
+    // A call for a company this machine has not joined has no person to check the login against, so
+    // it is refused before the tracker is asked anything.
+    if (relayOrigin !== undefined && me === undefined) {
+      return yield* new TaskLeaseError({
+        reason: "unavailable",
+        detail: `This machine has not joined the company at ${relayOrigin}.`,
+      });
+    }
     const detail = yield* issues.detail(ref).pipe(Effect.mapError(failed));
     const comments = [...detail.comments];
     let cursor = detail.commentsCursor;
@@ -196,8 +206,6 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         body: comment.body,
       });
     }
-    const relayOrigin = yield* ActingRelay;
-    const me = relayOrigin === undefined ? undefined : (yield* enrolment.status(relayOrigin)).me;
     const now = yield* DateTime.now;
     const fold = foldLease({
       comments: foldComments,

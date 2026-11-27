@@ -2,7 +2,7 @@
 // (Board, Feed, Today and Map are pages), as the Ports dialog does, and the Release dialog. Mounted
 // once by WorkspacesHost.
 import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog";
-import { ReleaseDialogHost } from "./LeaseControls";
+import { LeaseConfirmHost, ReleaseDialogHost } from "./LeaseControls";
 import { TaskPanel } from "./TaskPanel";
 import { openTaskDialog, useTaskDialogStore } from "./taskStore";
 
@@ -28,6 +28,7 @@ export function TaskDialogHost() {
         </Dialog>
       )}
       <ReleaseDialogHost />
+      <LeaseConfirmHost />
     </>
   );
 }

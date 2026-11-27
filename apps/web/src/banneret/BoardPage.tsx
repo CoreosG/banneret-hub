@@ -31,7 +31,9 @@ import { BoardCardMenu } from "./BoardCardMenu";
 import type { RelayTarget } from "./enrolmentStore";
 import { FeedStatus } from "./FeedParts";
 import { freeToContinueFirst, freeToContinueLine, isFreeToContinue } from "./lease.logic";
-import { LeaseButtons, LeaseNoticeLine, useLeaseCheck } from "./LeaseControls";
+import { LeaseButtons, LeaseNoticeLine, routeMachine, useLeaseCheck } from "./LeaseControls";
+import { useLeaseRoute } from "./leaseMachineStore";
+import { routeProblem } from "./leaseRoute.logic";
 import { useLeaseEntry } from "./leaseStore";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { LeaseChip } from "./ui/Chips";
@@ -200,11 +202,15 @@ function ClaimReviewActions(props: {
 }) {
   const { card, target } = props;
   const issueRef = useTaskIssueRef(target.environmentId, card.task);
-  const entry = useLeaseCheck(target, card.task.id, issueRef, true);
-  if (issueRef === null) {
+  const route = useLeaseRoute(target, card.task, issueRef);
+  const entry = useLeaseCheck(target, card.task.id, routeMachine(route), true);
+  if (route.kind === "loading") return null;
+  if (route.kind !== "ready") {
     return (
       <p className="px-1 pt-1 text-muted-foreground text-xs" data-testid="review-off">
-        Release needs a local project for {taskRef(card.task).repo}.
+        {route.kind === "none"
+          ? `Release needs a project on ${route.repo} on one of your machines.`
+          : routeProblem(route)}
       </p>
     );
   }
@@ -214,7 +220,7 @@ function ClaimReviewActions(props: {
         target={target}
         taskId={card.task.id}
         title={card.task.title}
-        issueRef={issueRef}
+        route={route}
         entry={entry}
         continues={false}
       />
