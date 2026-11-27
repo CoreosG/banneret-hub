@@ -9,6 +9,10 @@
     "boards": "sha256:5b1f0c2a9e7d4c3b8a6f1e2d3c4b5a69788796a5b4c3d2e1f0a9b8c7d6e5f4a3",
     "board.platform": "sha256:a3f4e5d6c7b8a9f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d5e4f3a2b1c",
     "board.ops": "sha256:0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b",
-    "team": "sha256:7e6d5c4b3a291807f6e5d4c3b2a1908f7e6d5c4b3a291807f6e5d4c3b2a19080"
+    "team": "sha256:7e6d5c4b3a291807f6e5d4c3b2a1908f7e6d5c4b3a291807f6e5d4c3b2a19080",
+    "team.people": "sha256:4311dba19cc8325a741fb3ed3c3d300af9de0fa0400dfd53c44947fa0b7d3071",
+    "team.hallway": "sha256:daad3a79f2ab0deadca110f64c9a442db8a0a39814c8c309f35c0d3806d65914",
+    "team.room.platform": "sha256:71d0dc1e9ae2549c99d384460339f11ed1f6bc410579fa6e0d3b7c6860307f55",
+    "team.room.ops": "sha256:144c8724ffdc819a6955233b808aa4ddbdb4bf2dce1aa561cac062c65e390bf3"
   }
 }

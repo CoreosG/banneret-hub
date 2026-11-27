@@ -168,7 +168,7 @@ function SessionLine(props: {
           <TaskButton taskId={session.taskId} tasks={props.tasks} onOpen={props.onOpen} />
         </span>
         <span className={cn(TYPE.meta, "shrink-0 whitespace-nowrap")}>
-          {machine?.label ?? "a machine"} · {sessionStateLabel(session)}{" "}
+          {machine?.label ?? "a private machine"} · {sessionStateLabel(session)}{" "}
           <RelativeTime at={session.since} kind="duration" />
         </span>
       </div>

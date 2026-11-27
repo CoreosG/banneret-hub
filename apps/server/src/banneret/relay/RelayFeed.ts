@@ -1027,12 +1027,13 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       ...(boardFlags === null && mapFlags === null ? [] : ["work"]),
       ...(feedFlags === null ? [] : ["feed"]),
       ...(graveyardOffered ? ["graveyard"] : []),
-      ...(teamFlags === null ? [] : ["team", "machines"]),
+      ...(teamFlags === null ? [] : ["team", "team.people", "team.hallway", "machines"]),
     ];
     const wantsAny = boardFlags !== null || fixed.length > 0;
     // The boards index and every `board.<id>` the head names; chosen per head read.
     const wanted = (keys: ReadonlyArray<string>) => [
       ...(boardFlags === null ? [] : boardHeadKeys(keys)),
+      ...(teamFlags === null ? [] : keys.filter((key) => key.startsWith("team.room."))),
       ...fixed,
     ];
     const at = yield* nowIso;
@@ -1185,7 +1186,15 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         }
         if (teamFlags !== null) {
           const value =
-            refs.team === undefined ? undefined : reshapeTeam(files.team, files.machines);
+            refs.team === undefined
+              ? undefined
+              : reshapeTeam(
+                  files["team.people"],
+                  files.machines,
+                  Object.entries(files)
+                    .filter(([key]) => key === "team.hallway" || key.startsWith("team.room."))
+                    .map(([, file]) => file),
+                );
           if (refs.team === undefined) teamProblem(notPublished("team"));
           else if (value === undefined) teamProblem(unreadable);
           else {

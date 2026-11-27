@@ -294,6 +294,8 @@ describe("BanneretFacts heartbeat", () => {
         expect(body.machine).toMatchObject({
           environmentId: ENVIRONMENT,
           label: "Ada laptop",
+          share: "agents_only",
+          shareUsage: false,
           kind: "laptop",
           policyFingerprint: world.policyFingerprint,
           sandbox: { enabled: false, image: null },

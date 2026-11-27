@@ -1,0 +1,18 @@
+{
+  "rooms": [],
+  "agents": [],
+  "hallway": {
+    "counts": {
+      "working": 0,
+      "waiting": 0,
+      "idle": 0,
+      "notHeardFrom": 0,
+      "stopped": 0
+    }
+  },
+  "office": {},
+  "people": {
+    "total": 1
+  },
+  "agentsNextCursor": 42
+}

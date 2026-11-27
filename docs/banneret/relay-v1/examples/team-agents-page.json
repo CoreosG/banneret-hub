@@ -1,0 +1,21 @@
+{
+  "agents": [
+    {
+      "personId": "p_Ada",
+      "counts": {
+        "working": 1,
+        "waiting": 0,
+        "idle": 0,
+        "notHeardFrom": 0,
+        "stopped": 0
+      },
+      "rooms": [
+        {
+          "board": "platform",
+          "waiting": 0
+        }
+      ]
+    }
+  ],
+  "nextCursor": null
+}

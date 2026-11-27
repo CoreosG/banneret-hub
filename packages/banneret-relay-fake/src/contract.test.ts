@@ -49,10 +49,30 @@ describe("relay v1 contract", () => {
     ]);
     expect(Object.keys(schemas.PersonRef!.properties).toSorted()).toEqual(["id", "login"]);
     expect(Object.keys(schemas.TeamPerson!.properties).toSorted()).toEqual([
+      "displayName",
       "id",
       "login",
+      "presence",
       "role",
-      "sessions",
+      "seatBoard",
+      "status",
+    ]);
+  });
+
+  it("keeps presence updates and live person events free of time fields", () => {
+    const { schemas } = readOpenApi().components as {
+      schemas: Record<string, { properties: object }>;
+    };
+    expect(Object.keys(schemas.TeamEdit!.properties).sort()).toEqual([
+      "presence",
+      "seatBoard",
+      "status",
+    ]);
+    expect(Object.keys(schemas.TeamPresence!.properties).sort()).toEqual([
+      "id",
+      "presence",
+      "seatBoard",
+      "status",
     ]);
   });
 

@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off - a real HTTP relay (the fake) behind a recording forwarder.
+import * as NodeZlib from "node:zlib";
 import * as NodeHttp from "node:http";
 
 import { type FakeRelay, startFakeRelay } from "@t3tools/banneret-relay-fake";
@@ -86,19 +87,21 @@ const startForwarder = async (target: string): Promise<Forwarder> => {
           const replyChunks: Buffer[] = [];
           reply.on("data", (chunk: Buffer) => replyChunks.push(chunk));
           reply.on("end", () => {
-            let text = Buffer.concat(replyChunks).toString("utf8");
+            const bytes = Buffer.concat(replyChunks);
+            const gzip = reply.headers["content-encoding"] === "gzip";
+            const text = (gzip ? NodeZlib.gunzipSync(bytes) : bytes).toString("utf8");
             if (forwarder.drop?.(recorded, text) === true) {
               recorded.status = 0;
               response.destroy();
               return;
             }
-            if (forwarder.rewrite) text = forwarder.rewrite(recorded, text);
+            const edited = forwarder.rewrite?.(recorded, text) ?? text;
             const headers = { ...reply.headers };
             delete headers["content-length"];
             delete headers["transfer-encoding"];
             recorded.status = reply.statusCode ?? 502;
             response.writeHead(reply.statusCode ?? 502, headers);
-            response.end(text);
+            response.end(edited === text ? bytes : gzip ? NodeZlib.gzipSync(edited) : edited);
           });
         },
       );

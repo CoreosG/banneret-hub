@@ -201,31 +201,17 @@ the reason. A task never sits there without one. A text box narrows the entries 
 
 ### Team
 
-**Team** answers "who is working on what right now". It is the first page to open when you join a company.
+The Team list shows people, their agents and their claims. Helpers count under their lead. A waiting helper
+makes the lead count as waiting. Claim chips say live, paused or quiet.
 
-- **One row per person:** their role, their machines with a dot for online or offline, the tasks they hold a
-  claim on, and their live agents counted by state.
-- **Four states, most urgent first:**
-  - **Needs you:** one of your own agents waits on your permission or your answer.
-  - **Waiting on someone else:** another person's agent waits on them.
-  - **Not heard from:** the agent's machine has gone quiet for 90 seconds. It is drawn grey and dashed, never as
-    stopped, because the agent may still be running.
-  - **Working:** a run is going.
-- **Helpers count under their lead.** A lead session takes the most urgent state among its helpers, so a helper
-  waiting on a permission makes its lead "waiting". An idle agent, one that finished its turn and waits for a next
-  message, shows only when you expand the person.
-- **Expand a person** to see the working tree: each lead agent, the helpers under it, and the task each one works
-  on, with its machine and how long it has been in its state. A task opens in the Task dialog. A claim chip opens
-  its task too.
-- **Find a person** filters by login, role, machine, or a task they hold or work on. The filter and the expanded
-  person are part of the page address. In `/` search, an exact login or the start of a login puts the person first.
+Team version 2 supplies the same facts for the planned Office, Floor and List views. Each board is one room.
+You set your own presence (Available, Focusing, Away or Off), status line and chosen room. The relay keeps
+these until you change them. Founders can set a meeting link for each room and the office. Links open in
+your browser. The Hub hosts no calls.
 
-The page uses only what the relay already sends: the relay's team file for people and sessions, its machines list,
-and the boards for claims and task titles. It makes no tracker call and never checks a claim, so opening it costs
-nothing. When the relay cannot be reached, it keeps showing what the relay last said, with its age.
-
-Two people with several machines each is the shape Banneret runs. A larger company sees the same page with more
-rows; the filter is there for that.
+Agents only is the default machine sharing choice. Sharing the machine name adds its name, kind and online dot
+for colleagues. Hidden machines share no agents. Agent and machine heartbeat times describe those devices and
+processes. Founders retain the machine list for administration.
 
 ### Search
 
@@ -276,15 +262,14 @@ shows each machine's current and target version.
 
 ## What leaves the machine
 
-A joined machine sends the relay facts and usage every 30 seconds, and nothing else:
+A joined machine sends the relay agent facts, its sharing choice and usage every 30 seconds:
 
 - the machine's name, kind, hostname, operating system and Banneret Hub version;
 - for threads in Enterprise projects only, each session's state, branch, provider, model, times and a hash of
   the repository name;
 - how much of each usage window your own Claude and Codex logins have used.
 
-It never sends prompts, replies, code, thread titles, local paths or remote URLs. Everyone at the company sees
-each session's state, provider, machine and task on the Team page, never its content. Thread content leaves through explicit sharing or a chat post. Solo projects send nothing. See
+It never sends prompts, replies, code, thread titles, local paths or remote URLs. Colleagues see each shared session's state, provider and task, and the machine's name only when you share it. The Hub sends nothing about what you do. Your presence and status line are values you set yourself. Thread content leaves through explicit sharing or a chat post. Solo projects send nothing. See
 [privacy.md](privacy.md) for the full notice.
 
 When Enterprise chat is enabled, posted messages and agent handle names leave the machine. A tool call can post thread content. The relay stores chat in plaintext. The operator and anyone with a backup and its key can read channels and DMs. Each person's read position is private and has no timestamp. Agents may read their owner's DMs with people only after the owner opts in. Every participant sees which owners have opted in.

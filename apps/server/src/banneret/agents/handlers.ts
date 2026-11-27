@@ -530,7 +530,9 @@ const make = Effect.gen(function* () {
                 return {
                   id: session.id,
                   ...(session.parentId === undefined ? {} : { parentId: session.parentId }),
-                  machine: labels.get(session.machineId) ?? session.machineId,
+                  machine: session.machineId
+                    ? (labels.get(session.machineId) ?? session.machineId)
+                    : "private",
                   provider: session.provider,
                   state: session.state,
                   ...(session.waiting === undefined ? {} : { waiting: session.waiting }),

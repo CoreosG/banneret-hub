@@ -527,8 +527,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         yield* control(fake, "/board/seed", SEED);
         const joined = yield* join(fake, relay);
         yield* assignProject(joined.workspaceId!);
-        // A live thread on no board task: each heartbeat moves the work file, never the board,
-        // and never the team once the session is on it.
+        // The branch is shown in work but is absent from the Team session and board.
         world.threads = [thread("th-plain")];
         yield* events.next(
           (event) =>
@@ -538,19 +537,17 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         );
         const before = relay.requests.filter((request) => isFile(request.url)).length;
         yield* events.reset;
-        // Reads run in order, so a head answered after the second new file means it was handled.
+        world.threads = [thread("th-plain", { branch: "work/another-unlinked-branch" })];
         yield* untilEnrolment(() => {
           const files = relay.requests.flatMap((request, index) =>
             isFile(request.url) ? [index] : [],
           );
-          const second = files[before + 1];
+          const changed = files[before];
           return (
-            second !== undefined &&
-            relay.requests
-              .slice(second + 1)
-              .some((request) => isHead(request.url) && request.status !== undefined)
+            changed !== undefined &&
+            relay.requests.slice(changed + 1).some((r) => isHead(r.url) && r.status !== undefined)
           );
-        }, "two new work files handled");
+        }, "the changed work file handled");
         expect(yield* events.count).toBe(0);
       }).pipe(onFreshHub(world)),
     );
@@ -1381,11 +1378,10 @@ describe("BanneretRelayFeed team from the snapshot", () => {
           expect(state.team!.problem).toBeUndefined();
           const person = state.team!.value!.people.find((entry) => entry.sessions.length === 2)!;
           expect(person.role).toBe("founder");
-          expect(person.machines).toHaveLength(1);
-          expect(person.machines[0]!.connected).toBe(true);
+          expect(person.machines).toHaveLength(0);
           const [lead, child] = person.sessions;
           expect(lead!.state).toBe("working");
-          expect(lead!.machineId).toBe(person.machines[0]!.id);
+          expect(lead!.machineId).toBeUndefined();
           expect(lead!.provider).toBe("claude");
           expect(child!.parentId).toBe(lead!.id);
           expect(child!.state).toBe("waiting");
@@ -1429,10 +1425,6 @@ describe("reshapeTeam", () => {
             id: "p_ada",
             login: "ada-example",
             role: "founder",
-            sessions: [
-              { id: "s_1", machineId: "m_1", provider: "claude", state: "working", since: "x" },
-              { id: "s_2", machineId: "m_1", state: "working", since: "x" },
-            ],
           },
           { login: "no-id", role: "founder", sessions: [] },
           { id: "p_bo", login: "bo-example", sessions: [] },
@@ -1452,6 +1444,14 @@ describe("reshapeTeam", () => {
         ],
         truncated: false,
       },
+      [
+        {
+          sessions: [
+            { personId: "p_ada", id: "s_1", provider: "claude", state: "working", since: "x" },
+            { personId: "p_ada", id: "s_2", machineId: "m_1", state: "working", since: "x" },
+          ],
+        },
+      ],
     );
     expect(team?.people.map((person) => person.login)).toEqual(["ada-example", "bo-example"]);
     expect(team?.people[0]?.machines).toEqual([
@@ -1459,6 +1459,6 @@ describe("reshapeTeam", () => {
     ]);
     expect(team?.people[0]?.sessions.map((session) => session.id)).toEqual(["s_1"]);
     expect(team?.people[1]?.role).toBe("limited_staff");
-    expect(reshapeTeam({ people: "nope" }, undefined)).toBeUndefined();
+    expect(reshapeTeam({ people: "nope" }, undefined, [])).toBeUndefined();
   });
 });

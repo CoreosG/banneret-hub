@@ -215,6 +215,8 @@ const openEvents = (machine: Enrolled, lastEventId?: string) =>
   client.events(machine.key, machine.token, machine.machineId, lastEventId);
 
 const EVENT_SCHEMAS: Record<string, string> = {
+  "team.changed": "TeamChangedEvent",
+  "team.rooms_changed": "TeamRoomsChangedEvent",
   "chat.changed": "ChatChangedEvent",
   "chat.delivery": "ChatDeliveryEvent",
   "needs.changed": "NeedsChangedEvent",
@@ -228,7 +230,8 @@ const EVENT_SCHEMAS: Record<string, string> = {
 const nextEvent = async (reader: SseReader) => {
   const event = await reader.next();
   if (!event) throw new Error("the event stream closed");
-  if (event.event.startsWith("chat.")) expect(event.id).toBeUndefined();
+  if (event.event.startsWith("chat.") || event.event.startsWith("team."))
+    expect(event.id).toBeUndefined();
   else expect(event.id).toBeDefined();
   expectSchema(EVENT_SCHEMAS[event.event] ?? "unknown event", event.data);
   return event;
@@ -989,20 +992,21 @@ describe("revocation", () => {
 });
 
 describe("machine visibility", () => {
-  it("shows every live machine to everyone, and a revoked one only to its owner and founders", async () => {
+  it("shows named machines to colleagues, and a revoked one only to its owner and founders", async () => {
     const owner = await enrol({ role: "limited_staff" });
     const ownerOther = await enrol({ login: owner.login, role: "limited_staff" });
     const founderMachine = await enrol({ role: "founder" });
     const staff = await enrol({ role: "limited_staff" });
 
-    const staffView = await listMachines(staff);
-    for (const live of [owner, ownerOther, founderMachine]) {
-      expect(staffView.find((item) => item.id === live.machineId)).toMatchObject({
-        revocable: false,
-      });
-    }
-    expect(staffView.find((item) => item.id === owner.machineId)?.revokedAt).toBeUndefined();
-
+    expect((await listMachines(staff)).map((m) => m.id)).not.toContain(owner.machineId);
+    const facts = factsFor(owner);
+    await call(owner, "POST", "/relay/v1/facts", {
+      ...facts,
+      machine: { ...facts.machine, share: "agents_and_name" },
+    });
+    expect((await listMachines(staff)).find((m) => m.id === owner.machineId)).toMatchObject({
+      revocable: false,
+    });
     expect((await call(owner, "DELETE", `/relay/v1/machines/${owner.machineId}`)).status).toBe(204);
 
     const ids = (view: ListedMachine[]) => view.map((item) => item.id);
@@ -1129,10 +1133,10 @@ describe("snapshot", () => {
     const live = await call(machine, "GET", "/relay/v1/today");
     expect(fetched.needs).toEqual((live.body as { needsYou: unknown }).needsYou);
     expect(Object.keys(fetched.work as object).toSorted()).toEqual(["stuck", "working"]);
-    const listed = (await listMachines(machine)).map((item) => item.id);
-    expect(
-      (fetched.machines as { items: Array<{ id: string }> }).items.map((item) => item.id),
-    ).toEqual(listed);
+    const listed = (await listMachines(machine)).map((m) => m.id);
+    const shared = (fetched.machines as { items: Array<{ id: string }> }).items.map((m) => m.id);
+    expect(listed).toEqual(expect.arrayContaining(shared));
+    expect(shared).not.toContain(machine.machineId);
     if (head.files.repositories !== undefined) {
       const repositories = fetched.repositories as { items: unknown[]; truncated: boolean };
       expect(repositories.items.length).toBeGreaterThanOrEqual(2);
@@ -2487,37 +2491,45 @@ describe("map and the stage plan", () => {
 
 describe("team", () => {
   interface TeamSession {
-    readonly id: string;
-    readonly parentId?: string;
-    readonly machineId: string;
-    readonly provider: string;
-    readonly state: string;
-    readonly waiting?: string;
-    readonly taskId?: string;
-    readonly since: string;
+    id: string;
+    personId: string;
+    state: string;
+    since: string;
+    machineId?: string;
+    parentId?: string;
+    waiting?: string;
   }
-  interface TeamFile {
-    readonly people: ReadonlyArray<{
-      readonly id: string;
-      readonly login: string;
-      readonly role: string;
-      readonly sessions: ReadonlyArray<TeamSession>;
-    }>;
-  }
-
-  const readTeam = async (machine: Enrolled) => {
+  const filesFor = async (machine: Enrolled) => {
     await client.rebuildSnapshot(machine.login);
     const head = await call(machine, "GET", "/relay/v1/snapshot/head");
-    expect(head.status, JSON.stringify(head.body)).toBe(200);
-    const ref = (head.body as { files: Record<string, string> }).files.team;
-    expect(ref, "the head names team").toBeDefined();
-    const file = await call(machine, "GET", `/relay/v1/snapshot/files/${(ref ?? "").slice(7)}`);
-    expect(file.status, JSON.stringify(file.body)).toBe(200);
-    expectSchema("SnapshotTeam", file.body);
-    return file.body as TeamFile;
+    return (head.body as { files: Record<string, string> }).files;
   };
-  const sessionsOf = async (machine: Enrolled, reader = machine) =>
-    (await readTeam(reader)).people.find((person) => person.login === machine.login)?.sessions;
+  const readFile = async (machine: Enrolled, ref: string, schema: string) => {
+    const file = await call(machine, "GET", "/relay/v1/snapshot/files/" + ref.slice(7));
+    expectSchema(schema, file.body);
+    return file.body;
+  };
+  const readTeam = async (machine: Enrolled) => {
+    const files = await filesFor(machine);
+    await readFile(machine, files.team!, "SnapshotTeam");
+    return (await readFile(machine, files["team.people"]!, "SnapshotTeamPeople")) as {
+      people: { id: string; login: string; role: string; presence: string }[];
+    };
+  };
+  const sessionsOf = async (machine: Enrolled, reader = machine) => {
+    const person = (await readTeam(reader)).people.find((p) => p.login === machine.login)!;
+    const files = await filesFor(reader);
+    const sessions: TeamSession[] = [];
+    for (const [key, ref] of Object.entries(files)) {
+      if (key === "team.hallway" || key.startsWith("team.room.")) {
+        const room = (await readFile(reader, ref, "SnapshotTeamRoom")) as {
+          sessions: TeamSession[];
+        };
+        sessions.push(...room.sessions.filter((s) => s.personId === person.id));
+      }
+    }
+    return sessions;
+  };
   const sendFacts = async (machine: Enrolled, activity: ReadonlyArray<Record<string, unknown>>) => {
     const body = { ...factsFor(machine), activity };
     const sent = await call(machine, "POST", "/relay/v1/facts", body);
@@ -2535,19 +2547,192 @@ describe("team", () => {
     const team = await readTeam(machine);
     const me = team.people.find((person) => person.login === machine.login);
     expect(me?.role).toBe("founder");
-    expect(me?.sessions).toEqual([]);
+    expect(me?.presence).toBe("off");
   });
 
+  it("publishes a self-set status live and in the next directory", async () => {
+    const machine = await enrol();
+    const reader = await openEvents(machine);
+    try {
+      const edit = { presence: "focusing", status: { text: "Reviewing" } };
+      const reply = await call(machine, "PUT", "/relay/v1/team/me", edit);
+      expect(reply.status).toBe(200);
+      expect(await nextEvent(reader)).toMatchObject({
+        event: "team.changed",
+        data: { person: reply.body },
+      });
+      expect((await readTeam(machine)).people.find((p) => p.login === machine.login)).toMatchObject(
+        edit,
+      );
+    } finally {
+      await reader.cancel();
+    }
+  });
+
+  it("hides sessions when the heartbeat omits sharing", async () => {
+    const machine = await enrol();
+    const facts = factsFor(machine);
+    await sendFacts(machine, exampleActivity());
+    expect(await sessionsOf(machine)).not.toHaveLength(0);
+    const { share: _share, ...hidden } = facts.machine as typeof facts.machine & { share: string };
+    expect(
+      (await call(machine, "POST", "/relay/v1/facts", { ...facts, machine: hidden })).status,
+    ).toBe(200);
+    expect(await sessionsOf(machine)).toEqual([]);
+  });
+
+  it("counts a waiting helper under its lead and filters names and usage on each heartbeat", async () => {
+    const owner = await enrol();
+    const viewer = await enrol({ role: "limited_staff" });
+    const id = "task_" + randomText(5);
+    await client.control("/board/seed", {
+      tasks: [{ id, title: "Room task", holder: owner.login }],
+    });
+    const [lead, helper, stop] = exampleActivity();
+    const sessions = [
+      { ...lead, sessionId: "lead_" + id, taskId: id },
+      { ...helper, sessionId: "helper_" + id, parentSessionId: "lead_" + id, taskId: id },
+      { ...stop, sessionId: "stop_" + id, taskId: id },
+    ];
+    const facts = factsFor(owner);
+    for (const named of [true, false]) {
+      await call(owner, "POST", "/relay/v1/facts", {
+        ...facts,
+        machine: {
+          ...facts.machine,
+          share: named ? "agents_and_name" : "agents_only",
+          shareUsage: named,
+        },
+        activity: sessions,
+      });
+      const directory = await readTeam(viewer);
+      const person = directory.people.find((p) => p.login === owner.login)!;
+      const files = await filesFor(viewer);
+      const team = await readFile(viewer, files.team!, "SnapshotTeam");
+      expect(team).toMatchObject({
+        agents: expect.arrayContaining([
+          expect.objectContaining({
+            personId: person.id,
+            counts: { waiting: 1, working: 0, idle: 0, notHeardFrom: 0, stopped: 1 },
+            rooms: [{ board: "platform", waiting: 1 }],
+          }),
+        ]),
+      });
+      const page = await call(viewer, "GET", "/relay/v1/team/rooms/platform/sessions");
+      expectSchema("SnapshotTeamRoom", page.body);
+      const own = (
+        page.body as { sessions: { id: string; machineId?: string; stopReason?: string }[] }
+      ).sessions.filter((s) => s.id.endsWith(id));
+      expect(own).toHaveLength(3);
+      expect(own.map((s) => s.machineId)).toEqual(
+        Array(3).fill(named ? owner.machineId : undefined),
+      );
+      expect(own.find((s) => s.id === "stop_" + id)?.stopReason).toBe(
+        named ? "usage_limit" : undefined,
+      );
+    }
+  });
+
+  it("fits 500 agent owners into a paged summary and finds directory entries past the first page", async () => {
+    const isolated = external
+      ? undefined
+      : await startFakeRelay({ autoApprove: false, retryAfterMs: 0 });
+    const original = client;
+    if (isolated) client = new RelayClient(isolated.url);
+    try {
+      const reader = await enrol();
+      const prefix = newLogin();
+      const activity = exampleActivity()[0]!;
+      const taskId = "t_" + randomText(4);
+      await client.control("/board/seed", { tasks: [{ id: taskId, title: "Platform task" }] });
+      for (let index = 0; index < 500; index++) {
+        const owner = await enrol({ login: prefix + "-" + String(index).padStart(3, "0") });
+        await sendFacts(owner, [{ ...activity, sessionId: "s_" + index, taskId }]);
+      }
+      const files = await filesFor(reader);
+      const summary = (await readFile(reader, files.team!, "SnapshotTeam")) as {
+        agents: { personId: string }[];
+        agentsNextCursor: string | null;
+        rooms: { counts: { working: number } }[];
+      };
+      expect(Buffer.byteLength(JSON.stringify(summary))).toBeLessThanOrEqual(65536);
+      expect(summary.rooms[0]?.counts.working).toBeGreaterThanOrEqual(500);
+      expect(summary.agentsNextCursor).toEqual(expect.any(String));
+      const ids = new Set(summary.agents.map((row) => row.personId));
+      let cursor = summary.agentsNextCursor;
+      while (cursor) {
+        const page = await call(
+          reader,
+          "GET",
+          "/relay/v1/team/agents?cursor=" + encodeURIComponent(cursor),
+        );
+        expectSchema("TeamAgentsPage", page.body);
+        const next = page.body as { agents: { personId: string }[]; nextCursor: string | null };
+        for (const row of next.agents) {
+          expect(ids.has(row.personId)).toBe(false);
+          ids.add(row.personId);
+        }
+        cursor = next.nextCursor;
+      }
+      const target = "/relay/v1/team/people?q=" + prefix;
+      const first = await call(reader, "GET", target);
+      expectSchema("SnapshotTeamPeople", first.body);
+      const page = first.body as { people: { id: string }[]; nextCursor: string };
+      expect(page.people).toHaveLength(100);
+      expect(typeof page.nextCursor).toBe("string");
+      expect(
+        (await call(reader, "GET", target + "&cursor=" + encodeURIComponent(page.nextCursor))).body,
+      ).toMatchObject({
+        people: expect.arrayContaining([expect.objectContaining({ login: prefix + "-100" })]),
+      });
+      const last = await call(reader, "GET", target + "-499");
+      expect(last.body).toMatchObject({ people: [{ login: prefix + "-499" }], nextCursor: null });
+      if (isolated) expect(ids.size).toBe(500);
+    } finally {
+      client = original;
+      await isolated?.close();
+    }
+  });
+
+  it("restricts meeting writes and serves scoped agent heartbeats", async () => {
+    const founder = await enrol();
+    const staff = await enrol({ role: "limited_staff" });
+    for (const path of ["office", "rooms/platform"]) {
+      const target = "/relay/v1/team/" + path;
+      expect((await call(staff, "PUT", target, { meetingUrl: null })).status).toBe(403);
+      expect(
+        (await call(founder, "PUT", target, { meetingUrl: "http://example.org" })).status,
+      ).toBe(400);
+      expect(
+        (await call(founder, "PUT", target, { meetingUrl: "https://meet.example.org" })).status,
+      ).toBe(204);
+      expect((await call(founder, "PUT", target, { meetingUrl: null })).status).toBe(204);
+    }
+    const id = "s_" + randomText(5);
+    await sendFacts(founder, [{ ...exampleActivity()[0], sessionId: id }]);
+    const heard = await call(staff, "GET", "/relay/v1/team/heartbeats?sessions=" + id);
+    expectSchema("TeamHeartbeats", heard.body);
+    expect(heard.body).toMatchObject({ sessions: [{ id }] });
+    expect(
+      (
+        await call(
+          staff,
+          "GET",
+          "/relay/v1/team/heartbeats?sessions=" + Array(51).fill(id).join(","),
+        )
+      ).status,
+    ).toBe(400);
+  });
   it("includes a directory member before their first sign-in", async () => {
     const reader = await enrol();
     const person = (await readTeam(reader)).people.find((entry) => entry.login === "cy-example");
-    expect(person).toMatchObject({ role: "limited_staff", sessions: [] });
+    expect(person).toMatchObject({ role: "limited_staff", presence: "off" });
     expect((await listMachines(reader)).map((machine) => machine.ownerId)).not.toContain(
       person?.id,
     );
   });
 
-  it("lists every live session with its parent, leaves stopped ones out, and carries no titles or branches", async () => {
+  it("lists every live session with its parent, retains stopped sessions, and carries no titles or branches", async () => {
     const machine = await enrol();
     const other = await enrol({ role: "limited_staff" });
     await sendFacts(machine, exampleActivity());
@@ -2555,12 +2740,13 @@ describe("team", () => {
     expect(sessions?.map((session) => [session.id, session.state])).toEqual([
       ["s_q8Lm2Vx", "working"],
       ["s_h3Pw7Nc", "waiting"],
+      ["s_c4Rt1Ya", "stopped"],
     ]);
     const helper = sessions?.find((session) => session.id === "s_h3Pw7Nc");
     expect(helper?.parentId).toBe("s_q8Lm2Vx");
     expect(helper?.waiting).toBe("permission");
-    expect(helper?.machineId).toBe(machine.machineId);
-    expect(sessions?.[0]?.taskId).toBe("t_K9w3Ls");
+    expect(helper?.machineId).toBeUndefined();
+
     const raw = JSON.stringify(await readTeam(other));
     expect(raw).not.toContain("work/42-guild-invites");
     expect(raw).not.toContain("th_01JDX3K9");
@@ -2609,7 +2795,11 @@ describe("team", () => {
     await sendFacts(machine, exampleActivity());
     await client.control("/machines/age", { machineId: machine.machineId, seconds: 120 });
     const unheard = await sessionsOf(machine);
-    expect(unheard?.map((session) => session.state)).toEqual(["not_heard_from", "not_heard_from"]);
+    expect(unheard.map((s) => s.state).sort()).toEqual([
+      "not_heard_from",
+      "not_heard_from",
+      "stopped",
+    ]);
     expect(unheard?.every((session) => session.waiting === undefined)).toBe(true);
     const listed = (await listMachines(machine)).find((entry) => entry.id === machine.machineId);
     expect(unheard?.[0]?.since).toBe(listed?.lastHeardAt);

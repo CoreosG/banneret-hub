@@ -88,6 +88,18 @@ export const BanneretRelayHealth = Schema.Literals([
 ]);
 export type BanneretRelayHealth = typeof BanneretRelayHealth.Type;
 
+type Presence = "available" | "focusing" | "away" | "off";
+export interface TeamPresenceValues {
+  presence: Presence;
+  status?: { text: string };
+  seatBoard?: string;
+}
+export interface TeamPresenceEdit {
+  presence?: Presence;
+  status?: { text: string } | null;
+  seatBoard?: string | null;
+}
+
 export const BanneretMachineKind = Schema.Literals(["laptop", "desktop", "server", "cloud"]);
 export type BanneretMachineKind = typeof BanneretMachineKind.Type;
 

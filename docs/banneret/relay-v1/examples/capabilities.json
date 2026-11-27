@@ -3,6 +3,7 @@
   "iconUrl": null,
   "enrolment": { "start": "/relay/v1/enroll/start", "browser": "/admin/hub/enroll" },
   "me": { "id": "p_7Hq2xK", "login": "ada-example", "role": "founder", "machineId": "m_4fT9wQ" },
+  "team": {"preset":"company","stoppedKeptSeconds":3600},
   "sections": [
     { "id": "today", "kind": "today", "version": 1, "flags": [] },
     { "id": "needs", "kind": "needs", "version": 1, "flags": ["mentions"] },
@@ -12,7 +13,7 @@
     { "id": "feed", "kind": "feed", "version": 1, "flags": ["graveyard"] },
     { "id": "task", "kind": "task", "version": 1, "flags": [] },
     {"id": "chat", "kind": "chat", "version": 1, "flags": ["channels", "private_channels", "dms", "group_dms", "threads", "agents", "agent_dms", "agent_owner_dm_read", "others_agents", "task_links", "reactions", "search", "promote"]},
-    { "id": "team", "kind": "team", "version": 1, "flags": [] }
+    { "id": "team", "kind": "team", "version": 2, "flags": ["presence","status","sharing","meeting_links"] }
   ],
   "chat": {"maxTextBytes": 16384, "editWindowSeconds": 0, "rate": {"postsPerMinute": 10, "postsPerHour": 120, "openAsks": 5, "hopCap": 4, "pairPerMinute": 20}, "retentionDays": {"channels": 0, "dms": 0}},
   "dashboards": [{"id":"metrics","title":"Metrics","url":"https://metrics.example.org"}],

@@ -1,0 +1,12 @@
+{
+  "people": [
+    {
+      "id": "p_7Hq2xK",
+      "login": "ada-example",
+      "role": "founder",
+      "presence": "off",
+      "email": "ada@example.com"
+    }
+  ],
+  "nextCursor": null
+}
