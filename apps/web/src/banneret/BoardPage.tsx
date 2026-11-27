@@ -204,10 +204,13 @@ function ClaimReviewActions(props: {
   const issueRef = useTaskIssueRef(target.environmentId, card.task);
   const route = useLeaseRoute(target, card.task, issueRef);
   const entry = useLeaseCheck(target, card.task.id, routeMachine(route), true);
+  if (route.kind === "loading") return null;
   if (route.kind !== "ready") {
     return (
       <p className="px-1 pt-1 text-muted-foreground text-xs" data-testid="review-off">
-        {routeProblem(route)}
+        {route.kind === "none"
+          ? `Release needs a project on ${route.repo} on one of your machines.`
+          : routeProblem(route)}
       </p>
     );
   }

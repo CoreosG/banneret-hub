@@ -27,7 +27,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
 import { useProjects, useServerConfigs } from "../state/entities";
-import { usePrimaryEnvironmentId } from "../state/environments";
+import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
 import { BoardPage } from "./BoardPage";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
@@ -187,6 +187,7 @@ function setup() {
   openTaskDialog(null);
   storeEnrolmentView(LOCAL, configured);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(LOCAL);
+  vi.mocked(useConnectedEnvironmentIds).mockReturnValue([LOCAL]);
   const listeners = new Set<(event: BanneretFeedState) => void>();
   const nothing = { joined: true, value: null, fetchedAt: null };
   vi.spyOn(feedRpc, "today").mockResolvedValue(nothing);

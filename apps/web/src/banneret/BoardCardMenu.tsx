@@ -25,7 +25,7 @@ function LeaseItems(props: {
   if (route.kind !== "ready") {
     return (
       <MenuItem disabled data-testid="lease-menu-off">
-        {routeProblem(route)}
+        {routeProblem(route) ?? "Checking who holds it…"}
       </MenuItem>
     );
   }

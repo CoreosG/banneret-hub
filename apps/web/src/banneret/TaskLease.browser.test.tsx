@@ -14,6 +14,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../test/render";
 import { useProjects, useServerConfigs } from "../state/entities";
+import { useConnectedEnvironmentIds } from "../state/environments";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { LeaseConfirmHost, ReleaseDialogHost } from "./LeaseControls";
 import { useLeaseMachineStore } from "./leaseMachineStore";
@@ -30,6 +31,7 @@ import { taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
 
 vi.mock("../state/entities", { spy: true });
+vi.mock("../state/environments", { spy: true });
 vi.mock("../components/issue/IssueDetailPanel", () => ({
   IssueDetailPanel: () => <div data-testid="issue-thread" />,
 }));
@@ -190,6 +192,9 @@ function setup(options: { issues?: boolean; localRepo?: boolean; server?: Linked
       label: "dev-server",
       me: { login: server.me, role: "staff" },
     });
+  } else if (server !== undefined) {
+    // It answered: no relay joined.
+    useEnrolmentStore.setState((state) => ({ views: { ...state.views, [SERVER]: [] } }));
   }
   vi.mocked(useServerConfigs).mockReturnValue(
     new Map<EnvironmentId, unknown>([
@@ -203,6 +208,9 @@ function setup(options: { issues?: boolean; localRepo?: boolean; server?: Linked
             ] as const,
           ]),
     ]) as unknown as ReturnType<typeof useServerConfigs>,
+  );
+  vi.mocked(useConnectedEnvironmentIds).mockReturnValue(
+    server === undefined ? [LOCAL] : [LOCAL, SERVER],
   );
   vi.mocked(useProjects).mockReturnValue([
     ...(issues && options.localRepo !== false ? [project] : []),
@@ -724,6 +732,30 @@ describe("Machines", () => {
     );
     // The choice is remembered for the repository.
     expect(useLeaseMachineStore.getState().last).toBe(SERVER);
+  });
+
+  it("keeps the machine switch when the default machine cannot be reached", async () => {
+    const { emit, rpc } = setup({ server: { me: ME, hasRepo: true } });
+    rpc.check.mockImplementation(async (where) =>
+      where.environmentId === LOCAL
+        ? {
+            ok: false,
+            message: "The Hub server is not reachable. Check the task before trying again.",
+          }
+        : ok(leaseStatus()),
+    );
+    await using _task = await openTask(card());
+    await emit(feed([card()]));
+    await expect.element(page.getByRole("alert")).toBeVisible();
+    await userEvent.click(page.getByTestId("lease-machine-switcher"));
+    await userEvent.click(page.getByRole("menuitem", { name: "dev-server" }));
+    await vi.waitFor(() =>
+      expect(rpc.check).toHaveBeenLastCalledWith(
+        ON_SERVER,
+        expect.objectContaining({ projectId: serverProject.id }),
+      ),
+    );
+    await expect.element(button("Take…")).toBeEnabled();
   });
 
   it("ignores a linked server that belongs to someone else", async () => {

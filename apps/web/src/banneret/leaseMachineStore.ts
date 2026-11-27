@@ -6,6 +6,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { create } from "zustand";
 
 import { useProjects, useServerConfigs } from "../state/entities";
+import { useConnectedEnvironmentIds } from "../state/environments";
 import { type RelayTarget, useEnrolmentStore } from "./enrolmentStore";
 import { useLeaseEntry } from "./leaseStore";
 import {
@@ -67,18 +68,28 @@ export function chooseLeaseMachine(
   }
 }
 
-/** Every environment this client knows, with what the route needs from each. */
+/**
+ * Every connected environment whose enrolments have been read, with what the route needs from each. A
+ * disconnected one keeps a cached config and its last enrolment, but a call to it cannot run.
+ */
 function useLeaseEnvironments(): ReadonlyArray<LeaseEnvironment> {
   const configs = useServerConfigs();
+  const connected = useConnectedEnvironmentIds();
   const projects = useProjects();
   const views = useEnrolmentStore((state) => state.views);
-  return [...configs].map(([environmentId, config]) => ({
-    environmentId,
-    label: config?.environment?.label,
-    issues: config?.environment?.capabilities?.issues === true,
-    projects: projects.filter((project) => project.environmentId === environmentId),
-    enrolments: views[environmentId] ?? [],
-  }));
+  return [...configs].flatMap(([environmentId, config]) => {
+    const enrolments = views[environmentId];
+    if (!connected.includes(environmentId) || enrolments === undefined) return [];
+    return [
+      {
+        environmentId,
+        label: config?.environment?.label,
+        issues: config?.environment?.capabilities?.issues === true,
+        projects: projects.filter((project) => project.environmentId === environmentId),
+        enrolments,
+      },
+    ];
+  });
 }
 
 /** Where the task's take and release run from this window; see leaseRoute.logic for the rules. */

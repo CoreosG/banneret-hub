@@ -154,9 +154,12 @@ export function takeLabel(route: Extract<LeaseRoute, { kind: "ready" }>, continu
 }
 
 /** Switches the machine checks and operations run on, while several qualify and none holds the claim. */
-function MachineSwitcher(props: { readonly route: LeaseRoute; readonly disabled?: boolean }) {
+function MachineSwitcher(props: {
+  readonly route: Extract<LeaseRoute, { kind: "ready" }>;
+  readonly disabled?: boolean;
+}) {
   const { route } = props;
-  if (route.kind !== "ready" || route.machines.length < 2 || route.held) return null;
+  if (route.machines.length < 2 || route.held) return null;
   return (
     <Menu>
       <MenuTrigger
@@ -306,11 +309,19 @@ export function LeaseButtons(props: {
   readonly continues: boolean;
 }) {
   const { entry } = props;
-  const status = entry?.status ?? null;
-  if (status === null) return null;
   const running = entry?.phase.kind === "running" ? entry.phase.operation : null;
+  const switchable = props.route.machines.length > 1 && !props.route.held;
+  // The switcher stays while the chosen machine's check failed, so another machine can be picked.
+  if (entry?.status == null) {
+    return switchable ? (
+      <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="lease-buttons">
+        <MachineSwitcher route={props.route} disabled={running !== null} />
+      </div>
+    ) : null;
+  }
+  const status = entry.status;
   // While a check runs the buttons still show the last answer, so they wait for the new one.
-  const disabled = running !== null || status.busy || entry?.phase.kind === "checking";
+  const disabled = running !== null || status.busy || entry.phase.kind === "checking";
   const run = (operation: LeaseOperation) => startLease(props, operation);
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="lease-buttons">

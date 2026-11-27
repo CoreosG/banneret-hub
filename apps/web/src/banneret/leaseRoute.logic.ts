@@ -22,6 +22,8 @@ export interface LeaseMachine {
  * only when provably someone else's; one that has not joined this relay is never written to.
  */
 export type LeaseRoute =
+  /** The page's machine has not answered with its enrolments yet: nothing is shown. */
+  | { readonly kind: "loading" }
   | { readonly kind: "none"; readonly repo: string }
   | { readonly kind: "not-joined"; readonly machine: string; readonly company: string }
   | {
@@ -104,11 +106,12 @@ export function leaseRoute(input: LeaseRouteInput): LeaseRoute {
   const pageEnvironment = input.environments.find(
     (environment) => environment.environmentId === page.environmentId,
   );
-  const pagePeople = personByRelay(pageEnvironment?.enrolments ?? []);
+  if (pageEnvironment === undefined) return { kind: "loading" };
+  const pagePeople = personByRelay(pageEnvironment.enrolments);
   const person = pagePeople.get(page.relayOrigin);
   const company =
-    pageEnvironment?.enrolments.find((view) => view.relayOrigin === page.relayOrigin)
-      ?.displayName ?? hostOf(page.relayOrigin);
+    pageEnvironment.enrolments.find((view) => view.relayOrigin === page.relayOrigin)?.displayName ??
+    hostOf(page.relayOrigin);
   const machines: LeaseMachine[] = [];
   const unjoined: string[] = [];
   for (const environment of input.environments) {
@@ -180,6 +183,7 @@ export function routeProblem(route: LeaseRoute): string | null {
       return `Take needs a project on ${route.repo} on one of your machines.`;
     case "not-joined":
       return `${route.machine} has the repository but has not joined ${route.company}.`;
+    case "loading":
     case "ready":
       return null;
   }

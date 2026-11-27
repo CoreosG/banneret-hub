@@ -148,8 +148,10 @@ export type LeasePhase =
 export interface LeaseEntry {
   readonly seq: number;
   readonly phase: LeasePhase;
-  /** The server's last answer for this task; null before the first one. */
+  /** The last answer for this task, from `statusOn`; null before the first one there. */
   readonly status: TaskLeaseStatus | null;
+  /** The machine that gave `status`: a check on another machine starts from nothing. */
+  readonly statusOn: EnvironmentId | null;
   readonly notice: LeaseNotice | null;
   /** When this window last finished a take; the board shows "Taken by you" until the snapshot agrees. */
   readonly takenAt: number | null;
@@ -198,10 +200,12 @@ export async function checkLease(
   const entry = entryOf(key);
   if (entry?.phase.kind === "running") return;
   const seq = (entry?.seq ?? 0) + 1;
+  const sameMachine = entry?.statusOn === machine.environmentId;
   put(key, {
     seq,
     phase: { kind: "checking" },
-    status: entry?.status ?? null,
+    status: sameMachine ? (entry?.status ?? null) : null,
+    statusOn: machine.environmentId,
     notice: options.keepNotice === true ? (entry?.notice ?? null) : null,
     takenAt: entry?.takenAt ?? null,
     heldOn: entry?.heldOn ?? null,
@@ -261,7 +265,8 @@ export async function runLease(
   put(key, {
     seq,
     phase: { kind: "running", operation, startedAt: Date.now() },
-    status: entry?.status ?? null,
+    status: entry?.statusOn === machine.environmentId ? (entry?.status ?? null) : null,
+    statusOn: machine.environmentId,
     notice: null,
     takenAt: entry?.takenAt ?? null,
     heldOn: entry?.heldOn ?? null,
@@ -274,6 +279,7 @@ export async function runLease(
       seq,
       phase: { kind: "settled" },
       status: result.status,
+      statusOn: machine.environmentId,
       notice: message === null ? null : { tone: outcomeTone(result), message, at: Date.now() },
       takenAt: result.outcome === "taken" ? Date.now() : null,
       heldOn: heldAfter(result, machine),
