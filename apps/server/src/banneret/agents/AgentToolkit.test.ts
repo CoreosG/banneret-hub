@@ -1099,6 +1099,17 @@ describe("agent lease tools against the fake relay", () => {
                 key: "follow",
                 text: "Which checks passed?",
               });
+              yield* device.signedChat("PUT", "me/agents/wake", { wake: "nobody" });
+              yield* device.signedChat("POST", "messages", {
+                conversationId: "c_general",
+                threadRootId: root,
+                key: "waiting",
+                text: "Read this later.",
+              });
+              expect(yield* call("banneret_chat_inbox", {})).toMatchObject({
+                items: [{ state: "consumed", message: { text: "Read this later." } }],
+              });
+              expect(yield* call("banneret_chat_inbox", {})).toMatchObject({ items: [] });
               const receipts = new Set<string>();
               const service = yield* ThreadManagementService.ThreadManagementService;
               let stopped = false;

@@ -4,6 +4,7 @@
 // tracker login, exactly as the Board's Take and Release buttons do.
 import {
   ChatCard,
+  ChatDeliveries,
   LEASE_RELEASE_REASONS,
   PoolResources,
   SandboxReceipt,
@@ -399,11 +400,11 @@ const ChatAskTool = writes(
     dependencies,
   }),
 );
-const ChatInboxTool = reads(
+const ChatInboxTool = writes(
   Tool.make("banneret_chat_inbox", {
     description: "Read and consume your waiting inbox deliveries. Call again until empty.",
     parameters: Schema.Record(Schema.String, Schema.Never),
-    success: Schema.Unknown,
+    success: ChatDeliveries,
     failure,
     failureMode: "return",
     dependencies,

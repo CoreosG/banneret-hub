@@ -299,3 +299,17 @@
   text-decoration: underline;
   margin-inline-end: 0.75rem;
 }
+[data-chat-outside] {
+  --outside: oklch(55% 0.12 200);
+  --outside-foreground: oklch(45% 0.11 210);
+  color: var(--outside-foreground);
+  background: color-mix(in srgb, var(--outside) 8%, var(--card));
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.75rem;
+}
+.dark [data-chat-outside] {
+  --outside: oklch(70% 0.14 200);
+  --outside-foreground: oklch(80% 0.12 200);
+  background: color-mix(in srgb, var(--outside) 16%, var(--card));
+}

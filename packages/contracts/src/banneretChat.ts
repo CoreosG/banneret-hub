@@ -462,6 +462,16 @@ export const RoleAction = Schema.Union([
 ]);
 export const ChatAction = Schema.Union([
   ThreadChatAction,
+  Schema.Struct({ kind: Schema.Literal("directory"), ...Page }),
+  Schema.Struct({ kind: Schema.Literal("requests"), id: Id, ...Page }),
+  Schema.Struct({
+    kind: Schema.Literal("request"),
+    id: Id,
+    note: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({ kind: Schema.Literals(["cancelRequest", "approve", "decline"]), id: Id }),
+  Schema.Struct({ kind: Schema.Literal("addMember"), id: Id, member: Id }),
+  Schema.Struct({ kind: Schema.Literal("applyWake"), wake: ChatWake }),
   Schema.Struct({ kind: Schema.Literal("settings"), id: Id, patch: ChatPatch }),
   Schema.Struct({ kind: Schema.Literal("handles"), ...Page }),
   Schema.Struct({ kind: Schema.Literal("dmSettings") }),
@@ -569,6 +579,21 @@ export function callChannel<A>(
       throw new Error("Thread chat settings require the owning Hub.");
     case "handles":
       return call("GET", "handles" + page);
+    case "directory":
+      return call("GET", "directory" + page);
+    case "requests":
+      return call("GET", "conversations/" + action.id + "/requests" + page);
+    case "request":
+      return call("POST", "conversations/" + action.id + "/requests", { note: action.note });
+    case "cancelRequest":
+      return call("DELETE", "requests/" + action.id);
+    case "approve":
+    case "decline":
+      return call("POST", "requests/" + action.id + "/" + action.kind);
+    case "addMember":
+      return call("PUT", "conversations/" + action.id + "/members/" + action.member);
+    case "applyWake":
+      return call("PUT", "me/agents/wake", { wake: action.wake });
     case "dmSettings":
       return call("GET", "me/settings");
     case "setDmSettings":

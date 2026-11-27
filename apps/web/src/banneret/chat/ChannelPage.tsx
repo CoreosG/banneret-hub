@@ -1,3 +1,6 @@
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
+import { ChannelMembers } from "./ChannelMembers";
+import { RequestControl } from "./JoinRequests";
 import { randomUUID } from "../../lib/utils";
 import "./chat.css";
 import { useEffect, useRef, useState } from "react";
@@ -22,7 +25,7 @@ import {
   conversations,
   conversationTitle,
   offersConversation,
-  members,
+  channelMembers,
   history,
   replyAuthors,
   chatRpc,
@@ -118,10 +121,11 @@ function ChannelView({ enterprise, id, root, focus }: View) {
     missingAt === revision
       ? undefined
       : rows.value?.find((c) => c.id === id && offersConversation(c, flags));
-  const people = useChatRead(
-    () => (channel ? members({ environmentId, relayOrigin }, id) : Promise.resolve([])),
-    revision + ":" + (channel?.id ?? ""),
+  const roster = useChatRead(
+    () => (channel ? channelMembers({ environmentId, relayOrigin }, id) : Promise.resolve([])),
+    revision + ":" + membershipRevision + ":" + (channel?.id ?? ""),
   );
+  const people = roster.value?.filter((m) => m.kind === "person");
   const title = channel ? conversationTitle(channel, enterprise.enrolment.me?.login) : "";
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -164,7 +168,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                     {channel.purpose}{" "}
                     {flags.includes("agents") &&
                       channel.agents !== "off" &&
-                      "Only an explicit @mention wakes another agent."}
+                      "Only an explicit @mention reaches another agent."}
                   </p>
                 )}
               </div>
@@ -176,7 +180,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                   key={JSON.stringify([channel.access, channel.managers, channel.agents])}
                   enterprise={enterprise}
                   channel={channel}
-                  people={people.value}
+                  people={people}
                   close={() => setSettings(false)}
                   saved={membershipChanged}
                 />
@@ -223,27 +227,53 @@ function ChannelView({ enterprise, id, root, focus }: View) {
               )}
             </header>
             {showMembers && (
-              <section data-chat-members>
-                <b>Members</b> {people.value?.map((p) => p.login).join(", ")} {people.error}
-                {channel.kind === "channel" && !channel.defaultChannel && channel.me.member && (
-                  <button
-                    onClick={async () => {
-                      try {
-                        await chatRpc.run(enterprise.target, {
-                          kind: "leave",
-                          id,
-                        });
-                        membershipChanged();
-                        setMembers(false);
-                      } catch (e) {
-                        setError(String(e));
-                      }
-                    }}
-                  >
-                    Leave channel
-                  </button>
-                )}
-              </section>
+              <Sheet
+                open
+                onOpenChange={(open) => {
+                  if (!open) setMembers(false);
+                }}
+              >
+                <SheetContent>
+                  <SheetHeader>
+                    <SheetTitle>
+                      {channel.kind === "channel" ? "Members of #" + channel.name : "Members"}
+                    </SheetTitle>
+                    <p className="text-xs text-muted-foreground">
+                      {channel.memberCount.people} people · {channel.memberCount.agents} agents
+                    </p>
+                  </SheetHeader>
+                  <section data-chat-members className="overflow-auto">
+                    {roster.value && (
+                      <ChannelMembers
+                        enterprise={enterprise}
+                        channel={channel}
+                        members={roster.value}
+                        agents={agents.value ?? []}
+                        changed={membershipChanged}
+                      />
+                    )}{" "}
+                    {roster.error}
+                    {channel.kind === "channel" && !channel.defaultChannel && channel.me.member && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await chatRpc.run(enterprise.target, {
+                              kind: "leave",
+                              id,
+                            });
+                            membershipChanged();
+                            setMembers(false);
+                          } catch (e) {
+                            setError(String(e));
+                          }
+                        }}
+                      >
+                        Leave channel
+                      </button>
+                    )}
+                  </section>
+                </SheetContent>
+              </Sheet>
             )}
             {error && <p role="alert">{error}</p>}
             <Timeline
@@ -252,7 +282,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
               root={undefined}
               focus={root ? undefined : focus}
               people={[
-                ...(people.value ?? []),
+                ...(people ?? []),
                 ...(flags.includes("agents") ? (agents.value ?? []) : []).filter(
                   (h) =>
                     (enterprise.enrolment.me?.permissions.includes("agents.mention") &&
@@ -283,7 +313,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                 root={root}
                 focus={focus}
                 people={[
-                  ...(people.value ?? []),
+                  ...(people ?? []),
                   ...(flags.includes("agents") ? (agents.value ?? []) : []).filter(
                     (h) =>
                       (enterprise.enrolment.me?.permissions.includes("agents.mention") &&
@@ -464,12 +494,13 @@ function Timeline({
     setBusy(true);
     try {
       await chatRpc.run(enterprise.target, action);
-      if (action.kind === "join") membershipChanged();
+      if (["join", "request", "cancelRequest"].includes(action.kind)) membershipChanged();
       refresh((n) => n + 1);
       setError("");
       setBusy(false);
       return true;
     } catch (e) {
+      if (action.kind === "cancelRequest" || action.kind === "request") membershipChanged();
       setError(String(e));
       setBusy(false);
       return false;
@@ -826,7 +857,10 @@ function Timeline({
           {channel.archived ? (
             "This channel is archived."
           ) : channel.kind === "channel" && channel.me.request ? (
-            <RelativeTime prefix="Request sent" at={channel.me.request.createdAt} />
+            <>
+              <RelativeTime prefix="Request sent" at={channel.me.request.createdAt} />
+              <RequestControl channel={channel} busy={busy} change={write} />
+            </>
           ) : channel.kind === "channel" && channel.me.can.join ? (
             <>
               <span>Join #{channel.name} to post</span>
@@ -835,7 +869,10 @@ function Timeline({
               </button>
             </>
           ) : channel.kind === "channel" && channel.me.can.request ? (
-            "Ask to join #" + channel.name
+            <>
+              <span>Ask to join #{channel.name}</span>
+              <RequestControl channel={channel} busy={busy} change={write} />
+            </>
           ) : (
             composerRestriction(channel)
           )}

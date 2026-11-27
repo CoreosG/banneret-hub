@@ -1,3 +1,4 @@
+import { JoinRequests } from "./JoinRequests";
 import appCss from "../../index.css?inline";
 import {
   EnvironmentId,
@@ -27,10 +28,11 @@ import { EnterpriseSidebarRows } from "../EnterpriseSidebarRows";
 import { TabsFrame } from "../tabs/TabsFrame";
 import { useTabsStore } from "../tabs/tabsStore";
 import * as Schema from "effect/Schema";
-import { ChatConversations, ChatMessages } from "@t3tools/contracts";
+import { ChatConversations, ChatConversation, ChatMessages } from "@t3tools/contracts";
 import { DmPrivacy, ChannelPage } from "./ChannelPage";
 import { NeedsRow } from "../TodayRows";
 import { chatRpc } from "./client";
+const decodeConversation = Schema.decodeUnknownSync(ChatConversation);
 const decodeMessages = Schema.decodeUnknownSync(ChatMessages);
 const decodeConversations = Schema.decodeUnknownSync(ChatConversations);
 declare module "vite-plus/test/browser" {
@@ -38,11 +40,11 @@ declare module "vite-plus/test/browser" {
     companyChat: {
       (op: "outsideStart"): Promise<typeof import("@t3tools/contracts").RelayMe.Type>;
       (
-        op: "start" | "roles:start",
+        op: "start" | "roles:start" | "wake:start",
       ): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
-      (op: "call" | "roles:call" | "leo", arg: ChannelAction): Promise<ChannelResult>;
+      (op: "call" | "roles:call" | "leo" | "wake:leo", arg: ChannelAction): Promise<ChannelResult>;
       (op: "ask"): Promise<BanneretFeedNeedsItem>;
-      (op: "stop" | "roles:stop"): Promise<void>;
+      (op: "stop" | "roles:stop" | "wake:stop"): Promise<void>;
     };
   }
 }
@@ -137,6 +139,8 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
             "private_channels",
             "reactions",
             "channel_access",
+            "join_requests",
+            "agent_inbox",
             "dms",
             "group_dms",
             "agents",
@@ -156,8 +160,11 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       graveyard: null,
       team: { value: { people }, fetchedAt: null },
     } as BanneretFeedState);
-  vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => {
-    const result = await commands.companyChat("call", action);
+  const rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (target, action) => {
+    const result = await commands.companyChat(
+      target.environmentId === "manager" ? "leo" : "call",
+      action,
+    );
     if (!result.ok) throw new Error(result.message);
     if (
       ["post", "edit", "delete", "read", "dm", "notifications", "setDmSettings"].includes(
@@ -340,12 +347,67 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     .click();
   await expect.element(screen.getByText("Message deleted")).toBeVisible();
   await expect.element(screen.getByRole("button", { name: /2 replies/ })).toBeVisible();
+  const roster = screen.getByRole("button", { name: /[0-9]+ people/ }).first();
+  await roster.click();
+  const sheet = page.getByRole("dialog", { name: "Members of #platform" });
+  await expect.element(sheet.getByText("Members of #platform")).toBeVisible();
+  await expect.element(sheet.getByText("Manager", { exact: true }).first()).toBeVisible();
+  await sheet.getByText("Add people", { exact: true }).click();
+  await sheet.getByLabelText("Find people or agents").fill("kim");
+  await sheet.getByRole("button", { name: "Add kim", exact: true }).click();
+  await expect.element(sheet.getByText(/They will see [0-9]+ earlier messages/)).toBeVisible();
+  await sheet.getByRole("button", { name: "Confirm add" }).click();
+  await expect.element(sheet.getByText("Already in this channel.", { exact: true })).toBeVisible();
+  await sheet.getByRole("button", { name: "Close" }).click();
+  const createdCommunity = await commands.companyChat("leo", {
+    kind: "create",
+    name: "contributors",
+    purpose: "Discuss patches",
+    template: "community",
+  });
+  if (!createdCommunity.ok) throw new Error(createdCommunity.message);
+  const community = decodeConversation(createdCommunity.value);
+  await screen.getByRole("button", { name: "Browse channels" }).click();
+  const directory = screen.getByRole("region", { name: "Channel directory" });
+  await directory.getByRole("button", { name: "Request", exact: true }).click();
+  await directory.getByRole("button", { name: "Cancel request" }).click();
+  await directory.getByLabelText("Request note").fill("Working on patches");
+  await directory.getByRole("button", { name: "Request", exact: true }).click();
+  await expect.element(directory.getByRole("button", { name: "Cancel request" })).toBeVisible();
+  {
+    const target = { environmentId: EnvironmentId.make("manager"), relayOrigin: origin };
+    await using requests = await render(
+      <JoinRequests
+        target={target}
+        item={{
+          id: community.id,
+          conversationId: community.id,
+          count: 1,
+          kind: "chat_join_requests",
+          title: "Requests to join #contributors",
+          createdAt: "2026-11-27T00:00:00Z",
+        }}
+      />,
+    );
+    await requests.getByRole("button", { name: "1 person asked to join #contributors" }).click();
+    await expect.element(requests.getByText("Working on patches")).toBeVisible();
+    await requests.getByRole("button", { name: "Approve", exact: true }).click();
+    await expect
+      .element(requests.getByRole("button", { name: "Approve", exact: true }))
+      .not.toBeInTheDocument();
+    expect(rpc).toHaveBeenCalledWith(target, expect.objectContaining({ kind: "approve" }));
+  }
+  await screen.getByRole("button", { name: "Browse channels" }).click();
   await screen.getByRole("button", { name: "Start direct message" }).click();
   await screen.getByRole("checkbox", { name: "kim" }).click();
   await screen.getByRole("checkbox", { name: "leo" }).click();
   await screen.getByRole("button", { name: "Open conversation" }).click();
   await expect.element(screen.getByText(/The relay's operator can read it/)).toBeVisible();
   await expect.element(screen.getByText("kim's agents can read this conversation.")).toBeVisible();
+  const defaultWake = screen.getByLabelText("Who can wake new agents");
+  await defaultWake.selectOptions("nobody");
+  await expect.element(defaultWake).toHaveValue("nobody");
+  await screen.getByRole("button", { name: "Apply to all my agents" }).click();
   const optIn = screen.getByRole("checkbox", { name: "My agents can read my DMs" });
   await expect.element(optIn).not.toBeChecked();
   await optIn.click();
