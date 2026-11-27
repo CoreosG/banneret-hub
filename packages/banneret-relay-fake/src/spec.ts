@@ -24,6 +24,7 @@ export type SchemaName =
   | "ChatAuthor"
   | "ChatMessage"
   | "ChatHandle"
+  | "ChatActiveProgress"
   | "ChatDelivery"
   | "ChatRead"
   | "ChatChange"
@@ -165,6 +166,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "chat-author.json": "ChatAuthor",
   "chat-message.json": "ChatMessage",
   "chat-handle.json": "ChatHandle",
+  "chat-active-progress.json": "ChatActiveProgress",
   "chat-delivery.json": "ChatDelivery",
   "chat-read.json": "ChatRead",
   "chat-change.json": "ChatChange",

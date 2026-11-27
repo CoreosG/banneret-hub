@@ -58,6 +58,7 @@ export async function command(op, arg) {
       const ada = await enrol(relay, "ada"),
         leo = await enrol(relay, "leo");
       session.ada = ada;
+      session.leo = leo;
       const c = (
         await leo({
           kind: "create",
@@ -88,6 +89,33 @@ export async function command(op, arg) {
         key: "mention",
         text: "@ada could you check the upload flow before we release?",
       });
+      await leo.call("PUT", "chat/handles/h_review", {
+        name: "reviewer",
+        threadRef: "review1",
+        machineId: leo.me.machineId,
+        provider: "codex",
+      });
+      await leo.call("POST", "chat/messages", {
+        asHandle: "h_review",
+        key: "review",
+        conversationId: c.id,
+        text: "The upload check passed.",
+        card: {
+          title: "Upload verification",
+          tone: "ok",
+          fields: [{ label: "Checks", value: "12 passed" }],
+          links: [],
+        },
+      });
+      await leo.call("PUT", "chat/messages/" + root.id + "/progress", {
+        asHandle: "h_review",
+        text: "Reviewing the release",
+        state: "working",
+        steps: [
+          { title: "Run upload checks", state: "done" },
+          { title: "Review results", state: "working" },
+        ],
+      });
       const kim = await enrol(relay, "kim");
       await kim.call("PUT", "chat/me/settings", { agentsReadMyDms: true });
       return {
@@ -111,6 +139,7 @@ export async function command(op, arg) {
     session = undefined;
     return;
   }
+  if (op === "leo") return session.leo(arg);
   if (op === "call") return session.ada(arg);
   throw new Error("Unknown chat test command.");
 }

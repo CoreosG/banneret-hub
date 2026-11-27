@@ -47,6 +47,7 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import { makeDeliveries } from "../chat/Deliveries.ts";
 import { catchUpChat, channelAction, chatUnavailable } from "./ChatSync.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import { BanneretEnrolment, type RelayEnrolment } from "./Enrolment.ts";
@@ -541,6 +542,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   options: RelayFeedOptions,
   /** The layer's scope: a feed added while a request runs must outlive that request. */
   layerScope: Scope.Scope,
+  agents?: Effect.Success<typeof makeDeliveries>,
 ) {
   const changes = yield* PubSub.unbounded<BanneretFeedState>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -824,6 +826,9 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     yield* publishSnapshot;
   });
 
+  const syncAgents = Effect.suspend(() =>
+    agents && joined && chatFlags.includes("agents") ? agents.reconcile(enrolment) : Effect.void,
+  );
   const handleMessage = Effect.fn("BanneretRelayFeed.handleMessage")(function* (
     key: string,
     message: SseMessage,
@@ -833,6 +838,9 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     const data = parseData(message.data);
     switch (message.event) {
       // Live eligible create -> one transient notice; subscribe, reconnect, restart -> snapshot without notices.
+      case "chat.delivery":
+        yield* syncAgents;
+        return;
       case "chat.changed":
         if (sections.includes("chat") && typeof data?.seq === "number" && isChatNotice(data.notice))
           yield* PubSub.publish(changes, { ...snapshot(), chatNotice: data.notice });
@@ -855,6 +863,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         // The relay cannot replay what this server missed: refetch everything.
         needsCount = null;
         yield* refreshSections(key);
+        yield* syncAgents;
         yield* syncChat(key);
         wakeSnapshot();
         yield* bump;
@@ -1292,11 +1301,11 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   const follow = Effect.fn("BanneretRelayFeed.follow")(function* (key: string) {
     let delay = 0;
     let connections = 0;
-    yield* refreshSections(key);
     for (;;) {
       const outcome = yield* connectOnce(
         key,
         Effect.gen(function* () {
+          yield* syncAgents;
           yield* syncChat(key);
           connections += 1;
           delay = 0;
@@ -1350,6 +1359,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         lastHint = undefined;
         yield* enrolment.setBoardTasks([]);
         chatSeq = 0;
+        chatFlags = [];
         joined = next;
         lastEventId = undefined;
         live = false;
@@ -1367,6 +1377,8 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         labelsReadAt = Number.NEGATIVE_INFINITY;
         if (next !== null) {
           if (next.label !== undefined) labels.set(environmentId, next.label);
+          yield* refreshSections(next.key);
+          yield* syncAgents;
           follower = yield* Effect.forkIn(follow(next.key) as Effect.Effect<never>, layerScope);
           const wake = yield* Queue.sliding<void>(1);
           snapshotWake = wake;
@@ -1378,6 +1390,8 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         yield* publishSnapshot;
       }),
     );
+
+  yield* adopt(joinedOf(yield* enrolment.status));
 
   // One supervisor: follows the enrolment, so the stream runs only while configured.
   yield* Effect.forkIn(
@@ -1406,10 +1420,19 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     { bufferSize: 64, strategy: "sliding" },
   );
 
+  if (agents)
+    yield* Effect.forkIn(
+      Effect.forever(Effect.sleep("10 seconds").pipe(Effect.andThen(syncAgents))),
+      layerScope,
+    );
   const service: RelayFeedInstance = {
     chat: (action) =>
       joined && sections.includes("chat")
-        ? channelAction(enrolment.signedChat, action)
+        ? action.kind === "threadChat"
+          ? agents && chatFlags.includes("agents")
+            ? agents.settings(enrolment, action)
+            : Effect.succeed(chatUnavailable)
+          : channelAction(enrolment.signedChat, action)
         : Effect.succeed(chatUnavailable),
     today: readToday,
     needs: readNeeds,
@@ -1424,6 +1447,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
 
 const make = Effect.fn("BanneretRelayFeed.make")(function* (
   overrides: Partial<RelayFeedOptions> = {},
+  agents?: Effect.Success<typeof makeDeliveries>,
 ) {
   const options = { ...DEFAULT_OPTIONS, ...overrides };
   const enrolment = yield* BanneretEnrolment;
@@ -1440,7 +1464,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         if (relay === undefined) return undefined;
         const existing = feeds.get(relay.origin);
         if (existing !== undefined) return existing;
-        const added = yield* makeRelayFeed(relay, environmentId, options, layerScope);
+        const added = yield* makeRelayFeed(relay, environmentId, options, layerScope, agents);
         feeds.set(relay.origin, added);
         return added;
       }),
@@ -1510,7 +1534,10 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
 export const layerWith = (options: Partial<RelayFeedOptions>) =>
   Layer.effect(BanneretRelayFeed, make(options));
 
-export const layer = layerWith({});
+export const layer = Layer.effect(
+  BanneretRelayFeed,
+  Effect.flatMap(makeDeliveries, (agents) => make({}, agents)),
+);
 
 /** Handlers for the feed RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {

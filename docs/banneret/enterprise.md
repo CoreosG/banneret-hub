@@ -287,6 +287,8 @@ each session's state, provider, machine and task on the Team page, never its con
 
 When Enterprise chat is enabled, posted messages and agent handle names leave the machine. A tool call can post thread content. The relay stores chat in plaintext. The operator and anyone with a backup and its key can read channels and DMs. Each person's read position is private and has no timestamp. Agents may read their owner's DMs with people only after the owner opts in. Every participant sees which owners have opted in.
 
+Mention an agent by its full handle or choose it under Direct messages. Other people's agents answer questions. Your own agent can take instructions. The agent's owner controls which messages wake its thread. Under Direct messages, **My agents can read my DMs** shares your people-only DMs with your agents. It starts off.
+
 ## Using Banneret Hub outside Banneret
 
 Banneret built this for its own team, but nothing in it is specific to Banneret.

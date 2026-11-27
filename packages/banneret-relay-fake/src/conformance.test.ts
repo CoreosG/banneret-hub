@@ -2916,6 +2916,140 @@ describe("opt-in health", () => {
 });
 
 describe("chat contract", () => {
+  it("delivers a non-owner agent DM only to its machine and coalesces progress", async () => {
+    const owner = await enrol(),
+      sender = await enrol();
+    const prefix = "/relay/v1/chat/",
+      asHandle = "h_" + randomText(8);
+    const handle = await call(owner, "PUT", prefix + "handles/" + asHandle, {
+      threadRef: "thread1",
+      name: "builder",
+      provider: "codex",
+      machineId: owner.machineId,
+    });
+    expectSchema("ChatHandle", handle.body);
+    const dm = await call(sender, "POST", prefix + "conversations", {
+      kind: "dm",
+      members: [asHandle],
+    });
+    const conversationId = (dm.body as { id: string }).id;
+    await call(sender, "POST", prefix + "messages", {
+      conversationId,
+      text: "What passed?",
+      key: "question",
+    });
+    const items = (await call(owner, "GET", prefix + "deliveries")).body as {
+      items: { id: string }[];
+    };
+    expect(items.items).toMatchObject([{ fromOwner: false, reason: "dm" }]);
+    const path = prefix + "deliveries/" + items.items[0]!.id;
+    expect((await call(sender, "POST", path + "/claim", { asHandle })).status).toBe(403);
+    expect((await call(owner, "POST", path + "/claim", { asHandle })).body).toMatchObject({
+      state: "claimed",
+    });
+    expect((await call(owner, "POST", path + "/consume", { asHandle })).body).toMatchObject({
+      state: "consumed",
+    });
+    const progress = (text: string) =>
+      call(owner, "PUT", prefix + "messages/" + conversationId + "/progress", {
+        asHandle,
+        text,
+        state: "working",
+      });
+    const first = await progress("Checking");
+    expectSchema("ChatMessage", first.body);
+    expect((await progress("Reading results")).body).toMatchObject({
+      id: (first.body as { id: string }).id,
+      text: "Reading results",
+    });
+  });
+  it("limits owner DM reads, delivers only explicitly mentioned agents, and resolves a named ask", async () => {
+    const owner = await enrol(),
+      colleague = await enrol();
+    const path = "/relay/v1/chat/",
+      h = "h_" + randomText(8),
+      helper = "h_" + randomText(8);
+    const who = async (machine: Enrolled) =>
+      ((await call(machine, "GET", "/relay/v1/capabilities")).body as { me: { id: string } }).me.id;
+    const person = await who(colleague);
+    for (const [id, name] of [
+      [h, "builder"],
+      [helper, "reviewer"],
+    ] as const) {
+      expect(
+        (
+          await call(owner, "PUT", path + "handles/" + id, {
+            name,
+            threadRef: id,
+            provider: "codex",
+            machineId: owner.machineId,
+          })
+        ).status,
+      ).toBe(200);
+    }
+    const dm = (
+      await call(owner, "POST", path + "conversations", { kind: "dm", members: [person] })
+    ).body as { id: string };
+    const read = () =>
+      call(owner, "GET", path + "conversations/" + dm.id + "/messages?asHandle=" + h);
+    expect((await read()).status).toBe(404);
+    for (const enabled of [true, false]) {
+      await call(owner, "PUT", path + "me/settings", { agentsReadMyDms: enabled });
+      expect((await read()).status).toBe(enabled ? 200 : 404);
+    }
+    const c = (
+      await call(colleague, "POST", path + "conversations", {
+        kind: "channel",
+        name: "agents-" + randomText(6),
+        private: false,
+        agents: "allowed",
+      })
+    ).body as { id: string };
+    const root = (
+      await call(colleague, "POST", path + "messages", {
+        conversationId: c.id,
+        text: "@" + owner.login + "/builder what passed?",
+        key: "question",
+      })
+    ).body as { id: string };
+    const write = (text: string, key: string) =>
+      call(owner, "POST", path + "messages", {
+        conversationId: c.id,
+        threadRootId: root.id,
+        text,
+        key,
+        asHandle: helper,
+      });
+    await write("Checks passed.", "reply");
+    const inbox = () => call(owner, "GET", path + "deliveries?asHandle=" + h);
+    expect((await inbox()).body).toMatchObject({
+      items: [{ reason: "mention", fromOwner: false }],
+    });
+    await write("@" + owner.login + "/builder which test?", "mention");
+    expect((await inbox()).body).toMatchObject({
+      items: [{ reason: "mention" }, { reason: "mention", fromOwner: false }],
+    });
+    const ask = await call(owner, "POST", path + "asks", {
+      to: person,
+      question: "Which upload?",
+      key: "ask",
+      asHandle: h,
+      threadRootId: root.id,
+    });
+    expectSchema("ChatAsk", ask.body);
+    expect((await call(colleague, "GET", "/relay/v1/needs")).body).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ kind: "chat_ask", ask: ask.body })]),
+    });
+    await call(colleague, "POST", path + "messages", {
+      conversationId: c.id,
+      threadRootId: root.id,
+      text: "Linux.",
+      key: "answer",
+    });
+    expect((await inbox()).body).toMatchObject({
+      items: [{ reason: "mention" }, { reason: "mention" }, { reason: "answer" }],
+    });
+  });
   it("opens the same private DM for either participant and resolves its inbox item on read", async () => {
     const sender = await enrol(),
       recipient = await enrol(),

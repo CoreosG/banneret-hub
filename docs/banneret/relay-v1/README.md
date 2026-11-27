@@ -1135,6 +1135,14 @@ past `after`; the Hub then reloads the conversation list and the open conversati
 
 Message changes resolve to the current message, including its tombstone after deletion. Conversation changes carry a reference so each participant fetches their own view. A private cursor update reaches only the same person’s machines. A chat ask adds `ask` to its class 1 Needs item so the named person can answer by id.
 
+### Owner Hub delivery and progress calls
+
+`PUT /chat/handles/{id}` accepts an opaque string `threadRef`. Omit `name` or `wake` to preserve that field on an existing registration. A new handle defaults to its claim name and wakes for everyone. The Hub derives the id from the thread. An existing id cannot move to another owner, machine or thread.
+
+Every `ChatDelivery` includes the target `threadRef`, current `wake` policy and current `message: ChatMessage`. Only its enrolled machine can read or claim it. `GET /chat/deliveries?asHandle=...` additionally limits the list to one owned handle. Reclaiming a claimed delivery from the same machine returns its current contents. The Hub uses the handle and delivery ids as its durable dispatch receipt.
+
+`GET /chat/progress?cursor=...&limit=...` returns `{items: [{handleId, threadRef, message}], nextCursor}` for this machine's working or stale progress. For `PUT /chat/messages/{id}/progress`, the id may be a thread root, a DM conversation, or the working progress message itself. Updating by progress id must reject a closed message. This prevents a stale reconciliation from stopping a newer message. Agent conversation reads with `asHandle` page oldest first.
+
 ## Shared machines
 
 The relay advertises the signed-in section `{id:"pool",kind:"pool",version:1,flags:[]}` when
