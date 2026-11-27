@@ -24,7 +24,6 @@ test(
         body,
         author: null,
         createdAt: `2026-10-${day}T00:00:00.000Z`,
-        updatedAt: `2026-10-${day}T00:00:00.000Z`,
         url: null,
       });
       const send = WebSocket.prototype.send;
