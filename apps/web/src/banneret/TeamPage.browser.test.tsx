@@ -3,6 +3,7 @@ import { minuteTick } from "@t3tools/client-runtime/clock";
 import {
   EnvironmentId,
   PoolResources,
+  PoolFounderView,
   type BanneretBoardCard,
   type BanneretEnrolmentView,
   type BanneretFeedBoardRead,
@@ -25,6 +26,8 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
 import * as Schema from "effect/Schema";
+import rawFounder from "../../../../docs/banneret/relay-v1/examples/pool-founder-view.json";
+import { PoolFounderPage } from "./PoolFounderPage";
 import { PoolPage } from "./PoolPage";
 import rawPool from "../../../../docs/banneret/relay-v1/examples/pool.json";
 import ownExample from "../../../../docs/banneret/relay-v1/examples/pool-resources-local.json";
@@ -290,6 +293,11 @@ async function openTeam(stack: DisposableStack, path = "/team") {
   const router = createRouter({
     routeTree: root.addChildren([
       createRoute({ getParentRoute: () => root, path: "/", component: () => <p>Home</p> }),
+      createRoute({
+        getParentRoute: () => root,
+        path: "/offer-machine",
+        component: PoolFounderPage,
+      }),
       createRoute({ getParentRoute: () => root, path: "/pool", component: PoolPage }),
       createRoute({ getParentRoute: () => root, path: "/team", component: TeamPage }),
     ]),
@@ -302,6 +310,7 @@ async function openTeam(stack: DisposableStack, path = "/team") {
 }
 
 const poolExample = Schema.decodeUnknownSync(PoolResources)(rawPool);
+const founderExample = Schema.decodeUnknownSync(PoolFounderView)(rawFounder);
 const ALL = ["today", "board", "team"];
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
 const personRow = (login: string) =>
@@ -316,6 +325,48 @@ const shownLogins = () =>
   [...document.querySelectorAll("li[data-person]")].map((row) => row.getAttribute("data-person"));
 
 describe("Team page", () => {
+  it("opens founder approvals and prepares the manual seat command", async () => {
+    using stack = new DisposableStack();
+    vi.mocked(useEnvironmentScope).mockReturnValue(true);
+    const view = founderExample;
+    const rpc = vi.spyOn(enrolmentRpc, "poolFounder").mockResolvedValue({ ok: true, value: view });
+    vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({ ok: true, value: poolExample });
+    const { emit, screen } = await openTeam(stack, "/pool");
+    await using _screen = screen;
+    await emit(state(["pool"], null));
+    await expect.element(page.getByText("Your workspace: Active")).toBeVisible();
+    if (import.meta.env.VITE_POOL_SCREENSHOTS)
+      await page.screenshot({ path: import.meta.env.VITE_POOL_SCREENSHOTS + "/pool.png" });
+    await sidebar().getByRole("button", { name: "Offer a machine" }).click();
+    await expect.element(page.getByLabelText("Workspace seats")).toHaveValue(4);
+    if (import.meta.env.VITE_POOL_SCREENSHOTS)
+      await page.screenshot({ path: import.meta.env.VITE_POOL_SCREENSHOTS + "/founder.png" });
+    rpc.mockResolvedValue({
+      ok: true,
+      value: { ...view, requests: view.requests.map((w) => ({ ...w, state: "approved" })) },
+    });
+    await userEvent.click(page.getByRole("button", { name: "Approve workspace" }));
+    expect(rpc).toHaveBeenLastCalledWith(
+      { environmentId: LOCAL, relayOrigin: configured.relayOrigin },
+      { action: "approve", requestId: "req_1" },
+    );
+    await page.getByLabelText("Login", { exact: true }).fill("alice");
+    await page.getByLabelText("UID", { exact: true }).fill("24001");
+    await page.getByLabelText("Seat port").fill("24101");
+    await userEvent.click(page.getByRole("button", { name: "Show admin command" }));
+    await expect
+      .element(
+        page.getByText("/opt/banneret-pool/banneret pool seat p_alice alice 24001 24101 --apply"),
+      )
+      .toBeVisible();
+    await act(() =>
+      storeEnrolmentView(LOCAL, { ...configured, me: { login: "member", role: "limited_staff" } }),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Offer a machine" }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByLabelText("Workspace seats")).not.toBeInTheDocument();
+  });
   it("shows the pool and pairing guidance only when advertised", async () => {
     using stack = new DisposableStack();
     vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({ ok: true, value: poolExample });

@@ -38,7 +38,8 @@ Each subcommand previews its action by default. Add `--apply` to execute it.
    ```
 
 3. Run `./banneret pool join --apply`. Give the displayed pairing URL and code to the
-   founder. The command polls until confirmation and saves the host credential in
+   founder. In the company workspace the founder opens **Offer a machine**, matches the pairing ID
+   from the URL, and enters the code. The command polls until confirmation and saves the host credential in
    /var/lib/banneret-pool. An interrupted join resumes with the same key.
 
 4. Run `./banneret pool agent --once --apply` and inspect /var/lib/banneret-pool/policy.json.
@@ -53,6 +54,7 @@ Each subcommand previews its action by default. Add `--apply` to execute it.
    Reserve an unused login, UID and loopback TCP port in the site's seat range (20000 to 29999).
    Keep these ports reserved for seat services. Each seat slice can bind only its own
    TCP port within this range. Other ports remain available for member development servers.
+   The founder can enter these values beside the approved request to display your exact command.
    For example, run `./banneret pool seat p_alice alice 24001 24101`, then
    `./banneret pool seat p_alice alice 24001 24101 --apply`. The UID doubles as the project number
    on this dedicated image. The command applies the returned workspace ceilings, including

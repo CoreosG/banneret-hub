@@ -22,6 +22,7 @@ import type {
   ChatRead,
   ChatSettings,
   PoolConfig,
+  PoolFounderAction,
   PoolHostFacts,
   PoolNextRequest,
   PoolSandboxRequest,
@@ -2519,6 +2520,41 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const owner = caller.person.id;
       const host = caller.machine.facts.environmentId;
       const sandbox = /^\/pool\/sandboxes\/([^/]+)(\/extend)?$/.exec(route);
+      if (route === "/pool/founder" && (method === "GET" || method === "POST")) {
+        if (caller.person.role !== "founder")
+          throw new RelayError("forbidden", "Founder role required.");
+        if (method === "POST") {
+          const input = parseJson(body, "PoolFounderAction") as PoolFounderAction;
+          if (input.action === "limits") pool.setLimits(input.requested);
+          else if (input.action === "approve") pool.approve(input.requestId);
+          else {
+            const pairing = pairingById(input.pairingId);
+            if (!pairing.poolHost || pairing.state !== "pending")
+              throw new RelayError("not_found", "No pending host enrolment.");
+            if (input.action === "refuse") refusePairing(pairing.id, "declined");
+            else if (
+              confirmPairing(pairing.id, input.code, { login: caller.person.login }) !== "approved"
+            )
+              throw new RelayError(
+                "forbidden",
+                "Host confirmation failed. Check the code with the admin.",
+              );
+          }
+          refreshAllHeads();
+        }
+        const enrolments = [...pairings.values()]
+          .filter((p) => {
+            if (!p.poolHost) return false;
+            settleExpiry(p);
+            return p.state === "pending";
+          })
+          .map((p) => ({ pairingId: p.id, hostId: p.machine.environmentId }));
+        return sendJson(response, 200, "PoolFounderView", {
+          enrolments,
+          hosts: pool.founderHosts(),
+          requests: pool.requests(),
+        });
+      }
       if (method === "GET" && route === "/pool")
         return sendJson(response, 200, "PoolView", pool.list(owner));
       if (method === "POST" && route === "/pool/workspaces") {

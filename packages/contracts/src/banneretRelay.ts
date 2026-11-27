@@ -8,6 +8,8 @@ import {
   ResourceReport,
   WarningPolicy,
 } from "./banneretResources.ts";
+import { PoolFounderAction, PoolFounderView } from "./banneretPoolFounder.ts";
+export * from "./banneretPoolFounder.ts";
 export * from "./banneretResources.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as Schema from "effect/Schema";
@@ -38,6 +40,7 @@ export const BANNERET_RELAY_WS_METHODS = {
   resources: "banneret.resources",
   folders: "banneret.resourceFolders",
   requestWorkspace: "banneret.requestWorkspace",
+  poolFounder: "banneret.poolFounder",
   pool: "banneret.poolResources",
   probe: "banneretRelay.probe",
   status: "banneretRelay.status",
@@ -240,6 +243,11 @@ export const BANNERET_RELAY_RPCS = [
     success: WorkspaceReceipt,
     error: RelayRpcError,
   }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.poolFounder, {
+    payload: Schema.Struct({ ...RelayTarget, action: Schema.optional(PoolFounderAction) }),
+    success: PoolFounderView,
+    error: RelayRpcError,
+  }),
   Rpc.make(BANNERET_RELAY_WS_METHODS.pool, {
     payload: Schema.Struct(RelayTarget),
     success: PoolResources,
@@ -261,6 +269,7 @@ export const BANNERET_RELAY_RPCS = [
 export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.resources]: AuthDiagnosticsReadScope,
   [BANNERET_RELAY_WS_METHODS.folders]: AuthFilesystemReadScope,
+  [BANNERET_RELAY_WS_METHODS.poolFounder]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.pool]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.requestWorkspace]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.probe]: AuthEnvironmentMaintainScope,
@@ -279,6 +288,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
 export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.resources]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.folders]: "banneret-relay",
+  [BANNERET_RELAY_WS_METHODS.poolFounder]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.pool]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.requestWorkspace]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.probe]: "banneret-relay",

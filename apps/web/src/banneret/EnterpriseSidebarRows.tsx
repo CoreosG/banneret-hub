@@ -1,3 +1,5 @@
+import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
+import { useEnvironmentScope } from "../state/session";
 // Banneret Hub: the company rows above the thread list (Today, Needs you with its count, the Board,
 // the Map, the Feed and the Team), shown only for an Enterprise workspace this machine has joined, and only for sections the
 // relay offers. Board, Map and Feed open with the filters last set on them in this window.
@@ -36,6 +38,7 @@ export function EnterpriseSidebarRows() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const environmentId = enterprise?.environmentId;
+  const canManagePool = useEnvironmentScope(environmentId ?? null, AuthEnvironmentMaintainScope);
   const relayOrigin = enterprise?.target.relayOrigin;
   const connected = useConnectedEnvironmentIds();
   const views = useEnrolmentStore((state) => state.views);
@@ -71,7 +74,9 @@ export function EnterpriseSidebarRows() {
   const showFeed = offersSection(feed, "feed");
   const showTeam = offersSection(feed, "team");
 
-  const go = (to: "/today" | "/needs" | "/board" | "/map" | "/feed" | "/team" | "/pool") => {
+  const go = (
+    to: "/today" | "/needs" | "/board" | "/map" | "/feed" | "/team" | "/pool" | "/offer-machine",
+  ) => {
     if (isMobile) setOpenMobile(false);
     void navigate({
       to,
@@ -164,6 +169,19 @@ export function EnterpriseSidebarRows() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         )}
+        {canManagePool &&
+          feed.sections.includes("pool") &&
+          enterprise.enrolment.me?.role === "founder" && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={pathname === "/offer-machine"}
+                onClick={() => go("/offer-machine")}
+              >
+                <ServerIcon />
+                <span>Offer a machine</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
         {showTeam ? (
           <SidebarMenuItem>
             <SidebarMenuButton isActive={pathname === "/team"} onClick={() => go("/team")}>

@@ -1220,3 +1220,26 @@ running sandbox and an empty line. Use the normal error envelope with 409 pool_l
 | Ending | Verified cleanup gives ended, a failure gives cleanup_failed | Host resumes cleanup before reuse |
 | Cleanup failed | Admin verifies cleanup and closes the request | Host and relay keep the slot unavailable |
 | Ended | Delete after seven days | Relay retains the owner-only result |
+
+#### Founder pool controls
+
+A signed Hub device belonging to a current founder can GET or POST `/pool/founder`.
+Both return `PoolFounderView`. Host credentials and other roles receive 403.
+List pending unexpired host pairings by pairing ID and host ID only. Confirm using
+`{action:"confirm",pairingId,code}` with the code supplied by the admin, or refuse
+using `{action:"refuse",pairingId}`. Apply the existing pairing expiry and attempt limit.
+Unknown, closed and non-host pairings return 404.
+
+Each configured host row has requested, local and effective ceilings (limits and sizes).
+Local and effective are null before the first facts report. POST
+`{action:"limits",requested:{limits,sizes}}` to replace that host's requested ceilings.
+Require a report, keep host ID and level fixed and reject excess capacity or a memory
+floor above its maximum with 409 pool_limit_reached. Compare sizes in bytes.
+Recompute effective ceilings immediately and on every report, taking each lower bound.
+Warnings continue to come from the pool configuration.
+
+Workspace request rows identify the request, host, person and state (asked or approved).
+POST `{action:"approve",requestId}` to reserve a workspace within effective capacity.
+Repeating approval succeeds while reserved. Keep approval visible until host facts
+report the seat. The host administrator chooses an unused login, UID and port and
+runs the seat command by hand. The relay never provisions an account.

@@ -29,6 +29,49 @@ tags:
   - name: snapshot
   - name: pool
 paths:
+  /pool/founder:
+    get:
+      tags:
+      - pool
+      operationId: getPoolFounderView
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolFounderView'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags:
+      - pool
+      operationId: managePool
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PoolFounderAction'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PoolFounderView'
+        default:
+          $ref: '#/components/responses/Error'
   /pool:
     get:
       tags:
@@ -1929,6 +1972,134 @@ components:
       properties:
         offer: { $ref: '#/components/schemas/PoolOffer' }
         directives: { $ref: '#/components/schemas/PoolDirectives' }
+    PoolCeilings:
+      type: object
+      additionalProperties: false
+      required:
+      - limits
+      - sizes
+      properties:
+        limits:
+          $ref: '#/components/schemas/PoolHostLimits'
+        sizes:
+          $ref: '#/components/schemas/PoolSizes'
+    PoolFounderAction:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - action
+        - pairingId
+        - code
+        properties:
+          action:
+            type: string
+            enum:
+            - confirm
+          pairingId:
+            $ref: '#/components/schemas/Id'
+          code:
+            type: string
+            pattern: ^[A-Z2-7]{8}$
+      - type: object
+        additionalProperties: false
+        required:
+        - action
+        - pairingId
+        properties:
+          action:
+            type: string
+            enum:
+            - refuse
+          pairingId:
+            $ref: '#/components/schemas/Id'
+      - type: object
+        additionalProperties: false
+        required:
+        - action
+        - requestId
+        properties:
+          action:
+            type: string
+            enum:
+            - approve
+          requestId:
+            $ref: '#/components/schemas/Id'
+      - type: object
+        additionalProperties: false
+        required:
+        - action
+        - requested
+        properties:
+          action:
+            type: string
+            enum:
+            - limits
+          requested:
+            $ref: '#/components/schemas/PoolCeilings'
+    PoolFounderView:
+      type: object
+      additionalProperties: false
+      required:
+      - enrolments
+      - hosts
+      - requests
+      properties:
+        enrolments:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - pairingId
+            - hostId
+            properties:
+              pairingId:
+                $ref: '#/components/schemas/Id'
+              hostId:
+                $ref: '#/components/schemas/Id'
+        hosts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - requested
+            - local
+            - effective
+            properties:
+              requested:
+                $ref: '#/components/schemas/PoolCeilings'
+              local:
+                anyOf:
+                - $ref: '#/components/schemas/PoolCeilings'
+                - type: 'null'
+              effective:
+                anyOf:
+                - $ref: '#/components/schemas/PoolCeilings'
+                - type: 'null'
+        requests:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - requestId
+            - hostId
+            - personId
+            - state
+            properties:
+              requestId:
+                $ref: '#/components/schemas/Id'
+              hostId:
+                $ref: '#/components/schemas/Id'
+              personId:
+                $ref: '#/components/schemas/Id'
+              state:
+                type: string
+                enum:
+                - asked
+                - approved
     PoolPolicy:
       type: object
       required: [directives]

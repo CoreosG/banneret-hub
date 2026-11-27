@@ -54,6 +54,27 @@ def filesystem(root, size, call=run):
             raise ValueError("Mount verification failed")
 
 
+def checked_seat_policy(policy, local):
+    limits = policy["limits"]
+    if limits["id"] != local["id"] or limits["level"] != local["level"]:
+        raise ValueError("Seat policy belongs to another host or level")
+
+    def quantity(value):
+        if type(value) is int and value >= 0:
+            return value
+        if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,8}[KMG]", value):
+            return int(value[:-1]) * 1024 ** ("KMG".index(value[-1]) + 1)
+        raise ValueError("Invalid workspace ceiling")
+
+    requested = limits["workspaces"]
+    ceiling = local["workspaces"]
+    for key, maximum in {"max": ceiling["max"], **ceiling["each"]}.items():
+        value = requested["max"] if key == "max" else requested["each"][key]
+        if type(value) is not type(maximum) or quantity(value) > quantity(maximum):
+            raise ValueError("Seat policy exceeds the host file for " + key)
+    return policy
+
+
 def provision(root, directory, person, name, uid, port, policy, call=run):
     if not re.fullmatch(r"[a-z][a-z0-9_]{0,24}", name) or not 1000 <= uid < 60000:
         raise ValueError("Use a local login name and a dedicated UID between 1000 and 59999")
