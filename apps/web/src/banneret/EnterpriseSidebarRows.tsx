@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { useConnectedEnvironmentIds } from "../state/environments";
 import { relayKey, useEnrolmentStore } from "./enrolmentStore";
 import { useQuietThreadShell } from "../state/entities";
+import { useRefreshInactiveDesignation } from "./OrchestratorMarker";
 import { useOrchestrators, selectOrchestrator } from "./orchestratorStore";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -43,6 +44,7 @@ export function EnterpriseSidebarRows() {
   const pinned = useQuietThreadShell(
     environmentId && main ? { environmentId, threadId: main } : null,
   );
+  const pinInactive = useRefreshInactiveDesignation(pinned, environmentId, relayOrigin);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the designation from the selected company's machine
   useEffect(() => {
     if (!login || !relayOrigin) return;
@@ -99,7 +101,7 @@ export function EnterpriseSidebarRows() {
             }}
           >
             <UsersIcon />
-            <span>{pinned?.title ?? "Main orchestrator"}</span>
+            <span>{(!pinInactive && pinned?.title) || "Main orchestrator"}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
         {showToday ? (

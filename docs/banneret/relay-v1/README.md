@@ -477,7 +477,7 @@ More valid line 1 examples: `release: done`, `release: other · not needed after
 `Release: done` (capital R), `claim: bob-example/hub` written by ada-example (not the author), `claim:` (no login).
 `release: DONE` and `release: vacation` are releases with reason `other`.
 
-**Labels.** `claimed` is on the issue while it is held. The relay reads `claimed`.
+**Labels.** `claimed` is on the issue while it is held. The relay reads `claimed`. Release adds `paused` to linked open draft pull requests. The next Take removes it from linked open pull requests.
 
 **Edited comments do not count.** On GitHub anyone with write access can edit another person's comment, so an
 edited `claim:` could be turned into a `release: done`. A `claim:` or `release:` comment whose `updated_at` is later
@@ -547,7 +547,7 @@ with `freeToContinue` as written. Every reader of the protocol runs all of them:
 ### How the Hub writes
 
 Not part of the relay contract; it explains the states a relay sees. The Hub's `LeaseService`
-(`apps/server/src/banneret/lease/LeaseService.ts`) writes through the GitHub issue driver using the machine's own login. It keeps one operation
+(`apps/server/src/banneret/lease/LeaseService.ts`) writes through the GitHub issue and pull request APIs using the machine's own login. It keeps one operation
 per task in memory and nothing on disk; every step reads the issue again before it writes.
 
 - **Comments are only created.** The Hub never edits or deletes a protocol comment it wrote, and its
@@ -555,10 +555,10 @@ per task in memory and nothing on disk; every step reads the issue again before 
   record. It reads each comment's `updatedAt` from the tracker and passes it to the fold.
 - **Take:** read and fold, and stop unless the task is free and the person may comment, label and assign. Comment
   `claim: <login>/<agent>`. Assign the person and add `claimed` in one update, up to three tries; if all fail,
-  comment `release: take_failed`. Wait 10 seconds, read again: the earliest claim wins. The loser comments `release: lost_claim · @<winner>` and unassigns only
+  comment `release: take_failed`. Wait 10 seconds, read again: the earliest claim wins and removes `paused` from open pull requests. The loser comments `release: lost_claim · @<winner>` and unassigns only
   themself; `claimed` stays.
 - **Release:** read and fold, and stop unless the person holds it. Comment the release first, since the reason is
-  the record. Then unassign the person, remove `claimed` unless another claim stands. A retry finds its own release comment and posts no second one.
+  the record. Then unassign the person, remove `claimed` unless another claim stands, and add `paused` to open draft pull requests. A retry finds its own release comment and posts no second one.
 - **Finish** re-runs the steps after the comment. **Withdraw** comments `take_failed` (or `lost_claim` for a loser)
   and unassigns.
 

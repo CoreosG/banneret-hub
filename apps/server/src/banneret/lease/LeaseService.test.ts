@@ -314,7 +314,7 @@ describe("LeaseService take", () => {
     }),
   );
 
-  it.effect("leaves linked pull requests untouched when it wins", () =>
+  it.effect("removes paused only from open pull requests when it wins", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(EPOCH);
       const tracker = newTracker({
@@ -325,7 +325,7 @@ describe("LeaseService take", () => {
       });
       const result = yield* (yield* leases(tracker)).take({ ...ref });
       expect(result.outcome).toBe("taken");
-      expect(tracker.prs.map((pr) => pr.labels)).toEqual([["paused"], ["paused"]]);
+      expect(tracker.prs.map((pr) => pr.labels)).toEqual([[], ["paused"]]);
     }),
   );
 
@@ -376,7 +376,7 @@ describe("LeaseService release", () => {
       );
       expect(tracker.assignees).toEqual([]);
       expect(tracker.labels).toEqual(["bug"]);
-      expect(tracker.prs[0]?.labels).toEqual([]);
+      expect(tracker.prs[0]?.labels).toEqual(["paused"]);
       expect(result.status.lease).toBeNull();
       expect(result.status.lastRelease).toMatchObject({
         by: ME,
@@ -384,6 +384,23 @@ describe("LeaseService release", () => {
         freeToContinue: true,
       });
       expect(result.status.actions.take).toBe(true);
+    }),
+  );
+
+  it.effect("finishes a release whose draft pull request label failed", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(EPOCH);
+      const tracker = held();
+      tracker.failPrLabels = 1;
+      const service = yield* leases(tracker);
+      const first = yield* service.release({ ...ref, reason: "blocked", freeToContinue: true });
+      expect(first.outcome).toBe("incomplete");
+      expect(first.status.actions.finish).toBe(true);
+      expect(tracker.prs[0]?.labels).toEqual([]);
+      const finished = yield* service.finish(ref);
+      expect(finished.outcome).toBe("released");
+      expect(tracker.prs[0]?.labels).toEqual(["paused"]);
+      expect(tracker.writes.filter((write) => write.startsWith("comment"))).toHaveLength(1);
     }),
   );
 

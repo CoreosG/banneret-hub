@@ -1,3 +1,4 @@
+import type { PullRequestProviderApi } from "@t3tools/source-control-core/server/PullRequestProvider";
 import { IssueOperationError, type TaskLeaseRef } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -8,7 +9,13 @@ import type { IssueTrackerApi } from "@t3tools/source-control-core/server/IssueT
 
 export type LeaseIssue = Omit<TaskLeaseRef, "relayOrigin">;
 
-export function repositoryTracker(api: IssueTrackerApi | undefined) {
+export function repositoryTracker(
+  api: IssueTrackerApi | undefined,
+  prs?: Pick<
+    PullRequestProviderApi,
+    "getChangeRequest" | "withVerifiedCredential" | "setLabels"
+  > | null,
+) {
   const target = Effect.fn("LeaseTracker.target")(function* (ref: LeaseIssue) {
     if (
       !api ||
@@ -37,6 +44,34 @@ export function repositoryTracker(api: IssueTrackerApi | undefined) {
         scope: issue.scope,
         capabilities: api.capabilities,
       };
+    }),
+    pausePullRequest: Effect.fn(function* (
+      ref: LeaseIssue,
+      repository: string,
+      number: number,
+      viewer: string,
+      applied: boolean,
+    ) {
+      const pr = { cwd: "/", host: ref.host ?? "github.com", repository, number };
+      const setLabels = prs?.setLabels;
+      if (!prs?.withVerifiedCredential || !setLabels)
+        return yield* new IssueOperationError({
+          operation: "lease",
+          detail: "Pull request labels are unavailable.",
+        });
+      yield* prs.withVerifiedCredential(pr, (identity) =>
+        Effect.gen(function* () {
+          if (identity.viewer.toLowerCase() !== viewer.toLowerCase())
+            return yield* new IssueOperationError({
+              operation: "lease",
+              detail: "The pull request account differs from the lease holder.",
+            });
+          const current = yield* prs.getChangeRequest(pr);
+          if (current.state !== "open" || (applied && !current.isDraft)) return;
+          if (current.labels.some((label) => label.name.toLowerCase() === "paused") !== applied)
+            yield* setLabels({ ...pr, labels: ["paused"], applied });
+        }),
+      );
     }),
     comments: Effect.fn(function* (ref: LeaseIssue & { cursor: string }) {
       const { api, target: issue } = yield* target(ref);
@@ -71,7 +106,8 @@ export class LeaseTracker extends Context.Service<
 >()("t3/banneret/lease/LeaseTracker") {}
 export const layer = Layer.effect(
   LeaseTracker,
-  Effect.map(SourceControlDrivers, (drivers) =>
-    repositoryTracker(drivers.find((entry) => entry.driver.kind === "github")?.instance.issues),
-  ),
+  Effect.map(SourceControlDrivers, (drivers) => {
+    const github = drivers.find((entry) => entry.driver.kind === "github")?.instance;
+    return repositoryTracker(github?.issues, github?.pullRequests);
+  }),
 );

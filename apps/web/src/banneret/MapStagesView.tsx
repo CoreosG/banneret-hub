@@ -2,7 +2,7 @@
 // count, its ring the status mix and its dots the items. A faint line joins stages that rest on each
 // other, amber while something blocks. Clicking a bubble expands that stage below the canvas.
 import type { BanneretMap } from "@t3tools/contracts";
-import type { KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import { arcPath, stageLayout, type StageBubble } from "./mapGraph.logic";
 import { statusView } from "./ui/status";
@@ -28,6 +28,7 @@ function Bubble(props: {
   readonly bubble: StageBubble;
   readonly selected: boolean;
   readonly onToggle: () => void;
+  readonly onHint: (title: string | null) => void;
 }) {
   const { bubble } = props;
   const onKeyDown = (event: KeyboardEvent) => {
@@ -48,6 +49,10 @@ function Bubble(props: {
       data-stage-id={bubble.id}
       data-spine={bubble.spine}
       transform={`translate(${bubble.x} ${bubble.y})`}
+      onFocus={() => props.onHint(bubble.title)}
+      onBlur={() => props.onHint(null)}
+      onMouseEnter={() => props.onHint(bubble.title)}
+      onMouseLeave={() => props.onHint(null)}
       onClick={props.onToggle}
       onKeyDown={onKeyDown}
     >
@@ -94,58 +99,86 @@ export function StageBubbles(props: {
   readonly motion: boolean;
   readonly onSelect: (stageId: string | null) => void;
 }) {
+  const [hint, setHint] = useState<string | null>(null);
   const layout = stageLayout(props.map);
   const selected = layout.bubbles.some((bubble) => bubble.id === props.selected)
     ? props.selected
     : null;
   const spineState = new Map(layout.bubbles.map((bubble) => [bubble.id, bubble.spine] as const));
   return (
-    <svg
-      viewBox={`0 0 ${layout.width} ${layout.height}`}
-      role="group"
-      aria-label="Stages in plan order"
-      data-has-selection={selected === null ? undefined : ""}
-      data-motion={props.motion ? "on" : "off"}
-      {...LAYOUT_STAGE_BUBBLES}
-    >
-      <g aria-hidden>
-        {layout.spine.map((link) => (
-          <path
-            key={`${link.from}>${link.to}`}
-            d={link.path}
-            data-slot="stage-spine"
-            data-spine={
-              spineState.get(link.from) === "done" && spineState.get(link.to) === "done"
-                ? "done"
-                : undefined
-            }
-          />
+    <>
+      <div className="relative">
+        {hint && (
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute top-1 left-1 rounded bg-popover px-2 py-1 text-sm text-popover-foreground shadow"
+          >
+            {hint}
+          </span>
+        )}
+        <svg
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          role="group"
+          aria-label="Stages in plan order"
+          data-has-selection={selected === null ? undefined : ""}
+          data-motion={props.motion ? "on" : "off"}
+          {...LAYOUT_STAGE_BUBBLES}
+        >
+          <g aria-hidden>
+            {layout.spine.map((link) => (
+              <path
+                key={`${link.from}>${link.to}`}
+                d={link.path}
+                data-slot="stage-spine"
+                data-spine={
+                  spineState.get(link.from) === "done" && spineState.get(link.to) === "done"
+                    ? "done"
+                    : undefined
+                }
+              />
+            ))}
+            {layout.bundles.map((bundle) => (
+              <path
+                key={`${bundle.from}>${bundle.to}`}
+                d={bundle.path}
+                strokeWidth={Math.min(10, 1 + Math.sqrt(bundle.count) * 1.4)}
+                data-slot="stage-bundle"
+                data-from={bundle.from}
+                data-to={bundle.to}
+                data-blocking={bundle.blocking > 0 ? "" : undefined}
+                data-near={
+                  selected !== null && (bundle.from === selected || bundle.to === selected)
+                    ? ""
+                    : undefined
+                }
+              />
+            ))}
+          </g>
+          {layout.bubbles.map((bubble) => (
+            <Bubble
+              key={bubble.id}
+              bubble={bubble}
+              onHint={setHint}
+              selected={bubble.id === selected}
+              onToggle={() => props.onSelect(bubble.id === selected ? null : bubble.id)}
+            />
+          ))}
+        </svg>
+      </div>
+      <ul aria-label="Stage legend" className="grid gap-1 sm:grid-cols-2">
+        {layout.bubbles.map((bubble) => (
+          <li key={bubble.id}>
+            <button
+              type="button"
+              className="w-full rounded px-2 py-1 text-left text-sm hover:bg-accent aria-pressed:bg-accent"
+              aria-pressed={bubble.id === selected}
+              onClick={() => props.onSelect(bubble.id === selected ? null : bubble.id)}
+            >
+              {bubbleLabel(bubble)}
+            </button>
+          </li>
         ))}
-        {layout.bundles.map((bundle) => (
-          <path
-            key={`${bundle.from}>${bundle.to}`}
-            d={bundle.path}
-            strokeWidth={Math.min(10, 1 + Math.sqrt(bundle.count) * 1.4)}
-            data-slot="stage-bundle"
-            data-from={bundle.from}
-            data-to={bundle.to}
-            data-blocking={bundle.blocking > 0 ? "" : undefined}
-            data-near={
-              selected !== null && (bundle.from === selected || bundle.to === selected)
-                ? ""
-                : undefined
-            }
-          />
-        ))}
-      </g>
-      {layout.bubbles.map((bubble) => (
-        <Bubble
-          key={bubble.id}
-          bubble={bubble}
-          selected={bubble.id === selected}
-          onToggle={() => props.onSelect(bubble.id === selected ? null : bubble.id)}
-        />
-      ))}
-    </svg>
+      </ul>
+    </>
   );
 }

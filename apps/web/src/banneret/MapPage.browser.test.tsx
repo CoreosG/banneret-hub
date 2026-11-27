@@ -562,6 +562,15 @@ describe("Enterprise build map", () => {
       ]),
     ).toEqual([["s1", "s2", false]]);
 
+    const legend = page.getByRole("list", { name: "Stage legend" });
+    await userEvent.click(legend.getByRole("button", { name: /Foundations/ }));
+    await vi.waitFor(() =>
+      expect(router.state.location.search).toEqual({ view: "stages", stage: "s1" }),
+    );
+    await act(() => router.navigate({ to: "/" }));
+    await userEvent.click(sidebar().getByRole("button", { name: "Map" }));
+    await vi.waitFor(() => expect(bubble("s1")?.getAttribute("aria-pressed")).toBe("true"));
+
     // Keyboard: Enter expands a stage, and its items open their neighbourhood.
     (bubble("s2") as unknown as HTMLElement).focus();
     await userEvent.keyboard("{Enter}");

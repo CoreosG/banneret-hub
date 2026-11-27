@@ -5,6 +5,7 @@ import {
   type IssueRef,
   IssueOperationError,
   IssueTrackerKind,
+  SourceControlProviderKind,
   ProjectId,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
@@ -13,6 +14,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as IssueService from "../../issue/IssueService.ts";
+import {
+  PullRequestProviderError,
+  type ProviderChangeRequestDetail,
+} from "@t3tools/source-control-core/server/PullRequestProvider";
 import type { IssueTrackerApi } from "@t3tools/source-control-core/server/IssueTracker";
 import { LeaseTracker, repositoryTracker } from "./LeaseTracker.ts";
 import * as BanneretEnrolment from "../relay/Enrolment.ts";
@@ -218,7 +223,42 @@ export const leaseTrackerLayer = (tracker: FakeTracker) => {
     comment: fake.comment,
     update: fake.update,
   } as unknown as IssueTrackerApi;
-  return Layer.succeed(LeaseTracker, repositoryTracker(api));
+  return Layer.succeed(
+    LeaseTracker,
+    repositoryTracker(api, {
+      withVerifiedCredential: (_target, use) =>
+        use({ viewer: tracker.viewer ?? "", accountId: "test", credentialFingerprint: "test" }),
+      getChangeRequest: ({ number }) =>
+        Effect.sync(() => {
+          const pr = tracker.prs.find((p) => p.number === number)!;
+          const detail: Pick<ProviderChangeRequestDetail, "state" | "isDraft" | "labels"> = {
+            state: pr.state,
+            isDraft: pr.isDraft,
+            labels: pr.labels.map((name) => ({ name, color: null })),
+          };
+          return detail as ProviderChangeRequestDetail;
+        }),
+      setLabels: ({ number, labels, applied }) =>
+        Effect.suspend(() => {
+          if (tracker.failPrLabels > 0) {
+            tracker.failPrLabels--;
+            return Effect.fail(
+              new PullRequestProviderError({
+                provider: SourceControlProviderKind.make("github"),
+                operation: "setLabels",
+                reason: "failed",
+                detail: "Label write refused.",
+              }),
+            );
+          }
+          const pr = tracker.prs.find((p) => p.number === number)!;
+          pr.labels = applied
+            ? [...pr.labels, ...labels]
+            : pr.labels.filter((name) => !labels.includes(name));
+          return Effect.void;
+        }),
+    }),
+  );
 };
 
 /** GitHub's REST times for the asked comments the tracker still has. */
