@@ -154,6 +154,7 @@ export interface OlderPages<T> {
 }
 
 export interface EnvironmentFeed {
+  readonly boardChannels?: Readonly<Record<string, string>> | undefined;
   readonly chatFlags?: readonly string[] | undefined;
   readonly chatRevision?: number | undefined;
   readonly joined: boolean;
@@ -427,6 +428,7 @@ function applyState(target: RelayTarget, state: BanneretFeedState) {
     liveSince: state.since,
     chatRevision: state.chatRevision,
     chatFlags: state.chatFlags,
+    boardChannels: state.boardChannels,
     sectionsKnown: state.sectionsKnown,
     sections: state.sections,
     dashboards: state.dashboards,

@@ -111,7 +111,10 @@ export function PresenceForm({
 
 export function SharingForm({ enterprise }: { enterprise: EnterpriseFeed }) {
   const [choice, choose] = useState<OfficeSharing>(
-    enterprise.enrolment.sharing ?? { share: "agents_only", shareUsage: false },
+    enterprise.enrolment.sharing ?? {
+      share: enterprise.feed.team?.value?.office?.preset === "community" ? "hidden" : "agents_only",
+      shareUsage: false,
+    },
   );
   const { busy, save, message } = useSave(enterprise.target);
   const label = enterprise.enrolment.label ?? "This machine";
@@ -242,7 +245,12 @@ export function PresencePrompt({
       : null,
   );
   const [changing, change] = useState(false);
-  const showReminder = !!reminder && !open && !changing && person.presence === reminder;
+  const showReminder =
+    enterprise.feed.team?.value?.office?.preset === "company" &&
+    !!reminder &&
+    !open &&
+    !changing &&
+    person.presence === reminder;
   function dismiss() {
     setReminder(null);
     change(false);

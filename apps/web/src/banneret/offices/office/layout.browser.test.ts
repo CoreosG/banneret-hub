@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vite-plus/test";
-import { detailFor, layout } from "./layout";
+import { detailFor, dimensions, layout } from "./layout";
 import { roomCache } from "./roomCache";
 import { officePaint } from "./paint";
 import { packRooms, pixelRatio, zoomSteps } from "./camera";
@@ -39,6 +39,17 @@ it("keeps the 500-person, 50-room, 1500-agent office within the sprite and pixel
       };
     }),
   );
+  const grid = packRooms(rooms.map((desks) => dimensions(desks.length)));
+  const size = dimensions(10);
+  expect(grid.width).toBe(8 * size.width + 7 * 8);
+  expect(grid.height).toBe(7 * size.height + 6 * 8);
+  for (const desks of rooms)
+    for (const tile of layout(desks, "full").tiles) {
+      expect(tile.x - 24).toBeGreaterThanOrEqual(0);
+      expect(tile.y - 27).toBeGreaterThanOrEqual(0);
+      expect(tile.x + 24).toBeLessThanOrEqual(size.width);
+      expect(tile.y + 21).toBeLessThanOrEqual(size.height);
+    }
   const canvas = document.createElement("canvas").getContext("2d")!;
   const draws = vi.spyOn(canvas, "drawImage");
   const staticDraws = vi.spyOn(OffscreenCanvasRenderingContext2D.prototype, "drawImage");

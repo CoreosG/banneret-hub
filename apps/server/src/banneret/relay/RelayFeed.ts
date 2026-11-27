@@ -601,6 +601,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   // Never reset, so a client can tell any two states apart.
   let chatFlags: ReadonlyArray<string> = [];
   let chatSeq = 0;
+  let boardChannels: Record<string, string> = {};
   let chatRevision = 0;
   let revision = 0;
   let needsCount: number | null = null;
@@ -658,7 +659,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     sectionsKnown,
     sections,
     needsCount,
-    ...(sections.includes("chat") ? { chatRevision, chatFlags } : {}),
+    ...(sections.includes("chat") ? { chatRevision, chatFlags, boardChannels } : {}),
     revision,
     board,
     map: mapRead,
@@ -802,6 +803,14 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
           chatFlags = sectionFlags(reply.body, "chat") ?? [];
+          boardChannels = Object.fromEntries(
+            list(fields(fields(reply.body)?.chat)?.boards, 50).flatMap((entry) => {
+              const row = fields(entry);
+              const board = text(row?.board, 128);
+              const channel = text(row?.channel, 128);
+              return board && channel ? [[board, channel]] : [];
+            }),
+          );
           sectionsKnown = true;
           const dashboards = defined(
             list(fields(reply.body)?.dashboards, 32).map((value) => {

@@ -179,4 +179,6 @@ Board seed PRs accept `baseBranch`, `approvals` (the wire object or null), `auth
 Omitting approvals seeds a measured branch with no approval rule. Personal reads resolve
 eligible logins against active company people. Reseeding replaces the prior review state.
 
+Select `"officeFixture": "company"` in the JSON config for 500 people, 50 boards and 1,500 working agents. Select `"officeFixture": "community"` for a directory of 2,000 people. Sign in as the default founder to keep the directory count exact.
+
 Pass `--chat` to enable the channel and thread calls. The fake keeps chat in memory. Its JSON config accepts `{"chat":{"enabled":true,"defaultChannels":["general"]}}`. All staff automatically belong to the listed channels. Configure the real conformance target with `chat.enabled: true`.

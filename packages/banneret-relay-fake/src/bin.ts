@@ -19,11 +19,24 @@ const { values } = NodeUtil.parseArgs({
   },
 });
 
-const settings: { chat?: { enabled?: boolean; defaultChannels?: readonly string[] } } & Pick<
+const settings: {
+  chat?: {
+    enabled?: boolean;
+    defaultChannels?: readonly string[];
+    boards?: readonly { board: string; channel: string }[];
+  };
+} & Pick<
   FakeRelayOptions,
-  "pool" | "healthSources" | "dashboards" | "board" | "criticalRecipients" | "alarmDatabase"
+  | "officeFixture"
+  | "pool"
+  | "healthSources"
+  | "dashboards"
+  | "board"
+  | "criticalRecipients"
+  | "alarmDatabase"
 > = values.config === undefined ? {} : JSON.parse(NodeFS.readFileSync(values.config, "utf8"));
 const relay = await startFakeRelay({
+  ...(settings.officeFixture && { officeFixture: settings.officeFixture }),
   ...(settings.pool && { pool: settings.pool }),
   ...(settings.healthSources && { healthSources: settings.healthSources }),
   ...(settings.dashboards && { dashboards: settings.dashboards }),
@@ -31,6 +44,7 @@ const relay = await startFakeRelay({
   ...(settings.criticalRecipients && { criticalRecipients: settings.criticalRecipients }),
   ...(settings.alarmDatabase && { alarmDatabase: settings.alarmDatabase }),
   chat: (values.chat || settings.chat?.enabled === true) && {
+    ...(settings.chat?.boards && { boards: settings.chat.boards }),
     defaultChannels: settings.chat?.defaultChannels ?? ["general"],
   },
   port: Number(values.port),

@@ -1,11 +1,9 @@
-import * as Schema from "effect/Schema";
-import { Link, useRouter } from "@tanstack/react-router";
-import { chatRpc } from "../../chat/client";
+import { RoomChannel } from "../OfficeChat";
+import { Link } from "@tanstack/react-router";
 import { PersonRoomAgents } from "../AgentDetails";
 import { DeskDetails } from "../DeskDetails";
 import { type AgentIndex, needsAgent, useAgentIndex, useAgentPage } from "../agentIndex";
 import {
-  ChatConversation,
   type BanneretBoardCard,
   type PoolResources,
   officeMeetingUrlValid,
@@ -33,7 +31,6 @@ type Props = {
   index: AgentIndex;
   cardsFor: (login: string) => readonly BanneretBoardCard[];
   pool: PoolResources | null;
-  dms: boolean;
   viewer: string | undefined;
   hallway: boolean;
   hasBoardDesk: (p: Person) => boolean;
@@ -77,36 +74,6 @@ function renderer() {
     },
   };
 }
-const decodeConversation = Schema.decodeUnknownSync(ChatConversation);
-function DirectMessage({ person, target }: { person: Person; target: RelayTarget }) {
-  const router = useRouter();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-  return (
-    <>
-      <button
-        disabled={pending}
-        aria-label={"Direct message " + person.login}
-        onClick={async () => {
-          setPending(true);
-          try {
-            const dm = decodeConversation(
-              await chatRpc.run(target, { kind: "dm", members: [person.id] }),
-            );
-            await router.navigate({ href: "/channels/" + encodeURIComponent(dm.id) });
-          } catch (e) {
-            setError(String(e));
-          }
-          setPending(false);
-        }}
-      >
-        Direct message
-      </button>
-      {error && <p role="alert">{error}</p>}
-    </>
-  );
-}
-
 function OfficeRoom({
   room,
   boardId,
@@ -392,9 +359,6 @@ function OfficeRoom({
                   personId={selectedPerson.id}
                 />
               )}
-              {props.dms && selectedPerson.login !== props.viewer && (
-                <DirectMessage key={selectedPerson.id} person={selectedPerson} target={target} />
-              )}
             </>
           ) : (
             <>
@@ -405,6 +369,7 @@ function OfficeRoom({
                   <Link className="underline" to="/board" search={() => ({ board: boardId })}>
                     Open {title} board
                   </Link>
+                  <RoomChannel board={boardId} title={title} />
                 </>
               )}
             </>

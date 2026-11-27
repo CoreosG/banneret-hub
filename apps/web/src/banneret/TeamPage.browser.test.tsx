@@ -1,4 +1,5 @@
 import company from "./offices/fixtures/company.csv?raw";
+import { chatRpc } from "./chat/client";
 import { restoredSearch } from "./filterMemory";
 import appCss from "../index.css?inline";
 import { minuteTick } from "@t3tools/client-runtime/clock";
@@ -227,7 +228,7 @@ const TEAM = (): BanneretTeam => ({
 
 const counts = { working: 1, waiting: 0, notHeardFrom: 0, stopped: 0, idle: 0 };
 const office = {
-  preset: "community" as const,
+  preset: "company" as const,
   revision: "one",
   files: { "team.room.platform": "platform-file" },
   flags: ["status", "presence", "sharing", "meeting_links"],
@@ -330,6 +331,11 @@ async function openTeam(stack: DisposableStack, path = "/team") {
       }),
       createRoute({ getParentRoute: () => root, path: "/pool", component: PoolPage }),
       createRoute({ getParentRoute: () => root, path: "/team", component: TeamPage }),
+      createRoute({
+        getParentRoute: () => root,
+        path: "/channels/$channelId",
+        component: () => <p>Chat</p>,
+      }),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
     disableGlobalCatchBoundary: true,
@@ -746,6 +752,70 @@ describe("Team page", () => {
     await expect.element(page.getByRole("button", { name: /Platform.*desks/ })).toBeVisible();
   });
 
+  it("starts a community on Floor with machines hidden and no automatic reminder", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openTeam(stack);
+    await using _screen = screen;
+    const people = TEAM().people.map((p) => ({ ...p, presence: "off" }));
+    await emit(state(ALL, teamRead({ people, office: { ...office, preset: "community" } })));
+    await expect
+      .element(page.getByRole("button", { name: "Floor", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect.element(page.getByRole("checkbox", { name: "Show machines" })).not.toBeChecked();
+    expect(page.getByRole("dialog").elements()).toHaveLength(0);
+    await expect.element(page.getByText("Ada server", { exact: true })).not.toBeInTheDocument();
+    await page.getByLabelText("Show machines").click();
+    await expect.element(page.getByText("Ada server", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Office", exact: true }).click();
+    await page.getByText("My office", { exact: true }).click();
+    await expect.element(page.getByLabelText("Machine sharing")).toHaveValue("hidden");
+  });
+  it("opens only advertised board channels, preferring a configured channel", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen, router } = await openTeam(stack);
+    await using _screen = screen;
+    const items = ["platform", "releases"].map((name) => ({
+      kind: "channel",
+      name,
+      id: "c_" + name,
+      purpose: "",
+      agents: "off",
+      memberCount: { people: 1, agents: 0 },
+      archived: false,
+      private: false,
+      lastSeq: 0,
+      me: { member: true, notify: "all", muted: false, readSeq: 0, unread: 0, mentions: 0 },
+    }));
+    vi.spyOn(chatRpc, "run").mockResolvedValue({ items, nextCursor: null });
+    const base = state([...ALL, "chat"], teamRead(TEAM()));
+    const link = page.getByRole("link", { name: "Open channel" });
+    await emit({ ...base, chatFlags: ["channels"] });
+    await expect.element(link).toHaveAttribute("href", "/channels/c_platform");
+    await emit({ ...base, chatFlags: ["channels"], boardChannels: { platform: "releases" } });
+    await expect.element(link).toHaveAttribute("href", "/channels/c_releases");
+    await emit({ ...base, chatFlags: ["dms"] });
+    await expect.element(link).not.toBeInTheDocument();
+    const me = items[0]!.me;
+    vi.mocked(chatRpc.run).mockResolvedValue({
+      kind: "dm",
+      id: "dm_bo",
+      private: true,
+      members: [],
+      agentReaders: [],
+      purpose: "",
+      agents: "off",
+      memberCount: { people: 2, agents: 0 },
+      archived: false,
+      lastSeq: 0,
+      me,
+    });
+    await page.getByRole("button", { name: "Direct message bo-example" }).click();
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/channels/dm_bo"));
+    expect(chatRpc.run).toHaveBeenCalledWith(
+      expect.objectContaining({ relayOrigin: configured.relayOrigin }),
+      { kind: "dm", members: ["p_bo"] },
+    );
+  });
   it("reminds only the signed-in person and writes only on Save", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openTeam(stack);
@@ -821,7 +891,7 @@ it("opens the company office, reads only visible rooms and makes zero frame requ
   const { emit, screen } = await openTeam(stack, "/team?view=office");
   await using _screen = screen;
   const people = Array.from({ length: 500 }, (_, i) => ({
-    id: "p" + i,
+    id: "p" + String(i).padStart(3, "0"),
     login: "builder-" + String(i).padStart(3, "0"),
     role: "limited_staff",
     presence: "available",
@@ -839,6 +909,9 @@ it("opens the company office, reads only visible rooms and makes zero frame requ
     counts: { ...counts, working: 3 },
     rooms: [{ board: rooms[Math.floor(i / 10)]!.board, waiting: 0 }],
   }));
+  const next = vi
+    .spyOn(feedRpc, "agents")
+    .mockResolvedValue({ agents: agents.slice(400), nextCursor: null });
   vi.mocked(feedRpc.room).mockImplementation(async (_target, board) => {
     const index = rooms.findIndex((r) => r.board === board);
     return {
@@ -863,7 +936,13 @@ it("opens the company office, reads only visible rooms and makes zero frame requ
         office: {
           ...office,
           preset: "company",
-          summary: { ...office.summary, people: { total: 500 }, rooms, agents },
+          summary: {
+            ...office.summary,
+            people: { total: 500 },
+            rooms,
+            agents: agents.slice(0, 400),
+            agentsNextCursor: "remaining",
+          },
         },
       }),
     ),
@@ -871,9 +950,21 @@ it("opens the company office, reads only visible rooms and makes zero frame requ
   const map = page.getByRole("group", { name: /Office map/ });
   await vi.waitFor(() =>
     expect(
-      document.querySelector('[data-office-target="team.room.Platform/desk/p0"]'),
+      document.querySelector('[data-office-target="team.room.Platform/desk/p000"]'),
     ).toBeTruthy(),
   );
+  if (import.meta.env.VITE_SCALE_SCREENSHOTS) {
+    await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/office.png" });
+    await page.getByRole("button", { name: "Floor", exact: true }).click();
+    await page.getByRole("button", { name: /Platform.*desks/ }).click();
+    await expect.element(page.getByText("builder-000", { exact: true })).toBeVisible();
+    await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/floor.png" });
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    await expect.element(page.getByRole("list", { name: "Team members" })).toBeVisible();
+    await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/list.png" });
+    await page.getByRole("button", { name: "Office", exact: true }).click();
+    await expect.element(map).toBeVisible();
+  }
   const surface = map.element().querySelector("canvas")!;
   await vi.waitFor(() =>
     expect(
@@ -901,6 +992,14 @@ it("opens the company office, reads only visible rooms and makes zero frame requ
   }
   expect(vi.mocked(feedRpc.room).mock.calls.some(([, id]) => id === "Board 49")).toBe(false);
   expect(map.element().querySelectorAll('[data-office-target*="/desk/"]')).toHaveLength(0);
+  expect(next).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  const list = page.getByRole("list", { name: "Team members" });
+  await expect.element(list).toBeVisible();
+  expect(next).not.toHaveBeenCalled();
+  list.element().scrollTop = 48 * 450;
+  await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(1));
+  expect(next.mock.calls[0]?.[1]).toBe("remaining");
 });
 
 it("explores desks with the keyboard and restores focus after closing the card", async () => {
@@ -955,6 +1054,7 @@ it("explores desks with the keyboard and restores focus after closing the card",
       ALL,
       teamRead({ people, office: { ...office, summary: { ...office.summary, rooms } } }),
     ),
+    sections: [...ALL, "chat"],
     chatFlags: ["dms"],
   });
   await robot.click();
