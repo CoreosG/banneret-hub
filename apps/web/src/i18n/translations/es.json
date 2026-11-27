@@ -1,4 +1,6 @@
 {
+  "b08ecf00be4fa6a6": "Usar la memoria de Banneret",
+  "da9c3dcef9b27497": "Activar la memoria de Banneret desactiva la memoria de Claude y Codex en los chats del Hub.",
   "6c6e16b9488f8b91": "Desplázate para leerlo todo.",
   "035aab5e99159bd8": "{count, plural, one {… No se muestra {hidden} carácter del medio.} other {… No se muestran {hidden} caracteres del medio.}} El texto termina con:",
   "011b1ef726fa9928": "Desplázate en cada parte para leerla entera.",

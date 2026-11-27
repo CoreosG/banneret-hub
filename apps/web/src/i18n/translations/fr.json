@@ -1,4 +1,6 @@
 {
+  "b08ecf00be4fa6a6": "Utiliser la mémoire Banneret",
+  "da9c3dcef9b27497": "Activer la mémoire Banneret désactive la mémoire de Claude et de Codex dans les discussions du Hub.",
   "6c6e16b9488f8b91": "Faites défiler pour tout lire.",
   "035aab5e99159bd8": "{count, plural, one {… {hidden} caractère au milieu n’est pas affiché.} other {… {hidden} caractères au milieu ne sont pas affichés.}} Le texte se termine par :",
   "011b1ef726fa9928": "Faites défiler chaque partie pour la lire en entier.",

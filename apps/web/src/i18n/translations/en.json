@@ -1,4 +1,6 @@
 {
+  "b08ecf00be4fa6a6": "Use Banneret memory",
+  "da9c3dcef9b27497": "Enabling Banneret memory turns off Claude and Codex memory in Hub chats.",
   "6c6e16b9488f8b91": "Scroll to read all of it.",
   "035aab5e99159bd8": "{count, plural, one {… {hidden} character in the middle is not shown.} other {… {hidden} characters in the middle are not shown.}} The text ends with:",
   "011b1ef726fa9928": "Scroll each part to read all of it.",

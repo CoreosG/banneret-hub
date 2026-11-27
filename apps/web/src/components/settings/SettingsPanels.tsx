@@ -1,3 +1,4 @@
+import { MemorySettings } from "../../banneret/MemorySettings";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m as resolveMessage } from "~/i18n/messages";
 import { useAtomValue } from "@effect/atom-react";
@@ -1350,6 +1351,8 @@ export function ChatSettingsPanel() {
           />
         </AdvancedSettings>
       </SettingsSection>
+
+      <MemorySettings />
 
       <SettingsSection id="follow-ups" title={gt("Follow-ups")}>
         <SettingsRow

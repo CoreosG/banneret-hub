@@ -1,3 +1,4 @@
+import { providerMemoryPolicy } from "../../banneret/memory/providerMemoryPolicy.ts";
 import { pipe } from "effect/Function";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import { brokenRuntimeError } from "../../provider/providerCompatibility.ts";
@@ -1981,6 +1982,7 @@ export const layerAppServerClientFactory: Layer.Layer<
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
     const agentScope = yield* AgentScope;
+    const memoryPolicy = yield* providerMemoryPolicy;
     const portDiscovery = yield* PortScanner.PortDiscovery;
 
     return CodexAppServerClientFactory.of({
@@ -1996,10 +1998,7 @@ export const layerAppServerClientFactory: Layer.Layer<
             ...codexAppServerArgs(
               resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
             ),
-            "-c",
-            "memories.generate_memories=false",
-            "-c",
-            "memories.use_memories=false",
+            ...(yield* memoryPolicy).codexArgs,
           ],
           env: environment,
           threadId: input.threadId,

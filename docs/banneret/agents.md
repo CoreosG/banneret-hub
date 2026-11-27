@@ -126,6 +126,8 @@ Only explicit use by a chat counts toward trust. Reading and searching do not co
 The collapsed Memory line shows the total, proposed and disputed counts visible to
 the orchestrator. Notes are stored unencrypted in the local Hub state directory.
 
+With **Use Banneret memory** enabled in Settings → Chat for an environment, the
 Hub sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for Claude chats. For Codex chats,
 it passes `memories.generate_memories=false` and `memories.use_memories=false` as
 app-server config overrides. These settings apply to Hub-launched sessions.
+The switch defaults to off. The Hub memory tools and Memory line work in either mode.

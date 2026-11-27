@@ -1,4 +1,6 @@
 {
+  "b08ecf00be4fa6a6": "使用 Banneret 记忆",
+  "da9c3dcef9b27497": "启用 Banneret 记忆后，Hub 聊天中的 Claude 和 Codex 记忆将关闭。",
   "6c6e16b9488f8b91": "滚动以阅读全部内容。",
   "035aab5e99159bd8": "{count, plural, other {… 中间的 {hidden} 个字符未显示。}} 文本结尾为：",
   "011b1ef726fa9928": "滚动每个部分以阅读全部内容。",
