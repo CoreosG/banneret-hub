@@ -45,6 +45,7 @@ export const BanneretFeedNeedsItem = Schema.Struct({
 export type BanneretFeedNeedsItem = typeof BanneretFeedNeedsItem.Type;
 
 export const BanneretFeedNotMeasured = Schema.Struct({
+  kind: Schema.optional(Schema.String),
   source: Schema.String,
   reason: Schema.String,
   since: Schema.String,
@@ -114,6 +115,8 @@ export const BanneretFeedStuckItem = Schema.Struct({
 });
 
 export const BanneretFeedHealthItem = Schema.Struct({
+  source: Schema.String,
+  kind: Schema.String,
   id: Schema.String,
   label: Schema.String,
   state: Schema.String,
@@ -134,7 +137,22 @@ export const BanneretFeedToday = Schema.Struct({
   shipped: block(BanneretFeedShippedItem),
   working: block(BanneretFeedWorkingItem),
   stuck: block(BanneretFeedStuckItem),
-  health: block(BanneretFeedHealthItem),
+  health: Schema.optional(
+    Schema.Struct({
+      ...block(BanneretFeedHealthItem).fields,
+      alarms: Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          sourceId: Schema.String,
+          severity: Schema.Literals(["info", "warning", "critical"]),
+          title: Schema.String,
+          firedAt: Schema.String,
+          detail: Schema.optional(Schema.String),
+          url: Schema.optional(Schema.String),
+        }),
+      ),
+    }),
+  ),
 });
 export type BanneretFeedToday = typeof BanneretFeedToday.Type;
 
@@ -456,6 +474,19 @@ export const BanneretFeedState = Schema.Struct({
   since: Schema.NullOr(Schema.String),
   /** False until the relay's capabilities have been read. */
   sectionsKnown: Schema.Boolean,
+  dashboards: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        title: Schema.String,
+        url: Schema.String,
+        group: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
+  leaseClocks: Schema.optional(
+    Schema.Struct({ staleSeconds: Schema.Number, expirySeconds: Schema.Number }),
+  ),
   /** The section kinds the relay advertises. */
   sections: Schema.Array(Schema.String),
   /** The open needs-you count from the last `needs.changed`, if one arrived. */

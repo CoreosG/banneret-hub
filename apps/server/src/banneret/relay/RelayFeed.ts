@@ -258,7 +258,13 @@ const notMeasured = (value: unknown): BanneretFeedNotMeasured | undefined => {
   const since = text(source?.since, 64);
   return sourceName === undefined || reason === undefined || since === undefined
     ? undefined
-    : { source: sourceName, reason, since };
+    : {
+        source: sourceName,
+        reason,
+        since,
+        ...optional("kind", text(source?.kind, 32)),
+        ...optional("detail", text(source?.detail, 240)),
+      };
 };
 
 const block = <T>(value: unknown, item: (value: unknown) => T | undefined) => {
@@ -346,20 +352,66 @@ export const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedTod
         ...optional("deepLink", deepLink(item?.deepLink, labelFor)),
       };
     }),
-    health: block(source?.health, (value) => {
-      const item = fields(value);
-      const id = text(item?.id, 64);
-      const label = text(item?.label, 120);
-      const state = text(item?.state, 32);
-      if (id === undefined || label === undefined || state === undefined) return undefined;
-      return {
-        id,
-        label,
-        state,
-        observedAt: text(item?.observedAt, 64) ?? null,
-        ...optional("summary", text(item?.summary, 300)),
-      };
-    }),
+    ...optional(
+      "health",
+      !fields(source?.health)
+        ? undefined
+        : {
+            alarms: defined(
+              list(fields(source?.health)?.alarms, Number.POSITIVE_INFINITY).map((value) => {
+                const a = fields(value);
+                const id = text(a?.id, 64),
+                  sourceId = text(a?.sourceId, 64),
+                  title = text(a?.title, 300),
+                  firedAt = text(a?.firedAt, 64);
+                const severity = a?.severity;
+                if (
+                  !id ||
+                  !sourceId ||
+                  !title ||
+                  !firedAt ||
+                  a?.resolvedAt !== undefined ||
+                  (severity !== "warning" && severity !== "critical" && severity !== "info")
+                )
+                  return undefined;
+                return {
+                  id,
+                  sourceId,
+                  title,
+                  firedAt,
+                  severity,
+                  ...optional("detail", text(a?.detail, 500)),
+                  ...optional("url", text(a?.url, 2048)),
+                } as const;
+              }),
+            ),
+            ...block(source?.health, (value) => {
+              const item = fields(value);
+              const id = text(item?.id, 64);
+              const label = text(item?.label, 120);
+              const state = text(item?.state, 32);
+              const sourceId = text(item?.source, 64),
+                kind = text(item?.kind, 32);
+              if (
+                !sourceId ||
+                !kind ||
+                id === undefined ||
+                label === undefined ||
+                state === undefined
+              )
+                return undefined;
+              return {
+                id,
+                label,
+                state,
+                source: sourceId,
+                kind,
+                observedAt: text(item?.observedAt, 64) ?? null,
+                ...optional("summary", text(item?.summary, 300)),
+              };
+            }),
+          },
+    ),
   };
 };
 
@@ -493,6 +545,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   let since: string | null = null;
   let sections: ReadonlyArray<string> = [];
   let sectionsKnown = false;
+  let dashboardSettings: Pick<BanneretFeedState, "dashboards" | "leaseClocks"> = {};
   let mcpTools: ReadonlyArray<RelayMcpTool> = [];
   // The `ETag` of the capabilities last read: a heartbeat whose `capabilitiesVersion` differs means
   // the document changed, even when the stream missed `capabilities.changed` or the read failed.
@@ -540,6 +593,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     joined: joined !== null,
     live,
     since,
+    ...dashboardSettings,
     sectionsKnown,
     sections,
     needsCount,
@@ -679,6 +733,33 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
           sectionsKnown = true;
+          const dashboards = defined(
+            list(fields(reply.body)?.dashboards, 32).map((value) => {
+              const d = fields(value);
+              const id = text(d?.id, 64),
+                title = text(d?.title, 120),
+                url = text(d?.url, 2048);
+              if (!id || !title || !url || !URL.canParse(url) || new URL(url).protocol !== "https:")
+                return undefined;
+              return { id, title, url, ...optional("group", text(d?.group, 80)) };
+            }),
+          );
+          const boardSection = list(fields(reply.body)?.sections, 64)
+            .map(fields)
+            .find((s) => s?.kind === "board");
+          const params = fields(boardSection?.params);
+          const staleSeconds = params?.staleSeconds,
+            expirySeconds = params?.expirySeconds;
+          const clocks =
+            typeof staleSeconds === "number" &&
+            Number.isSafeInteger(staleSeconds) &&
+            staleSeconds > 0 &&
+            typeof expirySeconds === "number" &&
+            Number.isSafeInteger(expirySeconds) &&
+            expirySeconds > staleSeconds
+              ? { staleSeconds, expirySeconds }
+              : undefined;
+          dashboardSettings = { dashboards, ...optional("leaseClocks", clocks) };
           sectionsVersion = reply.etag;
           mcpTools = mcpToolsOf(reply.body);
           boardFlags = sectionFlags(reply.body, "board");
@@ -1183,6 +1264,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         since = null;
         sections = [];
         sectionsKnown = false;
+        dashboardSettings = {};
         sectionsVersion = undefined;
         mcpTools = [];
         needsCount = null;

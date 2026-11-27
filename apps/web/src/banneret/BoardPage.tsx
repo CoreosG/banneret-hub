@@ -491,6 +491,12 @@ function FilterBar(props: {
   );
 }
 
+function leaseDuration(seconds: number) {
+  if (seconds % 3600 === 0) return `${seconds / 3600} h`;
+  if (seconds % 60 === 0) return `${seconds / 60} min`;
+  return `${seconds} s`;
+}
+
 export function BoardPage() {
   const enterprise = useEnterpriseFeed();
   const enrolment = enterprise?.enrolment ?? null;
@@ -570,6 +576,12 @@ export function BoardPage() {
         title={active === null || entries.length < 2 ? "Board" : active.title}
         summary={summary}
       >
+        {leases && feed.leaseClocks && (
+          <span className="text-muted-foreground text-xs">
+            Stale after {leaseDuration(feed.leaseClocks.staleSeconds)} · Expires after{" "}
+            {leaseDuration(feed.leaseClocks.expirySeconds)}
+          </span>
+        )}
         {active === null ? null : (
           <BoardSwitcher boards={entries} active={active} onPick={pickBoardId} />
         )}

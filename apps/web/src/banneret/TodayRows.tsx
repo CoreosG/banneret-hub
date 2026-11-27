@@ -49,6 +49,7 @@ import {
 } from "./relayFeed.logic";
 import { initial, workingTone } from "./today.logic";
 import { ReasonChip } from "./ui/Chips";
+import { StatusPill } from "./ui/StatusPill";
 import { RelativeTime } from "./ui/RelativeTime";
 import { SectionRow } from "./ui/Section";
 import { humanizeWord } from "./ui/status";
@@ -345,5 +346,24 @@ export function NotMeasuredLines(props: {
         </span>
       ))}
     </>
+  );
+}
+
+export function AlarmRow({
+  alarm,
+}: {
+  readonly alarm: NonNullable<BanneretFeedToday["health"]>["alarms"][number];
+}) {
+  return (
+    <li className="flex min-w-0 flex-col gap-1 rounded-lg border p-3">
+      <StatusPill status={alarm.severity} />
+      <span className={cn(TYPE.cardTitle, "break-words")}>
+        <TitleLink title={alarm.title} url={alarm.url} />
+      </span>
+      {alarm.detail && <span className={cn(TYPE.meta, "break-words")}>{alarm.detail}</span>}
+      <span className={TYPE.meta}>
+        {alarm.sourceId} · <RelativeTime at={alarm.firedAt} />
+      </span>
+    </li>
   );
 }

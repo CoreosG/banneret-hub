@@ -27,7 +27,7 @@ All under `/relay/v1`.
 | `GET /machines` | The Team machines list, paged: every live machine for everyone, revoked ones for their owner and founders. |
 | `DELETE /machines/{machineId}` | Revoke a machine (its owner or a founder). |
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
-| `GET /today` | The five ordered Today blocks: needs you, shipped, working, stuck, health. `?visit=1` marks a real open (see below). |
+| `GET /today` | Needs you, shipped, working, stuck and optionally health. `?visit=1` marks a real open (see below). |
 | `GET /needs` | Needs-you items, paged, most urgent first. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
 | `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
@@ -295,7 +295,7 @@ forever. They carry nothing those calls do not already return to the same caller
 - **Per person.** The head belongs to the caller's person. Every machine of one person gets the same head. Files are
   stored once by hash, so two people with identical bytes share one stored file. A file is readable only while one
   of the caller's retained heads names it. Knowing a hash grants nothing.
-- **Shape.** The head is `{generatedAt, files}`. `files` maps `needs`, `health`, `work`, `machines` and,
+- **Shape.** The head is `{generatedAt, files}`. `files` maps `needs`, optional `health`, `work`, `machines` and,
   when the relay serves `GET /repositories`, `repositories` to `sha256:<hex>`. The path of a file uses the bare hex.
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
@@ -419,8 +419,8 @@ short, and its mark is ⊘.
 **Lease state.** `state` is an open string; known values `active`, `stale`, `expired`, `paused`, `conflict`,
 `incomplete`. Time runs from `lastSignalAt`, the latest heartbeat, push or comment:
 
-- `staleAt` is `lastSignalAt` plus 6 hours. After it the lease is `stale` and the card is in Stuck.
-- `expiresAt` is `lastSignalAt` plus 24 hours. After it the lease is `expired`.
+- `staleAt` is `lastSignalAt` plus `params.staleSeconds` (default 6 hours). After it the lease is `stale` and the card is in Stuck.
+- `expiresAt` is `lastSignalAt` plus `params.expirySeconds` (default 24 hours). After it the lease is `expired`.
 - An expired lease stays in Stuck. It is never shown as Free while the tracker still names the assignee, because
   only a release on the tracker frees the task.
 - `paused` and `conflict` (two holders claim one task) come from the claims, not from time.
@@ -815,3 +815,40 @@ client accepts new values. Request bodies are closed.
 
 This folder names no organisation; examples use `example-org`. In the platform mirror, the folder also imports
 nothing from outside `internal/hub`, and `TestExtractionGuards` checks both.
+
+### Optional health sources, dashboards and alarms
+
+Configure `healthSources` with a stable `id` and an open `kind` per source, such as
+`relay`, `http_check` or `webhook`. The default is an empty list. With zero sources omit the
+health section, `Today.health` and the snapshot head's `health` key. Otherwise advertise the section
+and include `source` and `kind` on every measurement. Health blocks carry an `alarms` array of
+active alarms alongside `items` and `notMeasured`. Enrolled people can read active alarms.
+
+The optional `dashboards` list defaults to empty. Return it only in authenticated capabilities.
+Each entry has `id`, `title`, an HTTPS `url` and an optional `group`. Today opens it locally.
+The authenticated board section's `params` contains the configured `board.staleSeconds` and
+`board.expirySeconds`. Both are whole seconds and expiry must exceed stale.
+
+A source with a private `secret` accepts `POST /relay/v1/hooks/{sourceId}`. Send the generic
+[alarm JSON](examples/alarm.json). Supply a Unix timestamp in seconds in `X-Alarm-Timestamp`.
+Set `X-Alarm-Signature` to lowercase hex HMAC-SHA256 with the UTF-8 source secret over the ASCII
+timestamp, a literal period and the exact request bytes. The body sourceId must equal the path id.
+Accept timestamps within 300 seconds of receipt in either direction. Reject repeat signatures
+within that window (401), bodies over 1 MiB (413) and more than 60 requests per source per minute (429).
+Success returns 204. Provider mapping happens at the relay boundary. For example, an AWS SNS/SES
+adapter can map a delivery failure into a warning keyed by message id. An Alertmanager adapter can
+use the fingerprint, startsAt and endsAt for id, firedAt and resolvedAt. Sign the mapped JSON for
+this endpoint. Keep keys, deliveries and alarm records on the relay.
+
+| Stored state | Delivery | Result after commit |
+| --- | --- | --- |
+| Missing | Fired or resolved | Insert by (sourceId, id). Only an unresolved occurrence appears on Today. |
+| Active | Same firedAt | Update severity and details. A resolvedAt closes the occurrence. |
+| Resolved | Same occurrence | Keep closed, including after delayed retries. |
+| Either | Newer firedAt | Replace with the new occurrence. Ignore older occurrences. |
+| Any | Restart | Reopen the relay DB. Alarm rows and replay receipts survive. In-memory rate windows restart. |
+
+A critical active occurrence adds one health Needs-you item for each configured person.
+`criticalRecipients` holds stable person ids. Omitting it selects current founders. An empty list
+routes to nobody. Resolution or a lower severity removes the need. Alarm state belongs to the relay
+database and is never published to the work tracker.

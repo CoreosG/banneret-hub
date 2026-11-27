@@ -24,6 +24,7 @@ export type SchemaName =
   | "MachinesPage"
   | "NeedsPage"
   | "RepositoriesPage"
+  | "Alarm"
   | "Today"
   | "Error"
   | "NeedsChangedEvent"
@@ -104,6 +105,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "machines.json": "MachinesPage",
   "needs.json": "NeedsPage",
   "repositories.json": "RepositoriesPage",
+  "alarm.json": "Alarm",
   "today.json": "Today",
   "error.json": "Error",
   "event-needs-changed.json": "NeedsChangedEvent",
@@ -131,35 +133,37 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
 
 /** Invalid examples are refused facts, except the enrolment ones; the same rule as the Go contract test. */
 export const invalidExampleSchema = (file: string): SchemaName =>
-  file.startsWith("enroll-poll")
-    ? "EnrolPollResponse"
-    : file.startsWith("enroll-start")
-      ? "EnrolStartRequest"
-      : file.startsWith("repositories-")
-        ? "RepositoriesPage"
-        : file.startsWith("snapshot-head")
-          ? "SnapshotHead"
-          : file.startsWith("snapshot-machines")
-            ? "SnapshotMachines"
-            : file.startsWith("snapshot-repositories")
-              ? "SnapshotRepositories"
-              : file.startsWith("snapshot-work")
-                ? "SnapshotWork"
-                : file.startsWith("snapshot-boards")
-                  ? "SnapshotBoards"
-                  : file.startsWith("snapshot-board")
-                    ? "SnapshotBoard"
-                    : file.startsWith("snapshot-map")
-                      ? "SnapshotMap"
-                      : file.startsWith("snapshot-feed")
-                        ? "FeedPage"
-                        : file.startsWith("snapshot-graveyard")
-                          ? "GraveyardPage"
-                          : file.startsWith("task-")
-                            ? "TaskRead"
-                            : file.startsWith("today-")
-                              ? "Today"
-                              : "FactsRequest";
+  file.startsWith("alarm-")
+    ? "Alarm"
+    : file.startsWith("enroll-poll")
+      ? "EnrolPollResponse"
+      : file.startsWith("enroll-start")
+        ? "EnrolStartRequest"
+        : file.startsWith("repositories-")
+          ? "RepositoriesPage"
+          : file.startsWith("snapshot-head")
+            ? "SnapshotHead"
+            : file.startsWith("snapshot-machines")
+              ? "SnapshotMachines"
+              : file.startsWith("snapshot-repositories")
+                ? "SnapshotRepositories"
+                : file.startsWith("snapshot-work")
+                  ? "SnapshotWork"
+                  : file.startsWith("snapshot-boards")
+                    ? "SnapshotBoards"
+                    : file.startsWith("snapshot-board")
+                      ? "SnapshotBoard"
+                      : file.startsWith("snapshot-map")
+                        ? "SnapshotMap"
+                        : file.startsWith("snapshot-feed")
+                          ? "FeedPage"
+                          : file.startsWith("snapshot-graveyard")
+                            ? "GraveyardPage"
+                            : file.startsWith("task-")
+                              ? "TaskRead"
+                              : file.startsWith("today-")
+                                ? "Today"
+                                : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

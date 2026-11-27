@@ -32,7 +32,7 @@ describe("today blocks", () => {
       shipped: block,
       working: block,
       stuck: block,
-      health: block,
+      health: { ...block, alarms: [] },
     };
     const none = { needsCount: null, needs: null, needsNextCursor: null };
     // The relay's own count wins.

@@ -27,6 +27,23 @@ tags:
   - name: events
   - name: snapshot
 paths:
+  /hooks/{sourceId}:
+    post:
+      operationId: receiveAlarm
+      security: [{ alarmSignature: [] }]
+      description: Per-source HMAC-SHA256 over timestamp, a period and raw request bytes.
+      parameters:
+        - { in: path, name: sourceId, required: true, schema: { $ref: "#/components/schemas/Id" } }
+        - { in: header, name: X-Alarm-Timestamp, required: true, schema: { type: string } }
+        - { in: header, name: X-Alarm-Signature, required: true, schema: { type: string, pattern: "^[a-f0-9]{64}$" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Alarm" }
+      responses:
+        "204": { description: Alarm recorded }
+        default: { $ref: "#/components/responses/Error" }
   /capabilities:
     get:
       tags: [discovery]
@@ -224,9 +241,9 @@ paths:
     get:
       tags: [needs]
       operationId: getToday
-      summary: The five ordered Today blocks for the caller.
+      summary: Today blocks for the caller.
       description: |
-        Blocks, in this order: needs you, shipped since the last visit, working now, stuck, health. Each block has
+        Blocks, in this order: needs you, shipped since the last visit, working now, stuck and optional health. Each block has
         its own state; one broken source affects only its own block. A block holds at most 20 items; the needs-you
         block's `nextCursor` continues in `GET /needs`.
 
@@ -537,6 +554,11 @@ paths:
         "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
+    alarmSignature:
+      type: apiKey
+      in: header
+      name: X-Alarm-Signature
+      description: Lowercase hexadecimal HMAC-SHA256 of the timestamp, period and raw body.
     deviceToken:
       type: http
       scheme: bearer
@@ -683,6 +705,7 @@ components:
           type: array
           maxItems: 64
           items: { $ref: "#/components/schemas/Section" }
+        dashboards: { $ref: "#/components/schemas/Dashboards" }
         mcpTools:
           description: |
             Present only for an authenticated caller. The Hub offers its agents exactly the tools named here that it
@@ -703,9 +726,45 @@ components:
           properties:
             version: { type: integer, minimum: 1 }
             head: { type: string, const: /relay/v1/snapshot/head }
+    Dashboards:
+      type: array
+      maxItems: 32
+      items:
+        type: object
+        required: [id, title, url]
+        properties:
+          id: { $ref: "#/components/schemas/Id" }
+          title: { type: string, minLength: 1, maxLength: 120 }
+          group: { type: string, maxLength: 80 }
+          url: { type: string, format: uri, pattern: "^https://[^/ ]+", maxLength: 2048 }
+    LeaseClocks:
+      type: object
+      required: [staleSeconds, expirySeconds]
+      properties:
+        staleSeconds: { type: integer, minimum: 1, maximum: 31536000, default: 21600 }
+        expirySeconds: { type: integer, minimum: 2, maximum: 31536000, default: 86400 }
+    Alarm:
+      type: object
+      additionalProperties: false
+      required: [id, sourceId, severity, title, firedAt]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        sourceId: { $ref: "#/components/schemas/Id" }
+        severity: { enum: [info, warning, critical] }
+        title: { type: string, minLength: 1, maxLength: 300 }
+        detail: { type: string, maxLength: 500 }
+        url: { type: string, format: uri, pattern: "^https?://", maxLength: 2048 }
+        firedAt: { $ref: "#/components/schemas/Timestamp" }
+        resolvedAt: { $ref: "#/components/schemas/Timestamp" }
     Section:
       type: object
       required: [id, kind, version, flags]
+      allOf:
+        - if: { properties: { kind: { const: board } } }
+          then:
+            required: [params]
+            properties:
+              params: { $ref: "#/components/schemas/LeaseClocks" }
       properties:
         id: { $ref: "#/components/schemas/Id" }
         kind:
@@ -1093,7 +1152,7 @@ components:
         url: { type: string, format: uri }
     Today:
       type: object
-      required: [generatedAt, lastVisitAt, needsYou, shipped, working, stuck, health]
+      required: [generatedAt, lastVisitAt, needsYou, shipped, working, stuck]
       properties:
         generatedAt: { $ref: "#/components/schemas/Timestamp" }
         lastVisitAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
@@ -1227,22 +1286,34 @@ components:
     HealthBlock:
       description: The health block, as in Today. It is also the snapshot `health` file.
       type: object
-      required: [state, items, notMeasured]
+      required: [state, items, alarms, notMeasured]
       properties:
         state: { $ref: "#/components/schemas/BlockState" }
+        alarms: { type: array, items: { $ref: "#/components/schemas/Alarm" } }
         items:
           type: array
           maxItems: 20
           items:
             type: object
-            required: [id, label, state, observedAt]
+            required: [id, source, kind, label, state, observedAt]
             properties:
               id: { $ref: "#/components/schemas/Id" }
+              source: { $ref: "#/components/schemas/Id" }
+              kind: { type: string, pattern: "^[a-z][a-z0-9_]{0,31}$" }
               label: { type: string, maxLength: 120 }
               state: { type: string, enum: [good, warning, bad, not_measured] }
               summary: { type: string, maxLength: 300 }
               observedAt: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
-        notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
+        notMeasured:
+          type: array
+          items:
+            allOf:
+              - { $ref: "#/components/schemas/NotMeasured" }
+              - type: object
+                required: [kind]
+                properties:
+                  kind: { type: string, pattern: "^[a-z][a-z0-9_]{0,31}$" }
+
     FileRef:
       type: string
       pattern: "^sha256:[0-9a-f]{64}$"
@@ -1259,7 +1330,7 @@ components:
           allOf: [{ $ref: "#/components/schemas/Timestamp" }]
         files:
           type: object
-          required: [needs, health, work, machines]
+          required: [needs, work, machines]
           properties:
             needs: { $ref: "#/components/schemas/FileRef" }
             health: { $ref: "#/components/schemas/FileRef" }

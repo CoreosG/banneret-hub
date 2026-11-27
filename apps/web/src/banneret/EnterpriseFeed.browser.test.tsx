@@ -122,7 +122,18 @@ const TODAY: BanneretFeedToday = {
       },
     ],
   },
-  health: block,
+  health: {
+    ...block,
+    alarms: [
+      {
+        id: "queue",
+        sourceId: "monitor",
+        severity: "critical",
+        title: "Queue over capacity",
+        firedAt: "2026-11-26T10:00:00Z",
+      },
+    ],
+  },
 };
 
 const snapshot = (
@@ -278,6 +289,24 @@ describe("Enterprise Today and Needs you", () => {
     // Back to Personal: rows go and the feed is let go.
     await act(() => useWorkspacesStore.setState({ activeId: null }));
     expect(sidebar().getByRole("button").elements()).toHaveLength(0);
+  });
+
+  it("shows configured dashboards independently and hides alarms when health is withdrawn", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const { emit } = setup();
+    const router = createFeedRouter("/today");
+    await using screen = await render(<RouterProvider router={router} />, { router: false });
+    await emit({
+      ...snapshot(["today", "health"]),
+      dashboards: [{ id: "metrics", title: "Metrics", url: "https://metrics.example.org" }],
+    });
+    await expect.element(screen.getByText("Queue over capacity")).toBeVisible();
+    await expect.element(screen.getByText("Critical", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole("button", { name: "Metrics" })).toBeVisible();
+    await emit(snapshot(["today"]));
+    expect(screen.getByText("Queue over capacity").elements()).toHaveLength(0);
+    expect(screen.getByText("Health", { exact: true }).elements()).toHaveLength(0);
   });
 
   it("switching to another company's workspace swaps the rows and pages to its relay", async () => {
