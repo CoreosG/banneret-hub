@@ -270,6 +270,7 @@ paths:
       tags:
       - pool
       operationId: reportPoolState
+      description: The host supplies the current offerId. A stale or unknown offerId returns 409 stale_offer without changing the sandbox. The host drops that update.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -292,6 +293,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PoolSandbox'
+        '409':
+          $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
   /chat/conversations:
@@ -2239,8 +2242,9 @@ components:
       anyOf:
       - type: object
         additionalProperties: false
-        required: [id, personId, machineId, deadline, counter, sentAt, signature, bodyBase64]
+        required: [offerId, id, personId, machineId, deadline, counter, sentAt, signature, bodyBase64]
         properties:
+          offerId: {$ref: '#/components/schemas/Id'}
           id: {$ref: '#/components/schemas/Id'}
           personId: {$ref: '#/components/schemas/Id'}
           machineId: {$ref: '#/components/schemas/Id'}
@@ -2253,8 +2257,9 @@ components:
     PoolStateUpdate:
       type: object
       additionalProperties: false
-      required: [state, machineId, reason]
+      required: [offerId, state, machineId, reason]
       properties:
+        offerId: {$ref: '#/components/schemas/Id'}
         state: {type: string, enum: [starting, running, ending, ended, cleanup_failed]}
         machineId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
         reason: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}

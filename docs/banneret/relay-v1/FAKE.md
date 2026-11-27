@@ -58,6 +58,8 @@ in test mode, set its origin:
 BANNERET_RELAY_URL=http://127.0.0.1:8080 vp test run --config ../../vite.config.ts --dir .
 ```
 
+Use `POST /conformance/v1/pool/offer/expire` with `{sandboxId}` to expire an outstanding offer immediately.
+
 For the shared machine cases, set the config key `pool` to the contents of `examples/pool-config.json`.
 Host pairings always wait for founder confirmation, including on an auto-approving fake.
 

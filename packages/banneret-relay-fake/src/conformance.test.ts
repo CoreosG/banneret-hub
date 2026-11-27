@@ -3077,12 +3077,22 @@ describe("shared machines", () => {
           offer.signature,
         ),
     ).toBe(true);
-    const report = (state: string) =>
+    await client.control("/pool/offer/expire", { sandboxId: id });
+    const renewed = await hostCall("/hosts/next", { size: "small" });
+    expectSchema("PoolOffer", renewed.body);
+    const current = renewed.body as NonNullable<PoolOffer>;
+    expect(current.id).toBe(id);
+    expect(current.offerId).not.toBe(offer.offerId);
+    const before = await hub("GET", path);
+    const report = (state: string, offerId = current.offerId) =>
       hostCall(path + "/state", {
+        offerId,
         state,
         machineId: state === "running" ? owner.machineId : null,
         reason: null,
       });
+    expectError(await report("starting", offer.offerId), 409, "stale_offer");
+    expect((await hub("GET", path)).body).toEqual(before.body);
     expect((await report("starting")).body).toMatchObject({ state: "starting" });
     expect((await report("running")).body).toMatchObject({ state: "running" });
     expect((await hub("POST", path + "/extend")).body).toMatchObject({ state: "running" });

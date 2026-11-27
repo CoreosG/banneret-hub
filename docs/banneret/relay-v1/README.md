@@ -1166,7 +1166,9 @@ for that person. The memory warning also covers a new OOM kill. Never send human
 A sandbox offer carries the original signed POST to `/relay/v1/pool/sandboxes` as standard base64 body
 bytes with the original signing headers. Pool calls have no query parameters. Hosts verify the signature
 with the requesting machine key already bound to that person, check the signed host, size and digest,
-and consume each signed request once. The offer deadline is 60 seconds. A host without an eligible
+and consume each signed request once. Each offer has a fresh opaque `offerId`; `id` identifies the sandbox across renewals.
+Hosts include the offer's `offerId` in every state update. A stale or unknown value returns
+409 `stale_offer` without changing the sandbox. The host drops that update. The offer deadline is 60 seconds. A host without an eligible
 request gets JSON null. Queue places start at 1. Wait estimates use seconds. An extension requires a
 running sandbox and an empty line. Use the normal error envelope with 409 pool_limit_reached or
 403 level_not_offered. The relay only records requests. All account and sandbox operations run on the host.
@@ -1180,7 +1182,7 @@ running sandbox and an empty line. Use the normal error envelope with 409 pool_l
 | Suspended | Admin resumes or removes the account | Locked account stays locked |
 | Removed | Purge home after 14 days | Host stores the purge date |
 | Sandbox waiting | Eligible host takes it, member cancels, or two hours elapse | Relay stores the queue order |
-| Offered | Host reports starting, or deadline restores original place | Relay persists the offer and deadline atomically |
+| Offered | Host reports starting with the current offerId, or deadline restores original place | Relay persists the offer and deadline atomically |
 | Starting | Hub enrols and reports running, or startup fails after three minutes | Agent checks the host unit |
 | Running | Member ends it, limit expires, or host reboots | Agent reconciles the unit. Reboot ends it with host_restarted |
 | Ending | Verified cleanup gives ended, a failure gives cleanup_failed | Host resumes cleanup before reuse |

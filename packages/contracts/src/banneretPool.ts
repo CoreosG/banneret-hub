@@ -238,6 +238,7 @@ export type PoolNextRequest = {
 };
 
 export type PoolOffer = {
+  readonly offerId: string;
   readonly id: string;
   readonly personId: string;
   readonly machineId: string;
@@ -249,6 +250,7 @@ export type PoolOffer = {
 } | null;
 
 export type PoolStateUpdate = {
+  readonly offerId: string;
   readonly state: "starting" | "running" | "ending" | "ended" | "cleanup_failed";
   readonly machineId: string | null;
   readonly reason: string | null;

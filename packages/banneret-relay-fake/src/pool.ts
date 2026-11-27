@@ -24,9 +24,10 @@ type Booking = {
   proof: Proof;
   view: PoolSandbox;
   deadline: number;
-  offeredTo: string | null;
+  offerId: string | null;
 };
 type PoolError =
+  | "stale_offer"
   | "pool_limit_reached"
   | "level_not_offered"
   | "not_found"
@@ -58,7 +59,7 @@ export function createPool(
     for (const b of bookings.values()) {
       if (b.view.state === "offered" && now >= b.deadline) {
         b.view = { ...b.view, state: "waiting" };
-        b.offeredTo = null;
+        b.offerId = null;
       }
       if (b.view.state === "waiting") {
         const place = waiting(b.request.hostId).indexOf(b) + 1;
@@ -211,14 +212,18 @@ export function createPool(
         endsAt: null,
         reason: null,
       };
-      bookings.set(id, { owner, request, view, proof, deadline: 0, offeredTo: null });
+      bookings.set(id, { owner, request, view, proof, deadline: 0, offerId: null });
       return view;
     },
     next(host: string, size: "small" | "large") {
       refresh();
       const report = mustHost(host);
       const held = [...bookings.values()].filter(
-        (b) => b.offeredTo === host && b.request.size === size && b.view.state !== "ended",
+        (b) =>
+          b.offerId !== null &&
+          b.request.hostId === host &&
+          b.request.size === size &&
+          b.view.state !== "ended",
       );
       const pending = held.filter((b) => !report.facts.running.includes(b.view.id));
       if (
@@ -239,10 +244,11 @@ export function createPool(
       );
       if (!b) return null;
       b.deadline = Date.now() + 60000;
-      b.offeredTo = host;
+      b.offerId = NodeCrypto.randomUUID();
       b.view = { ...b.view, state: "offered", place: null, waitSeconds: null };
       return {
         id: b.view.id,
+        offerId: b.offerId,
         personId: b.owner,
         deadline: new Date(b.deadline).toISOString(),
         ...b.proof,
@@ -277,10 +283,17 @@ export function createPool(
       };
       return b.view;
     },
+    expireOffer(id: string) {
+      const b = bookings.get(id);
+      if (!b || b.view.state !== "offered") return fail("not_found", "Unknown offer.");
+      b.deadline = 0;
+      refresh();
+    },
     update(host: string, id: string, event: PoolStateUpdate) {
       refresh();
       const b = bookings.get(id);
-      if (!b || b.offeredTo !== host) return fail("not_found", "Unknown offer.");
+      if (!b || b.request.hostId !== host) return fail("not_found", "Unknown offer.");
+      if (b.offerId !== event.offerId) return fail("stale_offer", "Offer is no longer current.");
       const allowed: Record<PoolSandbox["state"], readonly PoolStateUpdate["state"][]> = {
         waiting: [],
         offered: ["starting"],
