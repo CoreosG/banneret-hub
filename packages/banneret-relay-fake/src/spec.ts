@@ -44,6 +44,7 @@ export type SchemaName =
   | "SnapshotMap"
   | "FeedPage"
   | "GraveyardPage"
+  | "SnapshotTeam"
   | "TaskRead"
   | "Id";
 
@@ -127,6 +128,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "snapshot-map-not-measured.json": "SnapshotMap",
   "snapshot-feed.json": "FeedPage",
   "snapshot-graveyard.json": "GraveyardPage",
+  "snapshot-team.json": "SnapshotTeam",
   "task.json": "TaskRead",
   "task-checked-ignored.json": "TaskRead",
 };
@@ -159,11 +161,13 @@ export const invalidExampleSchema = (file: string): SchemaName =>
                           ? "FeedPage"
                           : file.startsWith("snapshot-graveyard")
                             ? "GraveyardPage"
-                            : file.startsWith("task-")
-                              ? "TaskRead"
-                              : file.startsWith("today-")
-                                ? "Today"
-                                : "FactsRequest";
+                            : file.startsWith("snapshot-team")
+                              ? "SnapshotTeam"
+                              : file.startsWith("task-")
+                                ? "TaskRead"
+                                : file.startsWith("today-")
+                                  ? "Today"
+                                  : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

@@ -145,18 +145,61 @@ interface UsageFact {
   readonly resetsAt: string | null;
 }
 
+/**
+ * README, Team: the team state of each session a heartbeat carries. A stopped session is left out; a wait whose
+ * process is not running is a finished turn, so it is idle. `since` stays while the state stays.
+ */
+const nextTeamStates = (
+  before: ReadonlyMap<string, TeamState>,
+  facts: ReadonlyArray<{
+    readonly sessionId: string;
+    readonly state: string;
+    readonly waiting?: string;
+    readonly processRunning?: boolean;
+  }>,
+): ReadonlyMap<string, TeamState> => {
+  const now = Date.now();
+  const next = new Map<string, TeamState>();
+  for (const fact of facts) {
+    if (fact.state === "stopped") continue;
+    const state =
+      fact.state === "working"
+        ? "working"
+        : fact.state === "waiting" &&
+            fact.processRunning === true &&
+            (fact.waiting === "permission" || fact.waiting === "question")
+          ? "waiting"
+          : "idle";
+    const previous = before.get(fact.sessionId);
+    next.set(fact.sessionId, {
+      state,
+      since: previous?.state === state ? previous.since : now,
+    });
+  }
+  return next;
+};
+
 /** A visit read this close to the previous one continues the same visit. */
 const VISIT_GAP_MS = 30 * 60 * 1000;
 
 interface ActivityFact {
   readonly sessionId: string;
+  readonly parentSessionId?: string;
   readonly threadId: string;
   readonly branch?: string;
   readonly projectKey?: string;
   readonly taskId?: string;
+  readonly provider: string;
   readonly state: "working" | "waiting" | "idle" | "stopped";
+  readonly waiting?: "permission" | "question" | "input";
   readonly processRunning?: boolean;
   readonly lastSeenAt: string;
+}
+
+/** A session's state in the team file (README, Team), and since when it has held it. */
+interface TeamState {
+  readonly state: "working" | "waiting" | "idle";
+  readonly since: number;
 }
 
 interface Pairing {
@@ -184,6 +227,8 @@ interface Machine {
   readonly enrolledAt: number;
   facts: MachineFacts;
   sessions: ReadonlyArray<ActivityFact>;
+  /** By session id: the team state of each session the latest heartbeat carried (stopped ones left out). */
+  teamStates: ReadonlyMap<string, TeamState>;
   usage: ReadonlyArray<UsageFact>;
   lastHeardAt: number | null;
   /** The 256 highest counters accepted, ascending. */
@@ -368,6 +413,10 @@ const PAIRING_MS = 10 * 60 * 1000;
 const AWAITING_APPROVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const WRONG_CODES_BEFORE_EXPIRY = 5;
 const NOT_HEARD_FROM_MS = 90 * 1000;
+/** README, Team: sessions of a machine silent this long leave the team file. */
+const TEAM_FORGET_MS = 24 * 60 * 60 * 1000;
+const TEAM_PEOPLE_MAX = 500;
+const TEAM_SESSIONS_MAX = 100;
 const HEARTBEAT_SECONDS = 30;
 const EVENT_LOG_SIZE = 1000;
 const EVENT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -759,6 +808,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       enrolledAt: Date.now(),
       facts: pairing.machine,
       sessions: [],
+      teamStates: new Map(),
       usage: [],
       lastHeardAt: null,
       counters: [],
@@ -1561,6 +1611,73 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       graveyardRecords.length > SNAPSHOT_FEED_MAX ? encodeCursor(SNAPSHOT_FEED_MAX) : null,
   });
 
+  // The board task a fact without a taskId works on, by its branch and projectKey, as for lease heartbeats.
+  const taskForBranch = (fact: ActivityFact) =>
+    fact.branch === undefined
+      ? undefined
+      : boardTasks.find(
+          (task) =>
+            task.branch === fact.branch &&
+            (task.projectKey === null || task.projectKey === fact.projectKey),
+        );
+
+  // README, Team: every staff member and their live sessions. `since` moves only when a state changes.
+  const teamView = () => {
+    const now = Date.now();
+    const staff = [...people.values()]
+      .filter((person) => !person.removed)
+      .toSorted((a, b) => a.login.localeCompare(b.login));
+    return {
+      people: staff.slice(0, TEAM_PEOPLE_MAX).map((person) => {
+        const sessions = liveMachines()
+          .filter(
+            (machine) =>
+              machine.personId === person.id &&
+              machine.lastHeardAt !== null &&
+              now - machine.lastHeardAt <= TEAM_FORGET_MS,
+          )
+          .flatMap((machine) => {
+            const heardAt = machine.lastHeardAt ?? now;
+            const heard = now - heardAt <= NOT_HEARD_FROM_MS;
+            return machine.sessions.flatMap((fact) => {
+              const team = machine.teamStates.get(fact.sessionId);
+              if (team === undefined) return [];
+              const taskId = fact.taskId ?? taskForBranch(fact)?.id;
+              return [
+                {
+                  fact,
+                  view: {
+                    id: fact.sessionId,
+                    machineId: machine.id,
+                    provider: fact.provider,
+                    state: heard ? team.state : "not_heard_from",
+                    ...(heard && team.state === "waiting" && fact.waiting !== undefined
+                      ? { waiting: fact.waiting as "permission" | "question" }
+                      : {}),
+                    ...(taskId === undefined ? {} : { taskId }),
+                    since: iso(heard ? team.since : heardAt),
+                  },
+                },
+              ];
+            });
+          })
+          .slice(0, TEAM_SESSIONS_MAX);
+        const listed = new Set(sessions.map(({ fact }) => fact.sessionId));
+        return {
+          id: person.id,
+          login: person.login,
+          role: person.role,
+          sessions: sessions.map(({ fact, view }) => {
+            const parent = fact.parentSessionId;
+            return parent !== undefined && listed.has(parent) && parent !== fact.sessionId
+              ? { ...view, parentId: parent }
+              : view;
+          }),
+        };
+      }),
+    };
+  };
+
   // Snapshot (README, Snapshot). A head is rebuilt on every change and on every read, so a served head is always
   // current. Files are content-addressed and shared, but a read checks the caller's own retained heads.
   const buildSnapshotFiles = (person: Person): Record<string, string> => {
@@ -1600,6 +1717,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         : [["map", "SnapshotMap", mapView()] as readonly [string, SchemaName, unknown]]),
       ["feed", "FeedPage", feedFile()],
       ["graveyard", "GraveyardPage", graveyardFile()],
+      ["team", "SnapshotTeam", teamView()],
     ];
     const refs: Record<string, string> = {};
     for (const [kind, schema, value] of entries) {
@@ -1937,6 +2055,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               : [{ id: "map", kind: "map", version: 1, flags: ["rests_on"] }]),
             { id: "feed", kind: "feed", version: 1, flags: ["graveyard"] },
             { id: "task", kind: "task", version: 1, flags: [] },
+            { id: "team", kind: "team", version: 1, flags: [] },
           ],
           // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
           mcpTools: BANNERET_AGENT_TOOLS.map((name) => ({
@@ -2059,6 +2178,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       caller.machine.facts = facts.machine;
       caller.machine.sessions = facts.activity;
+      caller.machine.teamStates = nextTeamStates(caller.machine.teamStates, facts.activity);
       caller.machine.usage = facts.usage ?? [];
       caller.machine.lastHeardAt = Date.now();
       // An activity fact is a lease heartbeat only when the sending machine's owner holds the lease and the
@@ -2627,6 +2747,20 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           updatedAt: iso(Date.parse(comment.updatedAt) - shift),
         }));
       }
+      refreshAllHeads();
+      reply({});
+      return;
+    }
+    if (request.method === "POST" && route === "/machines/age") {
+      const machine = machines.get(String(input.machineId));
+      if (machine === undefined || machine.lastHeardAt === null)
+        throw new RelayError("not_found", "That machine has not been heard from.");
+      const shift = Number(input.seconds) * 1000;
+      machine.lastHeardAt -= shift;
+      // The machine's whole clock moves: its sessions entered their states that much earlier too.
+      machine.teamStates = new Map(
+        [...machine.teamStates].map(([id, team]) => [id, { ...team, since: team.since - shift }]),
+      );
       refreshAllHeads();
       reply({});
       return;

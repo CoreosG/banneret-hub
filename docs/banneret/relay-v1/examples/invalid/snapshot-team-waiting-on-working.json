@@ -1,0 +1,12 @@
+{
+  "people": [
+    {
+      "id": "p_7Hq2xK",
+      "login": "ada-example",
+      "role": "founder",
+      "sessions": [
+        { "id": "s_q8Lm2Vx", "machineId": "m_4fT9wQ", "provider": "claude", "state": "working", "waiting": "question", "since": "2026-11-26T09:12:00Z" }
+      ]
+    }
+  ]
+}

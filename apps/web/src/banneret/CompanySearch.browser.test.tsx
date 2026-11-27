@@ -81,6 +81,7 @@ const FEED: BanneretFeedState = {
   map: null,
   feed: null,
   graveyard: null,
+  team: null,
 };
 
 installFakeEnvironment([threadWithHistory("thread-search", 2)]);

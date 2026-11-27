@@ -406,6 +406,47 @@ export const BanneretFeedMapRead = Schema.Struct({
 });
 export type BanneretFeedMapRead = typeof BanneretFeedMapRead.Type;
 
+/** One of a person's machines, from the relay's `machines` file. Revoked machines are left out. */
+export const BanneretTeamMachine = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  /** Open: `laptop`, `desktop`, `server`, `cloud`. */
+  kind: Schema.String,
+  connected: Schema.Boolean,
+});
+export type BanneretTeamMachine = typeof BanneretTeamMachine.Type;
+
+/**
+ * One live agent session (relay-v1 `TeamSession`). `state` is open: `working`, `waiting`, `idle`,
+ * `not_heard_from` are known. `since` is when it entered that state. `parentId` names its orchestrator.
+ */
+export const BanneretTeamSession = Schema.Struct({
+  id: Schema.String,
+  parentId: Schema.optional(Schema.String),
+  machineId: Schema.String,
+  provider: Schema.String,
+  state: Schema.String,
+  waiting: Schema.optional(Schema.String),
+  taskId: Schema.optional(Schema.String),
+  since: Schema.String,
+});
+export type BanneretTeamSession = typeof BanneretTeamSession.Type;
+
+/** One person: their role, their machines and their live sessions. */
+export const BanneretTeamPerson = Schema.Struct({
+  id: Schema.String,
+  login: Schema.String,
+  /** Open: `founder`, `limited_staff`. */
+  role: Schema.String,
+  machines: Schema.Array(BanneretTeamMachine),
+  sessions: Schema.Array(BanneretTeamSession),
+});
+export type BanneretTeamPerson = typeof BanneretTeamPerson.Type;
+
+/** The relay's `team` file joined with its `machines` file, in the relay's (login) order. */
+export const BanneretTeam = Schema.Struct({ people: Schema.Array(BanneretTeamPerson) });
+export type BanneretTeam = typeof BanneretTeam.Type;
+
 /** A snapshot file as last read, kept with its age when the relay is away. */
 const snapshotRead = <S extends Schema.Top>(value: S) =>
   Schema.Struct({
@@ -418,6 +459,8 @@ export const BanneretFeedEntriesRead = snapshotRead(BanneretFeedEntryPage);
 export type BanneretFeedEntriesRead = typeof BanneretFeedEntriesRead.Type;
 export const BanneretGraveyardRead = snapshotRead(BanneretGraveyardPage);
 export type BanneretGraveyardRead = typeof BanneretGraveyardRead.Type;
+export const BanneretTeamRead = snapshotRead(BanneretTeam);
+export type BanneretTeamRead = typeof BanneretTeamRead.Type;
 
 /** An older page through `GET /feed` or `GET /graveyard`; `joined` false means nothing was asked. */
 export const BanneretFeedEntryPageRead = read(BanneretFeedEntryPage);
@@ -500,6 +543,8 @@ export const BanneretFeedState = Schema.Struct({
   feed: Schema.NullOr(BanneretFeedEntriesRead),
   /** Null while the feed section lacks the `graveyard` flag, or before it was looked at. */
   graveyard: Schema.NullOr(BanneretGraveyardRead),
+  /** Null while the relay advertises no team section, or before it was looked at. */
+  team: Schema.NullOr(BanneretTeamRead),
 });
 export type BanneretFeedState = typeof BanneretFeedState.Type;
 

@@ -137,6 +137,7 @@ const state = (
   map: null,
   feed,
   graveyard,
+  team: null,
 });
 
 function setup() {

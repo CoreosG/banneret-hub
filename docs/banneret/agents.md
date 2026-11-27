@@ -15,7 +15,8 @@ Work in this repository is leased: before you change anything, read the MCP reso
 `banneret://join` is a resource on the Hub's own MCP server, which every agent in a Hub thread already has. It
 names the company and the person the agent works for, and states the rules:
 
-1. **Check before you start.** Pick work from the board or the needs list, then check the lease once.
+1. **Check before you start.** Pick work from the board or the needs list, see on the team view what other
+   agents already work on, then check the lease once.
 2. **Tell your person first.** Say which task you are about to take, unless they already asked for it.
 3. **Take before you edit.** Change nothing until the take answers `taken`.
 4. **Release with a reason when you stop,** for any reason.
@@ -32,15 +33,16 @@ simply works as usual.
 
 ## The tools
 
-| Tool                      | What it does                                                                              |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| `banneret_board`          | The boards from the relay's last snapshot. Filters: board, column, mine, repo.            |
-| `banneret_needs`          | What waits on the person, most urgent first.                                              |
-| `banneret_task`           | One task: status, lease, pull requests, preview, sign-off and the last release note.      |
-| `banneret_lease_check`    | Who holds a task now, read from the tracker, and what the agent may do.                   |
-| `banneret_lease_take`     | Take a task: claim comment, assignee, `claimed` label, then a check of who claimed first. |
-| `banneret_lease_release`  | Release with a reason, a note and free to continue.                                       |
-| `banneret_lease_withdraw` | Undo the person's own take that stopped half way, or a claim that lost.                   |
+| Tool                      | What it does                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| `banneret_board`          | The boards from the relay's last snapshot. Filters: board, column, mine, repo.             |
+| `banneret_needs`          | What waits on the person, most urgent first.                                               |
+| `banneret_task`           | One task: status, lease, pull requests, preview, sign-off and the last release note.       |
+| `banneret_team`           | Who works on what: each person's machines, leases and live agent sessions with their task. |
+| `banneret_lease_check`    | Who holds a task now, read from the tracker, and what the agent may do.                    |
+| `banneret_lease_take`     | Take a task: claim comment, assignee, `claimed` label, then a check of who claimed first.  |
+| `banneret_lease_release`  | Release with a reason, a note and free to continue.                                        |
+| `banneret_lease_withdraw` | Undo the person's own take that stopped half way, or a claim that lost.                    |
 
 - **Same rules as the buttons.** Take and release run the same code as the Board: the claim grammar, the
   10-second read-back, the settle window, and the checks for the right tracker account and triage access.

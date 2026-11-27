@@ -152,6 +152,7 @@ const snapshot = (
   map: null,
   feed: null,
   graveyard: null,
+  team: null,
 });
 
 function setup(

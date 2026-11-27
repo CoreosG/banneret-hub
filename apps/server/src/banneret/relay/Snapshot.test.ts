@@ -14,6 +14,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -39,6 +40,7 @@ import {
   reshapeBoards,
   reshapeMap,
   reshapeTask,
+  reshapeTeam,
   taskIdForLinks,
 } from "./Snapshot.ts";
 
@@ -525,9 +527,15 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         yield* control(fake, "/board/seed", SEED);
         const joined = yield* join(fake, relay);
         yield* assignProject(joined.workspaceId!);
-        // A live thread on no board task: each heartbeat moves the work file, never the board.
+        // A live thread on no board task: each heartbeat moves the work file, never the board,
+        // and never the team once the session is on it.
         world.threads = [thread("th-plain")];
-        yield* events.next((event) => event.board?.value != null, "a settled board");
+        yield* events.next(
+          (event) =>
+            event.board?.value != null &&
+            event.team?.value?.people.some((person) => person.sessions.length === 1) === true,
+          "a settled board and team",
+        );
         const before = relay.requests.filter((request) => isFile(request.url)).length;
         yield* events.reset;
         // Reads run in order, so a head answered after the second new file means it was handled.
@@ -1344,5 +1352,121 @@ describe("lastRelease", () => {
     expect(cards[1]?.lastRelease).toBeUndefined();
     expect(Array.from(cards[2]?.lastRelease?.reasonText ?? "")).toHaveLength(200);
     expect(new TextEncoder().encode(cards[2]?.lastRelease?.note ?? "").length).toBe(2046);
+  });
+});
+
+describe("BanneretRelayFeed team from the snapshot", () => {
+  const orchestrator = thread("thread-team-lead");
+  const helper = thread("thread-team-helper", {
+    lineage: {
+      parentThreadId: ThreadId.make("thread-team-lead"),
+      relationshipToParent: "subagent",
+      rootThreadId: ThreadId.make("thread-team-lead"),
+    },
+    status: "waiting",
+    activityRunStatus: "waiting",
+    pendingRuntimeRequest: {
+      id: RuntimeRequestId.make("req-team"),
+      kind: "command",
+      createdAt: at(EPOCH),
+    },
+  });
+
+  it.live(
+    "reads each person with their machines and live sessions, the helper under its lead",
+    () =>
+      withFake((fake, relay) =>
+        Effect.gen(function* () {
+          const events = yield* subscribe;
+          const joined = yield* join(fake, relay);
+          yield* assignProject(joined.workspaceId!);
+          const state = yield* events.next(
+            (event) =>
+              event.team?.value?.people.some((person) => person.sessions.length === 2) === true,
+            "the team",
+          );
+          expect(state.sections).toContain("team");
+          expect(state.team!.problem).toBeUndefined();
+          const person = state.team!.value!.people.find((entry) => entry.sessions.length === 2)!;
+          expect(person.role).toBe("founder");
+          expect(person.machines).toHaveLength(1);
+          expect(person.machines[0]!.connected).toBe(true);
+          const [lead, child] = person.sessions;
+          expect(lead!.state).toBe("working");
+          expect(lead!.machineId).toBe(person.machines[0]!.id);
+          expect(lead!.provider).toBe("claude");
+          expect(child!.parentId).toBe(lead!.id);
+          expect(child!.state).toBe("waiting");
+          expect(child!.waiting).toBe("permission");
+        }).pipe(onFreshHub({ threads: [orchestrator, helper], reads: 0 })),
+      ),
+  );
+
+  it.live("reads no team while the relay does not advertise it", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        relay.rewrite = (request, body) => {
+          if (request.url !== "/relay/v1/capabilities") return body;
+          const capabilities = JSON.parse(body) as { sections?: Array<{ kind: string }> };
+          if (capabilities.sections === undefined) return body;
+          capabilities.sections = capabilities.sections.filter(
+            (section) => section.kind !== "team",
+          );
+          return JSON.stringify(capabilities);
+        };
+        const events = yield* subscribe;
+        yield* control(fake, "/feed/seed", { count: 1 });
+        yield* join(fake, relay);
+        const state = yield* events.next(
+          (event) => event.feed?.value?.entries.length === 1,
+          "the feed file",
+        );
+        expect(state.sections).not.toContain("team");
+        expect(state.team).toBeNull();
+      }).pipe(onFreshHub({ threads: [orchestrator], reads: 0 })),
+    ),
+  );
+});
+
+describe("reshapeTeam", () => {
+  it("joins live machines by owner, and drops revoked machines and malformed sessions", () => {
+    const team = reshapeTeam(
+      {
+        people: [
+          {
+            id: "p_ada",
+            login: "ada-example",
+            role: "founder",
+            sessions: [
+              { id: "s_1", machineId: "m_1", provider: "claude", state: "working", since: "x" },
+              { id: "s_2", machineId: "m_1", state: "working", since: "x" },
+            ],
+          },
+          { login: "no-id", role: "founder", sessions: [] },
+          { id: "p_bo", login: "bo-example", sessions: [] },
+        ],
+      },
+      {
+        items: [
+          { id: "m_1", ownerId: "p_ada", label: "Ada server", kind: "server", connected: true },
+          {
+            id: "m_2",
+            ownerId: "p_ada",
+            label: "Ada old laptop",
+            kind: "laptop",
+            connected: false,
+            revokedAt: "2026-11-24T18:00:00Z",
+          },
+        ],
+        truncated: false,
+      },
+    );
+    expect(team?.people.map((person) => person.login)).toEqual(["ada-example", "bo-example"]);
+    expect(team?.people[0]?.machines).toEqual([
+      { id: "m_1", label: "Ada server", kind: "server", connected: true },
+    ]);
+    expect(team?.people[0]?.sessions.map((session) => session.id)).toEqual(["s_1"]);
+    expect(team?.people[1]?.role).toBe("limited_staff");
+    expect(reshapeTeam({ people: "nope" }, undefined)).toBeUndefined();
   });
 });

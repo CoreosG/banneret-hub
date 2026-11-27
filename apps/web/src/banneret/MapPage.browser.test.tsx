@@ -168,6 +168,7 @@ const state = (sections: string[], map: BanneretFeedMapRead | null): BanneretFee
   map,
   feed: null,
   graveyard: null,
+  team: null,
 });
 
 function setup() {

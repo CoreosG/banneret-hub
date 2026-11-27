@@ -35,6 +35,7 @@ export const BANNERET_AGENT_TOOLS = [
   "banneret_lease_take",
   "banneret_lease_release",
   "banneret_lease_withdraw",
+  "banneret_team",
 ] as const;
 export type BanneretAgentToolName = (typeof BANNERET_AGENT_TOOLS)[number];
 

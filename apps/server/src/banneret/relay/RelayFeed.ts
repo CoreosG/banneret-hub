@@ -4,7 +4,7 @@
 // snapshot cache, open only while that relay's enrolment is `configured`; an environment that has
 // not joined makes no relay call. Relay answers are reshaped field by field (relay strings
 // stay plain data), and the last good answer is kept so a screen is never blank while the relay is
-// away. The board, the map, the feed and the graveyard come from the snapshot (Snapshot.ts), each read only
+// away. The board, the map, the feed, the graveyard and the team come from the snapshot (Snapshot.ts), each read only
 // when capabilities advertise the snapshot and its section; older feed and graveyard pages, and one
 // task for the Task tab, are read on request.
 import {
@@ -27,6 +27,7 @@ import {
   type BanneretFeedToday,
   type BanneretFeedTodayRead,
   type BanneretTaskRead,
+  type BanneretTeamRead,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -55,6 +56,8 @@ import {
   reshapeFeedPage,
   reshapeGraveyardPage,
   reshapeTask,
+  reshapeTeam,
+  teamViewKey,
   unquoteEtag,
 } from "./Snapshot.ts";
 
@@ -135,6 +138,7 @@ const NOT_JOINED_SNAPSHOT: BanneretFeedState = {
   map: null,
   feed: null,
   graveyard: null,
+  team: null,
 };
 
 /** A reference, so a server built without the feed layer answers as an environment that never joined. */
@@ -574,6 +578,11 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   let feedSignature = "";
   let graveyardRead: BanneretGraveyardRead | null = null;
   let graveyardSignature = "";
+  // The team: its section's flags (null when not advertised), the last read and the view it was built
+  // from. The machines file changes on every heartbeat, so the view itself is the signature.
+  let teamFlags: ReadonlyArray<string> | null = null;
+  let teamRead: BanneretTeamRead | null = null;
+  let teamSignature = "";
   let lastHint: string | undefined;
   let snapshotWake: Queue.Queue<void> | undefined;
   let snapshotReader: ReturnType<typeof makeSnapshotReader> | undefined;
@@ -602,6 +611,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     map: mapRead,
     feed: feedRead,
     graveyard: graveyardRead,
+    team: teamRead,
   });
   const publishSnapshot = Effect.suspend(() => PubSub.publish(changes, snapshot()));
   /** Today or Needs you may have changed: clients refetch. */
@@ -765,6 +775,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           boardFlags = sectionFlags(reply.body, "board");
           mapFlags = sectionFlags(reply.body, "map");
           feedFlags = sectionFlags(reply.body, "feed");
+          teamFlags = sectionFlags(reply.body, "team");
           snapshotOffered = fields(reply.body)?.snapshot !== undefined;
           wakeSnapshot();
           return publishSnapshot;
@@ -948,11 +959,19 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         changed = true;
       }
     }
+    if (teamFlags === null) {
+      teamSignature = "";
+      if (teamRead !== null) {
+        teamRead = null;
+        changed = true;
+      }
+    }
     const fixed = [
       ...(mapFlags === null ? [] : ["map"]),
       ...(boardFlags === null && mapFlags === null ? [] : ["work"]),
       ...(feedFlags === null ? [] : ["feed"]),
       ...(graveyardOffered ? ["graveyard"] : []),
+      ...(teamFlags === null ? [] : ["team", "machines"]),
     ];
     const wantsAny = boardFlags !== null || fixed.length > 0;
     // The boards index and every `board.<id>` the head names; chosen per head read.
@@ -1012,12 +1031,18 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       graveyardRead = problemOn(graveyardRead ?? { value: null, fetchedAt: null }, message);
       changed = true;
     };
+    const teamProblem = (message: string) => {
+      if (teamFlags === null || teamRead?.problem?.message === message) return;
+      teamRead = problemOn(teamRead ?? { value: null, fetchedAt: null }, message);
+      changed = true;
+    };
 
     if (wantsAny && !snapshotOffered) {
       boardProblem(notPublished("board"));
       mapProblem(notPublished("build map"));
       feedProblem(notPublished("feed"));
       graveyardProblem(notPublished("graveyard"));
+      teamProblem(notPublished("team"));
     } else if (wantsAny) {
       const outcome = yield* reader.read(wanted).pipe(Effect.result);
       if (!stillJoined(key)) return;
@@ -1028,6 +1053,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         mapProblem(message);
         feedProblem(message);
         graveyardProblem(message);
+        teamProblem(message);
       } else {
         const { refs, files } = outcome.success;
         if (boardFlags !== null) {
@@ -1099,6 +1125,27 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
             graveyardSignature = refs.graveyard;
             graveyardRead = { value, fetchedAt: at };
             changed = true;
+          }
+        }
+        if (teamFlags !== null) {
+          const value =
+            refs.team === undefined ? undefined : reshapeTeam(files.team, files.machines);
+          if (refs.team === undefined) teamProblem(notPublished("team"));
+          else if (value === undefined) teamProblem(unreadable);
+          else {
+            // Only what the page shows counts: a heartbeat that moved nothing on it publishes nothing.
+            const signature = teamViewKey(value);
+            if (
+              signature === teamSignature &&
+              teamRead !== null &&
+              teamRead.problem === undefined
+            ) {
+              teamRead = { ...teamRead, fetchedAt: at };
+            } else {
+              teamSignature = signature;
+              teamRead = { value, fetchedAt: at };
+              changed = true;
+            }
           }
         }
       }
@@ -1256,6 +1303,9 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         feedSignature = "";
         graveyardRead = null;
         graveyardSignature = "";
+        teamFlags = null;
+        teamRead = null;
+        teamSignature = "";
         lastHint = undefined;
         yield* enrolment.setBoardTasks([]);
         joined = next;

@@ -126,6 +126,7 @@ const state = (sections: string[], cards: BanneretBoardCard[] | null): BanneretF
   map: null,
   feed: null,
   graveyard: null,
+  team: null,
 });
 
 const withMap = (

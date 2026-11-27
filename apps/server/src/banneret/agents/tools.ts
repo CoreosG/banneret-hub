@@ -182,6 +182,48 @@ const TaskTool = reads(
   }),
 );
 
+const TeamTool = reads(
+  Tool.make("banneret_team", {
+    description:
+      "Who is working on what at your company, from the relay's last snapshot (no tracker calls): each person's machines, the leases they hold, and their live agent sessions with state and task. A session's state is working, waiting (on its person's permission or answer), idle or not_heard_from (its machine went quiet). parentId links a helper to its lead session. Use it to avoid work someone else's agent is already doing.",
+    parameters: Schema.Struct({
+      person: Schema.optional(
+        Schema.String.annotate({ description: "A login. Default: everyone." }),
+      ),
+    }),
+    success: Schema.Struct({
+      ...Company,
+      people: Schema.Array(
+        Schema.Struct({
+          login: Schema.String,
+          role: Schema.String,
+          machines: Schema.Array(Schema.Struct({ label: Schema.String, online: Schema.Boolean })),
+          /** Board tasks this person holds a lease on. */
+          leases: Schema.Array(
+            Schema.Struct({ taskId: Schema.String, title: Schema.String, state: Schema.String }),
+          ),
+          sessions: Schema.Array(
+            Schema.Struct({
+              id: Schema.String,
+              parentId: Schema.optional(Schema.String),
+              machine: Schema.String,
+              provider: Schema.String,
+              state: Schema.String,
+              waiting: Schema.optional(Schema.String),
+              taskId: Schema.optional(Schema.String),
+              taskTitle: Schema.optional(Schema.String),
+              since: Schema.String,
+            }),
+          ),
+        }),
+      ),
+    }),
+    failure,
+    failureMode: "return",
+    dependencies,
+  }),
+);
+
 const LeaseCheckTool = reads(
   Tool.make("banneret_lease_check", {
     description:
@@ -254,6 +296,7 @@ export const AgentToolkit = Toolkit.make(
   BoardTool,
   NeedsTool,
   TaskTool,
+  TeamTool,
   LeaseCheckTool,
   LeaseTakeTool,
   LeaseReleaseTool,

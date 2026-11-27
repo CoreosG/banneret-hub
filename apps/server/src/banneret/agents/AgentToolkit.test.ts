@@ -222,6 +222,30 @@ const boardState = (cards: ReadonlyArray<BanneretBoardCard>): BanneretFeedState 
   map: null,
   feed: null,
   graveyard: null,
+  team: {
+    value: {
+      people: [
+        {
+          id: "p_me",
+          login: ME,
+          role: "limited_staff",
+          machines: [{ id: "m_1", label: "Dev server", kind: "server", connected: true }],
+          sessions: [
+            {
+              id: "s_lead",
+              machineId: "m_1",
+              provider: "claude",
+              state: "working",
+              taskId: "t_mine",
+              since: "2026-11-26T09:40:00.000Z",
+            },
+          ],
+        },
+        { id: "p_bo", login: "bo-example", role: "founder", machines: [], sessions: [] },
+      ],
+    },
+    fetchedAt: "2026-11-26T10:00:00.000Z",
+  },
 });
 
 describe("agent toolkit listing", () => {
@@ -422,6 +446,20 @@ describe("agent toolkit listing", () => {
           };
           expect(ops.boards.map((entry) => entry.id)).toEqual(["platform", "ops"]);
           expect(ops.cards).toMatchObject([{ id: "t_mine", board: "ops" }]);
+          // Who works on what: titles from the board, machine labels from the machines file.
+          const team = (yield* company.call("banneret_team", { person: ME })).result!
+            .structuredContent as {
+            people: Array<{
+              login: string;
+              machines: Array<{ label: string; online: boolean }>;
+              sessions: Array<{ machine: string; state: string; taskTitle?: string }>;
+            }>;
+          };
+          expect(team.people.map((entry) => entry.login)).toEqual([ME]);
+          expect(team.people[0]!.machines).toEqual([{ label: "Dev server", online: true }]);
+          expect(team.people[0]!.sessions).toMatchObject([
+            { machine: "Dev server", state: "working", taskTitle: "Task t_mine" },
+          ]);
           const unknown = yield* company.call("banneret_board", { board: "nope" });
           expect(JSON.stringify(unknown.result ?? unknown.error)).toContain("platform, ops");
           // Named for founders only: hidden from this person, and a call is refused as unknown.

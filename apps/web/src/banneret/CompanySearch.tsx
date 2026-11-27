@@ -1,7 +1,6 @@
-// Banneret Hub: the `/` search over the active workspace's company, through the snapshot data the feed
-// already holds; it asks the relay for nothing. Enter opens the highlighted result: a card in the Task
-// dialog, a map item in its Map neighbourhood (else its task or the filtered Map), a feed entry in its
-// task or at its link.
+// Banneret Hub: the `/` search over the active workspace's company (board cards, map items, feed entries,
+// people) through what the feed already holds; no relay call. Enter opens the result: a card in the Task
+// dialog, a map item in its Map neighbourhood, a feed entry in its task or at its link, a person on Team.
 import type { BanneretBoardTask } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { SearchIcon } from "lucide-react";
@@ -17,6 +16,8 @@ import { mergeFeedEntries } from "./feed.logic";
 import { neighbourhoodSearch } from "./mapGraph.logic";
 import { safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
+import { roleLabel } from "./enterprise.logic";
+import { searchPeople } from "./team.logic";
 import {
   closeCompanySearch,
   openCompanySearch,
@@ -102,8 +103,18 @@ const boardsMapFeed: CompanySearchSource = ({ query, enterprise, openTask, navig
   ];
 };
 
-/** Every source, in result order. A page with its own kind of thing (people, say) adds one here. */
-const COMPANY_SEARCH_SOURCES: ReadonlyArray<CompanySearchSource> = [boardsMapFeed];
+/** The team's people, by login, role or machine; a person opens expanded on Team. */
+const people: CompanySearchSource = ({ query, enterprise, navigate }) =>
+  searchPeople(enterprise.feed.team?.value, query).map((person) => ({
+    key: `person:${person.id}`,
+    group: "People",
+    title: person.login,
+    detail: `Team · ${roleLabel(person.role)}`,
+    open: () => void navigate({ to: "/team", search: { person: person.login } } as never),
+  }));
+
+/** Every source, in result order. A page with its own kind of thing adds one here. */
+const COMPANY_SEARCH_SOURCES: ReadonlyArray<CompanySearchSource> = [boardsMapFeed, people];
 
 function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
   const { target, workspace } = props.enterprise;
@@ -135,7 +146,7 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
           aria-controls="company-search-results"
           aria-activedescendant={active < 0 ? undefined : `company-search-${active}`}
           aria-label={`Search ${workspace.name}`}
-          placeholder="Search tasks, the map and the feed"
+          placeholder="Search tasks, the map, the feed and people"
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-placeholder"
           value={query}
           onChange={(event) => {
@@ -165,7 +176,7 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
       >
         {query.trim() === "" ? (
           <p className="px-2 py-3 text-muted-foreground text-sm">
-            Type to search every board, the map and the feed.
+            Type to search every board, the map, the feed and the team.
           </p>
         ) : list.length === 0 ? (
           <p className="px-2 py-3 text-muted-foreground text-sm">Nothing matches.</p>
