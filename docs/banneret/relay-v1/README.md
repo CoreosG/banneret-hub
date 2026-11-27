@@ -299,8 +299,8 @@ forever. They carry nothing those calls do not already return to the same caller
   when the relay serves `GET /repositories`, `repositories` to `sha256:<hex>`. The path of a file uses the bare hex.
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
-  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `board`, `map`, `feed` and `graveyard`
-  are `SnapshotBoard`, `SnapshotMap`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know.
+  `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `boards` is `SnapshotBoards`, each
+  `board.<id>` is `SnapshotBoard`, and `map`, `feed` and `graveyard` are `SnapshotMap`, `FeedPage` and `GraveyardPage`. A client ignores keys under `files` it does not know.
 - **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
   head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
   fetch its files.
@@ -334,7 +334,8 @@ What the files hold, and who sees what, is the same as the live calls:
 | work | `Today.working` and `Today.stuck` for the caller | role, in practice |
 | machines | `GET /machines` for the caller | person (revoked machines for owner and founders; `revocable`) |
 | repositories | `GET /repositories` | nothing (relay-wide) |
-| board | none (snapshot only) | nothing (relay-wide) |
+| boards | none (snapshot only) | nothing (relay-wide) |
+| `board.<id>` | none (snapshot only) | nothing (relay-wide) |
 | map | none (snapshot only) | nothing (relay-wide) |
 | feed | `GET /feed` | nothing (relay-wide) |
 | graveyard | `GET /graveyard` | nothing (relay-wide) |
@@ -344,21 +345,37 @@ What the files hold, and who sees what, is the same as the live calls:
 
 ## Board and leases
 
-A relay that serves the board advertises the section `{kind:"board", flags:["leases"]}`
-(plus the flag `checked` when it applies the sign-off rule below)
-and names the `board` file in the snapshot head. A Hub does not
-read the board unless capabilities carry the section. The board is snapshot-only: the relay computes it, the Hub
-draws it. The flag `leases` also means the relay parses the lease protocol below. There is no second flag.
+A relay that serves boards advertises the section `{kind:"board", version:2, flags:["leases", "boards"]}`
+(plus the flag `checked` when it applies the sign-off rule below). A Hub does not read a board unless capabilities
+carry the section. Boards are snapshot-only: the relay computes them, the Hub draws them. The flag `leases` also means
+the relay parses the lease protocol below. The flag `boards` means the snapshot head names the `boards` index and one
+`board.<id>` file per board. The flag `status_columns` is reserved for boards whose columns come from a tracker's
+status field (a later version); a relay does not send it yet.
+
+**Several boards.** A company can have more than one board, for example one per team. The relay's config lists them;
+the Hub never discovers them. The head names:
+
+- `boards`: the index, `SnapshotBoards` = `{boards[{id, title, mode, source{kind, url?}, counts{<columnId>: n}}]}`,
+  in display order, at most 50. The list is data, not capabilities, so it can change without a deploy.
+- `board.<id>`: one `SnapshotBoard` per index entry, with its own 1,000-card cap. One file per board means a change on
+  one board does not re-send the others.
+
+`mode` and `source.kind` are open tokens. Known today: mode `dev` (the five columns below, with leases) and source
+`filter` (repositories and labels from the relay's config). A client draws an unknown mode as plain columns.
+`counts` are cards per column id after every column rule, so a client can show a board's size without reading its
+file. A task id is relay-wide: a task on two boards is the same task, and its lease is the same lease.
 
 A relay only reads. Every take, release and hand-off write comes from the Hub on the person's own login (see "Lease
 protocol"). The relay has no write endpoint for them.
 
-**The file.** `SnapshotBoard` is `{state, notMeasured, columns[], cards[]}`.
+**The file.** `SnapshotBoard` is `{state, notMeasured, columns[], cards[]}`. At most 51 columns.
 
-- `columns` are the relay's five, each `{id, title}`: `free` (Free), `taken` (Taken), `validating` (Validating),
+- On a `dev` board, `columns` are the relay's five, each `{id, title}`: `free` (Free), `taken` (Taken), `validating` (Validating),
   `stuck` (Stuck), `shipped` (Shipped). Ids are open strings.
-- A card is `{task, column, status, statusWhy, lease?, lastRelease?, assignees[], prs[], restsOn[taskId]}`. Objects in the file are closed, so
+- A card is `{task, kind, column, status, statusWhy, lease?, lastRelease?, assignees[], prs[], restsOn[taskId]}`. Objects in the file are closed, so
   an unknown field is a relay defect and a conformance failure. New fields come with a new minor version.
+- `kind` is an open token: `issue`, `pull_request` or `draft` (an item that belongs to no repository yet). A client
+  shows an unknown kind like `issue`.
 - `task` is `{id, title, ref{tracker, host?, scope, key, url}, openedAt, closedAt}`. `openedAt` is when the tracker
   issue was opened. `closedAt` is when it was closed, or null while it is open. Every task in the protocol has this
   shape: board cards, map items, `GET /tasks/{id}`, feed and graveyard entries.
@@ -726,7 +743,7 @@ optional fields:
   label. See "Checked".
 
 A `taskId` that is malformed (not an `Id`) or unknown answers 404 `not_found`, never 400, like `DELETE
-/machines/{machineId}`. The Hub reads the card from the `board` or `map` file when it holds the task and calls this
+/machines/{machineId}`. The Hub reads the card from a `board.<id>` or the `map` file when it holds the task and calls this
 only for the rest.
 
 ## Checked

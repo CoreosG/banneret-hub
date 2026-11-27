@@ -13,12 +13,13 @@ import { closeInactive, observeRoute, useTabsStore } from "./tabsStore";
 
 /** "modal": Settings and Usage open over the last view, which keeps its tab. */
 function readRouteTarget(router: AnyRouter): TabTarget | null | "modal" {
-  const { pathname } = router.state.location;
+  const { pathname, searchStr } = router.state.location;
   if (isAppModalPage(pathname)) return "modal";
   if (isPagePath(pathname)) {
     return {
       kind: "page",
-      href: pathname,
+      // The search keeps a page's filters (Board, Map, Feed) when its tab is opened again.
+      href: `${pathname}${searchStr}`,
       workspaceId: useWorkspacesStore.getState().activeId,
       title: pageTitle(pathname),
     };

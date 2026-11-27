@@ -11,6 +11,7 @@
     "openedAt": "2026-11-20T09:00:00Z",
     "closedAt": null
   },
+  "kind": "issue",
   "column": "shipped",
   "status": "checked",
   "statusWhy": "A sign-off role holder checked it after the merge.",

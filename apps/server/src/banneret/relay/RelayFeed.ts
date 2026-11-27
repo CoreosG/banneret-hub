@@ -49,7 +49,8 @@ import {
   boardTaskRef,
   liveTaskIds,
   makeSnapshotReader,
-  reshapeBoard,
+  boardHeadKeys,
+  reshapeBoards,
   reshapeMap,
   reshapeFeedPage,
   reshapeGraveyardPage,
@@ -862,12 +863,17 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         changed = true;
       }
     }
-    const wanted = [
-      ...(boardFlags === null ? [] : ["board"]),
+    const fixed = [
       ...(mapFlags === null ? [] : ["map"]),
       ...(boardFlags === null && mapFlags === null ? [] : ["work"]),
       ...(feedFlags === null ? [] : ["feed"]),
       ...(graveyardOffered ? ["graveyard"] : []),
+    ];
+    const wantsAny = boardFlags !== null || fixed.length > 0;
+    // The boards index and every `board.<id>` the head names; chosen per head read.
+    const wanted = (keys: ReadonlyArray<string>) => [
+      ...(boardFlags === null ? [] : boardHeadKeys(keys)),
+      ...fixed,
     ];
     const at = yield* nowIso;
     const notPublished = (what: string) =>
@@ -922,12 +928,12 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       changed = true;
     };
 
-    if (wanted.length > 0 && !snapshotOffered) {
+    if (wantsAny && !snapshotOffered) {
       boardProblem(notPublished("board"));
       mapProblem(notPublished("build map"));
       feedProblem(notPublished("feed"));
       graveyardProblem(notPublished("graveyard"));
-    } else if (wanted.length > 0) {
+    } else if (wantsAny) {
       const outcome = yield* reader.read(wanted).pipe(Effect.result);
       if (!stillJoined(key)) return;
       if (Result.isFailure(outcome)) {
@@ -940,13 +946,18 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       } else {
         const { refs, files } = outcome.success;
         if (boardFlags !== null) {
-          const value = refs.board === undefined ? undefined : reshapeBoard(files.board);
-          if (refs.board === undefined) boardProblem(notPublished("board"));
+          const value = refs.boards === undefined ? undefined : reshapeBoards(files.boards, files);
+          if (refs.boards === undefined) boardProblem(notPublished("boards"));
           else if (value === undefined) boardProblem(unreadable);
           else {
             const atWork = files.work === undefined ? [] : liveTaskIds(files.work);
+            // Every board file's hash: a change on one board republishes, an unchanged read does not.
+            const boardRefs = boardHeadKeys(Object.keys(refs))
+              .map((key) => `${key}=${refs[key]}`)
+              .toSorted()
+              .join(",");
             // The work file changes on every heartbeat; only the ring it yields counts.
-            const signature = `${refs.board} ${atWork.join(",")} ${leases} ${checked}`;
+            const signature = `${boardRefs} ${atWork.join(",")} ${leases} ${checked}`;
             if (signature === boardSignature && board !== null && board.problem === undefined) {
               // Unchanged: keep the newer age for the next publish without sending it again.
               board = { ...board, fetchedAt: at };

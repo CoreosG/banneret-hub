@@ -248,6 +248,32 @@ async function pick(title: string) {
 }
 
 describe("Enterprise build map", () => {
+  it("narrows the map to the items a text filter matches, kept in the URL", async () => {
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openMap(stack, "/map?q=blocks");
+    await using _screen = screen;
+    await emit(state(["map"], mapRead(MAP())));
+    await expect.element(page.getByLabelText("Filter the map")).toHaveValue("blocks");
+    await vi.waitFor(() =>
+      expect(
+        [...document.querySelectorAll("[data-item-id]")].map((row) =>
+          row.getAttribute("data-item-id"),
+        ),
+      ).toEqual(["profile"]),
+    );
+    // A stage with no match is hidden.
+    expect(
+      [...document.querySelectorAll("li[data-stage-id] h2")].map((h) => h.textContent),
+    ).toEqual(["Social"]);
+
+    await userEvent.fill(page.getByLabelText("Filter the map"), "nothing like it");
+    await vi.waitFor(() => expect(router.state.location.search).toEqual({ q: "nothing like it" }));
+    await expect.element(page.getByText("Nothing on the map matches this filter.")).toBeVisible();
+    await userEvent.fill(page.getByLabelText("Filter the map"), "");
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-item-id]")).toHaveLength(8));
+    expect(router.state.location.search).toEqual({});
+  });
+
   it("draws stage rows on a spine with progress, compact items and the counted legend", async () => {
     using stack = new DisposableStack();
     const { emit, router, screen } = await openMap(stack, "/");

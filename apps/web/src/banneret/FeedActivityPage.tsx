@@ -1,6 +1,7 @@
 // Banneret Hub: the Feed for an Enterprise workspace, with the Graveyard as a tab, drawn from the
 // relay's snapshot `feed` and `graveyard` files. Older entries load on request. Read-only: the relay
-// derives every entry. Relay strings render as plain text, and only http(s) links are rendered.
+// derives every entry. Relay strings render as plain text, and only http(s) links are rendered. A text
+// filter (in the URL as `q`) narrows the loaded entries of either tab.
 import type {
   BanneretBoardTask,
   BanneretFeedEntry,
@@ -11,6 +12,7 @@ import { type ReactNode, useState } from "react";
 
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
+import { feedEntryText, graveyardEntryText, matchesText, queryFromUrl } from "./boards.logic";
 import { cleanLogin } from "./enterprise.logic";
 import { Age, FeedStatus, When } from "./FeedParts";
 import {
@@ -26,7 +28,9 @@ import { offersSection, safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
 import { FeedPage, NotJoinedNote } from "./TodayPage";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
+import { FilterBox } from "./ui/FilterBox";
 import { useOpenTask } from "./useOpenTask";
+import { useUrlSearch } from "./useUrlSearch";
 
 type Tab = "feed" | "graveyard";
 
@@ -200,6 +204,8 @@ export function FeedActivityPage() {
   const enterprise = useEnterpriseFeed();
   const openTask = useOpenTask(enterprise?.target ?? null);
   const [tab, setTab] = useState<Tab>("feed");
+  const [rawSearch, setSearch] = useUrlSearch();
+  const query = queryFromUrl(rawSearch);
   if (enterprise === null) {
     return (
       <FeedPage title="Feed">
@@ -223,8 +229,9 @@ export function FeedActivityPage() {
   let body: ReactNode;
   if (active === "feed") {
     const file = feed.activity?.value ?? null;
-    const entries =
+    const loaded =
       file === null ? [] : mergeFeedEntries(file.entries, feed.activityOlder?.entries ?? []);
+    const entries = loaded.filter((entry) => matchesText(query, feedEntryText(entry)));
     body =
       file === null ? (
         waiting ? (
@@ -232,8 +239,10 @@ export function FeedActivityPage() {
         ) : null
       ) : (
         <>
-          {entries.length === 0 ? (
+          {loaded.length === 0 ? (
             <p className="text-muted-foreground text-sm">No activity yet</p>
+          ) : entries.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No loaded entry matches this filter.</p>
           ) : (
             <ul aria-label="Feed entries" className="flex flex-col divide-y rounded-lg border px-4">
               {entries.map((entry) => (
@@ -251,8 +260,9 @@ export function FeedActivityPage() {
       );
   } else {
     const file = feed.graveyard?.value ?? null;
-    const entries =
+    const loaded =
       file === null ? [] : mergeGraveyardEntries(file.entries, feed.graveyardOlder?.entries ?? []);
+    const entries = loaded.filter((entry) => matchesText(query, graveyardEntryText(entry)));
     body =
       file === null ? (
         waiting ? (
@@ -260,8 +270,10 @@ export function FeedActivityPage() {
         ) : null
       ) : (
         <>
-          {entries.length === 0 ? (
+          {loaded.length === 0 ? (
             <p className="text-muted-foreground text-sm">Nothing has been ruled dead</p>
+          ) : entries.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No loaded entry matches this filter.</p>
           ) : (
             <ul
               aria-label="Graveyard entries"
@@ -284,7 +296,15 @@ export function FeedActivityPage() {
 
   return (
     <FeedPage title={`Feed in ${workspace.name}`}>
-      {graveyardOffered ? <Tabs active={active} onChange={setTab} /> : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {graveyardOffered ? <Tabs active={active} onChange={setTab} /> : <span />}
+        <FilterBox
+          label="Filter the feed"
+          placeholder="Filter the feed"
+          value={query}
+          onChange={(q) => setSearch({ q }, { replace: true })}
+        />
+      </div>
       <FeedStatus
         feed={feed}
         company={workspace.name}

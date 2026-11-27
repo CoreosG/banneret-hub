@@ -29,7 +29,7 @@ simply works as usual.
 
 | Tool                      | What it does                                                                              |
 | ------------------------- | ----------------------------------------------------------------------------------------- |
-| `banneret_board`          | The board from the relay's last snapshot. Filters: column, mine, repo.                    |
+| `banneret_board`          | The boards from the relay's last snapshot. Filters: board, column, mine, repo.            |
 | `banneret_needs`          | What waits on the person, most urgent first.                                              |
 | `banneret_task`           | One task: status, lease, pull requests, preview, sign-off and the last release note.      |
 | `banneret_lease_check`    | Who holds a task now, read from the tracker, and what the agent may do.                   |

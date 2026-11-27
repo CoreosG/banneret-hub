@@ -1,7 +1,7 @@
-// Banneret Hub: the build map for an Enterprise workspace, drawn from the relay's snapshot `map` file,
-// with a Rests-on view when the map section carries the `rests_on` flag. The relay computes every
-// stage, status, reason and counter; this page only draws them. Read-only. An item with a task opens
-// its Task tab; an item without one is not clickable. Relay strings render as plain text.
+// Banneret Hub: the build map from the relay's snapshot `map` file, with a Rests-on view when the map
+// section flags `rests_on`. The relay computes every stage, status and counter; this page only draws
+// them. An item with a task opens its Task tab. Relay strings stay text. A text filter (`q` in the URL)
+// hides the items that do not match.
 import type { BanneretBoardTask, BanneretMap, BanneretMapItem } from "@t3tools/contracts";
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon } from "lucide-react";
 import { type CSSProperties, type ReactNode, useState } from "react";
@@ -23,6 +23,7 @@ import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { taskRef } from "./board.logic";
+import { mapItemText, matchesText, queryFromUrl } from "./boards.logic";
 import { FeedStatus } from "./FeedParts";
 import {
   blockedByLabel,
@@ -55,8 +56,10 @@ import {
   TYPE,
   toneProps,
 } from "./ui/tokens";
+import { FilterBox } from "./ui/FilterBox";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
+import { useUrlSearch } from "./useUrlSearch";
 
 type View = "map" | "rests_on";
 type OpenTask = (task: BanneretBoardTask) => void;
@@ -177,17 +180,31 @@ function BuildMapView(props: {
   readonly map: BanneretMap;
   readonly atWork: ReadonlySet<string>;
   readonly onOpen: OpenTask;
+  readonly query: string;
 }) {
-  const stages = mapStages(props.map);
-  const spine = spineStates(stages.map((stage) => stageProgress(stage.counts)));
+  const all = mapStages(props.map);
+  // The spine and progress keep every item; a filter only hides items and the stages left empty.
+  const spine = spineStates(all.map((stage) => stageProgress(stage.counts)));
+  const shown = all
+    .map((stage, index) => ({
+      stage: {
+        ...stage,
+        items: stage.items.filter((item) => matchesText(props.query, mapItemText(item))),
+      },
+      spine: spine[index]!,
+    }))
+    .filter((entry) => props.query === "" || entry.stage.items.length > 0);
+  if (shown.length === 0) {
+    return <QuietLine fact="Nothing on the map matches this filter." />;
+  }
   return (
     <ol aria-label="Stages" {...LAYOUT_MAP_STAGES}>
-      {stages.map((stage, index) => (
+      {shown.map(({ stage, spine: state }) => (
         <StageRow
           key={stage.id}
           map={props.map}
           stage={stage}
-          spine={spine[index]!}
+          spine={state}
           atWork={props.atWork}
           onOpen={props.onOpen}
         />
@@ -489,6 +506,8 @@ export function MapPage() {
   const enterprise = useEnterpriseFeed();
   const openTask = useOpenTask(enterprise?.target ?? null);
   const [view, setView] = useState<View>("map");
+  const [rawSearch, setSearch] = useUrlSearch();
+  const query = queryFromUrl(rawSearch);
   if (enterprise === null) {
     return (
       <MapFrame>
@@ -544,7 +563,7 @@ export function MapPage() {
         {active === "rests_on" ? (
           <RestsOnTab map={map} atWork={atWork} onOpen={openTask} />
         ) : (
-          <BuildMapView map={map} atWork={atWork} onOpen={openTask} />
+          <BuildMapView map={map} atWork={atWork} onOpen={openTask} query={query} />
         )}
       </>
     );
@@ -556,6 +575,14 @@ export function MapPage() {
         title="Build map"
         summary={hasItems ? mapSummary(map, mapStages(map).length) : undefined}
       >
+        {hasItems && active === "map" ? (
+          <FilterBox
+            label="Filter the map"
+            placeholder="Filter the map"
+            value={query}
+            onChange={(q) => setSearch({ q }, { replace: true })}
+          />
+        ) : null}
         {restsOnOffered ? (
           <ToggleGroup
             aria-label="Map views"

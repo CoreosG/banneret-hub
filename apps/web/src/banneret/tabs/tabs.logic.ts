@@ -49,13 +49,17 @@ export type TabTarget =
     }
   | {
       readonly kind: "page";
-      readonly href: PagePath;
+      /** The page path plus its search, so a tab keeps the page's filters. */
+      readonly href: string;
       readonly workspaceId: string | null;
       readonly title: string;
     };
 
+/** A page tab's path without its search: filters change the tab's href, not which tab it is. */
+const pagePath = (href: string) => href.split(/[?#]/, 1)[0] ?? href;
+
 export function tabKey(tab: Pick<Tab, "kind" | "href" | "threadRef" | "workspaceId">): string {
-  if (tab.kind === "page") return `page:${tab.workspaceId ?? ""}:${tab.href}`;
+  if (tab.kind === "page") return `page:${tab.workspaceId ?? ""}:${pagePath(tab.href)}`;
   return tab.threadRef === null
     ? `href:${tab.href}`
     : `thread:${tab.threadRef.environmentId}:${tab.threadRef.threadId}`;

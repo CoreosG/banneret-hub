@@ -269,9 +269,17 @@ interface LinkedPr {
   readonly mergedAt: number | null;
 }
 
+/** One configured board: every `filter` board in `dev` mode. */
+interface BoardConfig {
+  readonly id: string;
+  readonly title: string;
+}
+
 interface BoardTask {
   readonly id: string;
   readonly title: string;
+  /** The id of the board that shows the task. */
+  readonly board: string;
   column: string;
   status: string;
   holder: { readonly id: string; readonly login: string } | null;
@@ -358,6 +366,11 @@ const BOARD_COLUMNS = [
   { id: "stuck", title: "Stuck" },
   { id: "shipped", title: "Shipped" },
 ] as const;
+/** The fake's boards until a `board/seed` names others (README, "Board and leases"). */
+const DEFAULT_BOARDS: ReadonlyArray<BoardConfig> = [
+  { id: "platform", title: "Platform" },
+  { id: "ops", title: "Ops" },
+];
 const STATUS_WHY: Readonly<Record<string, string>> = {
   ruled_dead: "The issue was closed as not planned.",
   checked: "A sign-off role holder checked it after the merge.",
@@ -554,6 +567,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const snapshotHeads = new Map<string, SnapshotHeadRecord[]>();
   /** Board tasks in seeding order. Relay-wide. */
   let boardTasks: BoardTask[] = [];
+  let boards: ReadonlyArray<BoardConfig> = DEFAULT_BOARDS;
   // The fake has a work tracker once a board is seeded; until then Today's Shipped block is not configured.
   let boardSeeded = false;
   /** Derived entries, newest first. Relay-wide. */
@@ -1209,6 +1223,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             : (STATUS_WHY[status] ?? STATUS_WHY.planned ?? "");
     return {
       task: taskRefView(task, index),
+      kind: "issue",
       column,
       status,
       statusWhy,
@@ -1225,10 +1240,30 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     };
   };
 
-  const boardView = () => {
+  // One file per board and the index with each board's counts, after every column rule. Task ids and keys stay
+  // relay-wide: a card's index is its place in the whole seed, whichever board shows it.
+  const boardFiles = () => {
     const now = Date.now();
-    const cards = boardTasks.map((task, index) => cardView(task, index, now));
-    return { state: "ok", notMeasured: [], columns: BOARD_COLUMNS, cards };
+    const cards = boardTasks.map((task, index) => ({
+      board: task.board,
+      card: cardView(task, index, now),
+    }));
+    return boards.map((config) => {
+      const own = cards.filter((entry) => entry.board === config.id).map((entry) => entry.card);
+      const counts: Record<string, number> = {};
+      for (const column of BOARD_COLUMNS) counts[column.id] = 0;
+      for (const card of own) counts[card.column] = (counts[card.column] ?? 0) + 1;
+      return {
+        entry: {
+          id: config.id,
+          title: config.title,
+          mode: "dev",
+          source: { kind: "filter" },
+          counts,
+        },
+        file: { state: "ok", notMeasured: [], columns: BOARD_COLUMNS, cards: own },
+      };
+    });
   };
 
   // README, Map and the stage plan.
@@ -1465,7 +1500,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           truncated: repositories.length > SNAPSHOT_REPOSITORIES_MAX,
         },
       ],
-      ["board", "SnapshotBoard", boardView()],
+      ...(() => {
+        const files = boardFiles();
+        return [
+          ["boards", "SnapshotBoards", { boards: files.map((board) => board.entry) }],
+          ...files.map(
+            (board) => [`board.${board.entry.id}`, "SnapshotBoard", board.file] as const,
+          ),
+        ] as ReadonlyArray<readonly [string, SchemaName, unknown]>;
+      })(),
       ...(stagePlan === null
         ? []
         : [["map", "SnapshotMap", mapView()] as readonly [string, SchemaName, unknown]]),
@@ -1734,7 +1777,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { id: "today", kind: "today", version: 1, flags: [] },
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
             { id: "machines", kind: "machines", version: 1, flags: ["revoke"] },
-            { id: "board", kind: "board", version: 1, flags: ["leases", "checked"] },
+            { id: "board", kind: "board", version: 2, flags: ["leases", "checked", "boards"] },
             ...(stagePlan === null
               ? []
               : [{ id: "map", kind: "map", version: 1, flags: ["rests_on"] }]),
@@ -2009,6 +2052,22 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       };
     });
   };
+  // `board/seed` may name the boards; without `boards` the fake keeps its two (Platform and Ops).
+  const seedBoards = (value: unknown): ReadonlyArray<BoardConfig> => {
+    if (value === undefined) return DEFAULT_BOARDS;
+    if (!Array.isArray(value) || value.length < 1 || value.length > 50)
+      throw new RelayError("malformed", "boards must be a list of 1 to 50 boards.");
+    const seen = new Set<string>();
+    return value.map((raw: Record<string, unknown>) => {
+      const id = String(raw?.id ?? "");
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(id) || seen.has(id))
+        throw new RelayError("malformed", "A board id is an Id, unique among the boards.");
+      seen.add(id);
+      const title = String(raw.title ?? id).slice(0, 60);
+      return { id, title: title === "" ? id : title };
+    });
+  };
+
   const seedTracker = (raw: Record<string, unknown>, now: number): TrackerIssue | null =>
     raw.comments === undefined && raw.assignees === undefined && raw.labels === undefined
       ? null
@@ -2193,6 +2252,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         });
       };
       if (!Array.isArray(list)) throw new RelayError("malformed", "tasks must be a list.");
+      const seededBoards = seedBoards(input.boards);
+      const boardIds = new Set(seededBoards.map((board) => board.id));
       const now = Date.now();
       boardTasks = list.map((raw: Record<string, unknown>) => {
         const login = raw.holder === undefined ? null : String(raw.holder);
@@ -2214,9 +2275,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             "malformed",
             "A task with comments, assignees or labels gets its lease from them; drop holder and leaseState.",
           );
+        const board = raw.board === undefined ? seededBoards[0]!.id : String(raw.board);
+        if (!boardIds.has(board))
+          throw new RelayError("malformed", `Task ${String(raw.id)} names an unknown board.`);
         return {
           id: String(raw.id),
           title: String(raw.title ?? raw.id),
+          board,
           column: String(raw.column ?? "free"),
           status: String(raw.status ?? "planned"),
           holder: login === null || holderId === null ? null : { id: holderId, login },
@@ -2241,6 +2306,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           lastSignalAt: tracker === null ? now : 0,
         };
       });
+      boards = seededBoards;
       for (const task of boardTasks) feedReleases(task);
       boardSeeded = true;
       refreshAllHeads();

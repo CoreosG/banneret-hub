@@ -1,0 +1,32 @@
+{
+  "boards": [
+    {
+      "id": "platform",
+      "title": "Platform",
+      "source": {
+        "kind": "filter"
+      },
+      "counts": {
+        "free": 1,
+        "taken": 1,
+        "validating": 0,
+        "stuck": 0,
+        "shipped": 1
+      }
+    },
+    {
+      "id": "ops",
+      "title": "Ops",
+      "mode": "dev",
+      "source": {
+        "kind": "filter",
+        "url": "https://github.com/example-org/example-ops/issues"
+      },
+      "counts": {
+        "free": 2,
+        "taken": 0,
+        "stuck": 1
+      }
+    }
+  ]
+}

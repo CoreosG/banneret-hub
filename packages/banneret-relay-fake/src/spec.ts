@@ -38,6 +38,7 @@ export type SchemaName =
   | "SnapshotWork"
   | "SnapshotMachines"
   | "SnapshotRepositories"
+  | "SnapshotBoards"
   | "SnapshotBoard"
   | "SnapshotMap"
   | "FeedPage"
@@ -118,6 +119,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "snapshot-work.json": "SnapshotWork",
   "snapshot-machines.json": "SnapshotMachines",
   "snapshot-repositories.json": "SnapshotRepositories",
+  "snapshot-boards.json": "SnapshotBoards",
   "snapshot-board.json": "SnapshotBoard",
   "snapshot-map.json": "SnapshotMap",
   "snapshot-map-not-measured.json": "SnapshotMap",
@@ -143,19 +145,21 @@ export const invalidExampleSchema = (file: string): SchemaName =>
               ? "SnapshotRepositories"
               : file.startsWith("snapshot-work")
                 ? "SnapshotWork"
-                : file.startsWith("snapshot-board")
-                  ? "SnapshotBoard"
-                  : file.startsWith("snapshot-map")
-                    ? "SnapshotMap"
-                    : file.startsWith("snapshot-feed")
-                      ? "FeedPage"
-                      : file.startsWith("snapshot-graveyard")
-                        ? "GraveyardPage"
-                        : file.startsWith("task-")
-                          ? "TaskRead"
-                          : file.startsWith("today-")
-                            ? "Today"
-                            : "FactsRequest";
+                : file.startsWith("snapshot-boards")
+                  ? "SnapshotBoards"
+                  : file.startsWith("snapshot-board")
+                    ? "SnapshotBoard"
+                    : file.startsWith("snapshot-map")
+                      ? "SnapshotMap"
+                      : file.startsWith("snapshot-feed")
+                        ? "FeedPage"
+                        : file.startsWith("snapshot-graveyard")
+                          ? "GraveyardPage"
+                          : file.startsWith("task-")
+                            ? "TaskRead"
+                            : file.startsWith("today-")
+                              ? "Today"
+                              : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

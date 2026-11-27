@@ -29,6 +29,7 @@ import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
 import { TaskPanel } from "./TaskPanel";
 import { taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
+import { singleBoard } from "./boards.testkit";
 
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
@@ -73,6 +74,7 @@ const card = (extra: Partial<BanneretBoardCard> = {}): BanneretBoardCard => ({
     openedAt: "2026-11-20T09:00:00.000Z",
     closedAt: null,
   },
+  kind: "issue",
   column: "free",
   status: "planned",
   statusWhy: "Open and nobody has taken it yet.",
@@ -91,7 +93,7 @@ const feed = (cards: BanneretBoardCard[], leases = true): BanneretFeedState => (
   needsCount: null,
   revision: 1,
   board: {
-    value: { state: "ok", notMeasured: [], columns: [], cards },
+    value: singleBoard({ state: "ok", notMeasured: [], columns: [], cards }),
     fetchedAt: "2026-11-26T10:00:00.000Z",
     atWork: [],
     leases,

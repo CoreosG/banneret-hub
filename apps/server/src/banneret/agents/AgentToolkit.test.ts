@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import type { FakeRelay } from "@t3tools/banneret-relay-fake";
 import {
+  allBoardCards,
   BANNERET_AGENT_TOOLS,
   type BanneretBoardCard,
   type BanneretEnrolmentView,
@@ -176,6 +177,7 @@ const card = (id: string, key: string, overrides: Partial<BanneretBoardCard> = {
       openedAt: "2026-11-26T09:00:00.000Z",
       closedAt: null,
     },
+    kind: "issue",
     column: "free",
     status: "planned",
     statusWhy: "Open, none of the above.",
@@ -185,6 +187,16 @@ const card = (id: string, key: string, overrides: Partial<BanneretBoardCard> = {
     ...overrides,
   }) satisfies BanneretBoardCard;
 
+const boardOf = (id: string, title: string, cards: ReadonlyArray<BanneretBoardCard>) => ({
+  id,
+  title,
+  mode: "dev",
+  source: { kind: "filter" },
+  counts: { free: cards.length },
+  board: { state: "ok", notMeasured: [], columns: [], cards: [...cards] },
+});
+
+/** Two boards: the first card on Platform, the rest on Ops. */
 const boardState = (cards: ReadonlyArray<BanneretBoardCard>): BanneretFeedState => ({
   joined: true,
   live: true,
@@ -194,7 +206,12 @@ const boardState = (cards: ReadonlyArray<BanneretBoardCard>): BanneretFeedState 
   needsCount: null,
   revision: 1,
   board: {
-    value: { state: "ok", notMeasured: [], columns: [], cards: [...cards] },
+    value: {
+      boards: [
+        boardOf("platform", "Platform", cards.slice(0, 1)),
+        boardOf("ops", "Ops", cards.slice(1)),
+      ],
+    },
     fetchedAt: "2026-11-26T10:00:00.000Z",
     atWork: [],
     leases: true,
@@ -386,6 +403,16 @@ describe("agent toolkit listing", () => {
             .structuredContent as { company: string; me: string; cards: Array<{ id: string }> };
           expect(board).toMatchObject({ company: "Example Company", me: ME, leases: true });
           expect(board.cards.map((entry) => entry.id)).toEqual(["t_free", "t_mine"]);
+          // One board by id; an unknown id names the boards there are.
+          const ops = (yield* company.call("banneret_board", { board: "ops" })).result!
+            .structuredContent as {
+            boards: Array<{ id: string }>;
+            cards: Array<{ id: string; board: string }>;
+          };
+          expect(ops.boards.map((entry) => entry.id)).toEqual(["platform", "ops"]);
+          expect(ops.cards).toMatchObject([{ id: "t_mine", board: "ops" }]);
+          const unknown = yield* company.call("banneret_board", { board: "nope" });
+          expect(JSON.stringify(unknown.result ?? unknown.error)).toContain("platform, ops");
           // Named for founders only: hidden from this person, and a call is refused as unknown.
           expect(
             (yield* company.call("banneret_lease_withdraw", { taskId: "t_free" })).error,
@@ -565,7 +592,7 @@ describe("agent lease tools against the fake relay", () => {
       fake.approve(view.confirmCode!, { login: ME, role: "limited_staff" });
       const feed = yield* RelayFeed.BanneretRelayFeed;
       yield* feed.events(relay.origin).pipe(
-        Stream.filter((state) => (state.board?.value?.cards.length ?? 0) > 0),
+        Stream.filter((state) => allBoardCards(state.board?.value).length > 0),
         Stream.runHead,
       );
       yield* writeWorkspaces(relay.origin);

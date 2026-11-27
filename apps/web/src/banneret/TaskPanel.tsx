@@ -3,6 +3,7 @@
 // upstream's issue thread when a project here is on the task's tracker, else one row that links out.
 // Relay strings stay text.
 import {
+  allBoardCards,
   EnvironmentId,
   type BanneretBoardCard,
   type BanneretBoardPr,
@@ -540,7 +541,9 @@ function TaskPanelBody(props: {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's relay feed while the Task tab is shown
   useEffect(() => watchFeed({ environmentId, relayOrigin }), [environmentId, relayOrigin]);
 
-  const card = feed.board?.value?.cards.find((candidate) => candidate.task.id === taskId) ?? null;
+  // Every board's cards: a task can open from search on a board that is not the one shown.
+  const boardCards = allBoardCards(feed.board?.value);
+  const card = boardCards.find((candidate) => candidate.task.id === taskId) ?? null;
   // The map carries every planned task, closed issues included, that the relay may not serve.
   const mapItem = feed.map?.value?.items.find((item) => item.task?.id === taskId) ?? null;
   // Only a relay that advertises the section serves the read; any other relay answers 404 for a task
@@ -559,7 +562,7 @@ function TaskPanelBody(props: {
     mapItem,
     map: feed.map?.value ?? null,
     relayTask,
-    cards: feed.board?.value?.cards ?? [],
+    cards: boardCards,
     notFound,
   };
   const note =

@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import type { FakeRelay } from "@t3tools/banneret-relay-fake";
 import {
+  allBoardCards,
   type BanneretFeedState,
   EnvironmentId,
   IssueTrackerKind,
@@ -31,7 +32,15 @@ import * as Enrolment from "./Enrolment.ts";
 import * as Facts from "./Facts.ts";
 import * as RelayFeed from "./RelayFeed.ts";
 import { focus, type Forwarder, withFake } from "./relayHarness.testkit.ts";
-import { liveTaskIds, reshapeBoard, reshapeMap, reshapeTask, taskIdForLinks } from "./Snapshot.ts";
+import {
+  boardHeadKeys,
+  liveTaskIds,
+  reshapeBoard,
+  reshapeBoards,
+  reshapeMap,
+  reshapeTask,
+  taskIdForLinks,
+} from "./Snapshot.ts";
 
 const ENVIRONMENT = "env-board-1";
 const EPOCH = Date.parse("2026-11-26T10:00:00Z");
@@ -261,7 +270,7 @@ const subscribe = Effect.gen(function* () {
 });
 
 const leaseOf = (event: BanneretFeedState, taskId: string) =>
-  event.board?.value?.cards.find((card) => card.task.id === taskId)?.lease?.state;
+  allBoardCards(event.board?.value).find((card) => card.task.id === taskId)?.lease?.state;
 
 /** Waits until `done` holds, rechecking at each enrolment change (every signed call is one). */
 const untilEnrolment = (done: () => boolean, label: string) =>
@@ -323,21 +332,29 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         expect(board.leases).toBe(true);
         expect(board.fetchedAt).not.toBeNull();
         expect(board.problem).toBeUndefined();
-        expect(board.value!.columns.map((column) => column.title)).toEqual([
+        expect(board.value!.boards[0]!.board!.columns.map((column) => column.title)).toEqual([
           "Free",
           "Taken",
           "Validating",
           "Stuck",
           "Shipped",
         ]);
+        // The fake's two boards; the seed lands on the first, so the second is empty.
+        expect(board.value!.boards.map((entry) => [entry.id, entry.title])).toEqual([
+          ["platform", "Platform"],
+          ["ops", "Ops"],
+        ]);
+        expect(board.value!.boards[1]!.board!.cards).toEqual([]);
         const columnOf = (id: string) =>
-          board.value!.cards.find((card) => card.task.id === id)?.column;
+          allBoardCards(board.value).find((card) => card.task.id === id)?.column;
         expect(columnOf("t_free")).toBe("free");
         expect(columnOf("t_active")).toBe("taken");
         expect(columnOf("t_stale")).toBe("stuck");
         expect(columnOf("t_expired")).toBe("stuck");
         expect(leaseOf(state, "t_active")).toBe("active");
-        expect(board.value!.cards.find((card) => card.task.id === "t_free")?.lease).toBeUndefined();
+        expect(
+          allBoardCards(board.value).find((card) => card.task.id === "t_free")?.lease,
+        ).toBeUndefined();
 
         // A long heartbeat interval leaves the head unchanged, so the polls answer 304.
         const files = relay.requests.filter((request) => isFile(request.url));
@@ -377,7 +394,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         const events = yield* subscribe;
         yield* control(fake, "/board/seed", SEED);
         yield* join(fake, relay);
-        yield* events.next((event) => (event.board?.value?.cards.length ?? 0) === 4, "the board");
+        yield* events.next((event) => allBoardCards(event.board?.value).length === 4, "the board");
         expect(refused).toBe(1);
         const urls = relay.requests.map((request) => request.url);
         const refusedAt = relay.requests.findIndex((request) => request.status === 404);
@@ -400,7 +417,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         yield* control(fake, "/board/seed", SEED);
         yield* join(fake, relay);
         const good = yield* events.next(
-          (event) => (event.board?.value?.cards.length ?? 0) === 4,
+          (event) => allBoardCards(event.board?.value).length === 4,
           "the board",
         );
         relay.rewrite = (request, body) =>
@@ -416,10 +433,11 @@ describe("BanneretRelayFeed board from the snapshot", () => {
 
         relay.rewrite = undefined;
         const fixed = yield* events.next(
-          (event) => event.board?.problem === undefined && event.board?.value?.cards.length === 1,
+          (event) =>
+            event.board?.problem === undefined && allBoardCards(event.board?.value).length === 1,
           "the new board",
         );
-        expect(fixed.board!.value!.cards[0]!.task.title).toBe("Rate limits");
+        expect(allBoardCards(fixed.board!.value)[0]!.task.title).toBe("Rate limits");
       }).pipe(onFreshHub({ threads: [], reads: 0 })),
     ),
   );
@@ -431,7 +449,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         yield* control(fake, "/board/seed", SEED);
         yield* join(fake, relay);
         const good = yield* events.next(
-          (event) => (event.board?.value?.cards.length ?? 0) === 4,
+          (event) => allBoardCards(event.board?.value).length === 4,
           "the board",
         );
         yield* Effect.promise(() => relay.close());
@@ -462,10 +480,11 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         Effect.gen(function* () {
           const events = yield* subscribe;
           // The fake names card N issue N of example-org/example-app; neither task has a branch.
+          // The linked task is on the second board: every board's tasks can be linked.
           yield* control(fake, "/board/seed", {
             tasks: [
               { id: "t_other", title: "Other", holder: "bo-example" },
-              { id: "t_linked", title: "Linked", holder: "ada-example" },
+              { id: "t_linked", title: "Linked", holder: "ada-example", board: "ops" },
             ],
           });
           yield* control(fake, "/lease/age", { taskId: "t_linked", hours: 7 });
@@ -852,6 +871,7 @@ describe("snapshot reshaping", () => {
             openedAt: "2026-11-20T09:00:00Z",
             closedAt: null,
           },
+          kind: "issue",
           column: "free",
           status: "planned",
           statusWhy: "Open.",
@@ -877,6 +897,7 @@ describe("snapshot reshaping", () => {
             openedAt: "2026-11-20T09:00:00Z",
             closedAt: "2026-11-21T09:00:00Z",
           },
+          kind: "pull_request",
           column: "free",
           status: "planned",
           statusWhy: "Open.",
@@ -889,6 +910,7 @@ describe("snapshot reshaping", () => {
             title: "C",
             ref: { tracker: "github", scope: "example-org/app", key: "9", url: "https://z" },
           },
+          kind: "issue",
           column: "free",
           status: "planned",
           statusWhy: "Open.",
@@ -925,6 +947,77 @@ describe("snapshot reshaping", () => {
     expect(taskIdForLinks(index, [link("GHE.example.com", "8")])).toBe("t_ghe");
     expect(taskIdForLinks(index, [link("github.com", "9"), link("github.com", "7")])).toBe("t_gh");
     expect(taskIdForLinks(index, [])).toBeUndefined();
+    expect(board.cards[1]?.kind).toBe("pull_request");
+  });
+
+  it("drops a card without its kind", () => {
+    const board = reshapeBoard({
+      state: "ok",
+      notMeasured: [],
+      columns: [],
+      cards: [
+        {
+          task: {
+            id: "t_1",
+            title: "A",
+            ref: { tracker: "github", scope: "o/r", key: "1", url: "https://x" },
+            openedAt: "2026-11-20T09:00:00Z",
+            closedAt: null,
+          },
+          column: "free",
+          status: "planned",
+          statusWhy: "Open.",
+          prs: [],
+          assignees: [],
+          restsOn: [],
+        },
+      ],
+    })!;
+    expect(board.cards).toEqual([]);
+  });
+
+  it("reads the boards index with each board's file, keeping an entry whose file is missing", () => {
+    const file = {
+      state: "ok",
+      notMeasured: [],
+      columns: [{ id: "free", title: "Free" }],
+      cards: [],
+    };
+    expect(boardHeadKeys(["needs", "boards", "board.platform", "board.bad key", "board."])).toEqual(
+      ["boards", "board.platform"],
+    );
+    const boards = reshapeBoards(
+      {
+        boards: [
+          {
+            id: "platform",
+            title: "Platform",
+            mode: "dev",
+            source: { kind: "filter" },
+            counts: { free: 0, x: -1 },
+          },
+          {
+            id: "ops",
+            title: "Ops",
+            mode: "status",
+            source: { kind: "project", url: "https://p" },
+            counts: {},
+          },
+          { id: "platform", title: "Again", mode: "dev", source: { kind: "filter" }, counts: {} },
+          { id: "no title", mode: "dev", source: { kind: "filter" }, counts: {} },
+        ],
+      },
+      { "board.platform": file },
+    )!;
+    expect(boards.boards.map((entry) => [entry.id, entry.title, entry.mode])).toEqual([
+      ["platform", "Platform", "dev"],
+      ["ops", "Ops", "status"],
+    ]);
+    expect(boards.boards[0]!.counts).toEqual({ free: 0 });
+    expect(boards.boards[0]!.board?.columns).toEqual([{ id: "free", title: "Free" }]);
+    expect(boards.boards[1]!.source).toEqual({ kind: "project", url: "https://p" });
+    expect(boards.boards[1]!.board).toBeNull();
+    expect(reshapeBoards({ nope: [] }, {})).toBeUndefined();
   });
 });
 
@@ -1049,7 +1142,7 @@ describe("BanneretRelayFeed map from the snapshot", () => {
         yield* control(fake, "/board/seed", MAP_BOARD);
         yield* join(fake, relay);
         const before = yield* events.next(
-          (event) => event.sectionsKnown && (event.board?.value?.cards.length ?? 0) === 2,
+          (event) => event.sectionsKnown && allBoardCards(event.board?.value).length === 2,
           "the board",
         );
         expect(before.sections).not.toContain("map");
@@ -1067,7 +1160,7 @@ describe("BanneretRelayFeed map from the snapshot", () => {
           (event) => event.map === null && !event.sections.includes("map"),
           "the map gone",
         );
-        expect(gone.board?.value?.cards).toHaveLength(2);
+        expect(allBoardCards(gone.board?.value)).toHaveLength(2);
       }).pipe(onFreshHub({ threads: [], reads: 0 })),
     ),
   );
@@ -1095,7 +1188,7 @@ describe("BanneretRelayFeed map from the snapshot", () => {
         yield* control(fake, "/map/seed", MAP_PLAN);
         yield* join(fake, relay);
         const state = yield* events.next(
-          (event) => (event.board?.value?.cards.length ?? 0) === 2,
+          (event) => allBoardCards(event.board?.value).length === 2,
           "the board",
         );
         // Let a few more polls of the head pass.
@@ -1201,6 +1294,7 @@ describe("lastRelease", () => {
   };
   const card = (lastRelease: unknown) => ({
     task,
+    kind: "issue",
     column: "free",
     status: "planned",
     statusWhy: "Open.",

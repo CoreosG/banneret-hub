@@ -216,6 +216,28 @@ const entryIds = () =>
   );
 
 describe("Enterprise feed", () => {
+  it("narrows the loaded entries to a text filter, kept in the URL", async () => {
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openFeed(stack, "/feed?q=bo-example");
+    await using _screen = screen;
+    await emit(
+      state(
+        ["feed"],
+        feedRead([
+          entry("e1", 1, { author: { login: "bo-example" }, summary: "Merged rate limits." }),
+          entry("e2", 2, { task: task("t2", "Guild invites") }),
+          entry("e3", 3),
+        ]),
+      ),
+    );
+    await vi.waitFor(() => expect(entryIds()).toEqual(["e1"]));
+    await userEvent.fill(page.getByLabelText("Filter the feed"), "guild");
+    await vi.waitFor(() => expect(entryIds()).toEqual(["e2"]));
+    expect(router.state.location.search).toEqual({ q: "guild" });
+    await userEvent.fill(page.getByLabelText("Filter the feed"), "zzz");
+    await expect.element(page.getByText("No loaded entry matches this filter.")).toBeVisible();
+  });
+
   it("shows each entry's time, author, summary, status mark and link out", async () => {
     using stack = new DisposableStack();
     const { emit, router, screen } = await openFeed(stack, "/");

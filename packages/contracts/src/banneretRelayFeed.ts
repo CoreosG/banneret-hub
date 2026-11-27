@@ -212,6 +212,8 @@ export type BanneretLastRelease = typeof BanneretLastRelease.Type;
 /** One task on the board. `column` and `status` are open strings the relay computed. */
 export const BanneretBoardCard = Schema.Struct({
   task: BanneretBoardTask,
+  /** Open: `issue`, `pull_request` or `draft`; an unknown kind shows like `issue`. */
+  kind: Schema.String,
   column: Schema.String,
   status: Schema.String,
   statusWhy: Schema.String,
@@ -238,12 +240,50 @@ export const BanneretBoard = Schema.Struct({
 export type BanneretBoard = typeof BanneretBoard.Type;
 
 /**
- * The board as last read from the relay's snapshot, kept with its age when the relay is away.
+ * One board of the relay's `boards` index with its own file. `mode` and `source.kind` are open
+ * tokens (`dev` and `filter` today). `board` is null while its `board.<id>` file is missing or
+ * unreadable; the rest of the index still shows.
+ */
+export const BanneretBoardEntry = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  mode: Schema.String,
+  source: Schema.Struct({ kind: Schema.String, url: Schema.optional(Schema.String) }),
+  counts: Schema.Record(Schema.String, Schema.Number),
+  board: Schema.NullOr(BanneretBoard),
+});
+export type BanneretBoardEntry = typeof BanneretBoardEntry.Type;
+
+/** Every board the relay publishes, in its order. Task ids are relay-wide across them. */
+export const BanneretBoards = Schema.Struct({ boards: Schema.Array(BanneretBoardEntry) });
+export type BanneretBoards = typeof BanneretBoards.Type;
+
+/**
+ * Every card on every board, in board order. A task id is relay-wide, so a task that two boards
+ * show is listed once, with its first board's card.
+ */
+export function allBoardCards(
+  boards: BanneretBoards | null | undefined,
+): ReadonlyArray<BanneretBoardCard> {
+  const seen = new Set<string>();
+  const cards: Array<BanneretBoardCard> = [];
+  for (const entry of boards?.boards ?? []) {
+    for (const card of entry.board?.cards ?? []) {
+      if (seen.has(card.task.id)) continue;
+      seen.add(card.task.id);
+      cards.push(card);
+    }
+  }
+  return cards;
+}
+
+/**
+ * The boards as last read from the relay's snapshot, kept with their age when the relay is away.
  * `atWork` are task ids with a live agent session in the snapshot `work` file (the ring);
  * `leases` and `checked` are the board section's flags of those names.
  */
 export const BanneretFeedBoardRead = Schema.Struct({
-  value: Schema.NullOr(BanneretBoard),
+  value: Schema.NullOr(BanneretBoards),
   fetchedAt: Schema.NullOr(Schema.String),
   atWork: Schema.Array(Schema.String),
   leases: Schema.Boolean,
