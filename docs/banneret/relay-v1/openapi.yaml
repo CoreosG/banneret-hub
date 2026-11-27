@@ -3331,7 +3331,13 @@ components:
             - messageId
             - conversationId
             - snippet
+            - conversationName
+            - author
+            - createdAt
             properties:
+              conversationName: { type: string }
+              author: { $ref: '#/components/schemas/ChatAuthor' }
+              createdAt: { $ref: '#/components/schemas/Timestamp' }
               messageId:
                 $ref: '#/components/schemas/Id'
               conversationId:
@@ -3635,8 +3641,7 @@ components:
           maxLength: 16384
         link:
           type: string
-          format: uri
-          pattern: ^https?://
+          pattern: '^/channels/[A-Za-z0-9_-]+\?(thread=[A-Za-z0-9_-]+&)?message=[A-Za-z0-9_-]+$'
     ChatLimits:
       type: object
       additionalProperties: false

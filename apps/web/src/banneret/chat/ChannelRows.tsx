@@ -10,8 +10,12 @@ import { DmSettings } from "./AgentSettings";
 import { handles, conversations, conversationTitle, chatRpc, useChatRead } from "./client";
 const decodeChatConversation = Schema.decodeUnknownSync(ChatConversation);
 
-export const chatHref = (id: string, root?: string) =>
-  "/channels/" + encodeURIComponent(id) + (root ? "?thread=" + encodeURIComponent(root) : "");
+export const chatHref = (id: string, root?: string, message?: string) => {
+  const query = new URLSearchParams();
+  if (root) query.set("thread", root);
+  if (message) query.set("message", message);
+  return "/channels/" + encodeURIComponent(id) + (query.size ? "?" + query : "");
+};
 export function ChannelRows({
   enterprise,
   onOpen,

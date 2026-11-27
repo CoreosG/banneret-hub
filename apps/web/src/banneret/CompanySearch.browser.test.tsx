@@ -29,6 +29,7 @@ import {
   type FakeDriver,
 } from "../../test/fakeEnvironment";
 import { act, render } from "../../test/render";
+import { chatRpc } from "./chat/client";
 import { useCompanySearchStore } from "./companySearchStore";
 import { storeEnrolmentView } from "./enrolmentStore";
 import { feedRpc } from "./relayFeedStore";
@@ -215,5 +216,45 @@ describe("company search in the app", () => {
     await userEvent.keyboard("/");
     await expectSearchOpensThenClose();
     await page.viewport(1165, 900);
+  });
+  it("finds a highlighted reply through the Messages filter and opens its thread", async () => {
+    using rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) =>
+      action.kind === "search"
+        ? {
+            items: [
+              {
+                conversationId: "c_search",
+                conversationName: "#search",
+                messageId: "m_reply",
+                threadRootId: "m_root",
+                author: { kind: "person", id: "ada", login: "ada" },
+                createdAt: "2026-01-01T00:00:00Z",
+                snippet: "Upload finished",
+              },
+            ],
+            nextCursor: null,
+          }
+        : { items: [], nextCursor: null },
+    );
+    await act(() => {
+      for (const listener of listeners)
+        listener({ ...FEED, sections: [...FEED.sections, "chat"], chatFlags: ["search"] });
+    });
+    await clickEmptySpace();
+    await userEvent.keyboard("/");
+    await page.getByRole("button", { name: "Search all messages" }).click();
+    await page.getByRole("combobox", { name: "Search Example Company" }).fill("upload");
+    await page.getByRole("button", { name: "is:human", exact: true }).click();
+    await vi.waitFor(() =>
+      expect(rpc).toHaveBeenCalledWith(expect.anything(), {
+        kind: "search",
+        query: "upload is:human",
+      }),
+    );
+    const messages = page.getByRole("group", { name: "Messages", exact: true });
+    await expect.element(messages.getByText("Upload", { exact: true })).toBeVisible();
+    await messages.getByRole("option").click();
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/channels/c_search"));
+    expect(router.state.location.search).toMatchObject({ thread: "m_root", message: "m_reply" });
   });
 });

@@ -28,6 +28,7 @@ import {
   useChatRead,
 } from "./client";
 import { chatHref } from "./ChannelRows";
+import { PostToGitHub } from "./PostToGitHub";
 import { Markdown } from "./Markdown";
 
 type Person = Pick<Extract<ChatMember, { kind: "person" }>, "id" | "login">;
@@ -39,17 +40,23 @@ const author = (m: ChatMessage) =>
     : m.author.kind === "agent"
       ? m.author.handle
       : "System";
-type View = { enterprise: EnterpriseFeed; id: string; root: string | undefined };
-export function ChannelPage({ id, root }: Omit<View, "enterprise">) {
+type View = {
+  enterprise: EnterpriseFeed;
+  id: string;
+  root: string | undefined;
+  focus?: string | undefined;
+};
+export function ChannelPage({ id, root, focus }: Omit<View, "enterprise">) {
   const enterprise = useEnterpriseFeed();
   if (!enterprise?.feed.sectionsKnown || !enterprise.feed.sections.includes("chat"))
     return <QuietLine fact="This page is unavailable." />;
   return (
     <ChannelView
-      key={relayKey(enterprise.target) + "/" + id}
+      key={relayKey(enterprise.target) + "/" + id + "/" + (focus ?? "")}
       enterprise={enterprise}
       id={id}
       root={root}
+      focus={focus}
     />
   );
 }
@@ -85,7 +92,7 @@ export function DmPrivacy({
     </>
   );
 }
-function ChannelView({ enterprise, id, root }: View) {
+function ChannelView({ enterprise, id, root, focus }: View) {
   const { environmentId, relayOrigin } = enterprise.target;
   const load = () => conversations({ environmentId, relayOrigin });
   const loadPeople = () => members({ environmentId, relayOrigin }, id);
@@ -105,7 +112,7 @@ function ChannelView({ enterprise, id, root }: View) {
   const [q, setQ] = useState("");
   const [showMembers, setMembers] = useState(false);
   const [error, setError] = useState("");
-  const href = chatHref(id, root);
+  const href = chatHref(id, root, focus);
   const tabId = useTabsStore(
     (s) => s.tabs.find((t) => t.href === href && t.workspaceId === enterprise.workspace.id)?.id,
   );
@@ -205,6 +212,7 @@ function ChannelView({ enterprise, id, root }: View) {
               enterprise={enterprise}
               channel={channel}
               root={undefined}
+              focus={root ? undefined : focus}
               people={[
                 ...(people.value ?? []),
                 ...(agents.value ?? []).filter(
@@ -232,6 +240,7 @@ function ChannelView({ enterprise, id, root }: View) {
                 enterprise={enterprise}
                 channel={channel}
                 root={root}
+                focus={focus}
                 people={[
                   ...(people.value ?? []),
                   ...(agents.value ?? []).filter(
@@ -318,10 +327,12 @@ function Timeline({
   query,
   open,
   tabId,
+  focus,
 }: {
   enterprise: EnterpriseFeed;
   channel: ChatConversation;
   root: string | undefined;
+  focus?: string | undefined;
   people: Person[];
   query: string;
   open: (root: string) => void;
@@ -339,6 +350,7 @@ function Timeline({
       root,
       pages,
       seekUnread ? openingCursor : undefined,
+      focus,
     );
   const read = useChatRead(load, [enterprise.feed.chatRevision, localRevision, pages].join(":"));
   const items = (read.value?.items ?? []).filter(
@@ -440,7 +452,16 @@ function Timeline({
             keyExtractor={(m) => m.id}
             estimatedItemSize={82}
             className="min-h-0 flex-1"
-            initialScrollIndex={unreadIndex < 0 ? items.length - 1 : unreadIndex}
+            initialScrollIndex={
+              focus
+                ? Math.max(
+                    0,
+                    items.findIndex((m) => m.id === focus),
+                  )
+                : unreadIndex < 0
+                  ? items.length - 1
+                  : unreadIndex
+            }
             maintainScrollAtEnd
             onViewableItemsChanged={({ viewableItems }) => {
               setSeen(Math.max(0, ...viewableItems.map((t) => t.item.seq)));
@@ -597,12 +618,22 @@ function Timeline({
                           👍
                         </button>
                       )}
+                      {!m.deleted && enterprise.feed.chatFlags?.includes("promote") && (
+                        <PostToGitHub
+                          enterprise={enterprise}
+                          id={m.id}
+                          linked={
+                            m.taskRef ??
+                            (root ? items.find((item) => item.id === root)?.taskRef : undefined)
+                          }
+                        />
+                      )}
                       {!root && <button onClick={() => open(m.id)}>Reply in thread</button>}
                       <button
                         onClick={() =>
                           void navigator.clipboard
                             .writeText(
-                              new URL(chatHref(channel.id, root ?? m.id), location.origin).href,
+                              new URL(chatHref(channel.id, root, m.id), location.origin).href,
                             )
                             .catch((e) => setError(String(e)))
                         }

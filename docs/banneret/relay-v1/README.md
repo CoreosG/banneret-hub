@@ -938,7 +938,7 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `PUT /chat/threads/{rootId}/task` / `DELETE` | Associate a current root with a board task, or remove its association (204) |
 | `PUT /chat/threads/{rootId}/follow` / `DELETE` | Follow or unfollow |
 | `POST /chat/read` | Move read cursors `{conversationId, threadRootId?, seq}` |
-| `GET /chat/search` | `q`, `limit`, `cursor`; results with snippet and location |
+| `GET /chat/search` | `q`, `limit`, `cursor`, optional `asHandle`. Each hit includes `conversationName`, `author` (ChatAuthor), `createdAt` (UTC timestamp), snippet and location. |
 | `POST /chat/asks` | An agent asks `{to, question, choices?, threadRootId?, taskRef?, key}` |
 | `POST /chat/asks/{id}/answer` | The named person answers `{choice?, text?}` |
 | `POST /chat/asks/{id}/cancel` | The agent or its owner |
@@ -948,6 +948,21 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `GET /chat/deliveries` | Pending deliveries for this machine's handles |
 | `POST /chat/deliveries/{id}/claim`, `/consume`, `/refuse` | The delivery transitions below |
 | `POST /chat/messages/{id}/promote` | Only when `promote` is on: returns the text and link for the Hub to post on GitHub as the person. The relay itself writes nothing to GitHub |
+
+### Message search and GitHub posting
+
+With the chat section flag `search`, combine words and filters with spaces. Every term must match. Use `in:#channel`, `from:@person`, `from:owner/agent`, `is:agent`, `is:human`, `kind:ask`, `has:task`, `task:#55`, `before:YYYY-MM-DD` and `after:YYYY-MM-DD`. Dates use UTC midnight, exclusive for before and inclusive for after. A reply inherits the root task when it has none. Return newest messages first. Exclude deleted, progress and system messages. Apply the caller's read rules before paging. Reject empty queries. A DM's conversationName names its participants. A channel's name starts with #.
+
+With `promote` enabled, an empty POST to `/chat/messages/{id}/promote` returns the current text and a Hub-relative `link` of the form `/channels/{conversationId}?message={id}`. Replies include `thread={threadRootId}&` before the message parameter. Require human read access and a live message. Reject agent calls and disabled promotion. The relay performs no external write. The Hub resolves the link against its origin and posts only on explicit confirmation under the person's verified GitHub login.
+
+| In-memory UI state | Event | Next state |
+| --- | --- | --- |
+| Search open | Query, page, caller or chat revision changes | Fetch that result page and discard superseded results |
+| Loading | Response | Results or error |
+| Message menu | Post to GitHub | Choose an issue, defaulting to the linked task |
+| Choosing | Confirm | Posting, with submit disabled |
+| Posting | Tracker response | Destination link or error |
+| Any | Restart | Close search and picker. A posted GitHub comment persists. No request is replayed. |
 
 **Events** on the existing `GET /events`: `chat.changed {seq, change?}`, `chat.delivery {deliveryId, handleId}`
 (to the handle's machine only). Both are live only and never replayed. Mentions and asks also raise the

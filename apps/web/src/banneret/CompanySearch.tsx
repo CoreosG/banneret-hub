@@ -1,7 +1,11 @@
 // Banneret Hub: the `/` search over the active workspace's company (board cards, map items, feed entries,
-// people) through what the feed already holds; no relay call. Enter opens the result: a card in the Task
+// people) and chat through the relay. Enter opens the result: a card in the Task
 // dialog, a map item in its Map neighbourhood, a feed entry in its task or at its link, a person on Team.
-import type { BanneretBoardTask } from "@t3tools/contracts";
+import { ChatSearch, type BanneretBoardTask } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { chatHref } from "./chat/ChannelRows";
+import { chatRpc, useChatRead } from "./chat/client";
+import { relayKey } from "./enrolmentStore";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { SearchIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -116,16 +120,90 @@ const people: CompanySearchSource = ({ query, enterprise, navigate }) =>
 /** Every source, in result order. A page with its own kind of thing adds one here. */
 const COMPANY_SEARCH_SOURCES: ReadonlyArray<CompanySearchSource> = [boardsMapFeed, people];
 
+const decodeSearch = Schema.decodeUnknownSync(ChatSearch);
+const filterChips = [
+  "in:#",
+  "from:@",
+  "from:",
+  "is:agent",
+  "is:human",
+  "kind:ask",
+  "has:task",
+  "task:#",
+  "before:",
+  "after:",
+];
+function highlightWords(snippet: string, query: string) {
+  const words = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w && !/^(in|from|is|kind|has|task|before|after):/.test(w));
+  const pieces = [];
+  const text = snippet.toLowerCase();
+  let pos = 0;
+  while (pos < snippet.length) {
+    const hit = words
+      .map((word) => ({ word, index: text.indexOf(word, pos) }))
+      .filter((h) => h.index >= 0)
+      .sort((a, b) => a.index - b.index)[0];
+    if (!hit) break;
+    pieces.push(
+      snippet.slice(pos, hit.index),
+      <mark key={hit.index}>{snippet.slice(hit.index, hit.index + hit.word.length)}</mark>,
+    );
+    pos = hit.index + hit.word.length;
+  }
+  return [...pieces, snippet.slice(pos)];
+}
+
 function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
   const { target, workspace } = props.enterprise;
   const openTask = useOpenTask(target);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
+  const [full, setFull] = useState(false);
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
+  const enabled = props.enterprise.feed.chatFlags?.includes("search") === true;
+  const searchKey = JSON.stringify([enabled, query, cursor, props.enterprise.feed.chatRevision]);
+  const result = useChatRead(async () => {
+    if (!enabled || !query.trim()) return { searchKey, page: null };
+    const page = decodeSearch(
+      await chatRpc.run(target, { kind: "search", query, ...(cursor ? { cursor } : {}) }),
+    );
+    return { searchKey, page };
+  }, searchKey);
+  const page = result.value?.searchKey === searchKey ? result.value.page : null;
+  const messages: CompanySearchHit[] =
+    (full ? page?.items : page?.items.slice(0, 5))?.map((m) => ({
+      key: "message:" + m.messageId,
+      group: "Messages",
+      title: m.snippet,
+      detail: [
+        m.conversationName,
+        m.author.kind === "person"
+          ? m.author.login
+          : m.author.kind === "agent"
+            ? m.author.handle
+            : "System",
+        new Date(m.createdAt).toLocaleString(),
+      ].join(" · "),
+      open: () =>
+        void navigate({
+          href: chatHref(m.conversationId, m.threadRootId, m.messageId),
+        }),
+    })) ?? [];
+  function changeQuery(value: string) {
+    setQuery(value);
+    setCursors([]);
+    setHighlight(0);
+  }
   const context = { query, enterprise: props.enterprise, openTask, navigate };
-  const list: ReadonlyArray<CompanySearchHit> = COMPANY_SEARCH_SOURCES.flatMap((source) =>
-    source(context),
-  )
+  const list: ReadonlyArray<CompanySearchHit> = [
+    ...(full ? [] : COMPANY_SEARCH_SOURCES.flatMap((source) => source(context))),
+    ...messages,
+  ]
     .sort((a, b) => Number(b.group === "Matching people") - Number(a.group === "Matching people"))
     .map((hit) => ({
       ...hit,
@@ -148,12 +226,17 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
           aria-controls="company-search-results"
           aria-activedescendant={active < 0 ? undefined : `company-search-${active}`}
           aria-label={`Search ${workspace.name}`}
-          placeholder="Search tasks, the map, the feed and people"
+          placeholder={
+            full
+              ? "Search messages"
+              : enabled
+                ? "Search the company and messages"
+                : "Search tasks, the map, the feed and people"
+          }
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-placeholder"
           value={query}
           onChange={(event) => {
-            setQuery(event.target.value);
-            setHighlight(0);
+            changeQuery(event.target.value);
           }}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown") {
@@ -170,6 +253,33 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
         />
         <Kbd>Esc</Kbd>
       </label>
+      {enabled && (
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs">
+          <button
+            onClick={() => {
+              setFull(!full);
+              setCursors([]);
+              setHighlight(0);
+            }}
+          >
+            {full ? "All company results" : "Search all messages"}
+          </button>
+          {full &&
+            filterChips.map((chip) => (
+              <button
+                key={chip}
+                className="rounded-md border px-2 py-1"
+                onClick={(e) => {
+                  changeQuery((query.trim() + " " + chip).trim());
+                  e.currentTarget.closest('[role="dialog"]')?.querySelector("input")?.focus();
+                }}
+              >
+                {chip}
+              </button>
+            ))}
+        </div>
+      )}
+      {enabled && result.error && <p role="alert">{result.error}</p>}
       <div
         id="company-search-results"
         role="listbox"
@@ -178,10 +288,12 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
       >
         {query.trim() === "" ? (
           <p className="px-2 py-3 text-muted-foreground text-sm">
-            Type to search every board, the map, the feed and the team.
+            {full ? "Enter words or choose a filter." : "Type to search the company."}
           </p>
         ) : list.length === 0 ? (
-          <p className="px-2 py-3 text-muted-foreground text-sm">Nothing matches.</p>
+          <p className="px-2 py-3 text-muted-foreground text-sm">
+            {enabled && !page && !result.error ? "Searching messages..." : "Nothing matches."}
+          </p>
         ) : (
           groups.map((group) => (
             <div key={group} role="group" aria-label={group} className="flex flex-col">
@@ -206,7 +318,9 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
                     }}
                   >
                     {hit.status === undefined ? null : <StatusMark status={hit.status} />}
-                    <span className="min-w-0 flex-1 truncate">{hit.title}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {hit.group === "Messages" ? highlightWords(hit.title, query) : hit.title}
+                    </span>
                     <span className="shrink-0 truncate text-muted-foreground text-xs">
                       {hit.detail}
                     </span>
@@ -217,6 +331,16 @@ function SearchBody(props: { readonly enterprise: EnterpriseFeed }) {
           ))
         )}
       </div>
+      {full && (
+        <div className="flex gap-2 px-4 text-sm">
+          {cursor && (
+            <button onClick={() => setCursors((c) => c.slice(0, -1))}>Previous page</button>
+          )}
+          {page?.nextCursor && (
+            <button onClick={() => setCursors((c) => [...c, page.nextCursor!])}>Next page</button>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -257,7 +381,10 @@ export function CompanySearchHost() {
           className="max-w-xl overflow-hidden"
           data-testid="company-search"
         >
-          <SearchBody enterprise={enterprise} />
+          <SearchBody
+            key={relayKey(enterprise.target) + enterprise.enrolment.me?.login}
+            enterprise={enterprise}
+          />
         </DialogPopup>
       ) : null}
     </Dialog>

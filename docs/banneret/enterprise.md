@@ -421,6 +421,8 @@ and open a project to start a thread. Extend a running booking when the line is
 empty, or cancel it from the card. Push commits or copy files out before the
 booking ends. Cleanup deletes the sandbox's local work.
 
+With chat search enabled, press `/` and choose Search all messages to filter by channel, author, kind, linked task or date. Open a result to jump to the message. With posting enabled, choose Post to GitHub on a message, select the issue and confirm.
+
 In Settings → Chat, **Use Banneret memory** turns off Claude and Codex memory in new
 Hub sessions on the selected environment. It defaults to off. Hub memory tools
 and the Memory line are available in either mode.

@@ -3,7 +3,14 @@
     {
       "messageId": "example_1",
       "conversationId": "example_1",
-      "snippet": "example"
+      "snippet": "example",
+      "conversationName": "#general",
+      "author": {
+        "kind": "person",
+        "login": "ada",
+        "id": "p_1"
+      },
+      "createdAt": "2026-01-01T00:00:00Z"
     }
   ],
   "nextCursor": null

@@ -64,6 +64,7 @@ export async function history(
   root: string | undefined,
   pages: number,
   readSeq?: number,
+  focus?: string,
 ) {
   const items = [];
   let cursor: string | null = null;
@@ -77,16 +78,26 @@ export async function history(
       if (page.root.conversationId !== id)
         throw new Error("This thread belongs to another channel.");
       if (!cursor) items.push(page.root);
-      remaining--;
       items.push(...page.items);
+      if (!focus || items.some((m) => m.id === focus)) remaining--;
       cursor = page.nextCursor;
     } else {
       const page = decodeChatMessages(
-        await chatRpc.run(target, { kind: "messages", id, ...extra }),
+        await chatRpc.run(
+          target,
+          focus
+            ? { kind: "around", id, message: focus, ...extra }
+            : { kind: "messages", id, ...extra },
+        ),
       );
       items.push(...page.items);
       cursor = page.nextCursor;
-      if (readSeq === undefined || page.items.some((m) => m.seq <= readSeq)) remaining--;
+      if (
+        focus
+          ? items.some((m) => m.id === focus)
+          : readSeq === undefined || page.items.some((m) => m.seq <= readSeq)
+      )
+        remaining--;
     }
     if (!cursor) break;
   }
