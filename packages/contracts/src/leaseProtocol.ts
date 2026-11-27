@@ -275,6 +275,8 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
   const releases: LeaseRelease[] = [];
   let lastEventAt: string | null = null;
   let lastRelease: { release: LeaseRelease; holderSince: string } | null = null;
+  // Logins whose claim ended by a counted release or a withdrawal: evidence the protocol was used for them.
+  const ended: string[] = [];
 
   const indexOf = (login: string) => standing.findIndex((claim) => same(claim.login, login));
   for (const comment of comments) {
@@ -291,6 +293,7 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
     const own = indexOf(author);
     if (line.kind === "withdraw" || (own > 0 && line.kind === "release")) {
       if (own < 0) continue;
+      ended.push(author);
       standing.splice(own, 1);
       lastEventAt = comment.createdAt;
       continue;
@@ -300,6 +303,7 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
     const founder = input.founders.some((login) => same(login, author));
     if (own !== 0 && !founder) continue;
     standing.shift();
+    ended.push(holder.login);
     const release: LeaseRelease = {
       by: author,
       holder: holder.login,
@@ -332,17 +336,15 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
       claimants,
     };
   } else {
-    // No claim stands, yet the tracker still names someone: a release or withdrawal not finished, or an
-    // assignment made outside the protocol.
+    // No claim stands. The tracker still shows the protocol only when a release or withdrawal is unfinished
+    // (the ended claimant is still assigned) or the `claimed` label is left behind. A plain assignee with
+    // neither is an assignment made outside the protocol: not a lease.
     const released = lastRelease?.release.holder ?? null;
+    const endedAssignee = input.assignees.find((name) => ended.some((login) => same(login, name)));
     const residue =
-      input.assignees.length > 0
-        ? released !== null && assigned(released)
-          ? released
-          : (input.assignees[0] ?? null)
-        : claimedLabel
-          ? released
-          : null;
+      released !== null && assigned(released)
+        ? released
+        : (endedAssignee ?? (claimedLabel ? (input.assignees[0] ?? released) : null));
     if (residue !== null && settled(lastEventAt)) {
       lease = {
         holder: residue,

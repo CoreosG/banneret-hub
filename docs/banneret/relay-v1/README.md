@@ -402,7 +402,7 @@ short, and its mark is ⊘.
   only a release on the tracker frees the task.
 - `paused` and `conflict` (two holders claim one task) come from the claims, not from time.
 - `incomplete` comes from the lease protocol: the tracker's assignee and `claimed` label disagree with the claim
-  comments for longer than the settle window. A take or release stopped half way, and the Hub offers Finish and
+  comments for longer than the settle window. A plain assignee with no claim comment and no label is not a lease. A take or release stopped half way, and the Hub offers Finish and
   Withdraw. `conflict` and `incomplete` are never aged into `stale` or `expired`.
 
 ## Lease protocol
@@ -460,12 +460,25 @@ trackers compare their ids as numbers when both are digits, otherwise as strings
 5. Everything else is ignored, including a release by someone who neither holds the lease nor is a founder.
 
 **Settle window: 60 seconds.** A standing holder should be assigned and the issue should carry `claimed`. When no
-claim stands, nobody should be assigned. When that disagrees, the lease is `incomplete`, but only once 60 seconds
-have passed since the claim (or, with no standing claim, since the last protocol comment). Inside the window the
-relay shows the claim as `active`, or the release as done, because the Hub writes the comment first and the
-assignee a moment later. An `incomplete` lease with no standing claim is held by the released holder when they are
-still assigned or `claimed` is still on, otherwise by the first assignee. An assignee with no claim comment at all
-is `incomplete` too; its `since` is when the relay saw the assignment.
+claim stands, nobody should be assigned and `claimed` should be off. `incomplete` means the protocol is plainly in
+use and its parts disagree for longer than 60 seconds. There are exactly three cases:
+
+- a standing claim comment without the assignee or the `claimed` label;
+- the `claimed` label with no standing claim;
+- a counted release (or a withdrawal) while the ended claimant is still assigned.
+
+Time runs from the claim, or, with no standing claim, from the last protocol comment. Inside the window the relay
+shows the claim as `active`, or the release as done, because the Hub writes the comment first and the assignee a
+moment later. An `incomplete` lease with no standing claim is held by the released holder when they are still
+assigned or `claimed` is still on; otherwise by the ended claimant who is still assigned, or by the first assignee
+when only the label is left. Its `since` is the holder's claim time, or null when no claim comment backs it. A
+`claimed` label with nobody named anywhere (no assignee, no release) has no holder to show, so it makes no lease.
+
+**A plain assignee is not a lease.** Many issues are assigned outside the protocol. An assignee with no standing
+claim, no `claimed` label and no release or withdrawal for that person is not an `incomplete` lease: the card has no
+`lease` and shows no lease chip, and it is Free for lease purposes (anyone may take it). The board column still
+follows the assignee as usual, so the relay may show such a card in Taken. When someone takes it, the Hub's claim
+comment starts a lease and the Hub leaves the existing assignees as they are, adding the taker.
 
 **lastRelease.** The latest counted release, present while no claim stands. A withdrawn claim does not hide it; a
 standing claim does. `freeToContinue` is true only when line 1 says free to continue **and** nobody is assigned now.
