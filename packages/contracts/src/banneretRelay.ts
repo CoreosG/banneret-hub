@@ -394,4 +394,5 @@ export {
   memoryReviewInput,
   type MemoryReviewAction,
   type MemoryReviewNote,
+  type MemoryPreferencesInput,
 } from "./banneretMemory.ts";

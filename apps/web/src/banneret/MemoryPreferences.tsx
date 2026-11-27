@@ -1,5 +1,6 @@
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import { useEnvironmentSettings } from "../hooks/useSettings";
 import { useState } from "react";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -15,6 +16,7 @@ const write = createEnvironmentRpcCommand(connectionAtomRuntime, {
 });
 
 export function MemoryPreferences({ environmentId, threadId }: ScopedThreadRef) {
+  const generators = useEnvironmentSettings(environmentId).textGenerators;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const state = useChatRead(async () => {
@@ -42,13 +44,21 @@ export function MemoryPreferences({ environmentId, threadId }: ScopedThreadRef) 
                 .split("\n")
                 .map((v) => v.trim())
                 .filter(Boolean),
+              watcher: {
+                enabled: data.has("watcher"),
+                generator: String(data.get("generator") ?? ""),
+                model: String(data.get("model") ?? "").trim(),
+                muted: String(data.get("muted") ?? "")
+                  .split(/\s+/)
+                  .filter(Boolean),
+              },
               nudges: data.has("nudges"),
             },
           });
           setSaving(false);
           if (result._tag === "Success") {
             setError("");
-          } else setError("Could not save. Enter up to eight absolute folder paths.");
+          } else setError("Could not save. Check folder paths and reminder settings.");
         }}
       >
         <fieldset disabled={saving} className="grid gap-2">
@@ -63,6 +73,37 @@ export function MemoryPreferences({ environmentId, threadId }: ScopedThreadRef) 
           <label>
             <input type="checkbox" name="nudges" defaultChecked={state.value.nudges} /> Find
             repeated corrections in this orchestrator
+          </label>
+          <label>
+            <input type="checkbox" name="watcher" defaultChecked={state.value.watcher?.enabled} />{" "}
+            Rule reminders for this orchestrator
+          </label>
+          <p>Matching activity and note excerpts go to the selected generator.</p>
+          <label>
+            Text generator{" "}
+            <select name="generator" defaultValue={state.value.watcher?.generator}>
+              <option value="">Choose a configured text generator</option>
+              {Object.entries(generators)
+                .filter(([, g]) => g.enabled)
+                .map(([id, g]) => (
+                  <option key={id} value={id}>
+                    {g.label || g.baseUrl}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            Reminder model{" "}
+            <input
+              name="model"
+              maxLength={128}
+              defaultValue={state.value.watcher?.model}
+              placeholder="Model ID from the generator"
+            />
+          </label>
+          <label>
+            Muted rule keys, one per line{" "}
+            <textarea name="muted" defaultValue={state.value.watcher?.muted.join("\n")} />
           </label>
           <button type="submit">Save preferences</button>
           {error && <p role="alert">{error}</p>}

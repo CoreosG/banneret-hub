@@ -156,3 +156,14 @@ Enterprise workspaces copy personal notes by default. You can include project no
 your company allows Git copies. Review conflicting edits in the card before syncing
 your choice. Clear the saved URL to stop future copies. Existing Git history stays in
 the repository.
+
+To enable rule reminders, open **Memory preferences** for an orchestrator, select
+a configured text generator, enter its model ID and enable **Rule reminders**.
+The watcher defaults to off. When a note key, scope or path matches, the selected
+generator receives a short activity excerpt and candidate note excerpts. Choose
+a local generator if these must stay on the machine. The Hub quotes matching
+confirmed, trusted or pinned notes with their source. It skips checks that take
+over 1.5 seconds and delivers at most two reminders per turn. A rule can repeat
+within ten minutes if a later tool call violates it again. Mute individual keys
+in preferences or turn off reminders for the chat. Orchestrators acknowledge a
+rule with `banneret_memory_use` or contest it with `banneret_memory_flag`.

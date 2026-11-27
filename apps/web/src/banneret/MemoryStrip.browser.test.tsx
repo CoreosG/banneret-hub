@@ -77,3 +77,34 @@ it("opens a scoped inline command card, searches notes and closes it", async () 
   await screen.getByRole("button", { name: "Close", exact: true }).click();
   await expect.element(search).not.toBeInTheDocument();
 });
+
+it("labels a rule reminder separately from chat messages and shows its source and totals", async () => {
+  respond.mockResolvedValue({
+    _tag: "Success",
+    value: {
+      total: 1,
+      proposed: 0,
+      disputed: 0,
+      reminders: {
+        fired: 3,
+        acknowledged: 1,
+        contested: 1,
+        latest: [
+          { key: "format", text: "Use two spaces.", source: "Owner review", trust: "confirmed" },
+        ],
+      },
+    },
+  });
+  await using screen = await render(
+    <MemoryStrip
+      environmentId={EnvironmentId.make("machine")}
+      threadId={ThreadId.make("reminders")}
+    />,
+  );
+  await expect
+    .element(screen.getByRole("complementary").getByText("Rule reminder · format"))
+    .toBeVisible();
+  await expect.element(screen.getByText("Use two spaces.")).toBeVisible();
+  await expect.element(screen.getByText("Source: Owner review")).toBeVisible();
+  await expect.element(screen.getByText(/3 fired · 1 acknowledged · 1 contested/)).toBeVisible();
+});

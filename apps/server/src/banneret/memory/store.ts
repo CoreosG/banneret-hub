@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 
 import type { MemoryReviewAction } from "@t3tools/contracts";
 
+import { reminderStore, reminderTables } from "./reminders.ts";
 import { syncTables, syncState } from "./syncState.ts";
 import { formatNote, isMemoryFileError, parseImport, scanMemory } from "./files.ts";
 
@@ -40,14 +41,16 @@ export function withNotes<T>(
   now: number,
   run: (store: NoteStore) => T,
   changed?: () => void,
+  waitForLock = true,
 ) {
   const db = new NodeSqlite.DatabaseSync(file);
   try {
-    db.exec(`pragma busy_timeout=3000;
+    db.exec(`pragma busy_timeout=${waitForLock ? 3000 : 0};
       create table if not exists notes(key text primary key, text text not null, kind text not null,
       projectId text, source text not null, createdAt integer not null, confirmedAt integer, lastUsedAt integer,
       useCount integer not null default 0, disputedAt integer, disputeReason text, pinned integer not null default 0);
       ${syncTables}
+      ${reminderTables}
       create table if not exists knowledgeFolders(position integer primary key, folder text not null);
       create table if not exists nudges(thread text primary key, count integer default 0, lastId text);
       create table if not exists pendingCorrections(thread text, id text, sentence text, primary key(thread,id,sentence));
@@ -89,6 +92,7 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
   };
   return {
     read,
+    reminders: (thread: string) => reminderStore(db, thread, now, project),
     repo: syncState(db),
     folders() {
       return db
@@ -241,6 +245,11 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
       return read(input.key);
     },
     flag(key: string, reason: string, actor = "Person") {
+      this.reminders(actor).respond(
+        key,
+        String(db.prepare("select version from review where key=?").get(key)?.version ?? ""),
+        "contested",
+      );
       db.prepare(
         `update notes set disputedAt=$now,disputeReason=$reason where key=$key and ${visible}`,
       ).run({ ...params, key, reason });
@@ -366,6 +375,11 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
       ).run(key, NodeCrypto.randomUUID());
     },
     use(key: string, thread: string) {
+      this.reminders(thread).respond(
+        key,
+        String(db.prepare("select version from review where key=?").get(key)?.version ?? ""),
+        "acknowledged",
+      );
       read(key);
 
       const chat = NodeCrypto.createHash("sha256")

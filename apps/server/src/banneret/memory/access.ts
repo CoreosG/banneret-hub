@@ -93,11 +93,19 @@ export const memoryAccess = Effect.fn("BanneretMemory.access")(
       },
     });
     const open = Effect.fn("BanneretMemory.open")(
-      function* <T>(run: Parameters<typeof withNotes<T>>[3]) {
+      function* <T>(run: Parameters<typeof withNotes<T>>[3], mode?: "watcher") {
         yield* fs.makeDirectory(dir, { recursive: true, mode: 0o700 });
         const now = yield* Clock.currentTimeMillis;
         return yield* Effect.try({
-          try: () => withNotes(file, thread.projectId, now, run, repo.schedule),
+          try: () =>
+            withNotes(
+              file,
+              thread.projectId,
+              now,
+              run,
+              mode === "watcher" ? undefined : repo.schedule,
+              mode !== "watcher",
+            ),
           catch: (error) =>
             new OrchestratorMcpFailure({
               code: "orchestration_error",

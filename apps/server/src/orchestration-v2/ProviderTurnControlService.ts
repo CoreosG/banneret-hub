@@ -1,3 +1,4 @@
+import { promptReminders } from "../banneret/memory/promptHook.ts";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
   MessageId,
@@ -452,6 +453,7 @@ export const layer: Layer.Layer<
             mcpAppModelContext,
             input.threadId,
           );
+          appContext.push(...(yield* promptReminders(input.threadId, run.id, message.id)));
           yield* loaded.session.value
             .steerTurn({
               threadId: input.threadId,
