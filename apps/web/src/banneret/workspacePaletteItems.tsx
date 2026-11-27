@@ -1,6 +1,8 @@
 // Banneret Hub: "Switch workspace…", "New workspace…", "Show/Hide tabs bar" and, while a company is
 // shown, "Search the company…" in the command palette.
-import { LayersIcon, PanelTopIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { changePause, usePause } from "./Pause";
+import { PauseIcon, LayersIcon, PanelTopIcon, PlusIcon, SearchIcon } from "lucide-react";
 
 import {
   ADDON_ICON_CLASS,
@@ -37,6 +39,8 @@ function paletteGone(): Promise<void> {
 export function useCommandPaletteWorkspaceItems(): Array<
   CommandPaletteActionItem | CommandPaletteSubmenuItem
 > {
+  const machine = usePrimaryEnvironmentId();
+  const pause = usePause((s) => machine && s[machine]?.status);
   const workspaces = useWorkspaces();
   const tabsHidden = useTabsStore((state) => state.hidden);
   const searchAvailable = useCompanySearchStore((state) => state.available);
@@ -65,6 +69,18 @@ export function useCommandPaletteWorkspaceItems(): Array<
     : [];
   return [
     ...search,
+    ...(machine && pause
+      ? [
+          {
+            kind: "action" as const,
+            value: "action:pause-everything",
+            title: pause.paused ? "Resume automatic work" : "Pause everything",
+            searchTerms: ["pause", "stop", "new work", "resume"],
+            icon: <PauseIcon className={ITEM_ICON_CLASS} />,
+            run: () => changePause(machine, { kind: pause.paused ? "resume" : "pause" }),
+          },
+        ]
+      : []),
     {
       kind: "submenu",
       value: "action:switch-workspace",

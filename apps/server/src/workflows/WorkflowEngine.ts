@@ -1,5 +1,6 @@
 // The workflow service on Effect's workflow engine. Loaded only when workflows are enabled: the
 // engine's modules are not worth their load time on a server that registers none.
+import { makePauseStore } from "../banneret/PauseStore.ts";
 import * as Cause from "effect/Cause";
 import {
   ClusterWorkflowEngine,
@@ -117,6 +118,7 @@ const make = Effect.fn("WorkflowEngine.make")(function* (
   registered: ReadonlyArray<readonly [WorkflowDefinition, EngineWorkflow]>,
 ) {
   const store = yield* WorkflowStore.WorkflowStore;
+  const pause = yield* makePauseStore;
   const keyValues = yield* KeyValues;
   const link = yield* EngineLink;
   const trackers = Option.getOrElse(yield* Effect.serviceOption(WorkflowForge), () => unavailable);
@@ -642,7 +644,12 @@ const make = Effect.fn("WorkflowEngine.make")(function* (
         }
         hookStarts.set(hook.hookId, [...recent, now]);
       }
-      return Option.some(yield* start(hook.workflow, delivery.request, { idempotencyKey }));
+      return Option.some(
+        yield* pause.whenRunning(
+          start(hook.workflow, delivery.request, { idempotencyKey }),
+          Effect.fail(new WorkflowInputError({ problem: "Automatic work is paused." })),
+        ),
+      );
     },
   );
 
@@ -842,8 +849,8 @@ const make = Effect.fn("WorkflowEngine.make")(function* (
     // A run that ended without its parent hearing of it. Telling twice is harmless.
     for (const child of yield* store.untold) yield* ended(child.run_id);
     yield* store.mailExpire;
-    yield* fireSchedules;
-    yield* fireOpened;
+    yield* pause.whenRunning(fireSchedules, Effect.void);
+    yield* pause.whenRunning(fireOpened, Effect.void);
     yield* fireWatches;
     const at = yield* DateTime.now;
     // A run with a step still going is ended by its cancel, which waits for that step.

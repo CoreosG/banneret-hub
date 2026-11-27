@@ -12,9 +12,11 @@ import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import { forkParked } from "../../serverActivation.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { makeThreadRelay } from "../agents/AgentRelays.ts";
+import { makePauseStore, admission } from "../PauseStore.ts";
 import type { RelayEnrolment } from "../relay/Enrolment.ts";
 import { handleId, invalid } from "./AgentChat.ts";
 
@@ -60,6 +62,14 @@ export const makeDeliveries = Effect.gen(function* () {
   const threads = yield* ThreadManagementService,
     resolve = yield* makeThreadRelay,
     providers = yield* ProviderRegistry;
+  const pause = yield* makePauseStore;
+  yield* forkParked(
+    admission(pause.drain(threads)).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not resume held chat deliveries", cause),
+      ),
+    ),
+  );
   const lock = yield* Semaphore.make(1);
   const target = Effect.fn("Chat.deliveryTarget")(function* (relay: RelayEnrolment, ref: string) {
     const id = ThreadId.make(ref);
@@ -69,6 +79,7 @@ export const makeDeliveries = Effect.gen(function* () {
     return t && !t.archivedAt && !t.deletedAt ? t : null;
   });
   const drain = Effect.fn("Chat.drain")(function* (relay: RelayEnrolment) {
+    yield* admission(pause.drain(threads));
     const call = relay.signedChat;
     const rows = yield* pages((q) =>
       call("GET", "deliveries" + q).pipe(Effect.flatMap((r) => decodeDeliveries(r.body))),
@@ -100,18 +111,23 @@ export const makeDeliveries = Effect.gen(function* () {
       if (!d.wakes) continue;
       const key = "chat-" + row.handleId + "-" + row.id;
       const commandId = CommandId.make(key);
-      if (!(yield* threads.hasReceipt(commandId)))
-        yield* threads.sendToThread({
-          threadId: t.id,
-          projectId: t.projectId,
-          commandId,
-          messageId: MessageId.make(key),
-          text: deliveryText(d),
-          attachments: [],
-          mode: "queue",
-          createdBy: d.fromOwner ? "user" : "agent",
-          creationSource: "server",
-        });
+      yield* pause.whenRunning(
+        Effect.gen(function* () {
+          if (!(yield* threads.hasReceipt(commandId)))
+            yield* threads.sendToThread({
+              threadId: t.id,
+              projectId: t.projectId,
+              commandId,
+              messageId: MessageId.make(key),
+              text: deliveryText(d),
+              attachments: [],
+              mode: "queue",
+              createdBy: d.fromOwner ? "user" : "agent",
+              creationSource: "server",
+            });
+        }),
+        pause.hold(key, t.id, t.projectId, deliveryText(d), d.fromOwner),
+      );
       yield* call(
         "PUT",
         "messages/" +

@@ -1,5 +1,6 @@
 import { PreviewAgentActivity } from "../../preview/PreviewAgentActivity.ts";
 import { levelFor, toolkitSource, parkedMessage, allows, denied } from "../plugins/levels.ts";
+import { mayPause } from "./pause.ts";
 import { defaults, skillCatalog } from "../skills/catalog.ts";
 import * as Schema from "effect/Schema";
 import { knowledgeRevision } from "../memory/KbIndex.ts";
@@ -75,6 +76,10 @@ const offeredOnly = McpServer.visibility(
         const caller = Option.getOrUndefined(scope);
         const thread = caller?.thread;
         if (!caller || !thread) return false;
+        if (target === "banneret_pause")
+          return yield* mayPause(thread.threadId, caller.environmentId).pipe(
+            Effect.provideContext(memoryContext),
+          );
         if (
           target === "banneret_skills_propose" &&
           !(yield* offersHubMemory(thread.threadId, caller.environmentId).pipe(

@@ -46,16 +46,7 @@ import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import {
-  WsWorkspaceFilesCreateDownloadUrlRpc,
-  WsWorkspaceFilesCreateUploadUrlRpc,
-  WsWorkspaceFilesDeleteRpc,
-  WsWorkspaceFilesMakeDirectoryRpc,
-  WsWorkspaceFilesMoveRpc,
-} from "./workspaceFiles.ts";
-import { WsBanneretPortsListRpc } from "./banneretPorts.ts";
-import { WsBanneretWorkspacesListRpc, WsBanneretWorkspacesPutRpc } from "./banneretWorkspaces.ts";
-import { BANNERET_RELAY_RPCS } from "./banneretRelay.ts";
+import { banneretRpcs } from "./banneretRpcs.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -2669,16 +2660,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsCreateNewRpc,
   WsProjectsCreateFromThreadRpc,
   WsProjectsWriteFileRpc,
-  // Banneret Hub file explorer operations.
-  WsWorkspaceFilesMoveRpc,
-  WsWorkspaceFilesDeleteRpc,
-  WsWorkspaceFilesMakeDirectoryRpc,
-  WsWorkspaceFilesCreateUploadUrlRpc,
-  WsWorkspaceFilesCreateDownloadUrlRpc,
-  WsBanneretPortsListRpc,
-  WsBanneretWorkspacesListRpc,
-  WsBanneretWorkspacesPutRpc,
-  ...BANNERET_RELAY_RPCS,
+  ...banneretRpcs,
   WsProjectsMutateRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,

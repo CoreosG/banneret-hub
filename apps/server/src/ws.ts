@@ -232,6 +232,7 @@ import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspaceFiles from "./workspace/WorkspaceFiles.ts";
 import * as ListeningPorts from "./preview/ListeningPorts.ts";
+import { pauseRpcHandlers } from "./banneret/Pause.ts";
 import * as BanneretWorkspaces from "./banneret/Workspaces.ts";
 import * as BanneretEnrolment from "./banneret/relay/Enrolment.ts";
 import * as BanneretRelayFeed from "./banneret/relay/RelayFeed.ts";
@@ -2049,6 +2050,7 @@ export const layerWsRpc = (
       const handlers = ServerWsRpcGroup.of({
         ...WorkspaceFiles.rpcHandlers,
         ...ListeningPorts.rpcHandlers,
+        ...(yield* pauseRpcHandlers),
         ...BanneretWorkspaces.rpcHandlers,
         ...BanneretEnrolment.rpcHandlers,
         ...BanneretRelayFeed.rpcHandlers,

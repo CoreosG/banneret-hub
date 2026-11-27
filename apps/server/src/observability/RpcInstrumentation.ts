@@ -208,6 +208,8 @@ const RPC_AGGREGATES = {
   "banneretWorkspaces.list": "orchestration",
   "banneretWorkspaces.put": "orchestration",
   ...BANNERET_RELAY_RPC_AGGREGATES,
+  "banneretPause.status": "orchestration",
+  "banneretPause.change": "orchestration",
   [WS_METHODS.projectsEnsureScratch]: "orchestration",
   [WS_METHODS.projectsCreateNew]: "orchestration",
   [WS_METHODS.projectsCreateFromThread]: "orchestration",
