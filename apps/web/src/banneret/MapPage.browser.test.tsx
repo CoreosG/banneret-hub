@@ -232,13 +232,23 @@ async function openMap(stack: DisposableStack, path = "/map") {
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
 const itemRow = (id: string, scope: ParentNode = document) =>
   scope.querySelector<HTMLElement>(`[data-item-id="${id}"]`);
-const markOf = (id: string) => itemRow(id)?.querySelector("[data-status]")?.textContent ?? "";
+const cardOf = (id: string) => itemRow(id)?.querySelector<HTMLElement>("[data-slot=map-item]");
 const legend = () => document.querySelector('[aria-label="Status legend"]')!;
 const countIn = (scope: Element, status: string) =>
-  scope.querySelector(`li:has(> [data-status="${status}"]) [data-count]`)?.textContent;
+  scope.querySelector(`li[data-status="${status}"] [data-count]`)?.textContent;
+const stageRow = (title: string) =>
+  document.querySelector<HTMLElement>(`li[data-stage-id][aria-label="${title}"]`)!;
+const viewToggle = (name: string) => page.getByRole("button", { name, exact: true });
+const picker = () => page.getByRole("combobox", { name: /^Item:/ });
+
+async function pick(title: string) {
+  await userEvent.click(picker());
+  await userEvent.fill(page.getByRole("combobox", { name: "Search items" }), title);
+  await userEvent.click(page.getByRole("option", { name: new RegExp(`^${title}`) }));
+}
 
 describe("Enterprise build map", () => {
-  it("draws stages in order, every status mark with its word, and the counters", async () => {
+  it("draws stage rows on a spine with progress, compact items and the counted legend", async () => {
     using stack = new DisposableStack();
     const { emit, router, screen } = await openMap(stack, "/");
     await using _screen = screen;
@@ -247,124 +257,132 @@ describe("Enterprise build map", () => {
     await userEvent.click(sidebar().getByRole("button", { name: "Map" }));
     expect(router.state.location.pathname).toBe("/map");
     await expect.element(page.getByText("Old idea")).toBeVisible();
+    await expect.element(page.getByRole("heading", { level: 1, name: "Build map" })).toBeVisible();
+    expect(document.querySelector("header p")?.textContent).toBe(
+      "8 items in 3 stages · 2 built · 2 blocked",
+    );
 
-    const stages = [...document.querySelectorAll("section[data-stage-id] h2")].map(
+    const stages = [...document.querySelectorAll("li[data-stage-id] h2")].map(
       (heading) => heading.textContent,
     );
     expect(stages).toEqual(["Foundations", "Social", "Later"]);
-    const foundations = page.getByRole("region", { name: "Foundations" }).element();
     expect(
-      [...foundations.querySelectorAll("[data-item-id]")].map((row) =>
+      [...stageRow("Foundations").querySelectorAll("[data-item-id]")].map((row) =>
         row.getAttribute("data-item-id"),
       ),
     ).toEqual(["sign-in", "search", "old-idea"]);
-    await expect
-      .element(
-        page.getByRole("region", { name: "Later" }).getByText("Nothing planned in this stage."),
-      )
-      .toBeVisible();
 
-    const marks: Array<[string, string, string]> = [
-      ["old-idea", "†", "ruled dead"],
-      ["sign-in", "●", "checked"],
-      ["invites", "✕", "sent back"],
-      ["profile", "◆", "needs you"],
-      ["rate-limits", "⊘", "blocked"],
-      ["search", "◐", "built, unchecked"],
-      ["docs", "○", "planned"],
-    ];
-    for (const [id, mark, word] of marks) {
-      expect(markOf(id)).toContain(mark);
-      expect(markOf(id)).toContain(word);
+    // Built plus checked out of every item that is not dropped; the spine marks each stage.
+    expect(stageRow("Foundations").querySelector("[data-progress]")?.textContent).toBe("2/2 built");
+    expect(stageRow("Social").querySelector("[data-progress]")?.textContent).toBe("0/5 built");
+    expect(stageRow("Later").textContent).toContain("Nothing planned in this stage.");
+    expect(stageRow("Later").querySelector("[data-progress]")).toBeNull();
+    expect(
+      [...document.querySelectorAll("li[data-stage-id]")].map((row) =>
+        row.getAttribute("data-spine"),
+      ),
+    ).toEqual(["done", "current", "todo"]);
+
+    // Each card has its status icon and word, but never the relay's reason as text.
+    for (const [id, status] of [
+      ["old-idea", "ruled_dead"],
+      ["sign-in", "checked"],
+      ["invites", "sent_back"],
+      ["profile", "needs_you"],
+      ["rate-limits", "blocked"],
+      ["search", "built"],
+      ["docs", "planned"],
+    ] as const) {
+      expect(cardOf(id)?.getAttribute("data-status")).toBe(status);
     }
-    // The relay's reason shows on its own line.
-    expect(itemRow("search")?.querySelector("[data-status-why]")?.textContent).toBe(
+    expect(cardOf("search")!.textContent).toContain("Built, needs a check");
+    expect(document.querySelector('[role="main"]')!.textContent).not.toContain(
       "The pull request merged.",
     );
+    await userEvent.hover(cardOf("search")!);
+    await expect.element(page.getByText("The pull request merged.")).toBeVisible();
 
-    // Totals ride on the shared legend; each stage shows its own counts.
     expect(countIn(legend(), "needs_you")).toBe("1");
     expect(countIn(legend(), "blocked")).toBe("2");
     expect(countIn(legend(), "checked")).toBe("1");
     expect(countIn(legend(), "planned")).toBe("1");
-    const social = document.querySelector('[aria-label="Social counts"]')!;
-    expect(countIn(social, "needs_you")).toBe("1");
-    expect(countIn(social, "blocked")).toBe("2");
-    expect(countIn(social, "sent_back")).toBe("1");
-    expect(countIn(social, "checked")).toBeUndefined();
-    const foundationCounts = document.querySelector('[aria-label="Foundations counts"]')!;
-    expect(countIn(foundationCounts, "ruled_dead")).toBe("1");
-    expect(document.querySelector('[aria-label="Later counts"]')).toBeNull();
 
-    // Without the sign-off rule the legend leaves the checked mark out.
+    // Without the sign-off rule the legend leaves Checked out.
     await emit(state(["map"], mapRead(MAP(), { checked: false })));
-    await vi.waitFor(() => expect(legend().textContent).not.toContain("●"));
+    await vi.waitFor(() => expect(legend().querySelector('[data-status="checked"]')).toBeNull());
   });
 
   it("says which item blocks a blocked one, and the relay's reason on hover", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openMap(stack);
     await using _screen = screen;
-    await emit(state(["map"], mapRead(MAP())));
+    const map = MAP();
+    const items = map.items.map((entry) =>
+      entry.id === "polish" ? { ...entry, blockedBy: ["rate-limits", "profile", "ghost"] } : entry,
+    );
+    await emit(state(["map"], mapRead({ ...map, items })));
     await expect.element(page.getByText("Rate limits")).toBeVisible();
-    const blocked = itemRow("rate-limits")!;
-    expect(blocked.querySelector("[data-status]")?.textContent).toContain("⊘");
-    expect(blocked.querySelector("[data-blocked-by]")?.textContent).toBe(
-      "Blocked by Profile blocks",
-    );
-    expect(blocked.querySelector("[data-status-why]")).toBeNull();
-    // The dependant names its direct blocker, not the root cause.
-    expect(itemRow("polish")!.querySelector("[data-blocked-by]")?.textContent).toBe(
-      "Blocked by Rate limits",
-    );
-    await userEvent.hover(blocked.querySelector("[data-status]")!);
+    const note = (id: string) => itemRow(id)!.querySelector("[data-slot=map-item-note]");
+    expect(note("rate-limits")?.textContent).toBe("Blocked by Profile blocks");
+    expect(itemRow("rate-limits")!.getAttribute("data-blocked-by")).toBe("profile");
+    // The dependant names its direct blocker, not the root cause, and how many more.
+    expect(note("polish")?.textContent).toBe("Blocked by Rate limits and 2 more");
+    expect(note("profile")).toBeNull();
+    await userEvent.hover(cardOf("rate-limits")!);
     await expect
-      .element(page.getByText('Blocked by "Profile blocks", which needs you.'))
+      .element(
+        page.getByText('Not on the board yet. Blocked by "Profile blocks", which needs you.'),
+      )
       .toBeVisible();
   });
 
-  it("lists what an item rests on and what rests on it", async () => {
+  it("puts the picked item between what it needs first and what it unblocks", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openMap(stack);
     await using _screen = screen;
     await emit(state(["map"], mapRead(MAP())));
-    await userEvent.click(page.getByRole("tab", { name: "Rests on" }));
-    await expect
-      .element(page.getByRole("tab", { name: "Rests on" }))
-      .toHaveAttribute("aria-selected", "true");
+    await userEvent.click(viewToggle("Rests on"));
+    await expect.element(viewToggle("Rests on")).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelector("select")).toBeNull();
 
-    const restsOn = () => page.getByRole("region", { name: "It rests on" }).element();
-    const dependants = () => page.getByRole("region", { name: "Rests on it" }).element();
+    const needs = () => page.getByRole("region", { name: "Needs these first" }).element();
+    const unblocks = () => page.getByRole("region", { name: "Unblocks these" }).element();
+    const centre = () => page.getByRole("region", { name: "Picked item" }).element();
     const ids = (scope: Element) =>
       [...scope.querySelectorAll("[data-item-id]")].map((row) => row.getAttribute("data-item-id"));
+    const direct = () =>
+      [...needs().querySelectorAll("[data-direct-blocker]")].map((mark) =>
+        mark.closest("[data-item-id]")?.getAttribute("data-item-id"),
+      );
 
     // The first item that rests on something is picked first.
-    const select = page.getByRole("combobox", { name: "Item" });
-    await expect.element(select).toHaveValue("invites");
-    await userEvent.selectOptions(select, "rate-limits");
-    await vi.waitFor(() => expect(ids(restsOn())).toEqual(["profile"]));
-    expect(ids(dependants())).toEqual(["polish"]);
-    // The blocked item names its blocker, and the blocker is marked in the list.
-    const selected = page.getByRole("list", { name: "Selected item" }).element();
-    expect(selected.querySelector("[data-blocked-by]")?.textContent).toBe(
-      "Blocked by Profile blocks",
-    );
-    expect(
-      restsOn().querySelector('[data-item-id="profile"] [data-blocks-selected]'),
-    ).not.toBeNull();
+    await expect.element(picker()).toHaveTextContent("Guild invites");
+    expect(centre().getAttribute("data-item-id")).toBe("invites");
 
-    await userEvent.selectOptions(select, "polish");
-    await vi.waitFor(() => expect(ids(restsOn())).toEqual(["rate-limits", "sign-in"]));
-    expect(
-      [...restsOn().querySelectorAll("[data-blocks-selected]")].map((mark) =>
-        mark.closest("[data-item-id]")?.getAttribute("data-item-id"),
-      ),
-    ).toEqual(["rate-limits"]);
+    // The picker searches by title.
+    await pick("Rate limits");
+    await vi.waitFor(() => expect(centre().getAttribute("data-item-id")).toBe("rate-limits"));
+    expect(ids(needs())).toEqual(["profile"]);
+    expect(ids(unblocks())).toEqual(["polish"]);
+    expect(centre().textContent).toContain("Blocked by Profile blocks");
+    expect(direct()).toEqual(["profile"]);
 
-    await userEvent.selectOptions(select, "sign-in");
-    await vi.waitFor(() => expect(ids(dependants())).toEqual(["invites", "polish"]));
-    expect(ids(restsOn())).toEqual([]);
-    expect(restsOn().textContent).toContain("Nothing.");
+    // A side card becomes the picked item; only the direct blocker is marked.
+    await userEvent.click(unblocks().querySelector('[data-item-id="polish"] button')!);
+    await vi.waitFor(() => expect(centre().getAttribute("data-item-id")).toBe("polish"));
+    expect(ids(needs())).toEqual(["rate-limits", "sign-in"]);
+    expect(direct()).toEqual(["rate-limits"]);
+    expect(page.getByRole("dialog").elements()).toHaveLength(0);
+
+    await pick("Sign-in page");
+    await vi.waitFor(() => expect(ids(unblocks())).toEqual(["invites", "polish"]));
+    expect(ids(needs())).toEqual([]);
+    expect(needs().textContent).toContain("Nothing. This can start now.");
+
+    // The picked item with a task opens it.
+    await userEvent.click(centre().querySelector("button")!);
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog.getByRole("heading", { name: "Sign-in page" })).toBeVisible();
   });
 
   it("rings an item whose task has a live agent session in the work file", async () => {
@@ -377,9 +395,12 @@ describe("Enterprise build map", () => {
       row.getAttribute("data-item-id"),
     );
     expect(ringed).toEqual(["profile"]);
-    const ring = itemRow("profile")!.querySelector("[data-status] > span[aria-hidden]")!;
-    expect(ring.className).toContain("ring-2");
+    expect(itemRow("profile")!.querySelector("[data-slot=at-work]")?.className).toContain("ring-2");
     expect(itemRow("profile")!.textContent).toContain("agent at work");
+    expect(countIn(legend(), "needs_you")).toBe("1");
+    expect(legend().querySelector("[data-slot=legend-at-work] [data-count]")?.textContent).toBe(
+      "1",
+    );
   });
 
   it("opens the Task tab from an item with a task; an item without one is not clickable", async () => {
@@ -391,22 +412,21 @@ describe("Enterprise build map", () => {
 
     expect(itemRow("polish")!.querySelector("button")).toBeNull();
     expect(itemRow("rate-limits")!.querySelector("button")).toBeNull();
-    expect(itemRow("polish")!.querySelector("[tabindex]")).toBeNull();
-    // It looks inert: no pointer, and a hint that no task is linked.
-    const inert = itemRow("polish")!.firstElementChild!;
-    expect(getComputedStyle(inert).cursor).toBe("default");
-    expect(itemRow("polish")!.querySelector("[data-no-task]")?.textContent).toBe("No task linked");
-    const clickable = itemRow("invites")!.querySelector("[data-open-task]")!;
+    const inert = cardOf("polish")!;
+    expect(getComputedStyle(inert).cursor).toBe("auto");
+    expect(getComputedStyle(inert).borderStyle).toBe("dashed");
+    const clickable = cardOf("invites")!;
+    expect(clickable.tagName).toBe("BUTTON");
     expect(getComputedStyle(clickable).cursor).toBe("pointer");
-    expect(itemRow("invites")!.querySelector("[data-no-task]")).toBeNull();
+    expect(clickable.textContent).toContain("#42");
 
-    await userEvent.click(itemRow("invites")!.querySelector("[data-open-task]")!);
+    await userEvent.click(clickable);
     const dialog = page.getByRole("dialog");
     await expect.element(dialog.getByRole("heading", { name: "Guild invites" })).toBeVisible();
     expect(document.querySelector('[data-task-panel="t_invites"]')).not.toBeNull();
   });
 
-  it("gates the row and the tab, and says when the plan is empty or not measured", async () => {
+  it("gates the row and the view switch, and says when the plan is empty or not measured", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openMap(stack);
     await using _screen = screen;
@@ -422,12 +442,12 @@ describe("Enterprise build map", () => {
     await expect.element(sidebar().getByRole("button", { name: "Map" })).toBeVisible();
     await expect.element(page.getByText("Loading…")).toBeVisible();
 
-    // Without the rests_on flag there is no Rests-on tab.
+    // Without the rests_on flag there is no Rests-on view.
     await emit(state(["map"], mapRead(MAP(), { restsOn: false })));
     await expect.element(page.getByText("Polish")).toBeVisible();
-    expect(page.getByRole("tab").elements()).toHaveLength(0);
+    expect(viewToggle("Rests on").elements()).toHaveLength(0);
     await emit(state(["map"], mapRead(MAP())));
-    await expect.element(page.getByRole("tab", { name: "Rests on" })).toBeVisible();
+    await expect.element(viewToggle("Rests on")).toBeVisible();
 
     const empty: BanneretMap = {
       state: "ok",
@@ -438,7 +458,10 @@ describe("Enterprise build map", () => {
     };
     await emit(state(["map"], mapRead(empty)));
     await expect.element(page.getByText("This relay has no build plan yet.")).toBeVisible();
-    expect(page.getByRole("tab").elements()).toHaveLength(0);
+    expect(
+      page.getByText("This relay has no build plan yet.").element().closest("[data-slot]"),
+    ).toHaveAttribute("data-slot", "quiet-line");
+    expect(viewToggle("Rests on").elements()).toHaveLength(0);
 
     await emit(
       state(
@@ -506,7 +529,7 @@ describe("Enterprise build map", () => {
         mapRead({
           ...map,
           stages: [{ id: "s1", title: HOSTILE, order: 1 }],
-          items: [evil, item("plain", "s1", HOSTILE, "planned", HOSTILE)],
+          items: [evil, item("plain", "s1", HOSTILE, "planned", HOSTILE, { restsOn: ["evil"] })],
         }),
       ),
     );
@@ -518,9 +541,10 @@ describe("Enterprise build map", () => {
       expect(row.querySelector("a")).toBeNull();
     }
     expect(document.querySelector('[role="main"] img')).toBeNull();
-    await userEvent.click(page.getByRole("tab", { name: "Rests on" }));
-    await expect.element(page.getByRole("combobox", { name: "Item" })).toBeVisible();
+    await userEvent.click(viewToggle("Rests on"));
+    await expect.element(picker()).toBeVisible();
     expect(document.querySelector('[role="main"] img')).toBeNull();
+    expect(document.querySelector('[role="main"] a')).toBeNull();
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined();
   });
 });
