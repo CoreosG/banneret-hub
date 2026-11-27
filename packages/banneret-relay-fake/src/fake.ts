@@ -125,6 +125,8 @@ interface HealthSource {
 
 export interface FakeRelayOptions {
   readonly chat?: boolean;
+  readonly promote?: boolean;
+  readonly search?: boolean;
   readonly pool?: PoolConfig;
   readonly healthSources?: readonly HealthSource[];
   readonly criticalRecipients?: readonly string[];
@@ -2492,6 +2494,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     kind: "chat",
                     version: 1,
                     flags: [
+                      ...(options.search === false ? [] : ["search"]),
+                      ...(options.promote === false ? [] : ["promote"]),
                       "task_links",
                       "channels",
                       "private_channels",
@@ -2729,6 +2733,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               ownersAllowingDmReads.has(person.id) &&
               [...c.members].every((id) => people.has(id)))
           : visible(c, person.id);
+      const canReadThread = (c: Channel, rootId: string) =>
+        canRead(c) || (!c.dmKey && !!reader && !!follows.get(rootId)?.has(reader.view.id));
       const channelFor = (id: string) => {
         const c = channels.get(id);
         if (!c || !canRead(c)) throw new RelayError("not_found", "Unknown channel.");
@@ -3023,27 +3029,95 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         });
         return m.ask ? send("ChatAsk", m.ask) : send("ChatMessage", m);
       }
+      if (resource === "messages" && action === "promote" && method === "POST") {
+        if (options.promote === false || body.length)
+          throw new RelayError("forbidden", "Promotion is unavailable.");
+        const m = messageFor(id);
+        if (m.deleted) throw new RelayError("not_found", "Unknown message.");
+        const thread = m.threadRootId ? "thread=" + m.threadRootId + "&" : "";
+        return send("ChatPromotion", {
+          text: m.text,
+          link: "/channels/" + m.conversationId + "?" + thread + "message=" + m.id,
+        });
+      }
       if (resource === "search" && method === "GET") {
-        const q = (query.get("q") ?? "").toLowerCase();
-        return send(
-          "ChatSearch",
-          paged(
-            [...messages.values()]
-              .filter(
-                (m) =>
-                  !m.deleted &&
-                  !["progress", "system"].includes(m.kind) &&
-                  canRead(channels.get(m.conversationId)!) &&
-                  m.text.toLowerCase().includes(q),
-              )
-              .map((m) => ({
-                messageId: m.id,
-                conversationId: m.conversationId,
-                threadRootId: m.threadRootId,
-                snippet: m.text.slice(0, 240),
-              })),
-          ),
-        );
+        if (options.search === false)
+          throw new RelayError("forbidden", "Message search is unavailable.");
+        const tokens = (query.get("q") ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (!tokens.length) throw new RelayError("malformed", "Enter a search term or filter.");
+        const words = tokens.filter((t) => !/^(in|from|is|kind|has|task|before|after):/.test(t));
+        const filters = tokens.filter((t) => !words.includes(t));
+        const tokenize = (text: string) =>
+          text
+            .normalize("NFD")
+            .replace(/\p{M}/gu, "")
+            .toLowerCase()
+            .match(/[\p{L}\p{N}]+/gu) ?? [];
+        const terms = words.flatMap(tokenize);
+        const results = [...messages.values()].reverse().flatMap((m) => {
+          const c = channels.get(m.conversationId)!;
+          if (
+            m.deleted ||
+            !canReadThread(c, m.threadRootId ?? m.id) ||
+            m.kind === "progress" ||
+            m.kind === "system"
+          )
+            return [];
+          const text = m.text.toLowerCase();
+          const indexed = new Set(tokenize(text));
+          if ((words.length && !terms.length) || !terms.every((t) => indexed.has(t))) return [];
+          const author = m.author;
+          const ref =
+            m.taskRef ?? (m.threadRootId ? messages.get(m.threadRootId)?.taskRef : undefined);
+          const matches = filters.every((filter) => {
+            const [key, value] = filter.split(":");
+            switch (key) {
+              case "in":
+                return !c.dmKey && "#" + c.name.toLowerCase() === value;
+              case "from":
+                return author.kind === "person"
+                  ? "@" + author.login.toLowerCase() === value
+                  : author.kind === "agent" && author.handle.toLowerCase() === value;
+              case "is":
+                return value === (author.kind === "person" ? "human" : author.kind);
+              case "kind":
+                return m.kind === value;
+              case "has":
+                return value === "task" && !!ref;
+              case "task":
+                return !!ref && boardTasks.some((t, i) => t.id === ref && "#" + (i + 1) === value);
+              case "before":
+              case "after": {
+                if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+                return key === "before"
+                  ? Date.parse(m.createdAt) < Date.parse(value)
+                  : Date.parse(m.createdAt) >= Date.parse(value);
+              }
+              default:
+                return false;
+            }
+          });
+          if (!matches) return [];
+          const conversationName = c.dmKey
+            ? [...c.members]
+                .map(member)
+                .map((m) => (m.kind === "person" ? m.login : m.handle))
+                .join(", ")
+            : "#" + c.name;
+          const start = Math.max(0, text.indexOf(words[0] ?? "") - 60);
+          return [
+            {
+              messageId: m.id,
+              conversationId: c.id,
+              conversationName,
+              author,
+              createdAt: m.createdAt,
+              threadRootId: m.threadRootId,
+              snippet: m.text.slice(start, start + 240),
+            },
+          ];
+        });
+        return send("ChatSearch", paged(results));
       }
       if (resource === "me" && id === "settings" && !action) {
         if (method === "GET")
@@ -3242,13 +3316,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       if (resource === "threads" && id && !action && method === "GET") {
         const root = messages.get(id);
-        if (
-          !root ||
-          !(
-            canRead(channels.get(root.conversationId)!) ||
-            (reader && follows.get(id)?.has(reader.view.id))
-          )
-        )
+        if (!root || !canReadThread(channels.get(root.conversationId)!, id))
           throw new RelayError("not_found", "Unknown thread.");
         if (root.threadRootId)
           throw new RelayError("malformed", "A reply cannot be a thread root.");

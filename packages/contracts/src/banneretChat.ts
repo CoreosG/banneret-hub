@@ -246,6 +246,9 @@ export const ChatSearch = Schema.Struct({
       conversationId: Schema.String,
       threadRootId: Schema.optionalKey(Schema.String),
       snippet: Schema.String,
+      conversationName: Schema.String,
+      createdAt: Schema.String,
+      author: ChatAuthor,
     }),
   ),
   nextCursor: Schema.NullOr(Schema.String),
@@ -397,6 +400,16 @@ export const ChannelAction = Schema.Union([
   }),
   Schema.Struct({ kind: Schema.Literal("dm"), members: Schema.Array(Id) }),
   Schema.Struct({ kind: Schema.Literal("notifications"), id: Id, settings: ChatNotifications }),
+  Schema.Struct({ kind: Schema.Literal("search"), query: Schema.String, ...Page }),
+  Schema.Struct({
+    kind: Schema.Literal("promote"),
+    id: Id,
+    scope: Schema.String,
+    key: Schema.String,
+    host: Schema.String,
+    hubOrigin: Schema.String,
+  }),
+  Schema.Struct({ kind: Schema.Literal("around"), id: Id, message: Id, ...Page }),
   Schema.Struct({ kind: Schema.Literal("list"), ...Page }),
   Schema.Struct({
     kind: Schema.Literals(["messages", "thread", "members", "replyPreview"]),
@@ -440,6 +453,15 @@ export function callChannel<A>(
       : "?limit=100";
 
   switch (action.kind) {
+    case "around":
+      return call(
+        "GET",
+        "conversations/" + action.id + "/messages" + page + "&around=" + action.message,
+      );
+    case "search":
+      return call("GET", "search" + page + "&q=" + encodeURIComponent(action.query));
+    case "promote":
+      throw new Error("Posting requires the owning Hub.");
     case "threadChat":
       throw new Error("Thread chat settings require the owning Hub.");
     case "handles":

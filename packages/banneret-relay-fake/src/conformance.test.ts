@@ -2992,9 +2992,20 @@ describe("chat contract", () => {
     ).body as { id: string };
     const read = () =>
       call(owner, "GET", path + "conversations/" + dm.id + "/messages?asHandle=" + h);
+    const privateText = "private" + randomText(6);
+    await call(owner, "POST", path + "messages", {
+      conversationId: dm.id,
+      key: privateText,
+      text: privateText,
+    });
+    const searchDm = () => call(owner, "GET", path + "search?q=" + privateText + "&asHandle=" + h);
+    expect((await searchDm()).body).toMatchObject({ items: [] });
     expect((await read()).status).toBe(404);
     for (const enabled of [true, false]) {
       await call(owner, "PUT", path + "me/settings", { agentsReadMyDms: enabled });
+      expect((await searchDm()).body).toMatchObject({
+        items: enabled ? [{ conversationId: dm.id }] : [],
+      });
       expect((await read()).status).toBe(enabled ? 200 : 404);
     }
     const c = (
@@ -3037,6 +3048,17 @@ describe("chat contract", () => {
       threadRootId: root.id,
     });
     expectSchema("ChatAsk", ask.body);
+    const q = encodeURIComponent("upload kind:ask is:agent from:" + owner.login + "/builder");
+    expect((await call(colleague, "GET", path + "search?q=" + q)).body).toMatchObject({
+      items: [{ conversationId: c.id, threadRootId: root.id }],
+    });
+    expect(
+      (await call(owner, "POST", path + "messages/" + root.id + "/promote?asHandle=" + h)).status,
+    ).toBe(403);
+    expect(
+      (await call(owner, "POST", path + "messages/" + root.id + "/promote", { asHandle: h }))
+        .status,
+    ).toBe(403);
     expect((await call(colleague, "GET", "/relay/v1/needs")).body).toMatchObject({
       items: expect.arrayContaining([expect.objectContaining({ kind: "chat_ask", ask: ask.body })]),
     });
@@ -3129,6 +3151,60 @@ describe("chat contract", () => {
         { systemEvent: "lease_handed_over" },
       ],
     });
+    const text = "needle" + randomText(6);
+    const reply = await call(member, "POST", path + "messages", {
+      conversationId,
+      threadRootId,
+      text,
+      key: text,
+    });
+    const msg = (reply.body as { id: string }).id;
+    const search = async (filter: string) => {
+      const page = await call(
+        member,
+        "GET",
+        path + "search?q=" + encodeURIComponent(text + " " + filter),
+      );
+      expectSchema("ChatSearch", page.body);
+      return (page.body as { items: unknown[] }).items;
+    };
+    for (const filter of [
+      "in:#general",
+      "from:@" + member.login,
+      "is:human",
+      "has:task",
+      "task:#1",
+      "after:2000-01-01",
+      "before:2100-01-01",
+    ]) {
+      expect(await search(filter)).toMatchObject([
+        {
+          messageId: msg,
+          conversationId,
+          conversationName: "#general",
+          threadRootId,
+          author: { login: member.login },
+          createdAt: expect.any(String),
+        },
+      ]);
+    }
+    for (const filter of [
+      "kind:ask",
+      "is:agent",
+      "from:" + member.login + "/builder",
+      "before:2000-01-01",
+      "after:2100-01-01",
+      "task:#99",
+    ])
+      expect(await search(filter)).toEqual([]);
+    const promote = path + "messages/" + msg + "/promote";
+    expect((await call(member, "POST", promote)).body).toEqual({
+      text,
+      link: "/channels/" + conversationId + "?thread=" + threadRootId + "&message=" + msg,
+    });
+    await call(member, "DELETE", path + "messages/" + msg);
+    expect(await search("")).toEqual([]);
+    expect((await call(member, "POST", promote)).status).toBe(404);
     expect((await call(member, "DELETE", thread + "/task")).status).toBe(204);
     expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual({
       conversationId,

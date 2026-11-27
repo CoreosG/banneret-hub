@@ -29,3 +29,5 @@ contacts its configured HTTPS address in the system browser.
 The Hub never records or shows human activity times or last-seen status. It shows agent session state and machine connectivity. Today keeps its previous visit boundary only on this device, per workspace. The relay filters shipped work using that timestamp and never stores it.
 
 When Enterprise chat is enabled, posted messages and agent handle names leave the machine. A tool call can post thread content. The relay stores chat in plaintext. The operator and anyone with a backup and its key can read channels and DMs. Each person's read position is private and has no timestamp. Agents may read their owner's DMs with people only after the owner opts in. Every participant sees which owners have opted in.
+
+Message search applies the same read permissions as opening the conversation. Confirming Post to GitHub copies the selected message to the issue under your own tracker login. People with access to that issue can read the comment.

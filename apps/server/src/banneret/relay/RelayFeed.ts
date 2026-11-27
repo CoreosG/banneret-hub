@@ -49,6 +49,9 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { makeDeliveries } from "../chat/Deliveries.ts";
+import { promote } from "../chat/Promote.ts";
+import { SourceControlDrivers } from "../../sourceControl/builtInDrivers.ts";
+import type { SourceControlDriverInstance } from "@t3tools/source-control-core/server/driver";
 import { catchUpChat, channelAction, chatUnavailable } from "./ChatSync.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import { BanneretEnrolment, type RelayEnrolment } from "./Enrolment.ts";
@@ -546,6 +549,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   /** The layer's scope: a feed added while a request runs must outlive that request. */
   layerScope: Scope.Scope,
   agents?: Effect.Success<typeof makeDeliveries>,
+  github?: SourceControlDriverInstance,
 ) {
   const changes = yield* PubSub.unbounded<BanneretFeedState>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -1435,7 +1439,13 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           ? agents && chatFlags.includes("agents")
             ? agents.settings(enrolment, action)
             : Effect.succeed(chatUnavailable)
-          : channelAction(enrolment.signedChat, action)
+          : action.kind === "promote"
+            ? chatFlags.includes("promote")
+              ? promote(enrolment, github, action)
+              : Effect.succeed(chatUnavailable)
+            : action.kind === "search" && !chatFlags.includes("search")
+              ? Effect.succeed(chatUnavailable)
+              : channelAction(enrolment.signedChat, action)
         : Effect.succeed(chatUnavailable),
     today: readToday,
     needs: readNeeds,
@@ -1451,6 +1461,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
 const make = Effect.fn("BanneretRelayFeed.make")(function* (
   overrides: Partial<RelayFeedOptions> = {},
   agents?: Effect.Success<typeof makeDeliveries>,
+  github?: SourceControlDriverInstance,
 ) {
   const options = { ...DEFAULT_OPTIONS, ...overrides };
   const enrolment = yield* BanneretEnrolment;
@@ -1467,7 +1478,14 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         if (relay === undefined) return undefined;
         const existing = feeds.get(relay.origin);
         if (existing !== undefined) return existing;
-        const added = yield* makeRelayFeed(relay, environmentId, options, layerScope, agents);
+        const added = yield* makeRelayFeed(
+          relay,
+          environmentId,
+          options,
+          layerScope,
+          agents,
+          github,
+        );
         feeds.set(relay.origin, added);
         return added;
       }),
@@ -1539,7 +1557,11 @@ export const layerWith = (options: Partial<RelayFeedOptions>) =>
 
 export const layer = Layer.effect(
   BanneretRelayFeed,
-  Effect.flatMap(makeDeliveries, (agents) => make({}, agents)),
+  Effect.gen(function* () {
+    const agents = yield* makeDeliveries;
+    const drivers = yield* SourceControlDrivers;
+    return yield* make({}, agents, drivers.find((d) => d.driver.kind === "github")?.instance);
+  }),
 );
 
 /** Handlers for the feed RPCs, spread into the WebSocket handler group. */
