@@ -1178,10 +1178,25 @@ All samples stay in memory. Restart clears the window. Folder sizes are read onl
 A sandbox offer carries the original signed POST to `/relay/v1/pool/sandboxes` as standard base64 body
 bytes with the original signing headers. Pool calls have no query parameters. Hosts verify the signature
 with the requesting machine key already bound to that person, check the signed host, size and digest,
-and consume each signed request once. Each offer has a fresh opaque `offerId`; `id` identifies the sandbox across renewals.
-Hosts include the offer's `offerId` in every state update. A stale or unknown value returns
-409 `stale_offer` without changing the sandbox. The host drops that update. The offer deadline is 60 seconds. A host without an eligible
-request gets JSON null. Queue places start at 1. Wait estimates use seconds. An extension requires a
+and key local work by the pair of sandbox `id` and opaque `offerId`. Each re-offer of the signed request has a fresh offerId.
+The offer deadline is 60 seconds. Hosts include the offerId in every state update. A stale or unknown
+offerId returns 409 `stale_offer`. A forbidden transition for the current offer returns 403 `forbidden`.
+Both include `{error, current: {sandboxId, state, offerId?}}`. A late `starting` after expiry gets the
+current `waiting` state without an offerId. Abort that local start and accept future offers for the same sandbox.
+An unknown sandbox or a sandbox assigned to a different host returns 404 without its state.
+
+Host facts replies include `directives`. Host next replies contain `{offer, directives}`, with a null
+offer when no request is eligible. Both carry up to 100 pending directives for that host across sizes.
+Apply each directive to its matching booking and post the resulting state. For `extend`, set the timer
+to the absolute `endsAt` and report `running` with that exact timestamp and the running machineId.
+For `cancel`, stop the booking and report `ending`, then report the cleanup outcome. Polls repeat
+directives until confirmed. A newer extension replaces the pending deadline and cancel supersedes extend.
+
+For each size, the host reports `freeSlots` as its local slot capacity minus all locally held slots
+in `starting`, `running`, `ending` or `cleanup_failed`. The relay subtracts only unacknowledged
+`offered` rows from that number before offering work. Its configured slot limit still applies.
+
+Queue places start at 1. Wait estimates use seconds. An extension requires a
 running sandbox and an empty line. Use the normal error envelope with 409 pool_limit_reached or
 403 level_not_offered. The relay only records requests. All account and sandbox operations run on the host.
 
@@ -1194,9 +1209,9 @@ running sandbox and an empty line. Use the normal error envelope with 409 pool_l
 | Suspended | Admin resumes or removes the account | Locked account stays locked |
 | Removed | Purge home after 14 days | Host stores the purge date |
 | Sandbox waiting | Eligible host takes it, member cancels, or two hours elapse | Relay stores the queue order |
-| Offered | Host reports starting with the current offerId, or deadline restores original place | Relay persists the offer and deadline atomically |
-| Starting | Hub enrols and reports running, or startup fails after three minutes | Agent checks the host unit |
-| Running | Member ends it, limit expires, or host reboots | Agent reconciles the unit. Reboot ends it with host_restarted |
+| Offered | Host reports starting with the current offerId, or deadline restores original place | Relay reserves one reported free slot until acknowledgement or expiry |
+| Starting | Hub enrols and reports running, or startup fails after three minutes | Starting, running, ending and cleanup_failed each occupy a local slot in freeSlots accounting |
+| Running | Apply extend and confirm running with endsAt, or enter ending on cancel, expiry or reboot | Agent reconciles the unit. Reboot ends it with host_restarted |
 | Ending | Verified cleanup gives ended, a failure gives cleanup_failed | Host resumes cleanup before reuse |
 | Cleanup failed | Admin verifies cleanup and closes the request | Host and relay keep the slot unavailable |
 | Ended | Delete after seven days | Relay retains the owner-only result |

@@ -262,7 +262,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PoolOffer'
+                $ref: '#/components/schemas/PoolNextResponse'
         default:
           $ref: '#/components/responses/Error'
   /pool/sandboxes/{id}/state:
@@ -270,7 +270,7 @@ paths:
       tags:
       - pool
       operationId: reportPoolState
-      description: The host supplies the current offerId. A stale or unknown offerId returns 409 stale_offer without changing the sandbox. The host drops that update.
+      description: The host supplies the current offerId. A stale or unknown offerId returns 409 stale_offer without changing the sandbox. A forbidden transition returns 403. Both state refusals include the current booking.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -293,8 +293,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PoolSandbox'
+        '403':
+          description: Forbidden transition includes current. Authorization failures omit current.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - { $ref: '#/components/schemas/PoolStateRefusal' }
+                - allOf:
+                  - { $ref: '#/components/schemas/Error' }
+                  - not: { required: [current] }
         '409':
-          $ref: '#/components/responses/Error'
+          description: Stale or unknown offerId.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PoolStateRefusal' }
         default:
           $ref: '#/components/responses/Error'
   /chat/conversations:
@@ -1880,9 +1893,51 @@ components:
             cpu: {type: integer, minimum: 0}
             memory: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
             disk: {type: string, pattern: '^[1-9][0-9]{0,8}[KMG]$'}
-    PoolPolicy:
+    PoolDirectives:
+      type: array
+      maxItems: 100
+      items:
+        type: object
+        additionalProperties: false
+        required: [sandboxId, offerId, action]
+        properties:
+          sandboxId: { $ref: '#/components/schemas/Id' }
+          offerId: { $ref: '#/components/schemas/Id' }
+          action: { type: string, enum: [extend, cancel] }
+          endsAt: { $ref: '#/components/schemas/Timestamp' }
+        if: { properties: { action: { const: extend } } }
+        then: { required: [endsAt] }
+        else: { not: { required: [endsAt] } }
+    PoolStateRefusal:
+      allOf:
+      - { $ref: '#/components/schemas/Error' }
+      - type: object
+        required: [current]
+        properties:
+          current:
+            type: object
+            additionalProperties: false
+            required: [sandboxId, state]
+            properties:
+              sandboxId: { $ref: '#/components/schemas/Id' }
+              state: { $ref: '#/components/schemas/PoolSandbox/properties/state' }
+              offerId: { $ref: '#/components/schemas/Id' }
+    PoolNextResponse:
       type: object
       additionalProperties: false
+      required: [offer, directives]
+      properties:
+        offer: { $ref: '#/components/schemas/PoolOffer' }
+        directives: { $ref: '#/components/schemas/PoolDirectives' }
+    PoolPolicy:
+      type: object
+      required: [directives]
+      properties:
+        directives: { $ref: '#/components/schemas/PoolDirectives' }
+      allOf: [{ $ref: '#/components/schemas/PoolLimitsPolicy' }]
+      unevaluatedProperties: false
+    PoolLimitsPolicy:
+      type: object
       required: [warnings, limits, sizes]
       properties:
         warnings: { $ref: "#/components/schemas/PoolWarnings" }
@@ -2113,7 +2168,7 @@ components:
         memAvailableBytes: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
         poolMemoryUsedBytes: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
         poolMemoryLimitBytes: {anyOf: [{type: integer, minimum: 0}, {type: 'null'}]}
-        freeSlots: {$ref: '#/components/schemas/PoolSlots'}
+        freeSlots: { $ref: '#/components/schemas/PoolSlots', description: "Local capacity per size minus slots in starting, running, ending or cleanup_failed." }
         busy: {type: boolean}
     PoolSandbox:
       type: object
@@ -2155,7 +2210,7 @@ components:
               hostId: {$ref: '#/components/schemas/Id'}
               level: {type: string, enum: [staff, community]}
               reporting: {type: boolean}
-              policy: { anyOf: [{ $ref: '#/components/schemas/PoolPolicy' }, { type: 'null' }] }
+              policy: { anyOf: [{ $ref: '#/components/schemas/PoolLimitsPolicy', unevaluatedProperties: false }, { type: 'null' }] }
               contention: {anyOf: [{$ref: '#/components/schemas/HostContention'}, {type: 'null'}]}
               holders:
                 type: array
@@ -2259,6 +2314,7 @@ components:
       additionalProperties: false
       required: [offerId, state, machineId, reason]
       properties:
+        endsAt: { $ref: '#/components/schemas/Timestamp', description: Applied extension deadline. }
         offerId: {$ref: '#/components/schemas/Id'}
         state: {type: string, enum: [starting, running, ending, ended, cleanup_failed]}
         machineId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}

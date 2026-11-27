@@ -173,7 +173,20 @@ export type PoolWorkspace = {
   readonly state: "asked" | "approved" | "ready_to_join" | "active" | "suspended" | "removed";
 };
 
-export type PoolPolicy = {
+export type PoolDirective = {
+  readonly sandboxId: string;
+  readonly offerId: string;
+} & ({ readonly action: "cancel" } | { readonly action: "extend"; readonly endsAt: string });
+
+export type PoolCurrent = {
+  readonly sandboxId: string;
+  readonly state: PoolSandbox["state"];
+  readonly offerId?: string;
+};
+
+export type PoolPolicy = PoolLimitsPolicy & { readonly directives: readonly PoolDirective[] };
+
+export type PoolLimitsPolicy = {
   readonly limits: PoolHostLimits;
   readonly sizes: PoolConfig["sandboxes"]["sizes"];
   readonly warnings: PoolWarnings;
@@ -183,7 +196,7 @@ export type PoolView = {
   readonly hosts: ReadonlyArray<{
     readonly hostId: string;
     readonly level: "staff" | "community";
-    readonly policy: PoolPolicy | null;
+    readonly policy: PoolLimitsPolicy | null;
     readonly reporting: boolean;
     readonly contention: HostContention | null;
     readonly holders: ReadonlyArray<{
@@ -249,7 +262,13 @@ export type PoolOffer = {
   readonly bodyBase64: string;
 } | null;
 
+export type PoolNextResponse = {
+  readonly offer: PoolOffer;
+  readonly directives: readonly PoolDirective[];
+};
+
 export type PoolStateUpdate = {
+  readonly endsAt?: string;
   readonly offerId: string;
   readonly state: "starting" | "running" | "ending" | "ended" | "cleanup_failed";
   readonly machineId: string | null;

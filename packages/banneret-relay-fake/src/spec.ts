@@ -85,6 +85,10 @@ export type SchemaName =
   | "SnapshotTeam"
   | "TaskRead"
   | "PoolPolicy"
+  | "PoolNextResponse"
+  | "PoolDirectives"
+  | "PoolLimitsPolicy"
+  | "PoolStateRefusal"
   | "PoolSlots"
   | "PoolHostLimits"
   | "PoolWarnings"
@@ -206,6 +210,8 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "pool-resources-local.json": "Resources",
   "pool.json": "PoolView",
   "pool-config.json": "PoolConfig",
+  "pool-next.json": "PoolNextResponse",
+  "pool-refusal.json": "PoolStateRefusal",
   "pool-state.json": "PoolStateUpdate",
   "pool-facts.json": "PoolHostFacts",
   "alarm.json": "Alarm",
@@ -275,6 +281,7 @@ const baseInvalidExampleSchema = (file: string): SchemaName =>
                                     : "FactsRequest");
 
 export const invalidExampleSchema = (file: string): SchemaName => {
+  if (file.startsWith("pool-next-")) return "PoolNextResponse";
   if (file.startsWith("pool-state-")) return "PoolStateUpdate";
   if (file.startsWith("pool-facts-")) return "PoolHostFacts";
   if (file.startsWith("pool-")) return "PoolView";
