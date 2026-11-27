@@ -6,12 +6,24 @@ import { RoleRef, Admission } from "./banneretChat.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as Schema from "effect/Schema";
 
-import { AuthOrchestrationOperateScope, EnvironmentAuthorizationError } from "./auth.ts";
+import {
+  AuthEnvironmentMaintainScope,
+  AuthOrchestrationOperateScope,
+  EnvironmentAuthorizationError,
+} from "./auth.ts";
 
-import { ChatAsk, ChatRead, ChatNotice, ChannelAction, ChannelResult } from "./banneretChat.ts";
+import {
+  ChatAsk,
+  ChatRead,
+  ChatNotice,
+  RoleAction,
+  ChatAction,
+  ChannelResult,
+} from "./banneretChat.ts";
 
 export const BANNERET_RELAY_FEED_WS_METHODS = {
   chat: "banneretRelay.chat",
+  roles: "banneretRelay.roles",
   today: "banneretRelay.today",
   needs: "banneretRelay.needs",
   feed: "banneretRelay.feed",
@@ -702,8 +714,13 @@ const WsBanneretRelayTaskRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.task, {
 });
 
 export const BANNERET_RELAY_FEED_RPCS = [
+  Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.roles, {
+    payload: Schema.Struct({ relayOrigin: Schema.String, action: RoleAction }),
+    success: ChannelResult,
+    error: EnvironmentAuthorizationError,
+  }),
   Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.chat, {
-    payload: Schema.Struct({ relayOrigin: Schema.String, action: ChannelAction }),
+    payload: Schema.Struct({ relayOrigin: Schema.String, action: ChatAction }),
     success: ChannelResult,
     error: EnvironmentAuthorizationError,
   }),
@@ -730,6 +747,7 @@ export const BANNERET_RELAY_FEED_RPCS = [
 ] as const;
 
 export const BANNERET_RELAY_FEED_RPC_SCOPES = {
+  [BANNERET_RELAY_FEED_WS_METHODS.roles]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_FEED_WS_METHODS.chat]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.today]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_FEED_WS_METHODS.agents]: AuthOrchestrationOperateScope,
@@ -742,6 +760,7 @@ export const BANNERET_RELAY_FEED_RPC_SCOPES = {
 } as const;
 
 export const BANNERET_RELAY_FEED_RPC_AGGREGATES = {
+  [BANNERET_RELAY_FEED_WS_METHODS.roles]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.chat]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.today]: "banneret-relay",
   [BANNERET_RELAY_FEED_WS_METHODS.agents]: "banneret-relay",

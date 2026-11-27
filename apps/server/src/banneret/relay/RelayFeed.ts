@@ -914,6 +914,9 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         yield* bump;
         return;
       case "roles.changed":
+        chatRevision++;
+        yield* refreshSections(key);
+        return;
       case "capabilities.changed":
         yield* refreshSections(key);
         return;
@@ -1525,7 +1528,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     );
   const service: RelayFeedInstance = {
     chat: (action) =>
-      joined && sections.includes("chat")
+      joined && sections.includes(action.kind === "roles" ? "roles" : "chat")
         ? action.kind === "threadChat"
           ? agents && chatFlags.includes("agents")
             ? agents.settings(enrolment, action)
@@ -1687,6 +1690,13 @@ export const layer = Layer.effect(
 
 /** Handlers for the feed RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
+  [BANNERET_RELAY_FEED_WS_METHODS.roles]: (input: {
+    relayOrigin: string;
+    action: Extract<ChannelAction, { kind: "roles" }>["action"];
+  }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) =>
+      feed.chat(input.relayOrigin, { kind: "roles", action: input.action }),
+    ),
   [BANNERET_RELAY_FEED_WS_METHODS.chat]: (input: { relayOrigin: string; action: ChannelAction }) =>
     Effect.flatMap(BanneretRelayFeed, (feed) => feed.chat(input.relayOrigin, input.action)),
   [BANNERET_RELAY_FEED_WS_METHODS.today]: (input: {

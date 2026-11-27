@@ -37,7 +37,11 @@ export function OfficeChat({
     <Chat.Provider
       value={{
         channels,
-        dms: flags.includes("dms"),
+        dms:
+          flags.includes("dms") &&
+          !!enterprise.enrolment.me?.permissions.some(
+            (p) => p === "dm.start:anyone" || p === "dm.start:shared_channel",
+          ),
         viewer: enterprise.enrolment.me?.login,
         mapping: feed.boardChannels,
       }}
