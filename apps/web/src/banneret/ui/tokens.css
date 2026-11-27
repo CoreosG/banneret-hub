@@ -1,0 +1,87 @@
+/*
+ * Fork UI kit tokens. Each tone is one colour pair, `--tone` (tint and accent) and `--tone-fg`
+ * (text and icon), mapped onto the app's own theme variables, plus one new neutral pair.
+ * Lint accepts only classes index.css declares, so kit elements opt in with data attributes
+ * (`toneProps`, `TEXT_*` and `RADIUS_PANEL` in tokens.ts).
+ */
+@reference "../../index.css";
+
+:root {
+  --status-neutral: --theme(--color-zinc-500 inline);
+  /* zinc-500 text fails AA on its own tint. */
+  --status-neutral-foreground: --theme(--color-zinc-600 inline);
+  --tone-tint-strength: 8%;
+
+  @variant dark {
+    --status-neutral: --theme(--color-neutral-400 inline);
+    --status-neutral-foreground: --theme(--color-neutral-400 inline);
+    --tone-tint-strength: 16%;
+  }
+}
+
+@layer components {
+  [data-tone="ok"] {
+    --tone: var(--success);
+    --tone-fg: var(--success-foreground);
+  }
+
+  [data-tone="info"] {
+    --tone: var(--info);
+    --tone-fg: var(--info-foreground);
+  }
+
+  [data-tone="warn"] {
+    --tone: var(--warning);
+    --tone-fg: var(--warning-foreground);
+  }
+
+  [data-tone="error"] {
+    --tone: var(--error);
+    --tone-fg: var(--error-foreground);
+  }
+
+  [data-tone="muted"] {
+    --tone: var(--status-neutral);
+    --tone-fg: var(--status-neutral-foreground);
+  }
+
+  [data-tone-look~="tint"] {
+    background-color: color-mix(in srgb, var(--tone) var(--tone-tint-strength), transparent);
+  }
+
+  /* Legend chips use half the pill tint. */
+  [data-tone-look~="soft"] {
+    background-color: color-mix(
+      in srgb,
+      var(--tone) calc(var(--tone-tint-strength) / 2),
+      transparent
+    );
+  }
+
+  [data-tone-look~="fg"] {
+    color: var(--tone-fg);
+  }
+
+  [data-tone-look~="edge"] {
+    border-color: color-mix(in srgb, var(--tone) 40%, transparent);
+  }
+
+  [data-tone-look~="solid"] {
+    background-color: var(--tone);
+  }
+
+  [data-text="section"] {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+  }
+
+  [data-text="summary"] {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+  }
+
+  [data-radius="panel"] {
+    border-radius: 0.625rem;
+  }
+}
