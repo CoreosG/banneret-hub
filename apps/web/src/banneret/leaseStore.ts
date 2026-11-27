@@ -9,7 +9,6 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   TASK_LEASE_WS_METHODS,
-  type EnvironmentId,
   type IssueRef,
   type TaskLeaseReleaseInput,
   type TaskLeaseResult,
@@ -20,6 +19,7 @@ import { create } from "zustand";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { type RelayTarget, relayKey } from "./enrolmentStore";
 import {
   leaseFailureMessage,
   outcomeMessage,
@@ -71,26 +71,61 @@ async function call<A>(run: Promise<AtomCommandResult<A, unknown>>): Promise<Lea
   }
 }
 
-/** Every lease call the Hub makes; tests replace them. */
+/**
+ * Every lease call the Hub makes; tests replace them. Each names the relay whose person acts, so the
+ * server checks the tracker login against that company's account.
+ */
 export const leaseRpc = {
-  check: (environmentId: EnvironmentId, ref: IssueRef): Promise<LeaseCall<TaskLeaseStatus>> =>
-    call(runAtomCommand(appAtomRegistry, checkCommand, { environmentId, input: ref })),
-  take: (environmentId: EnvironmentId, ref: IssueRef): Promise<LeaseCall<TaskLeaseResult>> =>
+  check: (
+    { environmentId, relayOrigin }: RelayTarget,
+    ref: IssueRef,
+  ): Promise<LeaseCall<TaskLeaseStatus>> =>
+    call(
+      runAtomCommand(appAtomRegistry, checkCommand, {
+        environmentId,
+        input: { ...ref, relayOrigin },
+      }),
+    ),
+  take: (
+    { environmentId, relayOrigin }: RelayTarget,
+    ref: IssueRef,
+  ): Promise<LeaseCall<TaskLeaseResult>> =>
     call(
       runAtomCommand(appAtomRegistry, takeCommand, {
         environmentId,
-        input: { ...ref, agent: "hub" },
+        input: { ...ref, relayOrigin, agent: "hub" },
       }),
     ),
   release: (
-    environmentId: EnvironmentId,
+    { environmentId, relayOrigin }: RelayTarget,
     input: TaskLeaseReleaseInput,
   ): Promise<LeaseCall<TaskLeaseResult>> =>
-    call(runAtomCommand(appAtomRegistry, releaseCommand, { environmentId, input })),
-  finish: (environmentId: EnvironmentId, ref: IssueRef): Promise<LeaseCall<TaskLeaseResult>> =>
-    call(runAtomCommand(appAtomRegistry, finishCommand, { environmentId, input: ref })),
-  withdraw: (environmentId: EnvironmentId, ref: IssueRef): Promise<LeaseCall<TaskLeaseResult>> =>
-    call(runAtomCommand(appAtomRegistry, withdrawCommand, { environmentId, input: ref })),
+    call(
+      runAtomCommand(appAtomRegistry, releaseCommand, {
+        environmentId,
+        input: { ...input, relayOrigin },
+      }),
+    ),
+  finish: (
+    { environmentId, relayOrigin }: RelayTarget,
+    ref: IssueRef,
+  ): Promise<LeaseCall<TaskLeaseResult>> =>
+    call(
+      runAtomCommand(appAtomRegistry, finishCommand, {
+        environmentId,
+        input: { ...ref, relayOrigin },
+      }),
+    ),
+  withdraw: (
+    { environmentId, relayOrigin }: RelayTarget,
+    ref: IssueRef,
+  ): Promise<LeaseCall<TaskLeaseResult>> =>
+    call(
+      runAtomCommand(appAtomRegistry, withdrawCommand, {
+        environmentId,
+        input: { ...ref, relayOrigin },
+      }),
+    ),
 };
 
 export type LeaseOperation = "take" | "release" | "finish" | "withdraw";
@@ -122,7 +157,7 @@ interface LeaseStoreState {
 
 export const useLeaseStore = create<LeaseStoreState>(() => ({ entries: {} }));
 
-const leaseKey = (environmentId: string, taskId: string) => `${environmentId}\u0000${taskId}`;
+const leaseKey = (target: RelayTarget, taskId: string) => `${relayKey(target)}\u0000${taskId}`;
 
 const entryOf = (key: string): LeaseEntry | undefined => useLeaseStore.getState().entries[key];
 
@@ -136,8 +171,8 @@ const settle = (key: string, seq: number, change: (entry: LeaseEntry) => LeaseEn
   put(key, change(entry));
 };
 
-export function useLeaseEntry(environmentId: string, taskId: string): LeaseEntry | undefined {
-  return useLeaseStore((state) => state.entries[leaseKey(environmentId, taskId)]);
+export function useLeaseEntry(target: RelayTarget, taskId: string): LeaseEntry | undefined {
+  return useLeaseStore((state) => state.entries[leaseKey(target, taskId)]);
 }
 
 /**
@@ -145,12 +180,12 @@ export function useLeaseEntry(environmentId: string, taskId: string): LeaseEntry
  * clears the last notice; the check after a failed operation keeps it.
  */
 export async function checkLease(
-  environmentId: EnvironmentId,
+  target: RelayTarget,
   taskId: string,
   ref: IssueRef,
   options: { readonly keepNotice?: boolean } = {},
 ): Promise<void> {
-  const key = leaseKey(environmentId, taskId);
+  const key = leaseKey(target, taskId);
   const entry = entryOf(key);
   if (entry?.phase.kind === "running") return;
   const seq = (entry?.seq ?? 0) + 1;
@@ -161,7 +196,7 @@ export async function checkLease(
     notice: options.keepNotice === true ? (entry?.notice ?? null) : null,
     takenAt: entry?.takenAt ?? null,
   });
-  const answer = await leaseRpc.check(environmentId, ref);
+  const answer = await leaseRpc.check(target, ref);
   settle(key, seq, (current) =>
     answer.ok
       ? { ...current, phase: { kind: "settled" }, status: answer.value }
@@ -175,27 +210,27 @@ export async function checkLease(
 
 /** Runs one operation. A second one on the same task while it runs does nothing. */
 export async function runLease(
-  environmentId: EnvironmentId,
+  target: RelayTarget,
   taskId: string,
   ref: IssueRef,
   operation: LeaseOperation,
-  release?: Omit<TaskLeaseReleaseInput, keyof IssueRef>,
+  release?: Omit<TaskLeaseReleaseInput, keyof IssueRef | "relayOrigin">,
 ): Promise<LeaseCall<TaskLeaseResult>> {
   const call = (kind: LeaseOperation): Promise<LeaseCall<TaskLeaseResult>> => {
     switch (kind) {
       case "take":
-        return leaseRpc.take(environmentId, ref);
+        return leaseRpc.take(target, ref);
       case "release":
         return release === undefined
           ? Promise.resolve({ ok: false, message: "Pick a reason to release the task." })
-          : leaseRpc.release(environmentId, { ...ref, ...release });
+          : leaseRpc.release(target, { ...ref, ...release });
       case "finish":
-        return leaseRpc.finish(environmentId, ref);
+        return leaseRpc.finish(target, ref);
       case "withdraw":
-        return leaseRpc.withdraw(environmentId, ref);
+        return leaseRpc.withdraw(target, ref);
     }
   };
-  const key = leaseKey(environmentId, taskId);
+  const key = leaseKey(target, taskId);
   const entry = entryOf(key);
   if (entry?.phase.kind === "running") {
     return { ok: false, message: "Another change to this task is still running." };
@@ -227,13 +262,14 @@ export async function runLease(
     notice: { tone: "error", message: answer.message, at: Date.now() },
   }));
   // The tracker may have changed before the call failed; read it again rather than guess.
-  await checkLease(environmentId, taskId, ref, { keepNotice: true });
+  await checkLease(target, taskId, ref, { keepNotice: true });
   return answer;
 }
 
 /** The task whose Release dialog is open; null when closed. */
 export interface ReleaseTarget {
-  readonly environmentId: EnvironmentId;
+  /** The relay (on its environment) the task belongs to. */
+  readonly relay: RelayTarget;
   readonly taskId: string;
   readonly title: string;
   readonly ref: IssueRef;

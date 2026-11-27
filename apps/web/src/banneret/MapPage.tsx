@@ -487,7 +487,7 @@ function mapSummary(map: BanneretMap, stageCount: number): ReactNode {
 
 export function MapPage() {
   const enterprise = useEnterpriseFeed();
-  const openTask = useOpenTask(enterprise?.environmentId ?? "");
+  const openTask = useOpenTask(enterprise?.target ?? null);
   const [view, setView] = useState<View>("map");
   if (enterprise === null) {
     return (

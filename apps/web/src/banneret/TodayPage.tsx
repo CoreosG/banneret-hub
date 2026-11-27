@@ -123,7 +123,7 @@ function Block(props: {
   );
 }
 
-function RefreshButton(props: { readonly environmentId: Parameters<typeof refreshToday>[0] }) {
+function RefreshButton(props: { readonly target: Parameters<typeof refreshToday>[0] }) {
   const [busy, setBusy] = useState(false);
   return (
     <Button
@@ -133,7 +133,7 @@ function RefreshButton(props: { readonly environmentId: Parameters<typeof refres
       onClick={() => {
         setBusy(true);
         // Not a visit: only opening Today moves "since your last visit".
-        void refreshToday(props.environmentId, false).finally(() => setBusy(false));
+        void refreshToday(props.target, false).finally(() => setBusy(false));
       }}
     >
       <RefreshCwIcon aria-hidden />
@@ -145,11 +145,14 @@ function RefreshButton(props: { readonly environmentId: Parameters<typeof refres
 export function TodayPage() {
   const enterprise = useEnterpriseFeed();
   const environmentId = enterprise?.environmentId ?? null;
+  const relayOrigin = enterprise?.target.relayOrigin ?? null;
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opening Today is the one read that counts as a visit
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opening Today (of this workspace's company) is the one read that counts as a visit
   useEffect(() => {
-    if (environmentId !== null) void refreshToday(environmentId, true);
-  }, [environmentId]);
+    if (environmentId !== null && relayOrigin !== null) {
+      void refreshToday({ environmentId, relayOrigin }, true);
+    }
+  }, [environmentId, relayOrigin]);
 
   if (enterprise === null) {
     return (
@@ -332,7 +335,7 @@ export function TodayPage() {
         title="Today"
         summary={today === null ? undefined : <Summary counts={todayCounts(today, feed)} />}
       >
-        {environmentId === null ? null : <RefreshButton environmentId={environmentId} />}
+        <RefreshButton target={enterprise.target} />
       </PageHeader>
       <FeedStatus
         feed={feed}

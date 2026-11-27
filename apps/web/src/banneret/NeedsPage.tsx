@@ -28,7 +28,7 @@ export function NeedsPage() {
       </FeedFrame>
     );
   }
-  const { feed, workspace, environmentId } = enterprise;
+  const { feed, workspace, target } = enterprise;
   if (!offersSection(feed, "needs")) {
     return (
       <FeedFrame title="Needs you" company={workspace.name}>
@@ -89,7 +89,7 @@ export function NeedsPage() {
             disabled={loading}
             onClick={() => {
               setLoading(true);
-              void loadMoreNeeds(environmentId).finally(() => setLoading(false));
+              void loadMoreNeeds(target).finally(() => setLoading(false));
             }}
           >
             Load more

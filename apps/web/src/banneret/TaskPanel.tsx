@@ -19,7 +19,7 @@ import { IssueDetailPanel } from "../components/issue/IssueDetailPanel";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import { useRightPanelStore } from "../rightPanelStore";
-import { useEnrolmentView } from "./enrolmentStore";
+import { type RelayTarget, useEnrolmentView } from "./enrolmentStore";
 import { taskRef } from "./board.logic";
 import { lastReleaseView, releaseReasonLine, type LastReleaseView } from "./lease.logic";
 import { LeaseButtons, LeaseNoticeLine, useLeaseCheck } from "./LeaseControls";
@@ -329,7 +329,7 @@ function taskFacts(
 }
 
 function TaskHeader(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly view: TaskView;
   readonly atWork: boolean;
   readonly issueRef: IssueRef | null;
@@ -384,7 +384,7 @@ function TaskHeader(props: {
         <span className="flex-1" />
         {props.leases && props.issueRef !== null ? (
           <LeaseButtons
-            environmentId={props.environmentId}
+            target={props.target}
             taskId={view.task.id}
             title={card?.task.title ?? view.task.title}
             issueRef={props.issueRef}
@@ -513,16 +513,22 @@ function TaskPanelBody(props: {
 }) {
   const { surface } = props;
   const environmentId = EnvironmentId.make(surface.environmentId);
+  const { relayOrigin } = surface;
+  // The task's own relay, whichever workspace is active: the surface names it.
+  const target = { environmentId, relayOrigin };
   const taskId = surface.task.id;
-  const feed = useEnvironmentFeed(environmentId);
-  const enrolment = useEnrolmentView(environmentId);
+  const feed = useEnvironmentFeed(target);
+  const enrolment = useEnrolmentView(environmentId, relayOrigin);
   const issueRef = useTaskIssueRef(environmentId, surface.task);
   const leases = feed.board?.leases === true;
-  const lease = useLeaseCheck(environmentId, taskId, issueRef, leases);
+  const lease = useLeaseCheck(target, taskId, issueRef, leases);
 
   // A thread's panel has no page following the feed, so the tab follows it while shown.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's relay feed while the Task tab is shown
-  useEffect(() => watchFeed(environmentId), [environmentId]);
+  useEffect(
+    () => watchFeed({ environmentId, relayOrigin }),
+    [environmentId, relayOrigin],
+  );
 
   const card = feed.board?.value?.cards.find((candidate) => candidate.task.id === taskId) ?? null;
   // The map carries every planned task, closed issues included, that the relay may not serve.
@@ -530,7 +536,7 @@ function TaskPanelBody(props: {
   // Only a relay that advertises the section serves the read; any other relay answers 404 for a task
   // that exists.
   const offered = feed.joined && feed.sectionsKnown && feed.sections.includes("task");
-  const read = useTaskRead(environmentId, taskId, offered, feed.board?.fetchedAt ?? null);
+  const read = useTaskRead(target, taskId, offered, feed.board?.fetchedAt ?? null);
 
   const answer = read.kind === "done" ? read.read : null;
   const relayTask = answer?.value ?? null;
@@ -568,7 +574,7 @@ function TaskPanelBody(props: {
       data-task-narrow={notFound ? "" : undefined}
     >
       <TaskHeader
-        environmentId={environmentId}
+        target={target}
         view={view}
         atWork={feed.board?.atWork.includes(taskId) === true}
         issueRef={issueRef}

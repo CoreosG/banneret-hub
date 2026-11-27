@@ -73,8 +73,9 @@ export type WorkspaceDialogState =
   | { readonly kind: "manage"; readonly workspaceId: string | null }
   /** The Enterprise setup wizard, optionally for a relay already known (Join again). */
   | { readonly kind: "enterprise"; readonly origin?: string }
-  | { readonly kind: "machines" }
-  | { readonly kind: "leave" }
+  /** The Machines list and Leave act on one Enterprise workspace's relay. */
+  | { readonly kind: "machines"; readonly origin: string }
+  | { readonly kind: "leave"; readonly origin: string }
   | null;
 
 interface WorkspacesState {

@@ -1,6 +1,8 @@
 // Banneret Hub: join this machine to a company relay. Address, then "Join <company>", then the code
-// the person types on the relay's sign-in page, then the projects that belong to the company. The
-// server holds the key and token; this screen only shows what `banneretRelay.status` says.
+// the person types on the relay's sign-in page, then the projects that belong to the company. A
+// machine can join several companies, one per relay, so a new join always starts at the address; a
+// relay this machine already joined opens its workspace instead. The server holds the keys and
+// tokens; this screen only shows what `banneretRelay.status` says about the relay it is joining.
 import type { BanneretEnrolmentView, BanneretMachineKind, EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useId, useState } from "react";
 
@@ -35,6 +37,7 @@ import {
 import {
   enrolmentRpc,
   type RelayOutcome,
+  type RelayTarget,
   refreshEnrolment,
   storeEnrolmentView,
   useEnrolmentView,
@@ -81,11 +84,17 @@ function CompanyAvatar(props: { readonly name: string }) {
   );
 }
 
+/** A relay this machine is already joining or has joined: its progress, not a second join. */
+const alreadyJoined = (view: BanneretEnrolmentView | undefined) =>
+  view !== undefined && view.state !== "none" && view.state !== "revoked" && !canJoinAgain(view);
+
 function JoinForm(props: {
   readonly environmentId: EnvironmentId;
   readonly initialOrigin: string | undefined;
   readonly notice: string | null;
-  readonly onStarted: (origin: string) => void;
+  /** The relay this form joins or found already joined; the wizard then follows that relay. */
+  readonly onRelay: (origin: string) => void;
+  readonly onClose: () => void;
 }) {
   const id = useId();
   const environments = useEnvironmentIdentities();
@@ -105,9 +114,23 @@ function JoinForm(props: {
     setBusy(true);
     setError(null);
     const result = await enrolmentRpc.probe(props.environmentId, address);
+    if (!result.ok) {
+      setBusy(false);
+      setError(result.message);
+      return;
+    }
+    const views = await refreshEnrolment(props.environmentId);
     setBusy(false);
-    if (result.ok) setRelay(result.value);
-    else setError(result.message);
+    const existing = views?.find((view) => view.relayOrigin === result.value.origin);
+    if (existing !== undefined && alreadyJoined(existing)) {
+      // Joined already: open that company's workspace; joining: show where it stands.
+      if (existing.state === "configured") {
+        setActiveWorkspace(existing.workspaceId);
+        props.onClose();
+      } else props.onRelay(existing.relayOrigin);
+      return;
+    }
+    setRelay(result.value);
   };
   const join = async () => {
     if (relay === null) return;
@@ -124,8 +147,8 @@ function JoinForm(props: {
       setError(result.message);
       return;
     }
-    props.onStarted(relay.origin);
     storeEnrolmentView(props.environmentId, result.value);
+    props.onRelay(result.value.relayOrigin);
     openSignIn(result.value.browserUrl);
   };
 
@@ -226,16 +249,13 @@ function useNow(intervalMs: number) {
   return now;
 }
 
-function CodeStep(props: {
-  readonly environmentId: EnvironmentId;
-  readonly view: BanneretEnrolmentView;
-}) {
+function CodeStep(props: { readonly target: RelayTarget; readonly view: BanneretEnrolmentView }) {
   const now = useNow(1000);
   const awaiting = props.view.state === "awaiting_approval";
   const cancel = async () => {
-    const result = await enrolmentRpc.cancel(props.environmentId);
-    if (result.ok) storeEnrolmentView(props.environmentId, result.value);
-    else void refreshEnrolment(props.environmentId);
+    const result = await enrolmentRpc.cancel(props.target);
+    if (result.ok) storeEnrolmentView(props.target.environmentId, result.value);
+    else void refreshEnrolment(props.target.environmentId);
   };
   return (
     <div className="flex flex-col gap-4">
@@ -280,7 +300,7 @@ function CodeStep(props: {
 
 /** Approved, setting up. If setup keeps failing, the person can still cancel or forget. */
 function FinishingStep(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly view: BanneretEnrolmentView;
 }) {
   const [busy, setBusy] = useState(false);
@@ -292,10 +312,10 @@ function FinishingStep(props: {
     setError(null);
     const result = await run();
     setBusy(false);
-    if (result.ok) storeEnrolmentView(props.environmentId, result.value);
+    if (result.ok) storeEnrolmentView(props.target.environmentId, result.value);
     else {
       setError(result.message);
-      void refreshEnrolment(props.environmentId);
+      void refreshEnrolment(props.target.environmentId);
     }
   };
   return (
@@ -319,7 +339,7 @@ function FinishingStep(props: {
           type="button"
           variant="outline"
           disabled={busy}
-          onClick={() => void act(() => enrolmentRpc.cancel(props.environmentId))}
+          onClick={() => void act(() => enrolmentRpc.cancel(props.target))}
         >
           Cancel
         </Button>
@@ -328,7 +348,7 @@ function FinishingStep(props: {
             type="button"
             variant="destructive-outline"
             disabled={busy}
-            onClick={() => void act(() => enrolmentRpc.leave(props.environmentId, "forget"))}
+            onClick={() => void act(() => enrolmentRpc.leave(props.target, "forget"))}
           >
             Forget this machine here
           </Button>
@@ -339,7 +359,7 @@ function FinishingStep(props: {
 }
 
 function ProjectStep(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly view: BanneretEnrolmentView;
   readonly onClose: () => void;
 }) {
@@ -353,17 +373,21 @@ function ProjectStep(props: {
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the workspace the server just wrote and the company's repository list once joined
   useEffect(() => {
-    void loadEnvironmentWorkspaces(props.environmentId);
+    const { environmentId, relayOrigin } = props.target;
+    void loadEnvironmentWorkspaces(environmentId);
     let current = true;
     void enrolmentRpc
-      .matchProjects(props.environmentId, remoteKey === "" ? [] : remoteKey.split("\n"))
+      .matchProjects(
+        { environmentId, relayOrigin },
+        remoteKey === "" ? [] : remoteKey.split("\n"),
+      )
       .then((result) => {
         if (current) setMatched(new Set(result.ok ? result.value.matched : []));
       });
     return () => {
       current = false;
     };
-  }, [props.environmentId, remoteKey]);
+  }, [props.target.environmentId, props.target.relayOrigin, remoteKey]);
 
   const preselected = new Set(
     groups
@@ -476,18 +500,23 @@ function RevokedStep(props: {
 }
 
 export function EnterpriseWizard(props: {
+  /** The relay to show, from a workspace's "Join on this machine"; none for a new join. */
   readonly initialOrigin: string | undefined;
   readonly onClose: () => void;
 }) {
   const environmentId = usePrimaryEnvironmentId();
-  const view = useEnrolmentView(environmentId);
+  // The relay this wizard follows: none until the address is checked, so a new join never lands on
+  // a company this machine joined before.
+  const [origin, setOrigin] = useState<string | undefined>(props.initialOrigin);
+  const view = useEnrolmentView(environmentId, origin);
   const [joiningAgain, setJoiningAgain] = useState(false);
-  const [lastOrigin, setLastOrigin] = useState<string | undefined>(undefined);
-  const step = joiningAgain && view?.state === "revoked" ? "address" : wizardStep(view);
-  const initialOrigin =
-    props.initialOrigin ?? (step === "address" ? (view?.relayOrigin ?? lastOrigin) : undefined);
+  const step =
+    origin === undefined || (joiningAgain && view?.state === "revoked")
+      ? "address"
+      : wizardStep(view);
   const notice =
     view !== null && canJoinAgain(view) ? joinAgainNotice(view) : lastResultMessage(view);
+  const target = environmentId === null || origin === undefined ? null : { environmentId, relayOrigin: origin };
 
   return (
     <>
@@ -495,7 +524,7 @@ export function EnterpriseWizard(props: {
         <DialogTitle>Join a company</DialogTitle>
         <DialogDescription>
           An Enterprise workspace joins this machine to your company's relay. Only facts about your
-          work are shared, never your code or conversations.
+          work are shared, never your code or conversations. A machine can join several companies.
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
@@ -503,26 +532,30 @@ export function EnterpriseWizard(props: {
           {step === "address" ? <WorkspaceKindChoice kind="enterprise" /> : null}
           {environmentId === null ? (
             <p className="text-muted-foreground text-sm">Connect to an environment first.</p>
-          ) : step === "address" ? (
+          ) : step === "address" || target === null || view === null ? (
             <JoinForm
-              key={initialOrigin ?? ""}
+              key={origin ?? ""}
               environmentId={environmentId}
-              initialOrigin={initialOrigin}
-              notice={notice}
-              onStarted={setLastOrigin}
+              initialOrigin={origin}
+              notice={origin === undefined ? null : notice}
+              onRelay={(next) => {
+                setJoiningAgain(false);
+                setOrigin(next);
+              }}
+              onClose={props.onClose}
             />
           ) : step === "code" || step === "awaiting" ? (
-            <CodeStep environmentId={environmentId} view={view!} />
+            <CodeStep target={target} view={view} />
           ) : step === "finishing" ? (
-            <FinishingStep environmentId={environmentId} view={view!} />
+            <FinishingStep target={target} view={view} />
           ) : step === "revoked" ? (
             <RevokedStep
-              view={view!}
+              view={view}
               onJoinAgain={() => setJoiningAgain(true)}
               onClose={props.onClose}
             />
           ) : (
-            <ProjectStep environmentId={environmentId} view={view!} onClose={props.onClose} />
+            <ProjectStep target={target} view={view} onClose={props.onClose} />
           )}
         </div>
       </DialogPanel>

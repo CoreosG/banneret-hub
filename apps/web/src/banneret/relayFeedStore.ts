@@ -1,5 +1,5 @@
-// Banneret Hub: this client's copy of the relay feed for each environment. The server makes every
-// relay call; the client follows the `banneretRelay.feed` stream (Today and Needs you refetched on a
+// Banneret Hub: this client's copy of the relay feed for each environment and relay (one per
+// Enterprise workspace joined on that environment). The server makes every relay call; the client follows the `banneretRelay.feed` stream (Today and Needs you refetched on a
 // new revision; board, map, feed and graveyard ride on it) and reads older pages on request. A failed
 // read keeps the last good copy, so screens show old data with its age rather than nothing.
 import {
@@ -23,13 +23,13 @@ import {
   type BanneretFeedNeedsRead,
   type BanneretFeedToday,
   type BanneretFeedTodayRead,
-  type EnvironmentId,
 } from "@t3tools/contracts";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { create } from "zustand";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { type RelayTarget, relayKey } from "./enrolmentStore";
 
 const todayCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret-relay:today",
@@ -63,36 +63,53 @@ async function settled<T>(run: Promise<AtomCommandResult<T, unknown>>): Promise<
 
 /** Every call the feed makes; tests replace these. */
 export const feedRpc = {
-  today: (environmentId: EnvironmentId, visit: boolean): Promise<BanneretFeedTodayRead | null> =>
+  today: (
+    { environmentId, relayOrigin }: RelayTarget,
+    visit: boolean,
+  ): Promise<BanneretFeedTodayRead | null> =>
     settled(
       runAtomCommand(appAtomRegistry, todayCommand, {
         environmentId,
-        input: visit ? { visit: true } : {},
+        input: visit ? { relayOrigin, visit: true } : { relayOrigin },
       }),
     ),
-  needs: (environmentId: EnvironmentId, cursor?: string): Promise<BanneretFeedNeedsRead | null> =>
+  needs: (
+    { environmentId, relayOrigin }: RelayTarget,
+    cursor?: string,
+  ): Promise<BanneretFeedNeedsRead | null> =>
     settled(
       runAtomCommand(appAtomRegistry, needsCommand, {
         environmentId,
-        input: cursor === undefined ? {} : { cursor },
+        input: cursor === undefined ? { relayOrigin } : { relayOrigin, cursor },
       }),
     ),
   feedPage: (
-    environmentId: EnvironmentId,
+    { environmentId, relayOrigin }: RelayTarget,
     cursor: string,
   ): Promise<BanneretFeedEntryPageRead | null> =>
-    settled(runAtomCommand(appAtomRegistry, feedPageCommand, { environmentId, input: { cursor } })),
+    settled(
+      runAtomCommand(appAtomRegistry, feedPageCommand, {
+        environmentId,
+        input: { relayOrigin, cursor },
+      }),
+    ),
   graveyardPage: (
-    environmentId: EnvironmentId,
+    { environmentId, relayOrigin }: RelayTarget,
     cursor: string,
   ): Promise<BanneretGraveyardPageRead | null> =>
     settled(
-      runAtomCommand(appAtomRegistry, graveyardPageCommand, { environmentId, input: { cursor } }),
+      runAtomCommand(appAtomRegistry, graveyardPageCommand, {
+        environmentId,
+        input: { relayOrigin, cursor },
+      }),
     ),
   /** Calls `listener` with each feed state; returns the unsubscribe. */
-  subscribe: (environmentId: EnvironmentId, listener: (event: BanneretFeedState) => void) =>
+  subscribe: (
+    { environmentId, relayOrigin }: RelayTarget,
+    listener: (event: BanneretFeedState) => void,
+  ) =>
     appAtomRegistry.subscribe(
-      feedAtom({ environmentId, input: {} }),
+      feedAtom({ environmentId, input: { relayOrigin } }),
       (result) => {
         if (AsyncResult.isSuccess(result)) listener(result.value);
       },
@@ -169,33 +186,34 @@ const EMPTY_FEED: EnvironmentFeed = {
 };
 
 interface FeedState {
-  readonly feeds: Readonly<Record<EnvironmentId, EnvironmentFeed>>;
+  /** By `relayKey`: one feed per environment and relay. */
+  readonly feeds: Readonly<Record<string, EnvironmentFeed>>;
 }
 
 export const useRelayFeedStore = create<FeedState>(() => ({ feeds: {} }));
 
-const update = (environmentId: EnvironmentId, patch: Partial<EnvironmentFeed>) =>
+const update = (target: RelayTarget, patch: Partial<EnvironmentFeed>) =>
   useRelayFeedStore.setState((state) => ({
     feeds: {
       ...state.feeds,
-      [environmentId]: { ...(state.feeds[environmentId] ?? EMPTY_FEED), ...patch },
+      [relayKey(target)]: { ...(state.feeds[relayKey(target)] ?? EMPTY_FEED), ...patch },
     },
   }));
 
-export function useEnvironmentFeed(environmentId: EnvironmentId | null): EnvironmentFeed {
+export function useEnvironmentFeed(target: RelayTarget | null): EnvironmentFeed {
   return useRelayFeedStore((state) =>
-    environmentId === null ? EMPTY_FEED : (state.feeds[environmentId] ?? EMPTY_FEED),
+    target === null ? EMPTY_FEED : (state.feeds[relayKey(target)] ?? EMPTY_FEED),
   );
 }
 
 /** Reads Today. `visit` only when the person opens Today; refetches never send it. */
-export async function refreshToday(environmentId: EnvironmentId, visit = false) {
-  const read = await feedRpc.today(environmentId, visit);
+export async function refreshToday(target: RelayTarget, visit = false) {
+  const read = await feedRpc.today(target, visit);
   if (read === null) {
-    update(environmentId, { unreachable: true });
+    update(target, { unreachable: true });
     return;
   }
-  update(environmentId, {
+  update(target, {
     joined: read.joined,
     unreachable: false,
     todayProblem: read.problem ?? null,
@@ -204,13 +222,13 @@ export async function refreshToday(environmentId: EnvironmentId, visit = false) 
 }
 
 /** Reads the first page of Needs you, replacing any pages loaded before. */
-async function refreshNeeds(environmentId: EnvironmentId) {
-  const read = await feedRpc.needs(environmentId);
+async function refreshNeeds(target: RelayTarget) {
+  const read = await feedRpc.needs(target);
   if (read === null) {
-    update(environmentId, { unreachable: true });
+    update(target, { unreachable: true });
     return;
   }
-  update(environmentId, {
+  update(target, {
     joined: read.joined,
     unreachable: false,
     needsProblem: read.problem ?? null,
@@ -224,22 +242,22 @@ async function refreshNeeds(environmentId: EnvironmentId) {
   });
 }
 
-export async function loadMoreNeeds(environmentId: EnvironmentId) {
-  const current = useRelayFeedStore.getState().feeds[environmentId];
+export async function loadMoreNeeds(target: RelayTarget) {
+  const current = useRelayFeedStore.getState().feeds[relayKey(target)];
   const cursor = current?.needsNextCursor ?? null;
   if (cursor === null) return;
-  const read = await feedRpc.needs(environmentId, cursor);
+  const read = await feedRpc.needs(target, cursor);
   if (read === null || read.value === null) {
     update(
-      environmentId,
+      target,
       read === null ? { unreachable: true } : { needsProblem: read.problem ?? null },
     );
     return;
   }
-  const latest = useRelayFeedStore.getState().feeds[environmentId];
+  const latest = useRelayFeedStore.getState().feeds[relayKey(target)];
   // A refetch meanwhile started the list again; this page belongs to the old one.
   if (latest?.needsNextCursor !== cursor) return;
-  update(environmentId, {
+  update(target, {
     needs: [...(latest.needs ?? []), ...read.value.items],
     needsNextCursor: read.value.nextCursor,
   });
@@ -256,8 +274,8 @@ export function olderCursor(feed: EnvironmentFeed, kind: OlderKind): string | nu
 }
 
 /** The environment's feed when "Load older" still continues from `cursor`; else the list restarted. */
-function stillAt(environmentId: EnvironmentId, kind: OlderKind, cursor: string) {
-  const latest = useRelayFeedStore.getState().feeds[environmentId];
+function stillAt(target: RelayTarget, kind: OlderKind, cursor: string) {
+  const latest = useRelayFeedStore.getState().feeds[relayKey(target)];
   return latest !== undefined && olderCursor(latest, kind) === cursor ? latest : null;
 }
 
@@ -268,19 +286,19 @@ const pageProblem = (read: { readonly problem?: FeedProblem | undefined } | null
   };
 
 /** Reads the next older feed or graveyard page and appends it. */
-export async function loadOlder(environmentId: EnvironmentId, kind: OlderKind) {
-  const current = useRelayFeedStore.getState().feeds[environmentId];
+export async function loadOlder(target: RelayTarget, kind: OlderKind) {
+  const current = useRelayFeedStore.getState().feeds[relayKey(target)];
   const cursor = current === undefined ? null : olderCursor(current, kind);
   if (cursor === null) return;
   if (kind === "activity") {
-    const read = await feedRpc.feedPage(environmentId, cursor);
-    const latest = stillAt(environmentId, kind, cursor);
+    const read = await feedRpc.feedPage(target, cursor);
+    const latest = stillAt(target, kind, cursor);
     if (latest === null) return;
     if (read?.value == null) {
-      update(environmentId, { activityOlderProblem: pageProblem(read) });
+      update(target, { activityOlderProblem: pageProblem(read) });
       return;
     }
-    update(environmentId, {
+    update(target, {
       activityOlder: {
         entries: [...(latest.activityOlder?.entries ?? []), ...read.value.entries],
         nextCursor: read.value.nextCursor,
@@ -289,14 +307,14 @@ export async function loadOlder(environmentId: EnvironmentId, kind: OlderKind) {
     });
     return;
   }
-  const read = await feedRpc.graveyardPage(environmentId, cursor);
-  const latest = stillAt(environmentId, kind, cursor);
+  const read = await feedRpc.graveyardPage(target, cursor);
+  const latest = stillAt(target, kind, cursor);
   if (latest === null) return;
   if (read?.value == null) {
-    update(environmentId, { graveyardOlderProblem: pageProblem(read) });
+    update(target, { graveyardOlderProblem: pageProblem(read) });
     return;
   }
-  update(environmentId, {
+  update(target, {
     graveyardOlder: {
       entries: [...(latest.graveyardOlder?.entries ?? []), ...read.value.entries],
       nextCursor: read.value.nextCursor,
@@ -306,10 +324,10 @@ export async function loadOlder(environmentId: EnvironmentId, kind: OlderKind) {
 }
 
 // The revision each watched environment's copies were read at.
-const seenRevisions = new Map<EnvironmentId, number>();
+const seenRevisions = new Map<string, number>();
 
-function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
-  const before = useRelayFeedStore.getState().feeds[environmentId];
+function applyState(target: RelayTarget, state: BanneretFeedState) {
+  const before = useRelayFeedStore.getState().feeds[relayKey(target)];
   // Joining (or a new company), a list that went away, or a file that now holds the whole list:
   // older pages belong to the old list.
   const joinedNow = state.joined && before?.joined !== true;
@@ -320,7 +338,7 @@ function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
     !state.joined ||
     state.graveyard === null ||
     state.graveyard.value?.nextCursor === null;
-  update(environmentId, {
+  update(target, {
     activity: state.feed,
     graveyard: state.graveyard,
     ...(dropActivity ? { activityOlder: null, activityOlderProblem: null } : {}),
@@ -334,42 +352,42 @@ function applyState(environmentId: EnvironmentId, state: BanneretFeedState) {
     board: state.board,
     map: state.map,
   });
-  const seen = seenRevisions.get(environmentId);
-  seenRevisions.set(environmentId, state.revision);
+  const seen = seenRevisions.get(relayKey(target));
+  seenRevisions.set(relayKey(target), state.revision);
   // Joining (or a new company), or a change since the copies were read: read them again.
   if (joinedNow || (seen !== undefined && seen !== state.revision)) {
-    void refreshToday(environmentId);
-    void refreshNeeds(environmentId);
+    void refreshToday(target);
+    void refreshNeeds(target);
   }
 }
 
-const watchers = new Map<EnvironmentId, { count: number; stop: () => void }>();
+const watchers = new Map<string, { count: number; stop: () => void }>();
 
 /**
  * Follows one environment's feed while anything shows it. The first watcher subscribes and reads
  * Today and Needs you; the last one to leave unsubscribes.
  */
-export function watchFeed(environmentId: EnvironmentId): () => void {
-  const existing = watchers.get(environmentId);
+export function watchFeed(target: RelayTarget): () => void {
+  const existing = watchers.get(relayKey(target));
   if (existing !== undefined) {
     existing.count += 1;
   } else {
-    const stop = feedRpc.subscribe(environmentId, (state) => applyState(environmentId, state));
-    watchers.set(environmentId, { count: 1, stop });
-    void refreshToday(environmentId);
-    void refreshNeeds(environmentId);
+    const stop = feedRpc.subscribe(target, (state) => applyState(target, state));
+    watchers.set(relayKey(target), { count: 1, stop });
+    void refreshToday(target);
+    void refreshNeeds(target);
   }
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    const entry = watchers.get(environmentId);
+    const entry = watchers.get(relayKey(target));
     if (entry === undefined) return;
     entry.count -= 1;
     if (entry.count === 0) {
-      watchers.delete(environmentId);
-      seenRevisions.delete(environmentId);
-      update(environmentId, {
+      watchers.delete(relayKey(target));
+      seenRevisions.delete(relayKey(target));
+      update(target, {
         activityOlder: null,
         activityOlderProblem: null,
         graveyardOlder: null,

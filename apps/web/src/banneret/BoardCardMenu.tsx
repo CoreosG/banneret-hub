@@ -1,23 +1,24 @@
 // Banneret Hub: a board card's menu. Take, Continue, Release, Finish and Withdraw follow the server's
 // `leases.check`, read only when the menu opens, never for every card on the board.
-import type { BanneretBoardCard, BanneretBoardTask, EnvironmentId } from "@t3tools/contracts";
+import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
 import { EllipsisVerticalIcon } from "lucide-react";
 
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../components/ui/menu";
 import { taskRef } from "./board.logic";
+import type { RelayTarget } from "./enrolmentStore";
 import { isFreeToContinue } from "./lease.logic";
 import { useLeaseCheck } from "./LeaseControls";
 import { openReleaseDialog, runLease, useLeaseEntry } from "./leaseStore";
 import { useTaskIssueRef } from "./useTaskIssueRef";
 
 function LeaseItems(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly card: BanneretBoardCard;
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
-  const { card, environmentId } = props;
-  const issueRef = useTaskIssueRef(environmentId, card.task);
-  const entry = useLeaseCheck(environmentId, card.task.id, issueRef, true);
+  const { card, target } = props;
+  const issueRef = useTaskIssueRef(target.environmentId, card.task);
+  const entry = useLeaseCheck(target, card.task.id, issueRef, true);
   if (issueRef === null) {
     return (
       <MenuItem disabled data-testid="lease-menu-off">
@@ -42,7 +43,7 @@ function LeaseItems(props: {
   }
   const running = entry?.phase.kind === "running" || status.busy;
   const run = (operation: "take" | "finish" | "withdraw") =>
-    void runLease(environmentId, card.task.id, issueRef, operation);
+    void runLease(target, card.task.id, issueRef, operation);
   const items = [
     status.actions.take
       ? isFreeToContinue(card)
@@ -56,7 +57,7 @@ function LeaseItems(props: {
           label: "Release…",
           act: () =>
             openReleaseDialog({
-              environmentId,
+              relay: target,
               taskId: card.task.id,
               title: card.task.title,
               ref: issueRef,
@@ -84,11 +85,11 @@ function LeaseItems(props: {
 }
 
 export function BoardCardMenu(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly card: BanneretBoardCard;
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
-  const entry = useLeaseEntry(props.environmentId, props.card.task.id);
+  const entry = useLeaseEntry(props.target, props.card.task.id);
   const running = entry?.phase.kind === "running";
   return (
     <Menu>
@@ -111,7 +112,7 @@ export function BoardCardMenu(props: {
             A change to this task is running…
           </MenuItem>
         ) : (
-          <LeaseItems environmentId={props.environmentId} card={props.card} onOpen={props.onOpen} />
+          <LeaseItems target={props.target} card={props.card} onOpen={props.onOpen} />
         )}
       </MenuPopup>
     </Menu>

@@ -8,6 +8,7 @@ import { useParams } from "@tanstack/react-router";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useRightPanelStore } from "../rightPanelStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
+import type { RelayTarget } from "./enrolmentStore";
 import { openTaskDialog } from "./taskStore";
 import { taskSurface } from "./taskSurface";
 
@@ -21,10 +22,12 @@ function useRoutedPanelRef(): ScopedThreadRef | null {
   return draft === null ? null : scopeThreadRef(draft.environmentId, draft.threadId);
 }
 
-export function useOpenTask(environmentId: string): (task: BanneretBoardTask) => void {
+/** Opens a task of `target`'s relay; does nothing without one (no company joined here). */
+export function useOpenTask(target: RelayTarget | null): (task: BanneretBoardTask) => void {
   const panelRef = useRoutedPanelRef();
   return (task) => {
-    const surface = taskSurface(environmentId, task);
+    if (target === null) return;
+    const surface = taskSurface(target, task);
     if (panelRef === null) openTaskDialog(surface);
     else useRightPanelStore.getState().openTask(panelRef, surface);
   };

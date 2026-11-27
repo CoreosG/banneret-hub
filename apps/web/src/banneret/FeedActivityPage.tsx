@@ -5,7 +5,6 @@ import type {
   BanneretBoardTask,
   BanneretFeedEntry,
   BanneretGraveyardEntry,
-  EnvironmentId,
 } from "@t3tools/contracts";
 import { ExternalLinkIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -21,6 +20,7 @@ import {
   mergeFeedEntries,
   mergeGraveyardEntries,
 } from "./feed.logic";
+import type { RelayTarget } from "./enrolmentStore";
 import { type FeedProblem, loadOlder, olderCursor } from "./relayFeedStore";
 import { offersSection, safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
@@ -136,7 +136,7 @@ function GraveyardRow(props: {
 }
 
 function LoadOlder(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly kind: "activity" | "graveyard";
   readonly more: boolean;
   readonly problem: FeedProblem | null;
@@ -157,7 +157,7 @@ function LoadOlder(props: {
           disabled={loading}
           onClick={() => {
             setLoading(true);
-            void loadOlder(props.environmentId, props.kind).finally(() => setLoading(false));
+            void loadOlder(props.target, props.kind).finally(() => setLoading(false));
           }}
         >
           Load older
@@ -198,7 +198,7 @@ const Loading = () => <p className="text-muted-foreground text-sm">Loading…</p
 
 export function FeedActivityPage() {
   const enterprise = useEnterpriseFeed();
-  const openTask = useOpenTask(enterprise?.environmentId ?? "");
+  const openTask = useOpenTask(enterprise?.target ?? null);
   const [tab, setTab] = useState<Tab>("feed");
   if (enterprise === null) {
     return (
@@ -207,7 +207,7 @@ export function FeedActivityPage() {
       </FeedPage>
     );
   }
-  const { environmentId, feed, workspace } = enterprise;
+  const { target, feed, workspace } = enterprise;
   if (!offersSection(feed, "feed")) {
     return (
       <FeedPage title="Feed">
@@ -242,7 +242,7 @@ export function FeedActivityPage() {
             </ul>
           )}
           <LoadOlder
-            environmentId={environmentId}
+            target={target}
             kind="activity"
             more={olderCursor(feed, "activity") !== null}
             problem={feed.activityOlderProblem}
@@ -273,7 +273,7 @@ export function FeedActivityPage() {
             </ul>
           )}
           <LoadOlder
-            environmentId={environmentId}
+            target={target}
             kind="graveyard"
             more={olderCursor(feed, "graveyard") !== null}
             problem={feed.graveyardOlderProblem}
