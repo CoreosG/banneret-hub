@@ -270,7 +270,7 @@ function CopyDetails(props: {
     <button
       type="button"
       data-testid="copy-join-details"
-      className="me-auto self-center text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+      className="me-auto self-center rounded-sm text-muted-foreground text-xs underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onClick={() => copyToClipboard(joinDetails(props.view, machine), undefined)}
     >
       {isCopied ? "Copied" : "Copy details"}
