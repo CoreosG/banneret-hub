@@ -633,6 +633,20 @@ describe("LeaseService release", () => {
     }),
   );
 
+  it.effect("answers take and release with a status that does not count their own lock", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(EPOCH);
+      const service = yield* leases(newTracker());
+      const taken = yield* service.take({ ...ref });
+      expect(taken.outcome).toBe("taken");
+      expect(taken.status.busy).toBe(false);
+      expect(taken.status.actions.release).toBe(true);
+      const released = yield* service.release({ ...ref, reason: "done", freeToContinue: false });
+      expect(released.outcome).toBe("released");
+      expect(released.status.busy).toBe(false);
+    }),
+  );
+
   it.effect("refuses an invalid release and a release by someone who does not hold it", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(EPOCH);

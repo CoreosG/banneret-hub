@@ -2,14 +2,24 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { leaseRoute, machineAgent, ownIssueRef, type LeaseRouteInput } from "./leaseRoute.logic";
+import {
+  leaseRoute,
+  machineAgent,
+  ownIssueRef,
+  routeProblem,
+  type LeaseRouteInput,
+} from "./leaseRoute.logic";
 
 const DESK = EnvironmentId.make("desk");
 const SERVER = EnvironmentId.make("server");
 const RELAY = "https://relay.example.com";
 const URL = "https://github.com/example-org/example-app/issues/2";
 
-const projectOn = (environmentId: EnvironmentId, repo: string) =>
+const projectOn = (
+  environmentId: EnvironmentId,
+  repo: string,
+  remoteUrl = `https://github.com/example-org/${repo}.git`,
+) =>
   ({
     id: ProjectId.make(`${environmentId}-${repo}`),
     workspaceRoot: `/workspace/${repo}`,
@@ -21,7 +31,7 @@ const projectOn = (environmentId: EnvironmentId, repo: string) =>
       locator: {
         source: "git-remote",
         remoteName: "origin",
-        remoteUrl: `https://github.com/example-org/${repo}.git`,
+        remoteUrl,
       },
     },
   }) as unknown as EnvironmentProject;
@@ -83,9 +93,38 @@ describe("leaseRoute", () => {
     const mine = { ...server, enrolments: [joined("https://other.example", "ada", "dev-server")] };
     expect(leaseRoute({ ...base, environments: [desk, mine] })).toEqual({
       kind: "not-joined",
-      machine: "dev-server",
+      machines: ["dev-server"],
       company: "Example Company",
     });
+  });
+
+  it("names every machine that has the repository but has not joined, whatever its remote form", () => {
+    const unjoined = (id: string, label: string, remoteUrl: string) => ({
+      environmentId: EnvironmentId.make(id),
+      label,
+      issues: true,
+      projects: [projectOn(EnvironmentId.make(id), "example-app", remoteUrl)],
+      enrolments: [],
+    });
+    const route = leaseRoute({
+      ...base,
+      environments: [
+        desk,
+        unjoined("old", "banneret-old", "git@github.com:example-org/example-app.git"),
+        unjoined("dev", "banneret-dev", "https://github.com/example-org/example-app"),
+      ],
+    });
+    expect(route).toEqual({
+      kind: "not-joined",
+      machines: ["banneret-dev", "banneret-old"],
+      company: "Example Company",
+    });
+    expect(routeProblem(route)).toBe(
+      "banneret-dev and banneret-old have the repository but have not joined Example Company.",
+    );
+    expect(
+      routeProblem({ kind: "not-joined", machines: ["a", "b", "c"], company: "Example Company" }),
+    ).toBe("a, b and c have the repository but have not joined Example Company.");
   });
 
   it("prefers the machine holding the claim, then the remembered one, then the page's own", () => {

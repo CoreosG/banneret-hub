@@ -399,7 +399,9 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     return {
       outcome,
       ...(detail === undefined ? {} : { detail }),
-      status: statusOf(snapshot, ref),
+      // Every operation answers from inside `exclusive`, so the lock it sees is its own: no other
+      // change to this task can be running on this server.
+      status: { ...statusOf(snapshot, ref), busy: false },
     } satisfies TaskLeaseResult;
   });
 

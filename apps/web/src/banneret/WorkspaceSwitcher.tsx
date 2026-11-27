@@ -24,7 +24,13 @@ import {
   MenuTrigger,
 } from "../components/ui/menu";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { canJoinAgain, enrolmentLine, type EnrolmentTone } from "./enterprise.logic";
+import {
+  canJoinAgain,
+  enrolmentLine,
+  type EnrolmentTone,
+  joinLine,
+  pendingJoins,
+} from "./enterprise.logic";
 import { useEnrolmentViews } from "./enrolmentStore";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
@@ -57,6 +63,7 @@ export function WorkspaceSwitcher(props: {
     views.find((view) => view.workspaceId === workspace.id) ?? null;
   const enrolment = active === null ? null : viewOf(active);
   const joinedHere = active?.relay !== undefined && enrolment?.state === "configured";
+  const pending = pendingJoins(views, workspaces);
 
   return (
     <Menu>
@@ -107,6 +114,9 @@ export function WorkspaceSwitcher(props: {
             />
           ))}
         </MenuRadioGroup>
+        {pending.map((view) => (
+          <PendingJoinItem key={view.relayOrigin} view={view} />
+        ))}
         {active?.relay !== undefined ? (
           <>
             <MenuSeparator />
@@ -190,6 +200,23 @@ const TONE_DOT: Record<EnrolmentTone, string> = {
   error: "bg-destructive",
   muted: "bg-muted-foreground/50",
 };
+
+/** A join with no workspace yet: its own progress, and a way back to its join screen. */
+function PendingJoinItem(props: { readonly view: BanneretEnrolmentView }) {
+  const { view } = props;
+  const line = joinLine(view);
+  return (
+    <MenuItem onClick={() => openWorkspaceDialog({ kind: "enterprise", origin: view.relayOrigin })}>
+      <span className="flex min-w-0 items-center gap-2">
+        <span aria-hidden className={cn("size-2 shrink-0 rounded-full", TONE_DOT[line.tone])} />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate">{view.displayName ?? view.relayOrigin}</span>
+          <span className="truncate text-muted-foreground text-xs">{line.text}</span>
+        </span>
+      </span>
+    </MenuItem>
+  );
+}
 
 function WorkspaceRadioItem(props: {
   readonly value: string;

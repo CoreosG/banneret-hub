@@ -14,6 +14,7 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { namedClipboardTarget, useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
 import {
@@ -24,6 +25,7 @@ import {
   healthLine,
   isValidMachineLabel,
   joinAgainNotice,
+  joinDetails,
   lastResultMessage,
   letterAvatar,
   machineLabelFrom,
@@ -38,6 +40,7 @@ import {
   type RelayTarget,
   refreshEnrolment,
   storeEnrolmentView,
+  useEnrolmentMachine,
   useEnrolmentView,
 } from "./enrolmentStore";
 import { deleteWorkspace } from "./workspaces.logic";
@@ -254,6 +257,27 @@ function useNow(intervalMs: number) {
   return now;
 }
 
+/** A quiet link that copies what support needs to find this join in the relay's `pairings list`. */
+function CopyDetails(props: {
+  readonly target: RelayTarget;
+  readonly view: BanneretEnrolmentView;
+}) {
+  const machine = useEnrolmentMachine(props.target.environmentId);
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
+    target: namedClipboardTarget("join details"),
+  });
+  return (
+    <button
+      type="button"
+      data-testid="copy-join-details"
+      className="me-auto self-center text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+      onClick={() => copyToClipboard(joinDetails(props.view, machine), undefined)}
+    >
+      {isCopied ? "Copied" : "Copy details"}
+    </button>
+  );
+}
+
 function CodeStep(props: { readonly target: RelayTarget; readonly view: BanneretEnrolmentView }) {
   const now = useNow(1000);
   const awaiting = props.view.state === "awaiting_approval";
@@ -290,6 +314,7 @@ function CodeStep(props: { readonly target: RelayTarget; readonly view: Banneret
         </>
       )}
       <div className="flex justify-end gap-2">
+        <CopyDetails target={props.target} view={props.view} />
         <Button type="button" variant="outline" onClick={() => void cancel()}>
           Cancel
         </Button>
@@ -340,6 +365,7 @@ function FinishingStep(props: {
         </p>
       ) : null}
       <div className="flex justify-end gap-2">
+        <CopyDetails target={props.target} view={props.view} />
         <Button
           type="button"
           variant="outline"

@@ -25,7 +25,12 @@ export type LeaseRoute =
   /** The page's machine has not answered with its enrolments yet: nothing is shown. */
   | { readonly kind: "loading" }
   | { readonly kind: "none"; readonly repo: string }
-  | { readonly kind: "not-joined"; readonly machine: string; readonly company: string }
+  | {
+      readonly kind: "not-joined";
+      /** Every machine that has the repository but has not joined, by label. */
+      readonly machines: ReadonlyArray<string>;
+      readonly company: string;
+    }
   | {
       readonly kind: "ready";
       readonly machines: ReadonlyArray<LeaseMachine>;
@@ -146,10 +151,9 @@ export function leaseRoute(input: LeaseRouteInput): LeaseRoute {
   }
   const first = machines.toSorted((a, b) => a.label.localeCompare(b.label));
   if (first.length === 0) {
-    const machine = unjoined.toSorted((a, b) => a.localeCompare(b))[0];
-    return machine === undefined
+    return unjoined.length === 0
       ? { kind: "none", repo: input.repo }
-      : { kind: "not-joined", machine, company };
+      : { kind: "not-joined", machines: unjoined.toSorted((a, b) => a.localeCompare(b)), company };
   }
   const byId = (environmentId: EnvironmentId | null) =>
     environmentId === null
@@ -182,9 +186,16 @@ export function routeProblem(route: LeaseRoute): string | null {
     case "none":
       return `Take needs a project on ${route.repo} on one of your machines.`;
     case "not-joined":
-      return `${route.machine} has the repository but has not joined ${route.company}.`;
+      return `${namesList(route.machines)} ${route.machines.length === 1 ? "has" : "have"} the repository but ${route.machines.length === 1 ? "has" : "have"} not joined ${route.company}.`;
     case "loading":
     case "ready":
       return null;
   }
+}
+
+/** "a", "a and b", "a, b and c". */
+function namesList(names: ReadonlyArray<string>): string {
+  return names.length < 2
+    ? (names[0] ?? "")
+    : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }

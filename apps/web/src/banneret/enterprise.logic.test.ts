@@ -14,10 +14,12 @@ import {
   isKnownSectionKind,
   isValidMachineLabel,
   joinAgainNotice,
+  joinDetails,
   lastResultMessage,
   letterAvatar,
   machineLabelFrom,
   needsItemLabel,
+  pendingJoins,
   remoteUrlsOf,
   revokedMessage,
   roleLabel,
@@ -128,6 +130,35 @@ describe("revokedMessage", () => {
   });
 });
 
+describe("pendingJoins", () => {
+  it("keeps every join in progress that has no live workspace yet", () => {
+    const other = (state: BanneretEnrolmentView["state"]) =>
+      at({ state, workspaceId: "ent-ffffffffffffffff", relayOrigin: "https://other.example" });
+    expect(pendingJoins([at({ state: "requested" }), other("awaiting_approval")], [])).toEqual([
+      at({ state: "requested" }),
+      other("awaiting_approval"),
+    ]);
+    // A rejoin whose workspace exists shows on that workspace's own row instead.
+    expect(pendingJoins([at({ state: "requested" })], [workspace])).toEqual([]);
+    expect(
+      pendingJoins([at({ state: "requested" })], [{ ...workspace, deleted: true }]),
+    ).toHaveLength(1);
+    expect(pendingJoins([joined(), other("none"), other("revoked")], [])).toEqual([]);
+  });
+});
+
+describe("joinDetails", () => {
+  it("lists what support matches to pairings list, leaving out what is not known", () => {
+    const view = at({ state: "requested", pairingId: "pr_1" });
+    expect(
+      joinDetails(view, { environmentId: "env-1", hostname: "ada-laptop", hubVersion: "0.1.1" }),
+    ).toBe(
+      "Relay: https://relay.example.com\nPairing: pr_1\nEnvironment: env-1\nHostname: ada-laptop\nHub version: 0.1.1",
+    );
+    expect(joinDetails(at({ state: "requested" }), null)).toBe("Relay: https://relay.example.com");
+  });
+});
+
 describe("enrolmentLine", () => {
   it("says a workspace from another machine is not joined here", () => {
     expect(enrolmentLine(workspace, null)).toEqual({
@@ -145,6 +176,11 @@ describe("enrolmentLine", () => {
 
   it.each([
     [{ state: "requested" }, "warn", "Waiting for sign-in"],
+    [
+      { state: "requested", confirmCode: "ABCD2345" },
+      "warn",
+      "Waiting for sign-in · code ABCD2345",
+    ],
     [{ state: "awaiting_approval" }, "warn", "Waiting for a founder to approve"],
     [{ state: "approved" }, "muted", "Finishing setup…"],
     [{ health: "healthy" }, "ok", "Connected as ada-example \u00b7 Founder"],

@@ -36,6 +36,14 @@ address. If you enter a relay this machine already joined, the wizard says so an
 keeps its own key and token, and hears only about threads in its own workspace's projects. Leaving one company
 leaves the others as they are.
 
+**Joins in progress.** You can start a second join while the first still waits. The switcher lists every join
+that is not finished yet, each with its own status and code, for example "Waiting for sign-in · code
+ABCD2345". Pick one to get back to its join screen.
+
+**Copy details.** The join screen has a quiet "Copy details" link. It copies the relay address, the pairing id,
+the environment id, the hostname and the Banneret Hub version. These are what the relay's `pairings list`
+shows, so support can find your join.
+
 **Machines.** The switcher shows this machine's status for each Enterprise workspace, and lists that company's
 machines: who owns each one,
 whether it is online, its Banneret Hub version, its policy fingerprint and whether its sandbox is on. You can

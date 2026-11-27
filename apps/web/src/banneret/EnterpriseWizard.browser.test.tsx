@@ -114,6 +114,7 @@ function setup(displayName = "Example Company") {
     confirmCode: "ABCD2345",
     browserUrl: `${ORIGIN}/admin/hub/enroll/pr_1`,
     expiresAt: "2099-01-01T00:10:00.000Z",
+    pairingId: "pr_1",
   };
   const spies = {
     status: vi.spyOn(enrolmentRpc, "status").mockImplementation(async () => ({
@@ -123,6 +124,7 @@ function setup(displayName = "Example Company") {
           .filter((entry) => entry.relayOrigin !== ORIGIN)
           .concat(view.state === "none" && view.reason === undefined ? [] : [view])
           .toSorted((a, b) => a.relayOrigin.localeCompare(b.relayOrigin)),
+        machine: { environmentId: "local", hostname: "ada-laptop", hubVersion: "0.1.1225" },
       },
     })),
     probe: vi.spyOn(enrolmentRpc, "probe").mockImplementation(async () => ({
@@ -575,6 +577,58 @@ describe("EnterpriseWizard", () => {
     await expect.element(menu.getByText("Waiting for a founder to approve")).toBeVisible();
     await userEvent.click(page.getByRole("menuitem", { name: "Machines…" }));
     await vi.waitFor(() => expect(server.spies.machines).toHaveBeenCalledWith(TARGET));
+  });
+
+  it("lists each pending join in the switcher with its own code, and copies a join's details", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const server = setup();
+    await using _screen = await render(<Harness />);
+    // Two joins started one after the other; neither has a workspace until it completes.
+    await server.setView(server.pending);
+    await server.setView({
+      state: "awaiting_approval",
+      workspaceId: OTHER_ID,
+      relayOrigin: OTHER_ORIGIN,
+      displayName: "OSS Project",
+      label: "Ada laptop",
+      confirmCode: "WXYZ6789",
+      pairingId: "pr_2",
+      expiresAt: "2099-01-01T00:10:00.000Z",
+    });
+
+    await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
+    const oss = page.getByRole("menuitem", { name: /OSS Project/ });
+    await expect
+      .element(oss)
+      .toHaveTextContent("OSS ProjectWaiting for a founder to approve · code WXYZ6789");
+    await expect
+      .element(page.getByRole("menuitem", { name: /Example Company/ }))
+      .toHaveTextContent("Example CompanyWaiting for sign-in · code ABCD2345");
+
+    await userEvent.click(oss);
+    await expect.element(page.getByText(/Waiting for a founder to approve \(until/)).toBeVisible();
+    // Closing the join screen leaves the join running; the other one is still a pick away.
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
+    await userEvent.click(page.getByRole("menuitem", { name: /Example Company/ }));
+    await expect.element(page.getByLabelText("Confirm code")).toHaveTextContent("ABCD2345");
+
+    const copied = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    stack.defer(() => copied.mockRestore());
+    await userEvent.click(page.getByRole("button", { name: "Copy details" }));
+    await vi.waitFor(() =>
+      expect(copied).toHaveBeenCalledWith(
+        [
+          `Relay: ${ORIGIN}`,
+          "Pairing: pr_1",
+          "Environment: local",
+          "Hostname: ada-laptop",
+          "Hub version: 0.1.1225",
+        ].join("\n"),
+      ),
+    );
+    await expect.element(page.getByRole("button", { name: "Copied" })).toBeVisible();
   });
 
   it("an address this machine already joined opens that workspace instead of joining again", async () => {

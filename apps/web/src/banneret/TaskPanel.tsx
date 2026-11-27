@@ -33,6 +33,7 @@ import { checkedView, previewStateLabel, restsOnItems, trackerName } from "./tas
 import { useTaskRead } from "./taskStore";
 import { decodeTaskSurface, type TaskIdentity, type TaskSurface } from "./taskSurface";
 import { LeaseChip } from "./ui/Chips";
+import { EMPTY_NONE, EMPTY_NOT_KNOWN } from "./ui/labels";
 import { FactsGrid, type Fact } from "./ui/FactsGrid";
 import { RelativeTime } from "./ui/RelativeTime";
 import { StatusPill } from "./ui/StatusPill";
@@ -221,7 +222,7 @@ function taskFacts(
     },
     {
       label: "Closed",
-      empty: dated !== null && dated.closedAt === null ? "Still open" : "Not known",
+      empty: dated !== null && dated.closedAt === null ? "Still open" : EMPTY_NOT_KNOWN,
       value:
         dated?.closedAt == null ? undefined : (
           <span data-testid="task-closed">
@@ -275,7 +276,7 @@ function taskFacts(
     ...dates,
     {
       label: card !== null && card.prs.length > 1 ? "Pull requests" : "Pull request",
-      empty: card === null ? "Not known" : "Not linked",
+      empty: card === null ? EMPTY_NOT_KNOWN : EMPTY_NONE,
       value:
         card === null || card.prs.length === 0 ? undefined : (
           <span className="flex flex-col gap-1">
@@ -288,7 +289,7 @@ function taskFacts(
     { label: "Stage", value: stage?.title, empty: "Not on the map" },
     {
       label: "Preview",
-      empty: "None",
+      empty: relayTask === null ? EMPTY_NOT_KNOWN : EMPTY_NONE,
       value:
         preview === undefined ? undefined : (
           <span className="flex flex-wrap items-center gap-2">
@@ -299,7 +300,7 @@ function taskFacts(
     },
     {
       label: "Rests on",
-      empty: card === null ? "Not known" : "Nothing",
+      empty: card === null ? EMPTY_NOT_KNOWN : EMPTY_NONE,
       value:
         restsOn.length === 0 ? undefined : (
           <span className="flex flex-col">
@@ -321,7 +322,7 @@ function taskFacts(
     },
     {
       label: "Last release",
-      empty: "None",
+      empty: EMPTY_NONE,
       wide: release?.note !== undefined,
       value: !options.leases ? null : release === null ? undefined : (
         <LastReleaseValue release={release} />

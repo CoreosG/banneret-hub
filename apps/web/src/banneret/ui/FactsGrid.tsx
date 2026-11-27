@@ -2,13 +2,14 @@
 import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import { EMPTY_NOT_KNOWN } from "./labels";
 
 export interface Fact {
   readonly label: string;
   readonly value: ReactNode;
   /** Spans both columns, for a value that runs long (a note). */
   readonly wide?: boolean;
-  /** Said in a quiet tone when there is no value; "Not known" by default. */
+  /** Said in a quiet tone when there is no value; "Not known" by default (see `labels.ts`). */
   readonly empty?: string;
 }
 
@@ -37,7 +38,7 @@ export function FactsGrid(props: {
           <dd className="min-w-0 text-sm">
             {fact.value === undefined ? (
               <span className="text-muted-foreground text-xs" data-fact-empty="">
-                {fact.empty ?? "Not known"}
+                {fact.empty ?? EMPTY_NOT_KNOWN}
               </span>
             ) : (
               fact.value

@@ -78,6 +78,8 @@ export const BanneretEnrolmentView = Schema.Struct({
   /** The relay this enrolment is with. A machine has one enrolment per relay. */
   relayOrigin: Schema.String,
   displayName: Schema.optional(Schema.String),
+  /** The relay's id for this join, while it is pending or approved: what `pairings list` shows. */
+  pairingId: Schema.optional(Schema.String),
   machineId: Schema.optional(Schema.String),
   label: Schema.optional(Schema.String),
   confirmCode: Schema.optional(Schema.String),
@@ -95,9 +97,18 @@ export const BanneretEnrolmentView = Schema.Struct({
 });
 export type BanneretEnrolmentView = typeof BanneretEnrolmentView.Type;
 
+/** What this environment tells every relay about itself: the facts support matches a join by. */
+export const BanneretEnrolmentMachine = Schema.Struct({
+  environmentId: Schema.String,
+  hostname: Schema.String,
+  hubVersion: Schema.String,
+});
+export type BanneretEnrolmentMachine = typeof BanneretEnrolmentMachine.Type;
+
 /** Every relay this environment has joined, is joining, or last tried. */
 export const BanneretEnrolmentList = Schema.Struct({
   enrolments: Schema.Array(BanneretEnrolmentView),
+  machine: BanneretEnrolmentMachine,
 });
 export type BanneretEnrolmentList = typeof BanneretEnrolmentList.Type;
 

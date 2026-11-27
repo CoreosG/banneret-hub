@@ -2,6 +2,7 @@
 // reason string is unit-tested in one place. Relay strings are only ever rendered as text.
 import {
   BANNERET_MACHINE_LABEL_PATTERN,
+  type BanneretEnrolmentMachine,
   type BanneretEnrolmentView,
   type BanneretWorkspace,
 } from "@t3tools/contracts";
@@ -100,19 +101,67 @@ const relayHost = (origin: string | undefined) => {
   }
 };
 
+/** A pending join's line with its code, so the person can tell two pending joins apart. */
+const withCode = (text: string, view: BanneretEnrolmentView) =>
+  view.confirmCode === undefined ? text : `${text} \u00b7 code ${view.confirmCode}`;
+
+const PENDING_STATES: ReadonlySet<BanneretEnrolmentView["state"]> = new Set([
+  "requested",
+  "awaiting_approval",
+  "approved",
+]);
+
+/**
+ * Joins still in progress whose workspace does not exist yet (the server writes it once the join
+ * completes). The switcher lists each, so starting a second join never hides the first.
+ */
+export function pendingJoins(
+  views: ReadonlyArray<BanneretEnrolmentView>,
+  workspaces: ReadonlyArray<BanneretWorkspace>,
+): ReadonlyArray<BanneretEnrolmentView> {
+  const live = new Set(
+    workspaces.filter((entry) => entry.deleted !== true).map((entry) => entry.id),
+  );
+  return views.filter((view) => PENDING_STATES.has(view.state) && !live.has(view.workspaceId));
+}
+
+/** What "Copy details" puts on the clipboard: the facts support matches to `pairings list`. */
+export function joinDetails(
+  view: BanneretEnrolmentView,
+  machine: BanneretEnrolmentMachine | null,
+): string {
+  return [
+    `Relay: ${view.relayOrigin}`,
+    view.pairingId === undefined ? null : `Pairing: ${view.pairingId}`,
+    machine === null || machine.environmentId === ""
+      ? null
+      : `Environment: ${machine.environmentId}`,
+    machine === null ? null : `Hostname: ${machine.hostname}`,
+    machine === null ? null : `Hub version: ${machine.hubVersion}`,
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+}
+
 /** The status line under an Enterprise workspace in the switcher, for this machine. */
 export function enrolmentLine(
   workspace: BanneretWorkspace,
   view: BanneretEnrolmentView | null,
 ): EnrolmentLine {
-  if (view === null || view.workspaceId !== workspace.id || view.state === "none") {
-    return { tone: "muted", text: "Not joined on this machine · Join" };
-  }
+  return view === null || view.workspaceId !== workspace.id
+    ? { tone: "muted", text: "Not joined on this machine · Join" }
+    : joinLine(view);
+}
+
+/** Where this machine's join with one relay stands, in the switcher's words. */
+export function joinLine(view: BanneretEnrolmentView): EnrolmentLine {
   switch (view.state) {
+    case "none":
+      return { tone: "muted", text: "Not joined on this machine · Join" };
     case "requested":
-      return { tone: "warn", text: "Waiting for sign-in" };
+      return { tone: "warn", text: withCode("Waiting for sign-in", view) };
     case "awaiting_approval":
-      return { tone: "warn", text: "Waiting for a founder to approve" };
+      return { tone: "warn", text: withCode("Waiting for a founder to approve", view) };
     case "approved":
       return view.health === undefined
         ? { tone: "muted", text: "Finishing setup…" }

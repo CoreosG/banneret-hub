@@ -4,6 +4,15 @@ import { humanizeWord } from "./status";
 import { agoLabel, spanLabel } from "./relativeTime";
 import type { Tone } from "./tokens";
 
+/**
+ * Empty values in a facts grid use one of two words. "None" means the relay answered and there is
+ * nothing (no pull request, no preview, nothing it rests on). "Not known" means the relay has not
+ * said, or the task is not on the board. A row keeps its own words only when they carry meaning
+ * beyond "nothing", such as "Still open" for Closed or "Not on the map" for Stage.
+ */
+export const EMPTY_NONE = "None";
+export const EMPTY_NOT_KNOWN = "Not known";
+
 export interface ToneLabel {
   readonly label: string;
   readonly tone: Tone;
