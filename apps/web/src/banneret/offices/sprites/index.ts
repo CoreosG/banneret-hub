@@ -6,6 +6,7 @@ export type Theme = "light" | "dark";
 export type Detail = "full" | "simple" | "mark";
 const agents = [
   "working",
+  "idle",
   "waiting-on-you",
   "waiting-on-someone-else",
   "not-heard-from",
@@ -168,7 +169,8 @@ export function drawSprite(
         paints,
       );
     }
-    const panel = sprite.kind === "agent" && detail === "full";
+    const idle = sprite.kind === "agent" && sprite.name === "idle" && detail !== "mark";
+    const panel = sprite.kind === "agent" && detail === "full" && !idle;
     if (panel) {
       ctx.fillStyle = p.floor;
       ctx.fillRect(10, 8, 6, 5);
@@ -176,7 +178,7 @@ export function drawSprite(
     paints.a = p.tones[tone];
     if (sprite.kind === "presence" && detail === "simple")
       stamp(ctx, ".ssss/sffffs/sffffs/sffffs/sffffs/.ssss", 9, 9, paints);
-    stamp(ctx, glyph, panel ? 11 : 10, panel ? 8 : 10, paints);
+    if (!idle) stamp(ctx, glyph, panel ? 11 : 10, panel ? 8 : 10, paints);
   }
   ctx.restore();
 }

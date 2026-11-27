@@ -213,6 +213,7 @@ export const robot = `......ii
 ....ii..iii`;
 
 export const signals = {
+  idle: ["muted", "aaaa"],
   working: ["ok", ".a../.aa./.aaa/.aa./.a.."],
   "waiting-on-you": ["warn", ".aa./.aa./.aa./..../.aa."],
   "waiting-on-someone-else": ["warn", "aaaa/.aa./.aa./aaaa"],

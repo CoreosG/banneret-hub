@@ -25,7 +25,7 @@ import {
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
-import { act, render } from "../../test/render";
+import { act, fakeTimers, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
 import * as Schema from "effect/Schema";
 import rawFounder from "../../../../docs/banneret/relay-v1/examples/pool-founder-view.json";
@@ -227,6 +227,7 @@ const TEAM = (): BanneretTeam => ({
 
 const counts = { working: 1, waiting: 0, notHeardFrom: 0, stopped: 0, idle: 0 };
 const office = {
+  preset: "community" as const,
   revision: "one",
   files: { "team.room.platform": "platform-file" },
   flags: ["status", "presence", "sharing", "meeting_links"],
@@ -267,6 +268,7 @@ const state = (sections: string[], team: BanneretTeamRead | null): BanneretFeedS
 });
 
 function setup() {
+  localStorage.removeItem("banneret.team.view." + WORKSPACE_ID);
   useWorkspacesStore.setState({
     byEnvironment: {},
     local: [enterprise],
@@ -783,6 +785,7 @@ describe("Team page", () => {
       .mockResolvedValue({ ok: true, value: undefined });
     await emit(state(ALL, teamRead(TEAM())));
     await page.getByRole("button", { name: "Office", exact: true }).click();
+    await page.getByText("My office", { exact: true }).click();
     const sharing = page.getByLabelText("Machine sharing");
     await expect.element(sharing).toHaveValue("agents_only");
     await expect.element(page.getByText("Agents without the machine name")).toBeVisible();
@@ -811,4 +814,147 @@ describe("Team page", () => {
     await emit(state(ALL, teamRead({ people: [] })));
     await expect.element(page.getByText("Nobody is here yet.")).toBeVisible();
   });
+});
+
+it("opens the company office, reads only visible rooms and makes zero frame requests or paints in two idle seconds", async () => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openTeam(stack);
+  await using _screen = screen;
+  const people = Array.from({ length: 500 }, (_, i) => ({
+    id: "p" + i,
+    login: "builder-" + String(i).padStart(3, "0"),
+    role: "limited_staff",
+    presence: "available",
+    machines: [],
+    sessions: [],
+  }));
+  const rooms = Array.from({ length: 50 }, (_, i) => ({
+    board: ["Platform", "Design", "Operations"][i] ?? "Board " + i,
+    active: 10,
+    desks: 10,
+    counts: { ...counts, working: 30 },
+  }));
+  const agents = people.map((p, i) => ({
+    personId: p.id,
+    counts: { ...counts, working: 3 },
+    rooms: [{ board: rooms[Math.floor(i / 10)]!.board, waiting: 0 }],
+  }));
+  vi.mocked(feedRpc.room).mockImplementation(async (_target, board) => {
+    const index = rooms.findIndex((r) => r.board === board);
+    return {
+      sessions: people.slice(index * 10, index * 10 + 10).flatMap((p) =>
+        ["codex", "claude", "cursor"].map((provider) => ({
+          id: p.id + provider,
+          personId: p.id,
+          state: "working",
+          since: ago(1),
+          provider,
+        })),
+      ),
+      nextCursor: null,
+    };
+  });
+  localStorage.removeItem("banneret.team.view." + WORKSPACE_ID);
+  await emit(
+    state(
+      ALL,
+      teamRead({
+        people,
+        office: {
+          ...office,
+          preset: "company",
+          summary: { ...office.summary, people: { total: 500 }, rooms, agents },
+        },
+      }),
+    ),
+  );
+  const map = page.getByRole("group", { name: /Office map/ });
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector('[data-office-target="team.room.Platform/desk/p0"]'),
+    ).toBeTruthy(),
+  );
+  const surface = map.element().querySelector("canvas")!;
+  await vi.waitFor(() =>
+    expect(
+      surface
+        .getContext("2d")!
+        .getImageData(0, 0, surface.width, surface.height)
+        .data.some((v) => v > 0),
+    ).toBe(true),
+  );
+  {
+    using _clock = fakeTimers();
+    const requests = vi.spyOn(window, "requestAnimationFrame");
+    const paints = vi.spyOn(CanvasRenderingContext2D.prototype, "drawImage");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(requests).toHaveBeenCalledTimes(0);
+    expect(paints).toHaveBeenCalledTimes(0);
+    requests.mockRestore();
+    paints.mockRestore();
+  }
+  for (const label of ["full", "simple", "overview"]) {
+    if (label !== "full") await userEvent.click(page.getByRole("button", { name: "Zoom out" }));
+    const canvas = map.element().querySelector("canvas")!;
+    expect(Math.max(canvas.width, canvas.height)).toBeLessThanOrEqual(4096);
+    expect(map.element().querySelectorAll("button").length).toBeLessThanOrEqual(250);
+  }
+  expect(vi.mocked(feedRpc.room).mock.calls.some(([, id]) => id === "Board 49")).toBe(false);
+  expect(map.element().querySelectorAll('[data-office-target*="/desk/"]')).toHaveLength(0);
+});
+
+it("explores desks with the keyboard and restores focus after closing the card", async () => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openTeam(stack, "/team?view=office");
+  await using _screen = screen;
+  const people = TEAM().people.map((p) => ({
+    ...p,
+    presence: p.id === "p_ada" ? "focusing" : "available",
+    seatBoard: "platform",
+    machines: p.id === "p_bo" ? [] : p.machines,
+  }));
+  vi.mocked(feedRpc.room).mockImplementation(async (_target, board) => ({
+    sessions:
+      board === "platform"
+        ? people.flatMap((p) => p.sessions.slice(0, 2).map((s) => ({ ...s, personId: p.id })))
+        : [],
+    nextCursor: null,
+  }));
+  const rooms = office.summary.rooms.map((r) =>
+    r.board === "platform" ? { ...r, meetingUrl: "https://example.com/meet" } : r,
+  );
+  await emit(
+    state(ALL, teamRead({ people, office: { ...office, summary: { ...office.summary, rooms } } })),
+  );
+  const map = page.getByRole("group", { name: /Office map/ });
+  await vi.waitFor(() =>
+    expect(map.element().querySelector('[data-office-target*="/desk/"]')).toBeTruthy(),
+  );
+  const desk = map.getByRole("button", { name: "ada-example", exact: true });
+  await expect.element(desk.getByText("focusing", { exact: true })).toBeVisible();
+  expect(desk.element().getAttribute("aria-description")).toContain("Ada server");
+  expect(
+    map
+      .getByRole("button", { name: "bo-example", exact: true })
+      .element()
+      .getAttribute("aria-description"),
+  ).not.toMatch(/Bo laptop|m_bo_laptop/);
+  await map.getByRole("button", { name: /Platform.*Meeting link/i }).click();
+  await expect
+    .element(page.getByRole("link", { name: "Meeting link" }))
+    .toHaveAttribute("href", "https://example.com/meet");
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  map.element().focus();
+  await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+  await expect.element(page.getByRole("button", { name: "Close", exact: true })).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  expect(document.activeElement?.hasAttribute("data-office-target")).toBe(true);
+  map.element().focus();
+  for (const label of ["full", "simple", "overview"]) {
+    if (label !== "full") await userEvent.click(page.getByRole("button", { name: "Zoom out" }));
+    if (import.meta.env.VITE_OFFICE_SCREENSHOTS)
+      await page.screenshot({
+        path: import.meta.env.VITE_OFFICE_SCREENSHOTS + "/" + label + ".png",
+      });
+  }
 });

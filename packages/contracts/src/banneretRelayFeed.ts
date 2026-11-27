@@ -541,6 +541,7 @@ export const BanneretTeam = Schema.Struct({
   office: Schema.optional(
     Schema.Struct({
       summary: OfficeSummary,
+      preset: Schema.Literals(["company", "community"]),
       revision: Schema.String,
       files: Schema.Record(Schema.String, Schema.String),
       flags: Schema.Array(Schema.String),
