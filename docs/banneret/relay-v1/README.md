@@ -1210,7 +1210,7 @@ any configured host threshold is exceeded. A person's Hub reads local Resources 
 directly to that person's desktop. The host heartbeat can carry only disk, inodes and warning flags
 for that person. The memory warning also covers a new OOM kill. Never send human activity samples.
 
-A workspace Hub with `BANNERET_POOL_HOST_ID` set to its configured host ID includes `poolHostId` in machine facts. Machines and the machines snapshot repeat it so the desktop can join the public pressure reading to the right card. Standalone machines omit it. Access to a live reading always requires a direct connection to the workspace Hub.
+A workspace Hub with `BANNERET_POOL_HOST_ID` set to its configured host ID includes `poolHostId` in machine facts. Owners always receive their own machines through `GET /machines`, including `poolHostId` when configured, regardless of sharing. The `machines` snapshot includes only live machines shared with their name and carries `poolHostId` on those machines when configured. The desktop uses this ID to match the public pressure reading to the machine. Standalone machines omit it. Access to a live reading always requires a direct connection to the workspace Hub.
 
 | Resource state | Event | Next state |
 | --- | --- | --- |
