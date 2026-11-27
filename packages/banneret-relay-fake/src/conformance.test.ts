@@ -25,7 +25,7 @@ beforeAll(async () => {
     client = new RelayClient(external);
     return;
   }
-  fake = await startFakeRelay({ autoApprove: false, retryAfterMs: 0 });
+  fake = await startFakeRelay({ autoApprove: false, retryAfterMs: 0, chat: true });
   client = new RelayClient(fake.url);
 });
 
@@ -181,18 +181,12 @@ const factsFor = (machine: Enrolled, name = "facts-request.json") => {
   return body;
 };
 
-const openEvents = async (machine: Enrolled, lastEventId?: string) => {
-  const response = await client.raw(machine.key, "GET", "/relay/v1/events", {
-    token: machine.token,
-    device: machine.machineId,
-    ...(lastEventId === undefined ? {} : { headers: { "Last-Event-ID": lastEventId } }),
-  });
-  expect(response.status).toBe(200);
-  expect(response.headers.get("content-type")).toMatch(/^text\/event-stream/);
-  return new SseReader(response);
-};
+const openEvents = (machine: Enrolled, lastEventId?: string) =>
+  client.events(machine.key, machine.token, machine.machineId, lastEventId);
 
 const EVENT_SCHEMAS: Record<string, string> = {
+  "chat.changed": "ChatChangedEvent",
+  "chat.delivery": "ChatDeliveryEvent",
   "needs.changed": "NeedsChangedEvent",
   mention: "MentionEvent",
   "bundle.changed": "BundleChangedEvent",
@@ -204,7 +198,8 @@ const EVENT_SCHEMAS: Record<string, string> = {
 const nextEvent = async (reader: SseReader) => {
   const event = await reader.next();
   if (!event) throw new Error("the event stream closed");
-  expect(event.id).toBeDefined();
+  if (event.event.startsWith("chat.")) expect(event.id).toBeUndefined();
+  else expect(event.id).toBeDefined();
   expectSchema(EVENT_SCHEMAS[event.event] ?? "unknown event", event.data);
   return event;
 };
@@ -2887,5 +2882,77 @@ describe("opt-in health", () => {
     } finally {
       await relay?.close();
     }
+  });
+});
+
+describe("chat contract", () => {
+  it("creates a channel, syncs edits, and keeps each person's read position private", async () => {
+    const owner = await enrol();
+    const otherMachine = await enrol({ login: owner.login });
+    const outsider = await enrol();
+    const path = "/relay/v1/chat";
+    const create = await call(owner, "POST", path + "/conversations", {
+      kind: "channel",
+      name: "test-" + randomText(5),
+      private: true,
+      agents: "off",
+    });
+    expectSchema("ChatConversation", create.body);
+    const { id } = create.body as { id: string };
+    const post = { conversationId: id, key: randomText(8), text: "First message" };
+    const stream = await openEvents(otherMachine);
+    const root = await call(owner, "POST", path + "/messages", post);
+    try {
+      expect(await nextEvent(stream)).toMatchObject({
+        event: "chat.changed",
+        data: { change: { kind: "message.created", message: root.body } },
+      });
+    } finally {
+      await stream.cancel();
+    }
+    expectSchema("ChatMessage", root.body);
+    const message = root.body as { id: string; seq: number };
+    expect((await call(owner, "POST", path + "/messages", post)).body).toEqual(root.body);
+    await call(owner, "POST", path + "/messages", {
+      ...post,
+      key: randomText(8),
+      threadRootId: message.id,
+      text: "Reply",
+    });
+    expect((await call(owner, "GET", path + "/threads/" + message.id)).body).toMatchObject({
+      root: { replyCount: 1 },
+      items: [{ text: "Reply" }],
+    });
+    expect(
+      (await call(owner, "PATCH", path + "/messages/" + message.id, { text: "Edited" })).body,
+    ).toMatchObject({ text: "Edited" });
+    expect(
+      (await call(owner, "POST", path + "/read", { conversationId: id, seq: message.seq })).body,
+    ).toEqual({ conversationId: id, seq: message.seq });
+    expect((await call(otherMachine, "GET", path + "/conversations")).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id, me: expect.objectContaining({ readSeq: message.seq }) }),
+      ]),
+    });
+    expect((await call(owner, "DELETE", path + "/messages/" + message.id)).body).toMatchObject({
+      deleted: true,
+      text: "",
+    });
+    expect(
+      (await call(owner, "GET", path + "/conversations/" + id + "/messages")).body,
+    ).toMatchObject({ items: [{ id: message.id, deleted: true }] });
+    const feed = await call(owner, "GET", path + "/changes?after=" + message.seq);
+    expectSchema("ChatChanges", feed.body);
+    expect(JSON.stringify(feed.body)).not.toContain("Edited");
+    expect(feed.body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ kind: "read.moved" }),
+        expect.objectContaining({ kind: "message.deleted" }),
+      ]),
+    });
+    expect((await call(outsider, "GET", path + "/threads/" + message.id)).status).not.toBe(200);
+    expect(
+      JSON.stringify((await call(outsider, "GET", path + "/changes?after=" + message.seq)).body),
+    ).not.toContain(message.id);
   });
 });

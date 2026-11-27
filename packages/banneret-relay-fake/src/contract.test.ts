@@ -204,3 +204,30 @@ describe("relay v1 contract", () => {
     expect(verify(publicKey, { ...parts, counter: `${parts.counter}1` }, signature)).toBe(false);
   });
 });
+
+describe("chat privacy", () => {
+  it("exposes only the agreed member, self-view and cursor fields", () => {
+    const schemas = (
+      readOpenApi().components as {
+        schemas: Record<string, { properties: object; oneOf: Array<{ properties: object }> }>;
+      }
+    ).schemas;
+    expect(Object.keys(schemas.ChatMe!.properties).sort()).toEqual([
+      "member",
+      "mentions",
+      "muted",
+      "notify",
+      "readSeq",
+      "unread",
+    ]);
+    expect(Object.keys(schemas.ChatRead!.properties).sort()).toEqual([
+      "conversationId",
+      "seq",
+      "threadRootId",
+    ]);
+    expect(schemas.ChatMember!.oneOf.map((s) => Object.keys(s.properties).sort())).toEqual([
+      ["id", "kind", "login"],
+      ["handle", "id", "kind", "ownerLogin"],
+    ]);
+  });
+});

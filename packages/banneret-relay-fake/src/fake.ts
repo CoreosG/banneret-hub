@@ -10,6 +10,16 @@ import {
   type LeaseFoldResult,
 } from "@t3tools/contracts/leaseProtocol";
 
+import type {
+  ChatChange,
+  ChatConversation,
+  ChatCreate,
+  ChatEdit,
+  ChatMessage,
+  ChatPatch,
+  ChatPost,
+  ChatRead,
+} from "@t3tools/contracts";
 import { openAlarmStore, type Alarm } from "./alarms.ts";
 import { publicKeyFromBase64, verify } from "./signing.ts";
 import { loadSpec, type SchemaName } from "./spec.ts";
@@ -90,6 +100,7 @@ interface HealthSource {
 }
 
 export interface FakeRelayOptions {
+  readonly chat?: boolean;
   readonly healthSources?: readonly HealthSource[];
   readonly criticalRecipients?: readonly string[];
   readonly dashboards?: ReadonlyArray<{ id: string; title: string; url: string; group?: string }>;
@@ -528,6 +539,7 @@ const pageParams = (query: URLSearchParams) => {
 const NEEDS_CLASS: Readonly<Record<string, number>> = {
   thread_question: 1,
   thread_approval: 1,
+  chat_ask: 1,
   pull_request: 2,
   pr_approval: 2,
   waiting_for_approver: 2,
@@ -1939,6 +1951,101 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const publishBundle = (bundleSha: string) =>
     emit("bundle.changed", "BundleChangedEvent", { at: iso(Date.now()), bundleSha }, null);
 
+  // The fake starts with an empty change log. Only channel data is enabled in F0.
+  type Channel = {
+    id: string;
+    name: string;
+    purpose: string;
+    private: boolean;
+    agents: ChatConversation["agents"];
+    archived: boolean;
+    members: Set<string>;
+    creator: string;
+  };
+  const channels = new Map<string, Channel>();
+  const messages = new Map<string, ChatMessage>();
+  const postKeys = new Map<string, string>();
+  const cursors = new Map<string, number>();
+  const cursorKey = (personId: string, id: string, root = "") =>
+    JSON.stringify([personId, id, root]);
+  type MessageChange = Extract<ChatChange, { message: ChatMessage }>;
+  type StoredChange =
+    | Exclude<ChatChange, MessageChange>
+    | { seq: number; kind: MessageChange["kind"]; messageId: string };
+  const changes: { channel: Channel; person?: string; value: StoredChange }[] = [];
+  let chatSeq = 0;
+  if (options.chat)
+    channels.set("c_general", {
+      id: "c_general",
+      name: "general",
+      purpose: "",
+      private: false,
+      agents: "allowed",
+      archived: false,
+      members: new Set(),
+      creator: "",
+    });
+  const visible = (c: Channel, p: string) => !c.private || c.members.has(p);
+  const chatChange = (channel: Channel, value: ChatChange, person?: string) => {
+    if (value.kind === "read.moved") {
+      const { threadRootId } = value.read;
+      const index = changes.findIndex(
+        (row) =>
+          row.person === person &&
+          row.channel === channel &&
+          row.value.kind === "read.moved" &&
+          row.value.read.threadRootId === threadRootId,
+      );
+      if (index >= 0) changes.splice(index, 1);
+    }
+    const stored =
+      "message" in value
+        ? { kind: value.kind, seq: value.seq, messageId: value.message.id }
+        : value;
+    changes.push({ channel, value: stored, ...(person ? { person } : {}) });
+    const event =
+      Buffer.byteLength(JSON.stringify(value)) <= 8192
+        ? { seq: value.seq, change: value }
+        : { seq: value.seq };
+    for (const stream of streams) {
+      if (
+        (person === undefined || person === stream.personId) &&
+        visible(channel, stream.personId)
+      ) {
+        stream.response.write(`event: chat.changed\ndata: ${JSON.stringify(event)}\n\n`);
+      }
+    }
+  };
+  const channelView = (channel: Channel, person: Person): ChatConversation => {
+    const roots = [...messages.values()].filter(
+      (m) => m.conversationId === channel.id && !m.threadRootId,
+    );
+    const readSeq = cursors.get(cursorKey(person.id, channel.id)) ?? 0;
+    const unread = roots.filter(
+      (m) =>
+        !m.deleted && m.seq > readSeq && (m.author.kind === "system" || m.author.id !== person.id),
+    );
+    return {
+      id: channel.id,
+      kind: "channel",
+      name: channel.name,
+      purpose: channel.purpose,
+      private: channel.private,
+      agents: channel.agents,
+      archived: channel.archived,
+      memberCount: { people: channel.members.size, agents: 0 },
+      lastSeq: roots.at(-1)?.seq ?? 0,
+      me: {
+        member: channel.members.has(person.id),
+        notify: "mentions",
+        muted: false,
+        readSeq,
+        unread: unread.length,
+        mentions: unread.filter((m) => m.mentions.some((t) => t.id === person.id)).length,
+      },
+    };
+  };
+
   const removeStaff = (login: string) => {
     const person = peopleByLogin.get(login);
     if (!person || person.removed) throw new RelayError("not_found", "No such person.");
@@ -2106,8 +2213,34 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             role: caller.person.role,
             machineId: caller.machine.id,
           },
+          ...(options.chat
+            ? {
+                chat: {
+                  maxTextBytes: 16384,
+                  editWindowSeconds: 0,
+                  rate: {
+                    postsPerMinute: 10,
+                    postsPerHour: 120,
+                    openAsks: 5,
+                    hopCap: 4,
+                    pairPerMinute: 20,
+                  },
+                  retentionDays: { channels: 0, dms: 0 },
+                },
+              }
+            : {}),
           dashboards,
           sections: [
+            ...(options.chat
+              ? [
+                  {
+                    id: "chat",
+                    kind: "chat",
+                    version: 1,
+                    flags: ["channels", "private_channels", "threads"],
+                  },
+                ]
+              : []),
             ...(sources.size ? [{ id: "health", kind: "health", version: 1, flags: [] }] : []),
             { id: "today", kind: "today", version: 1, flags: [] },
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
@@ -2205,6 +2338,266 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     const caller = authenticate(request, body);
+
+    if (options.chat && route.startsWith("/chat/")) {
+      const { person } = caller;
+      const [, , resource, id = "", action, memberId] = route.split("/");
+      const send = (schema: SchemaName, value: unknown) => sendJson(response, 200, schema, value);
+      const channelFor = (id: string) => {
+        const c = channels.get(id);
+        if (!c || !visible(c, person.id)) throw new RelayError("not_found", "Unknown channel.");
+        return c;
+      };
+      const messageFor = (id: string) => {
+        const m = messages.get(id);
+        if (!m) throw new RelayError("not_found", "Unknown message.");
+        channelFor(m.conversationId);
+        return m;
+      };
+      const paged = <T>(rows: T[]) => {
+        const { offset, limit } = pageParams(query);
+        return page(rows, offset, limit);
+      };
+      const messageMentions = (text: string, card?: ChatMessage["card"]) => {
+        if (
+          Buffer.byteLength(text) > 16384 ||
+          (card && Buffer.byteLength(JSON.stringify(card)) > 4096)
+        )
+          throw new RelayError("too_large", "Message is too large.");
+        const mentions = [...new Set(text.match(/@[a-zA-Z0-9-]+/g) ?? [])].flatMap((login) => {
+          const p = peopleByLogin.get(login.slice(1));
+          return p ? [{ kind: "person" as const, id: p.id }] : [];
+        });
+        if (mentions.length > 50) throw new RelayError("malformed", "Too many mentions.");
+        return mentions;
+      };
+      if (query.has("asHandle")) throw new RelayError("forbidden", "Unknown agent handle.");
+      if (resource === "changes" && method === "GET" && !id) {
+        const after = query.get("after") ?? "";
+        if (!/^\d+$/.test(after) || !Number.isSafeInteger(Number(after)))
+          throw new RelayError("malformed", "Expected a change sequence.");
+        const { limit } = pageParams(query);
+        const rows = changes.filter(
+          (row) =>
+            row.value.seq > Number(after) &&
+            (!row.person || row.person === person.id) &&
+            visible(row.channel, person.id),
+        );
+        const items = rows
+          .slice(0, limit)
+          .map(({ value }) =>
+            "messageId" in value
+              ? { kind: value.kind, seq: value.seq, message: messageFor(value.messageId) }
+              : value,
+          );
+        return send("ChatChanges", {
+          items,
+          nextSeq: rows.length > limit ? items.at(-1)?.seq : chatSeq,
+          resync: Number(after) > chatSeq,
+        });
+      }
+      if (resource === "conversations" && !id) {
+        if (method === "GET")
+          return send(
+            "ChatConversations",
+            paged(
+              [...channels.values()]
+                .filter((c) => visible(c, person.id))
+                .map((c) => channelView(c, person)),
+            ),
+          );
+        if (method === "POST") {
+          const input = parseJson(body, "ChatCreate") as ChatCreate;
+          if (channels.size >= 500) throw new RelayError("malformed", "Channel limit reached.");
+          if (input.kind !== "channel") throw new RelayError("forbidden", "DMs are disabled.");
+          if ([...channels.values()].some((c) => c.name === input.name))
+            throw new RelayError("malformed", "This channel name is taken.");
+          const c: Channel = {
+            ...input,
+            purpose: input.purpose ?? "",
+            id: "c_" + NodeCrypto.randomUUID(),
+            members: new Set([person.id]),
+            archived: false,
+            creator: person.id,
+          };
+          channels.set(c.id, c);
+          chatChange(c, {
+            kind: "conversation.updated",
+            seq: ++chatSeq,
+            refId: c.id,
+            conversationId: c.id,
+          });
+          return send("ChatConversation", channelView(c, person));
+        }
+      }
+      if (resource === "conversations" && id) {
+        const c = channelFor(id);
+        if (!action && method === "PATCH") {
+          if (c.creator !== person.id && person.role !== "founder")
+            throw new RelayError(
+              "forbidden",
+              "Channel management requires its creator or a founder.",
+            );
+          const patch = parseJson(body, "ChatPatch") as ChatPatch;
+          if (
+            patch.name &&
+            [...channels.values()].some((other) => other.id !== id && other.name === patch.name)
+          )
+            throw new RelayError("malformed", "This channel name is taken.");
+          Object.assign(c, patch);
+          chatChange(c, {
+            kind: "conversation.updated",
+            seq: ++chatSeq,
+            refId: id,
+            conversationId: id,
+          });
+          return send("ChatConversation", channelView(c, person));
+        }
+        if (action === "members") {
+          if (!memberId && method === "GET")
+            return send(
+              "ChatMembers",
+              paged(
+                [...c.members].map((id) => ({ kind: "person", id, login: people.get(id)?.login })),
+              ),
+            );
+          if (memberId && (method === "PUT" || method === "DELETE")) {
+            if (memberId !== person.id && c.creator !== person.id && person.role !== "founder")
+              throw new RelayError("forbidden", "Cannot change this membership.");
+            if (!people.has(memberId) || people.get(memberId)?.removed)
+              throw new RelayError("not_found", "Unknown person.");
+            if (method === "PUT" && c.members.size >= 200 && !c.members.has(memberId))
+              throw new RelayError("malformed", "Channel member limit reached.");
+            if (method === "PUT") c.members.add(memberId);
+            else c.members.delete(memberId);
+            chatChange(c, {
+              kind: method === "PUT" ? "member.added" : "member.removed",
+              seq: ++chatSeq,
+              conversationId: id,
+              refId: memberId,
+            });
+            response.writeHead(204).end();
+            return;
+          }
+        }
+        if (action === "messages" && method === "GET") {
+          let rows = [...messages.values()]
+            .filter((m) => m.conversationId === id && !m.threadRootId)
+            .reverse();
+          const anchors = ["before", "after", "around"].filter((key) => query.has(key));
+          if (anchors.length > 1) throw new RelayError("malformed", "Choose one message anchor.");
+          const anchor = anchors[0];
+          if (anchor) {
+            const index = rows.findIndex((m) => m.id === query.get(anchor));
+            if (index < 0) throw new RelayError("not_found", "Unknown message anchor.");
+            rows =
+              anchor === "before"
+                ? rows.slice(index + 1)
+                : anchor === "after"
+                  ? rows.slice(0, index)
+                  : rows.slice(Math.max(0, index - Math.floor(pageParams(query).limit / 2)));
+          }
+          return send("ChatMessages", paged(rows));
+        }
+      }
+      if (resource === "threads" && id && !action && method === "GET") {
+        const root = messageFor(id);
+        if (root.threadRootId)
+          throw new RelayError("malformed", "A reply cannot be a thread root.");
+        return send("ChatThread", {
+          root,
+          ...paged([...messages.values()].filter((m) => m.threadRootId === id)),
+        });
+      }
+      if (resource === "messages" && !id && method === "POST") {
+        const post = parseJson(body, "ChatPost") as ChatPost;
+        const c = channelFor(post.conversationId);
+        if (post.asHandle || !c.members.has(person.id) || c.archived)
+          throw new RelayError("forbidden", "Cannot post in this channel.");
+        const key = JSON.stringify([person.id, post.key]);
+        const previous = postKeys.get(key);
+        if (previous) {
+          const existing = messageFor(previous);
+          if (existing.conversationId !== c.id)
+            throw new RelayError("malformed", "Post key belongs to another channel.");
+          return send("ChatMessage", existing);
+        }
+        const root = post.threadRootId ? messageFor(post.threadRootId) : undefined;
+        if (root && (root.threadRootId || root.conversationId !== c.id))
+          throw new RelayError("malformed", "Choose a root in this channel.");
+        const mentions = messageMentions(post.text, post.card);
+        const { key: _key, asHandle: _asHandle, ...fields } = post;
+        const m: ChatMessage = {
+          ...fields,
+          id: "m_" + NodeCrypto.randomUUID(),
+          seq: ++chatSeq,
+          kind: "text",
+          author: { kind: "person", id: person.id, login: person.login },
+          mentions,
+          replyCount: 0,
+          reactions: [],
+          createdAt: iso(Date.now()),
+          deleted: false,
+        };
+        messages.set(m.id, m);
+        postKeys.set(key, m.id);
+        if (root)
+          messages.set(root.id, {
+            ...root,
+            replyCount: root.replyCount + 1,
+            lastReplyAt: m.createdAt,
+          });
+        chatChange(c, { kind: "message.created", seq: m.seq, message: m });
+        return send("ChatMessage", m);
+      }
+      if (resource === "messages" && id && !action && (method === "PATCH" || method === "DELETE")) {
+        const m = messageFor(id);
+        if (
+          (m.author.kind !== "person" || m.author.id !== person.id) &&
+          !(method === "DELETE" && person.role === "founder")
+        )
+          throw new RelayError("forbidden", "Cannot change this message.");
+        if (m.deleted) throw new RelayError("malformed", "This message has been deleted.");
+        const input = method === "PATCH" ? (parseJson(body, "ChatEdit") as ChatEdit) : undefined;
+        if (input?.asHandle) throw new RelayError("forbidden", "Unknown agent handle.");
+        const { card: _card, ...base } = m;
+        const edited = input
+          ? {
+              ...m,
+              ...input,
+              mentions: messageMentions(input.text, input.card ?? m.card),
+              editedAt: iso(Date.now()),
+            }
+          : { ...base, text: "", mentions: [], deleted: true };
+        messages.set(id, edited);
+        chatChange(channelFor(m.conversationId), {
+          kind: input ? "message.edited" : "message.deleted",
+          seq: ++chatSeq,
+          message: edited,
+        });
+        return send("ChatMessage", edited);
+      }
+      if (resource === "read" && !id && method === "POST") {
+        const input = parseJson(body, "ChatRead") as ChatRead;
+        const c = channelFor(input.conversationId);
+        if (input.threadRootId) {
+          const root = messageFor(input.threadRootId);
+          if (root.conversationId !== c.id || root.threadRootId)
+            throw new RelayError("malformed", "Unknown thread in this channel.");
+        }
+        if (input.seq > chatSeq)
+          throw new RelayError("malformed", "Read position exceeds the current sequence.");
+        const key = cursorKey(person.id, c.id, input.threadRootId);
+        const previous = cursors.get(key) ?? 0;
+        const read = { ...input, seq: Math.max(previous, input.seq) };
+        if (read.seq > previous) {
+          cursors.set(key, read.seq);
+          chatChange(c, { seq: ++chatSeq, kind: "read.moved", read }, person.id);
+        }
+        return send("ChatRead", read);
+      }
+      throw new RelayError("not_found", "Unknown chat call.");
+    }
 
     if (method === "GET" && route === "/machines") {
       const { offset, limit } = pageParams(query);

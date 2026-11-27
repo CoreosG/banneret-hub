@@ -19,6 +19,7 @@ import {
 import { TASK_LEASE_RPCS, TASK_LEASE_RPC_AGGREGATES, TASK_LEASE_RPC_SCOPES } from "./taskLeases.ts";
 
 export * from "./banneretRelayFeed.ts";
+export * from "./banneretChat.ts";
 // Take and release are not relay calls, but they share the relay's one hook into the RPC group.
 export * from "./taskLeases.ts";
 export * from "./leaseProtocol.ts";

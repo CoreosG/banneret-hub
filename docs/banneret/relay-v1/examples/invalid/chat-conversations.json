@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "kind": "channel",
+      "name": "example",
+      "private": false,
+      "id": "example_1",
+      "purpose": "example",
+      "agents": "allowed",
+      "memberCount": {
+        "people": 1,
+        "agents": 1
+      },
+      "archived": false,
+      "lastSeq": 1,
+      "me": {
+        "member": false,
+        "notify": "all",
+        "muted": false,
+        "readSeq": 1,
+        "unread": 1,
+        "mentions": 1
+      }
+    }
+  ],
+  "nextCursor": null,
+  "unexpected": true
+}

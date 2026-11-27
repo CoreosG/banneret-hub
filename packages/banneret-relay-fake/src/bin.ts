@@ -14,6 +14,7 @@ const { values } = NodeUtil.parseArgs({
     "network-identity-header": { type: "string" },
     "public-origin": { type: "string" },
     config: { type: "string" },
+    chat: { type: "boolean", default: false },
     quiet: { type: "boolean", default: false },
   },
 });
@@ -28,6 +29,7 @@ const relay = await startFakeRelay({
   ...(settings.board && { board: settings.board }),
   ...(settings.criticalRecipients && { criticalRecipients: settings.criticalRecipients }),
   ...(settings.alarmDatabase && { alarmDatabase: settings.alarmDatabase }),
+  chat: values.chat,
   port: Number(values.port),
   host: values.host,
   autoApprove: !values["manual-approval"],
