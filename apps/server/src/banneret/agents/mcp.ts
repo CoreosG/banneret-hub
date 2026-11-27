@@ -55,7 +55,8 @@ const joinResource = Layer.effectDiscard(
     yield* McpServer.registerResource({
       uri: JOIN_URI,
       name: "banneret_join",
-      description: "The company's lease rules for coding agents. Read before you change anything.",
+      description:
+        "The company's lease and chat rules for coding agents. Read before you change anything.",
       mimeType: "text/markdown",
       annotations: Context.make(
         McpSchema.EnabledWhen,

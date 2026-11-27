@@ -24,13 +24,16 @@ import { useWorkspacesStore } from "../workspacesStore";
 import { EnterpriseSidebarRows } from "../EnterpriseSidebarRows";
 import { TabsFrame } from "../tabs/TabsFrame";
 import { useTabsStore } from "../tabs/tabsStore";
-import { ChannelPage } from "./ChannelPage";
+import * as Schema from "effect/Schema";
+import { ChatConversations } from "@t3tools/contracts";
+import { DmPrivacy, ChannelPage } from "./ChannelPage";
 import { chatRpc } from "./client";
+const decodeConversations = Schema.decodeUnknownSync(ChatConversations);
 declare module "vite-plus/test/browser" {
   interface BrowserCommands {
     companyChat: {
       (op: "start"): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
-      (op: "call", arg: ChannelAction): Promise<ChannelResult>;
+      (op: "call" | "leo", arg: ChannelAction): Promise<ChannelResult>;
       (op: "stop"): Promise<void>;
     };
   }
@@ -76,7 +79,18 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     publish?.({
       sections: ["today", "needs", "board", "map", "feed", "team", ...sections],
       sectionsKnown: true,
-      chatFlags: ["channels", "threads", "private_channels", "reactions", "dms", "group_dms"],
+      chatFlags: [
+        "channels",
+        "threads",
+        "private_channels",
+        "reactions",
+        "dms",
+        "group_dms",
+        "agents",
+        "agent_dms",
+        "others_agents",
+        "agent_owner_dm_read",
+      ],
       chatRevision: ++revision,
       revision: 1,
       joined: true,
@@ -92,7 +106,11 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => {
     const result = await commands.companyChat("call", action);
     if (!result.ok) throw new Error(result.message);
-    if (["post", "edit", "delete", "read", "dm", "notifications"].includes(action.kind))
+    if (
+      ["post", "edit", "delete", "read", "dm", "notifications", "setDmSettings"].includes(
+        action.kind,
+      )
+    )
       emit(["chat"]);
     return result.value;
   });
@@ -162,26 +180,26 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   const input = screen.getByRole("textbox", { name: "Channel message" });
   await input.fill("Upload flow checked.");
   await screen.getByRole("button", { name: "Send message" }).click();
-  await expect.element(screen.getByText("Upload flow checked.")).toBeVisible();
-  expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: true });
-  await screen.getByRole("button", { name: /1 reply/ }).click();
-  expect(router.state.location.search).toMatchObject({ thread: message });
+  const messageRow = (text: string) => screen.getByRole("article").filter({ hasText: text });
+  await expect.element(messageRow("Upload flow checked.")).toBeVisible();
+  await vi.waitFor(() =>
+    expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: true }),
+  );
+  await screen.getByRole("button", { name: /2 replies/ }).click();
+  await vi.waitFor(() => expect(router.state.location.search).toMatchObject({ thread: message }));
   const reply = screen.getByRole("textbox", { name: "Thread reply" });
   await reply.fill("Test passed on Linux.");
   await screen.getByRole("button", { name: "Send message" }).last().click();
-  await expect.element(screen.getByText("Test passed on Linux.")).toBeVisible();
+  await expect.element(messageRow("Test passed on Linux.")).toBeVisible();
   expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
   await proof("thread");
-  const own = screen.getByText("Test passed on Linux.").element().closest("article")!;
-  await page
-    .elementLocator(own)
+  await messageRow("Test passed on Linux.")
     .getByRole("button", { name: "Edit", exact: true })
     .click({ force: true });
   await reply.fill("Checked on Linux.");
   await screen.getByRole("button", { name: "Send message" }).last().click();
-  await expect.element(screen.getByText("Checked on Linux.")).toBeVisible();
-  await page
-    .elementLocator(own)
+  await expect.element(messageRow("Checked on Linux.")).toBeVisible();
+  await messageRow("Checked on Linux.")
     .getByRole("button", { name: "Delete", exact: true })
     .click({ force: true });
   await expect.element(screen.getByText("Message deleted")).toBeVisible();
@@ -191,11 +209,39 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await screen.getByRole("button", { name: "Open conversation" }).click();
   await expect.element(screen.getByText(/The relay's operator can read it/)).toBeVisible();
   await expect.element(screen.getByText("kim's agents can read this conversation.")).toBeVisible();
+  const optIn = screen.getByRole("checkbox", { name: "My agents can read my DMs" });
+  await expect.element(optIn).not.toBeChecked();
+  await optIn.click();
+  await expect.element(screen.getByText("ada's agents can read this conversation.")).toBeVisible();
+  const otherClient = await commands.companyChat("leo", { kind: "list" });
+  if (!otherClient.ok) throw new Error(otherClient.message);
+  const secondDm = decodeConversations(otherClient.value).items.find(
+    (c) => c.kind === "dm" && c.members.some((m) => m.kind === "person" && m.login === "ada"),
+  );
+  if (secondDm?.kind !== "dm") throw new Error("Leo cannot open the DM.");
+  {
+    await using leoScreen = await render(
+      <DmPrivacy channel={secondDm} login="leo" title="ada, kim" />,
+    );
+    await expect
+      .element(leoScreen.getByText("ada's agents can read this conversation."))
+      .toBeVisible();
+  }
   const dm = screen.getByRole("textbox", { name: "Direct message" });
   await dm.fill("Can we review the release together?");
   await screen.getByRole("button", { name: "Send message" }).click();
   await expect.element(screen.getByText("Can we review the release together?")).toBeVisible();
   await proof("group-dm");
+  await screen.getByRole("button", { name: "Start direct message" }).click();
+  await screen.getByRole("checkbox", { name: /leo\/reviewer/ }).click();
+  await screen.getByRole("button", { name: "Open conversation" }).click();
+  await expect
+    .element(screen.getByText("Questions only. This agent takes instructions from leo."))
+    .toBeVisible();
+  await screen.getByRole("textbox", { name: "Direct message" }).fill("Which checks passed?");
+  await screen.getByRole("button", { name: "Send message" }).click();
+  await expect.element(screen.getByText("Which checks passed?")).toBeVisible();
+  await proof("agent-dm");
   await act(() => useWorkspacesStore.setState({ activeId: null }));
   await expect.element(screen.getByText("Channels", { exact: true })).not.toBeInTheDocument();
 });

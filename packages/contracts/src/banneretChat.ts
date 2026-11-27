@@ -128,7 +128,17 @@ export const ChatHandle = Schema.Struct({
 });
 export type ChatHandle = typeof ChatHandle.Type;
 
+export const ChatActiveProgress = Schema.Struct({
+  items: Schema.Array(
+    Schema.Struct({ handleId: Schema.String, threadRef: Schema.String, message: ChatMessage }),
+  ),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+
 export const ChatDelivery = Schema.Struct({
+  threadRef: Schema.String,
+  wake: Schema.Literals(["everyone", "owner_only"]),
+  message: ChatMessage,
   id: Schema.String,
   handleId: Schema.String,
   messageId: Schema.String,
@@ -328,7 +338,7 @@ export const ChatAnswer = Schema.Union([
 export type ChatAnswer = typeof ChatAnswer.Type;
 
 export const ChatRegister = Schema.Struct({
-  name: Schema.String,
+  name: Schema.optionalKey(Schema.String),
   threadRef: Schema.String,
   provider: Schema.String,
   machineId: Schema.String,
@@ -361,7 +371,18 @@ export type ChatLimits = typeof ChatLimits.Type;
 
 const Id = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/));
 const Page = { cursor: Schema.optionalKey(Schema.String) };
+export const ThreadChatAction = Schema.Struct({
+  kind: Schema.Literal("threadChat"),
+  thread: Schema.String,
+  settings: Schema.optionalKey(
+    Schema.Struct({ name: Schema.String, wake: Schema.Literals(["owner_only", "everyone"]) }),
+  ),
+});
 export const ChannelAction = Schema.Union([
+  ThreadChatAction,
+  Schema.Struct({ kind: Schema.Literal("handles"), ...Page }),
+  Schema.Struct({ kind: Schema.Literal("dmSettings") }),
+  Schema.Struct({ kind: Schema.Literal("setDmSettings"), settings: ChatSettings }),
   Schema.Struct({ kind: Schema.Literals(["join", "leave", "follow", "unfollow"]), id: Id }),
   Schema.Struct({
     kind: Schema.Literal("reaction"),
@@ -412,6 +433,14 @@ export function callChannel<A>(
       : "?limit=100";
 
   switch (action.kind) {
+    case "threadChat":
+      throw new Error("Thread chat settings require the owning Hub.");
+    case "handles":
+      return call("GET", "handles" + page);
+    case "dmSettings":
+      return call("GET", "me/settings");
+    case "setDmSettings":
+      return call("PUT", "me/settings", action.settings);
     case "follow":
     case "unfollow":
       return call(action.kind === "follow" ? "PUT" : "DELETE", "threads/" + action.id + "/follow");
@@ -452,7 +481,7 @@ export function callChannel<A>(
         name: action.name,
         purpose: action.purpose,
         private: action.private,
-        agents: "off",
+        agents: "allowed",
       });
     case "edit":
       return call("PATCH", "messages/" + action.id, { text: action.text });

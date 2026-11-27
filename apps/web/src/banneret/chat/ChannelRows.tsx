@@ -6,7 +6,8 @@ import { ChatConversation } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { SidebarMenuButton } from "../../components/ui/sidebar";
 import type { EnterpriseFeed } from "../useEnterpriseFeed";
-import { conversations, conversationTitle, chatRpc, useChatRead } from "./client";
+import { DmSettings } from "./AgentSettings";
+import { handles, conversations, conversationTitle, chatRpc, useChatRead } from "./client";
 const decodeChatConversation = Schema.decodeUnknownSync(ChatConversation);
 
 export const chatHref = (id: string, root?: string) =>
@@ -25,6 +26,13 @@ export function ChannelRows({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const rows = useChatRead(load, enterprise.feed.chatRevision ?? 0);
+  const agentList = useChatRead(
+    () =>
+      enterprise.feed.chatFlags?.includes("agent_dms") && creating === "dm"
+        ? handles(enterprise.target)
+        : Promise.resolve([]),
+    String(creating) + ":" + (enterprise.feed.chatRevision ?? 0),
+  );
   const login = enterprise.enrolment.me?.login;
   const tabs = useTabsStore((s) => s.tabs);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keep every open chat tab's mention count current
@@ -162,9 +170,22 @@ export function ChannelRows({
                       {p.login}
                     </label>
                   ))}
+                {agentList.value
+                  ?.filter(
+                    (h) =>
+                      enterprise.feed.chatFlags?.includes("others_agents") || h.owner === login,
+                  )
+                  .map((h) => (
+                    <label key={h.id}>
+                      <input name="recipient" value={h.id} type="checkbox" /> {h.login} · Agent
+                    </label>
+                  ))}
               </fieldset>
               <button disabled={pending}>Open conversation</button>
             </form>
+          )}
+          {enterprise.feed.chatFlags?.includes("agent_owner_dm_read") && (
+            <DmSettings enterprise={enterprise} />
           )}
           {rows.value
             ?.filter((c) => c.kind === "dm")

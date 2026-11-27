@@ -1178,6 +1178,27 @@ paths:
                 $ref: '#/components/schemas/ChatHandles'
         default:
           $ref: '#/components/responses/Error'
+  /chat/progress:
+    get:
+      tags:
+      - chat
+      operationId: listWorkingProgress
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Working progress for this machine.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatActiveProgress'
+        default:
+          $ref: '#/components/responses/Error'
   /chat/deliveries:
     get:
       tags:
@@ -1190,6 +1211,9 @@ paths:
       - $ref: '#/components/parameters/Signature'
       - $ref: '#/components/parameters/Cursor'
       - $ref: '#/components/parameters/Limit'
+      - in: query
+        name: asHandle
+        schema: {$ref: '#/components/schemas/Id'}
       responses:
         '200':
           description: Chat Deliveries.
@@ -2993,10 +3017,29 @@ components:
           enum:
           - everyone
           - owner_only
+    ChatActiveProgress:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        nextCursor: {type: [string, "null"]}
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [handleId, threadRef, message]
+            properties:
+              handleId: {$ref: '#/components/schemas/Id'}
+              threadRef: {type: string}
+              message: {$ref: '#/components/schemas/ChatMessage'}
     ChatDelivery:
       type: object
       additionalProperties: false
       required:
+      - threadRef
+      - wake
+      - message
       - id
       - handleId
       - messageId
@@ -3006,6 +3049,9 @@ components:
       - state
       - expiresAt
       properties:
+        threadRef: {type: string}
+        wake: {type: string, enum: [everyone, owner_only]}
+        message: {$ref: '#/components/schemas/ChatMessage'}
         id:
           $ref: '#/components/schemas/Id'
         handleId:
@@ -3496,15 +3542,13 @@ components:
       type: object
       additionalProperties: false
       required:
-      - name
       - threadRef
       - provider
       - machineId
       properties:
         name:
           type: string
-        threadRef:
-          $ref: '#/components/schemas/Id'
+        threadRef: {type: string}
         provider:
           type: string
         machineId:

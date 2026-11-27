@@ -5,6 +5,7 @@ import {
   ChatConversations,
   type ChatConversation,
   ChatMembers,
+  ChatHandles,
   ChatMessages,
   ChatThread,
 } from "@t3tools/contracts";
@@ -126,4 +127,24 @@ export function useChatRead<T>(
     };
   }, [revision]);
   return state;
+}
+
+const decodeHandles = Schema.decodeUnknownSync(ChatHandles);
+export async function handles(target: RelayTarget) {
+  const result = [];
+  let cursor: string | null = null;
+  do {
+    const page = decodeHandles(
+      await chatRpc.run(target, { kind: "handles", ...(cursor ? { cursor } : {}) }),
+    );
+    result.push(
+      ...page.items.map((h) => ({
+        id: h.id,
+        login: h.owner.login + "/" + (h.shortName ?? h.claimName),
+        owner: h.owner.login,
+      })),
+    );
+    cursor = page.nextCursor;
+  } while (cursor);
+  return result;
 }

@@ -11,6 +11,14 @@ import {
 } from "@t3tools/contracts/leaseProtocol";
 
 import type {
+  ChatDelivery,
+  ChatHandle,
+  ChatRegister,
+  ChatAct,
+  ChatRefuse,
+  ChatNewAsk,
+  ChatWriteProgress,
+  ChatMember,
   ChatChange,
   ChatConversation,
   ChatCreate,
@@ -2015,6 +2023,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     creator: string;
   };
   const channels = new Map<string, Channel>();
+  type Handle = { view: ChatHandle; threadRef: string };
+  const handles = new Map<string, Handle>();
+  const deliveries = new Map<string, { row: ChatDelivery; claimedAt: number }>();
+  const agentHops = new Map<string, number>();
+  const pairWrites = new Map<string, number[]>();
+  const label = (h: ChatHandle) => h.owner.login + "/" + (h.shortName ?? h.claimName);
+  const member = (id: string): ChatMember => {
+    const h = handles.get(id)?.view;
+    return h
+      ? { kind: "agent", id, handle: label(h), ownerLogin: h.owner.login }
+      : { kind: "person", id, login: people.get(id)!.login };
+  };
   const messages = new Map<string, ChatMessage>();
   const postKeys = new Map<string, string>();
   const cursors = new Map<string, number>();
@@ -2105,18 +2125,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         stream.response.write(`event: chat.changed\ndata: ${JSON.stringify(event)}\n\n`);
       }
     }
-    if ("message" in value || value.kind === "read.moved") {
+    if (("message" in value && value.message.kind !== "progress") || value.kind === "read.moved") {
       for (const p of people.values()) {
         if (p.removed || !visible(channel, p.id) || (person && person !== p.id)) continue;
         if (
           "message" in value &&
           !channel.dmKey &&
+          value.message.ask?.to.id !== p.id &&
           !value.message.mentions.some((t) => t.id === p.id) &&
           value.kind === "message.created"
         )
           continue;
         const items = personalNeeds(p);
-        const item = "message" in value && items.find((i) => i.id === value.message.id);
+        const item =
+          "message" in value &&
+          items.find((i) => i.id === (value.message.ask?.id ?? value.message.id));
         if (item && value.kind === "message.created")
           emit("mention", "MentionEvent", { at: value.message.createdAt, item }, p.id);
         emit(
@@ -2135,7 +2158,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const readSeq = cursors.get(cursorKey(person.id, channel.id)) ?? 0;
     const unread = roots.filter(
       (m) =>
-        !m.deleted && m.seq > readSeq && (m.author.kind === "system" || m.author.id !== person.id),
+        m.kind !== "progress" &&
+        !m.deleted &&
+        m.seq > readSeq &&
+        (m.author.kind === "system" || m.author.id !== person.id),
     );
     return {
       id: channel.id,
@@ -2144,19 +2170,22 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             kind: "dm" as const,
             private: true as const,
             agentReaders: [...channel.members]
-              .filter((id) => ownersAllowingDmReads.has(id))
+              .filter(
+                (id) =>
+                  [...channel.members].every((id) => people.has(id)) &&
+                  ownersAllowingDmReads.has(id),
+              )
               .map((personId) => ({ personId, login: people.get(personId)!.login })),
-            members: [...channel.members].map((id) => ({
-              kind: "person" as const,
-              id,
-              login: people.get(id)!.login,
-            })),
+            members: [...channel.members].map(member),
           }
         : { kind: "channel" as const, private: channel.private, name: channel.name }),
       purpose: channel.purpose,
       agents: channel.agents,
       archived: channel.archived,
-      memberCount: { people: channel.members.size, agents: 0 },
+      memberCount: {
+        people: [...channel.members].filter((id) => people.has(id)).length,
+        agents: [...channel.members].filter((id) => handles.has(id)).length,
+      },
       lastSeq: roots.at(-1)?.seq ?? 0,
       me: {
         member: channel.members.has(person.id),
@@ -2175,6 +2204,30 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return [...messages.values()].flatMap((m) => {
       const c = channels.get(m.conversationId);
       if (
+        c &&
+        visible(c, person.id) &&
+        !m.deleted &&
+        m.ask?.state === "open" &&
+        m.ask.to.id === person.id
+      )
+        return [
+          {
+            id: m.ask.id,
+            ask: m.ask,
+            seq: m.seq,
+            createdAt: m.createdAt,
+            title: m.text.slice(0, 300),
+            kind: "chat_ask",
+            chatRead: {
+              conversationId: m.conversationId,
+              threadRootId: m.threadRootId ?? m.id,
+              seq: m.seq,
+            },
+          },
+        ];
+      if (
+        m.kind === "ask" ||
+        m.kind === "progress" ||
         !c ||
         !visible(c, person.id) ||
         m.deleted ||
@@ -2400,6 +2453,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                       "reactions",
                       "dms",
                       "group_dms",
+                      "agents",
+                      "agent_dms",
+                      "others_agents",
+                      "agent_owner_dm_read",
                     ],
                   },
                 ]
@@ -2424,7 +2481,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { id: "team", kind: "team", version: 1, flags: [] },
           ],
           // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
-          mcpTools: BANNERET_AGENT_TOOLS.map((name) => ({
+          mcpTools: BANNERET_AGENT_TOOLS.filter(
+            (name) => options.chat || !name.startsWith("banneret_chat_"),
+          ).map((name) => ({
             name,
             description: "A Banneret Hub agent tool.",
             role: "limited_staff",
@@ -2605,9 +2664,25 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const { person } = caller;
       const [, , resource, id = "", action, memberId] = route.split("/");
       const send = (schema: SchemaName, value: unknown) => sendJson(response, 200, schema, value);
+      const owned = (id: string) => {
+        const h = handles.get(id);
+        if (!h || h.view.machine.id !== caller.machine.id || h.view.owner.id !== person.id)
+          throw new RelayError("forbidden", "This machine does not own that agent.");
+        return h;
+      };
+      const reader = query.has("asHandle") ? owned(query.get("asHandle")!) : undefined;
+      const canRead = (c: Channel) =>
+        reader
+          ? !c.private ||
+            c.members.has(reader.view.id) ||
+            (!!c.dmKey &&
+              c.members.has(person.id) &&
+              ownersAllowingDmReads.has(person.id) &&
+              [...c.members].every((id) => people.has(id)))
+          : visible(c, person.id);
       const channelFor = (id: string) => {
         const c = channels.get(id);
-        if (!c || !visible(c, person.id)) throw new RelayError("not_found", "Unknown channel.");
+        if (!c || !canRead(c)) throw new RelayError("not_found", "Unknown channel.");
         return c;
       };
       const messageFor = (id: string) => {
@@ -2626,14 +2701,301 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           (card && Buffer.byteLength(JSON.stringify(card)) > 4096)
         )
           throw new RelayError("too_large", "Message is too large.");
-        const mentions = [...new Set(text.match(/@[a-zA-Z0-9-]+/g) ?? [])].flatMap((login) => {
-          const p = peopleByLogin.get(login.slice(1));
-          return p ? [{ kind: "person" as const, id: p.id }] : [];
-        });
+        const mentions: ChatMessage["mentions"][number][] = [];
+        for (const mention of new Set(text.match(/@[a-zA-Z0-9-]+(?:\/[a-zA-Z0-9-]+)?/g) ?? [])) {
+          const name = mention.slice(1),
+            p = peopleByLogin.get(name);
+          const h = [...handles.values()].find((h) => label(h.view) === name);
+          if (h) mentions.push({ kind: "agent", id: h.view.id });
+          else if (p) mentions.push({ kind: "person", id: p.id });
+        }
         if (mentions.length > 50) throw new RelayError("malformed", "Too many mentions.");
         return mentions;
       };
-      if (query.has("asHandle")) throw new RelayError("forbidden", "Unknown agent handle.");
+      if (
+        reader &&
+        !(
+          (method === "GET" &&
+            ["conversations", "threads", "search", "deliveries"].includes(resource ?? "")) ||
+          (resource === "messages" && action === "reactions")
+        )
+      )
+        throw new RelayError("forbidden", "This call is unavailable to agents.");
+      if (resource === "handles") {
+        if (method === "GET" && !id)
+          return send("ChatHandles", paged([...handles.values()].map((h) => h.view)));
+        if (method === "PUT" && id) {
+          const data = parseJson(body, "ChatRegister") as ChatRegister;
+          const existing = handles.has(id) ? owned(id) : undefined;
+          if (
+            data.machineId !== caller.machine.id ||
+            (existing && data.threadRef !== existing.threadRef)
+          )
+            throw new RelayError("forbidden", "Choose an agent on this machine.");
+          if (data.name && !/^[a-z0-9][a-z0-9-]{0,31}$/.test(data.name))
+            throw new RelayError(
+              "malformed",
+              "Use a short name with lowercase letters, numbers and hyphens.",
+            );
+          const claimName =
+            data.provider +
+            "-" +
+            data.threadRef
+              .replace(/^thread[:_-]?/i, "")
+              .replace(/[^a-zA-Z0-9._-]/g, "")
+              .slice(0, 8);
+          const shortName = data.name ?? existing?.view.shortName;
+          const view: ChatHandle = {
+            id,
+            claimName,
+            ...(shortName ? { shortName } : {}),
+            owner: { id: person.id, login: person.login },
+            machine: { id: data.machineId, label: caller.machine.facts.label },
+            provider: data.provider,
+            reachable: true,
+            wake: data.wake ?? existing?.view.wake ?? "everyone",
+          };
+          if ([...handles.values()].some((h) => h.view.id !== id && label(h.view) === label(view)))
+            throw new RelayError("malformed", "That chat name is taken.");
+          handles.set(id, { threadRef: data.threadRef, view });
+          return send("ChatHandle", view);
+        }
+      }
+      if (resource === "deliveries") {
+        const notDelivered = (d: ChatDelivery) => {
+          const original = messages.get(d.messageId)!;
+          const note: ChatMessage = {
+            id: randomId("m"),
+            conversationId: original.conversationId,
+            ...(original.threadRootId ? { threadRootId: original.threadRootId } : {}),
+            seq: ++chatSeq,
+            kind: "system",
+            systemEvent: "not_delivered",
+            author: { kind: "system" },
+            text:
+              "Not delivered: " + label(handles.get(d.handleId)!.view) + " could not be reached.",
+            mentions: [],
+            reactions: [],
+            replyCount: 0,
+            createdAt: iso(Date.now()),
+            deleted: false,
+          };
+          messages.set(note.id, note);
+          chatChange(channels.get(note.conversationId)!, {
+            kind: "message.created",
+            seq: note.seq,
+            message: note,
+          });
+        };
+        const now = Date.now();
+        for (const d of deliveries.values()) {
+          if (d.row.state !== "pending" && d.row.state !== "claimed") continue;
+          if (Date.parse(d.row.expiresAt) <= now) {
+            d.row = { ...d.row, state: "expired" };
+            notDelivered(d.row);
+          } else if (d.row.state === "claimed" && now - d.claimedAt >= 600000)
+            d.row = { ...d.row, state: "pending" };
+        }
+        const current = (row: ChatDelivery) => ({
+          ...row,
+          wake: owned(row.handleId).view.wake,
+          message: messages.get(row.messageId)!,
+        });
+        if (method === "GET" && !id)
+          return send(
+            "ChatDeliveries",
+            paged(
+              [...deliveries.values()]
+                .map((d) => d.row)
+                .filter(
+                  (d) =>
+                    d.machineId === caller.machine.id &&
+                    (!reader || d.handleId === reader.view.id) &&
+                    ["pending", "claimed"].includes(d.state),
+                )
+                .map(current),
+            ),
+          );
+        if (method === "POST" && id) {
+          const act = parseJson(body, action === "refuse" ? "ChatRefuse" : "ChatAct") as
+            | ChatAct
+            | ChatRefuse;
+          owned(act.asHandle);
+          const d = deliveries.get(id);
+          if (!d || d.row.handleId !== act.asHandle)
+            throw new RelayError("forbidden", "This delivery belongs to another agent.");
+          const state =
+            action === "claim" && ["pending", "claimed"].includes(d.row.state)
+              ? "claimed"
+              : action === "consume" && d.row.state === "claimed"
+                ? "consumed"
+                : action === "refuse" && ["pending", "claimed"].includes(d.row.state)
+                  ? "refused"
+                  : undefined;
+          if (!state) throw new RelayError("malformed", "This delivery has already closed.");
+          d.row = { ...d.row, state };
+          d.claimedAt = now;
+          if (state === "refused") notDelivered(d.row);
+          return send("ChatDelivery", current(d.row));
+        }
+      }
+      if (resource === "progress" && method === "GET" && !reader) {
+        return send(
+          "ChatActiveProgress",
+          paged(
+            [...messages.values()].flatMap((m) => {
+              const h = m.author.kind === "agent" && handles.get(m.author.id);
+              return h &&
+                h.view.machine.id === caller.machine.id &&
+                (m.progress?.state === "working" || m.progress?.state === "stale")
+                ? [{ threadRef: h.threadRef, handleId: h.view.id, message: m }]
+                : [];
+            }),
+          ),
+        );
+      }
+      if (
+        (resource === "messages" && action === "progress" && method === "PUT") ||
+        (resource === "asks" && !id && method === "POST")
+      ) {
+        const progress =
+          resource === "messages"
+            ? (parseJson(body, "ChatWriteProgress") as ChatWriteProgress)
+            : undefined;
+        const ask = progress ? undefined : (parseJson(body, "ChatNewAsk") as ChatNewAsk);
+        const h = owned((progress ?? ask)!.asHandle).view;
+        const root = messages.get(ask?.threadRootId ?? id);
+        let c = channels.get(root?.conversationId ?? id);
+        const to = ask && (people.get(ask.to) ?? peopleByLogin.get(ask.to));
+        if (ask && (!to || to.removed))
+          throw new RelayError("not_found", "Choose a current staff member.");
+        if (ask && !ask.threadRootId && to) {
+          const dmKey = JSON.stringify([h.id, to.id].sort());
+          c = [...channels.values()].find((c) => c.dmKey === dmKey);
+          if (!c) {
+            c = {
+              id: randomId("c"),
+              dmKey,
+              name: "",
+              purpose: "",
+              private: true,
+              agents: "allowed",
+              archived: false,
+              members: new Set([h.id, to.id]),
+              creator: person.id,
+            };
+            channels.set(c.id, c);
+          }
+        }
+        if (
+          !c ||
+          c.archived ||
+          c.agents === "off" ||
+          (to && !visible(c, to.id)) ||
+          (c.private &&
+            !c.members.has(h.id) &&
+            !(root && follows.get(root.threadRootId ?? root.id)?.has(h.id)))
+        )
+          throw new RelayError("forbidden", "This agent cannot post here.");
+        const rootId = root?.kind === "progress" ? root.threadRootId : root?.id;
+        if ((root && root.threadRootId && root.kind !== "progress") || (!root && !c.dmKey))
+          throw new RelayError("malformed", "Choose a thread or the top of a DM.");
+        const prior =
+          progress &&
+          [...messages.values()].find(
+            (m) =>
+              m.author.kind === "agent" &&
+              m.author.id === h.id &&
+              m.conversationId === c.id &&
+              m.threadRootId === rootId &&
+              (m.progress?.state === "working" || m.progress?.state === "stale"),
+          );
+        if (root?.kind === "progress" && (!prior || prior.id !== root.id))
+          throw new RelayError("malformed", "This progress message is already closed.");
+        const key = ask && JSON.stringify([h.id, ask.key]);
+        if (key && postKeys.has(key)) {
+          const priorAsk = messages.get(postKeys.get(key)!)?.ask;
+          if (!priorAsk) throw new RelayError("malformed", "This key already belongs to a post.");
+          return send("ChatAsk", priorAsk);
+        }
+        if (
+          ask &&
+          [...messages.values()].filter(
+            (m) => m.author.kind === "agent" && m.author.id === h.id && m.ask?.state === "open",
+          ).length >= 5
+        )
+          throw new RelayError("rate_limited", "Answer or cancel an open question first.");
+        const m: ChatMessage = {
+          id: prior ? prior.id : randomId("m"),
+          conversationId: c.id,
+          ...(rootId ? { threadRootId: rootId } : {}),
+          seq: prior ? prior.seq : ++chatSeq,
+          author: {
+            kind: "agent",
+            id: h.id,
+            provider: h.provider,
+            ownerLogin: person.login,
+            handle: label(h),
+          },
+          kind: progress ? "progress" : "ask",
+          text: progress?.text ?? ask!.question,
+          ...(progress ? { progress: { state: progress.state, steps: progress.steps ?? [] } } : {}),
+          ...(ask && to
+            ? {
+                ask: {
+                  id: randomId("a"),
+                  to: { id: to.id, login: to.login },
+                  state: "open",
+                  choices: ask.choices ?? [],
+                },
+                ...(ask.taskRef ? { taskRef: ask.taskRef } : {}),
+              }
+            : {}),
+          mentions: [],
+          replyCount: prior ? prior.replyCount : 0,
+          reactions: [],
+          createdAt: prior ? prior.createdAt : iso(Date.now()),
+          deleted: false,
+        };
+        messages.set(m.id, m);
+        if (key) postKeys.set(key, m.id);
+        if (!prior && rootId) {
+          const parent = messages.get(rootId)!;
+          messages.set(rootId, {
+            ...parent,
+            replyCount: parent.replyCount + 1,
+            lastReplyAt: m.createdAt,
+          });
+        }
+        chatChange(c, {
+          seq: prior ? ++chatSeq : m.seq,
+          kind: prior ? "message.edited" : "message.created",
+          message: m,
+        });
+        return m.ask ? send("ChatAsk", m.ask) : send("ChatMessage", m);
+      }
+      if (resource === "search" && method === "GET") {
+        const q = (query.get("q") ?? "").toLowerCase();
+        return send(
+          "ChatSearch",
+          paged(
+            [...messages.values()]
+              .filter(
+                (m) =>
+                  !m.deleted &&
+                  !["progress", "system"].includes(m.kind) &&
+                  canRead(channels.get(m.conversationId)!) &&
+                  m.text.toLowerCase().includes(q),
+              )
+              .map((m) => ({
+                messageId: m.id,
+                conversationId: m.conversationId,
+                threadRootId: m.threadRootId,
+                snippet: m.text.slice(0, 240),
+              })),
+          ),
+        );
+      }
       if (resource === "me" && id === "settings" && !action) {
         if (method === "GET")
           return send("ChatSettings", { agentsReadMyDms: ownersAllowingDmReads.has(person.id) });
@@ -2684,11 +3046,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (method === "GET")
           return send(
             "ChatConversations",
-            paged(
-              [...channels.values()]
-                .filter((c) => visible(c, person.id))
-                .map((c) => channelView(c, person)),
-            ),
+            paged([...channels.values()].filter(canRead).map((c) => channelView(c, person))),
           );
         if (method === "POST") {
           const input = parseJson(body, "ChatCreate") as ChatCreate;
@@ -2697,7 +3055,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (
               members.size < 2 ||
               members.size > 8 ||
-              [...members].some((id) => !people.has(id) || people.get(id)?.removed)
+              [...members].some(
+                (id) => !handles.has(id) && (!people.has(id) || people.get(id)?.removed),
+              ) ||
+              ([...members].some((id) => handles.has(id)) && members.size !== 2)
             )
               throw new RelayError("malformed", "Choose two to eight staff members.");
             const dmKey = JSON.stringify([...members].sort());
@@ -2709,7 +3070,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               name: "",
               purpose: "",
               private: true,
-              agents: "off",
+              agents: [...members].some((id) => handles.has(id)) ? "allowed" : "off",
               archived: false,
               members,
               creator: person.id,
@@ -2746,6 +3107,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       if (resource === "conversations" && id) {
         const c = channelFor(id);
+        if (reader && (action !== "messages" || method !== "GET"))
+          throw new RelayError("forbidden", "Choose a conversation to read.");
         if (c.dmKey && method !== "GET")
           throw new RelayError("forbidden", "DM participants are fixed.");
         if (action === "settings" && method === "PUT") {
@@ -2783,16 +3146,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         }
         if (action === "members") {
           if (!memberId && method === "GET")
-            return send(
-              "ChatMembers",
-              paged(
-                [...c.members].map((id) => ({ kind: "person", id, login: people.get(id)?.login })),
-              ),
-            );
+            return send("ChatMembers", paged([...c.members].map(member)));
           if (memberId && (method === "PUT" || method === "DELETE")) {
             if (memberId !== person.id && c.creator !== person.id && person.role !== "founder")
               throw new RelayError("forbidden", "Cannot change this membership.");
-            if (!people.has(memberId) || people.get(memberId)?.removed)
+            if (
+              handles.has(memberId)
+                ? owned(memberId).view.owner.id !== person.id
+                : !people.has(memberId) || people.get(memberId)?.removed
+            )
               throw new RelayError("not_found", "Unknown person.");
             if (method === "PUT" && c.members.size >= 200 && !c.members.has(memberId))
               throw new RelayError("malformed", "Channel member limit reached.");
@@ -2812,6 +3174,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           let rows = [...messages.values()]
             .filter((m) => m.conversationId === id && !m.threadRootId)
             .reverse();
+          if (reader) rows.reverse();
           const anchors = ["before", "after", "around"].filter((key) => query.has(key));
           if (anchors.length > 1) throw new RelayError("malformed", "Choose one message anchor.");
           const anchor = anchors[0];
@@ -2829,7 +3192,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         }
       }
       if (resource === "threads" && id && !action && method === "GET") {
-        const root = messageFor(id);
+        const root = messages.get(id);
+        if (
+          !root ||
+          !(
+            canRead(channels.get(root.conversationId)!) ||
+            (reader && follows.get(id)?.has(reader.view.id))
+          )
+        )
+          throw new RelayError("not_found", "Unknown thread.");
         if (root.threadRootId)
           throw new RelayError("malformed", "A reply cannot be a thread root.");
         return send("ChatThread", {
@@ -2843,28 +3214,78 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       if (resource === "messages" && !id && method === "POST") {
         const post = parseJson(body, "ChatPost") as ChatPost;
-        const c = channelFor(post.conversationId);
-        if (post.asHandle || !c.members.has(person.id) || c.archived)
+        const h = post.asHandle ? owned(post.asHandle) : undefined;
+        const c = channels.get(post.conversationId);
+        if (
+          !c ||
+          c.archived ||
+          (h
+            ? c.agents === "off" ||
+              (c.private &&
+                !c.members.has(h.view.id) &&
+                !(post.threadRootId && follows.get(post.threadRootId)?.has(h.view.id)))
+            : !c.members.has(person.id))
+        )
           throw new RelayError("forbidden", "Cannot post in this channel.");
-        const key = JSON.stringify([person.id, post.key]);
+        const actor = h?.view.id ?? person.id;
+        const key = JSON.stringify([actor, post.key]);
         const previous = postKeys.get(key);
         if (previous) {
-          const existing = messageFor(previous);
+          const existing = messages.get(previous)!;
           if (existing.conversationId !== c.id)
             throw new RelayError("malformed", "Post key belongs to another channel.");
           return send("ChatMessage", existing);
         }
-        const root = post.threadRootId ? messageFor(post.threadRootId) : undefined;
+        const root = post.threadRootId ? messages.get(post.threadRootId) : undefined;
+        if (post.threadRootId && !root) throw new RelayError("not_found", "Unknown thread.");
         if (root && (root.threadRootId || root.conversationId !== c.id))
           throw new RelayError("malformed", "Choose a root in this channel.");
         const mentions = messageMentions(post.text, post.card);
+        if (
+          (h && /@(channel|here)\b/.test(post.text)) ||
+          (c.agents === "off" && mentions.some((t) => t.kind === "agent"))
+        )
+          throw new RelayError(
+            "forbidden",
+            "Agents cannot broadcast or post in a channel with agents off.",
+          );
+        const targets = mentions.filter((t) => t.kind === "agent");
+        if (h && c.agents === "mentions_only" && !(root && follows.get(root.id)?.has(h.view.id)))
+          throw new RelayError(
+            "forbidden",
+            "This channel is mentions-only for agents. Ask your owner to mention you.",
+          );
+        if (h && root && targets.length) {
+          const hops = agentHops.get(root.id) ?? 0;
+          if (hops >= 4)
+            throw new RelayError("rate_limited", "Ask a person to continue this thread.");
+          const keys = targets.map((t) => JSON.stringify([root.id, ...[t.id, h.view.id].sort()]));
+          const now = Date.now();
+          for (const key of keys)
+            if ((pairWrites.get(key) ?? []).filter((t) => now - t < 60000).length >= 20)
+              throw new RelayError("rate_limited", "Wait before mentioning this agent again.");
+          for (const key of keys)
+            pairWrites.set(key, [
+              ...(pairWrites.get(key) ?? []).filter((t) => now - t < 60000),
+              now,
+            ]);
+          agentHops.set(root.id, hops + 1);
+        } else if (!h && root) agentHops.delete(root.id);
         const { key: _key, asHandle: _asHandle, ...fields } = post;
         const m: ChatMessage = {
           ...fields,
           id: "m_" + NodeCrypto.randomUUID(),
           seq: ++chatSeq,
           kind: "text",
-          author: { kind: "person", id: person.id, login: person.login },
+          author: h
+            ? {
+                kind: "agent",
+                id: actor,
+                handle: label(h.view),
+                ownerLogin: person.login,
+                provider: h.view.provider,
+              }
+            : { kind: "person", id: person.id, login: person.login },
           mentions,
           replyCount: 0,
           reactions: [],
@@ -2872,14 +3293,67 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           deleted: false,
         };
         messages.set(m.id, m);
+        const answered = new Set<string>();
+        if (!h && root) {
+          for (const question of messages.values()) {
+            if (
+              question.author.kind !== "agent" ||
+              question.ask?.state !== "open" ||
+              question.ask.to.id !== person.id ||
+              (question.threadRootId ?? question.id) !== root.id
+            )
+              continue;
+            const updated = {
+              ...question,
+              ask: { ...question.ask, state: "answered" as const, answerMessageId: m.id },
+            };
+            messages.set(question.id, updated);
+            chatChange(c, { kind: "message.edited", seq: ++chatSeq, message: updated });
+            answered.add(question.author.id);
+          }
+        }
         const subscribers = follows.get(root?.id ?? m.id) ?? new Set<string>();
-        subscribers.add(person.id);
+        for (const [hid, target] of handles) {
+          if (hid === actor || c.agents === "off") continue;
+          const reason = answered.has(hid)
+            ? "answer"
+            : mentions.some((t) => t.id === hid)
+              ? "mention"
+              : !h && c.dmKey && c.members.has(hid)
+                ? "dm"
+                : !h && root && subscribers.has(hid)
+                  ? "follow"
+                  : undefined;
+          if (!reason) continue;
+          const row: ChatDelivery = {
+            id: randomId("d"),
+            handleId: hid,
+            messageId: m.id,
+            machineId: target.view.machine.id,
+            reason,
+            fromOwner: !h && target.view.owner.id === person.id,
+            state: "pending",
+            expiresAt: iso(Date.now() + 86400000),
+            threadRef: target.threadRef,
+            wake: target.view.wake,
+            message: m,
+          };
+          deliveries.set(row.id, { row, claimedAt: 0 });
+          for (const stream of streams)
+            if (stream.machineId === row.machineId)
+              stream.response.write(
+                "event: chat.delivery\ndata: " +
+                  JSON.stringify({ deliveryId: row.id, handleId: hid }) +
+                  "\n\n",
+              );
+        }
+        subscribers.add(actor);
         for (const mention of mentions) subscribers.add(mention.id);
         follows.set(root?.id ?? m.id, subscribers);
         postKeys.set(key, m.id);
         if (root)
           messages.set(root.id, {
-            ...root,
+            ...messages.get(root.id)!,
             replyCount: root.replyCount + 1,
             lastReplyAt: m.createdAt,
           });
@@ -2934,15 +3408,26 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         memberId &&
         (method === "PUT" || method === "DELETE")
       ) {
-        const m = messageFor(id);
-        const c = channelFor(m.conversationId);
-        if (m.deleted || !c.members.has(person.id))
+        const m = messages.get(id),
+          c = m && channels.get(m.conversationId);
+        if (
+          !m ||
+          !c ||
+          !(canRead(c) || (reader && follows.get(m.threadRootId ?? m.id)?.has(reader.view.id)))
+        )
+          throw new RelayError("not_found", "Unknown message.");
+        const actor = reader?.view.id ?? person.id;
+        if (
+          m.deleted ||
+          (!c.members.has(actor) &&
+            !(reader && (!c.private || follows.get(m.threadRootId ?? m.id)?.has(actor))))
+        )
           throw new RelayError("forbidden", "Cannot react to this message.");
         const emoji = decodeURIComponent(memberId);
         const counts = reactions.get(id) ?? new Map<string, Set<string>>();
         const ids = counts.get(emoji) ?? new Set<string>();
-        if (method === "PUT") ids.add(person.id);
-        else ids.delete(person.id);
+        if (method === "PUT") ids.add(actor);
+        else ids.delete(actor);
         if (ids.size) counts.set(emoji, ids);
         else counts.delete(emoji);
         reactions.set(id, counts);

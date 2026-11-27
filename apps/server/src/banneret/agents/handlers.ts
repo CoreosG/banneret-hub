@@ -23,6 +23,8 @@ import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { LeaseService } from "../lease/LeaseService.ts";
 import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
 import { type AgentRelay, BanneretAgentRelays } from "./AgentRelays.ts";
+import { BanneretEnrolment } from "../relay/Enrolment.ts";
+import { chatClient, invalid } from "../chat/AgentChat.ts";
 import { AgentToolkit } from "./tools.ts";
 
 const DEFAULT_BOARD_LIMIT = 50;
@@ -190,7 +192,95 @@ const make = Effect.gen(function* () {
     (effect) => Effect.ignoreCause(effect),
   );
 
+  const enrolment = yield* BanneretEnrolment;
+  const chat = Effect.gen(function* () {
+    const { thread, relay } = yield* requireRelay;
+    const device = yield* enrolment.relay(relay.relayOrigin);
+    if (!device) return yield* invalid("Join the company to use chat.");
+    const status = yield* device.status;
+    if (!status.machineId) return yield* invalid("This machine is not enrolled.");
+    const known = Option.isNone(providers)
+      ? undefined
+      : (yield* providers.value.getProviders).find(
+          (p) => p.instanceId === thread.providerInstanceId,
+        );
+    const client = chatClient(
+      device,
+      thread.threadId,
+      providerName(known?.driver ?? "agent"),
+      status.machineId,
+    );
+    yield* client.ensure;
+    return client;
+  });
   return {
+    banneret_chat_read: McpToolAccess.readsAsCaller(({ conversation, thread, after, limit }) =>
+      Effect.gen(function* () {
+        if (!!conversation === !!thread)
+          return yield* invalid("Choose one conversation or one thread.");
+        return yield* (yield* chat).read(
+          thread ? "threads/" + thread : "conversations/" + conversation + "/messages",
+          { limit: String(limit ?? 50), ...(after ? { cursor: after } : {}) },
+        );
+      }),
+    ),
+    banneret_chat_search: McpToolAccess.readsAsCaller(({ query, limit }) =>
+      Effect.gen(function* () {
+        return yield* (yield* chat).read("search", { q: query, limit: String(limit ?? 50) });
+      }),
+    ),
+    banneret_chat_post: McpToolAccess.actsAsCaller(({ conversation, text, key, card, task }) =>
+      Effect.gen(function* () {
+        const result = yield* (yield* chat).write("POST", "messages", {
+          conversationId: conversation,
+          text,
+          key,
+          card,
+          taskRef: task,
+        });
+        return { messageId: result.id };
+      }),
+    ),
+    banneret_chat_reply: McpToolAccess.actsAsCaller(({ thread, text, key, card }) =>
+      Effect.gen(function* () {
+        const client = yield* chat;
+        const root = yield* client.root(thread);
+        const result = yield* client.write("POST", "messages", {
+          conversationId: root.conversationId,
+          threadRootId: thread,
+          text,
+          key,
+          card,
+        });
+        return { messageId: result.id };
+      }),
+    ),
+    banneret_chat_progress: McpToolAccess.actsAsCaller(({ thread, conversation, ...progress }) =>
+      Effect.gen(function* () {
+        if (!!conversation === !!thread) return yield* invalid("Choose one thread or DM.");
+        const result = yield* (yield* chat).write(
+          "PUT",
+          "messages/" + (thread ?? conversation) + "/progress",
+          progress,
+        );
+        return { messageId: result.id };
+      }),
+    ),
+    banneret_chat_ask: McpToolAccess.actsAsCaller(({ thread, task, ...ask }) =>
+      Effect.gen(function* () {
+        const result = yield* (yield* chat).write("POST", "asks", {
+          ...ask,
+          threadRootId: thread,
+          taskRef: task,
+        });
+        return { askId: result.id };
+      }),
+    ),
+    banneret_chat_inbox: McpToolAccess.readsAsCaller(({ after }) =>
+      Effect.gen(function* () {
+        return yield* (yield* chat).read("deliveries", after ? { cursor: after } : {});
+      }),
+    ),
     banneret_board: McpToolAccess.readsAsCaller(({ board: boardId, column, mine, repo, limit }) =>
       Effect.gen(function* () {
         const { relay } = yield* requireRelay;

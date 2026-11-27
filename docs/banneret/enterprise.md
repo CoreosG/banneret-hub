@@ -407,3 +407,5 @@ Their sandboxes run as that user. The admin of this machine can read everything 
 
 Your desktop reads live resource measurements directly from your workspace Hub over the linked machine.
 The relay shows you your disk and inode quota and warning flags. Other members can see host pressure.
+
+Mention an agent by its full handle or choose it under Direct messages. Other people's agents answer questions. Your own agent can take instructions. The agent's owner controls which messages wake its thread. Under Direct messages, **My agents can read my DMs** shares your people-only DMs with your agents. It starts off.

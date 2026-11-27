@@ -61,6 +61,7 @@ import * as Enrolment from "../relay/Enrolment.ts";
 import * as Facts from "../relay/Facts.ts";
 import * as RelayFeed from "../relay/RelayFeed.ts";
 import { type Forwarder, withFake } from "../relay/relayHarness.testkit.ts";
+import { makeDeliveries } from "../chat/Deliveries.ts";
 import { saveDesignations } from "../OrchestratorState.ts";
 import * as Workspaces from "../Workspaces.ts";
 import * as AgentRelays from "./AgentRelays.ts";
@@ -873,6 +874,83 @@ describe("agent lease tools against the fake relay", () => {
   );
 
   it.live(
+    "replays a claimed chat delivery on restart and stops progress after the session ends",
+    () =>
+      withFake(
+        (fake, relay) =>
+          onHub(
+            newTracker(),
+            Effect.gen(function* () {
+              yield* joinWithBoard(fake, relay);
+              const device = (yield* (yield* Enrolment.BanneretEnrolment).relay(relay.origin))!;
+              const post = yield* call("banneret_chat_post", {
+                conversation: "c_general",
+                text: "Review ready.",
+                key: "review",
+              });
+              expect(post.messageId).toEqual(expect.any(String));
+              const root = String(post.messageId);
+              yield* call("banneret_chat_progress", {
+                thread: root,
+                state: "working",
+                text: "Checking results",
+              });
+              const status = yield* device.status;
+              const caps = yield* device.signedGet("/relay/v1/capabilities");
+              const self = (caps.body as { me: { id: string } }).me.id;
+              yield* device.signedChat("PUT", "conversations/c_general/members/" + self);
+              yield* device.signedChat("POST", "messages", {
+                conversationId: "c_general",
+                threadRootId: root,
+                key: "follow",
+                text: "Which checks passed?",
+              });
+              const receipts = new Set<string>();
+              const service = yield* ThreadManagementService.ThreadManagementService;
+              let stopped = false;
+              const build = makeDeliveries.pipe(
+                Effect.provideService(ThreadManagementService.ThreadManagementService, {
+                  ...service,
+                  getThreadShell: (id) =>
+                    service
+                      .getThreadShell(id)
+                      .pipe(
+                        Effect.map((t) =>
+                          t && stopped ? { ...t, status: "interrupted" as const } : t,
+                        ),
+                      ),
+                  hasReceipt: (id) => Effect.succeed(receipts.has(id)),
+                  sendToThread: (input) =>
+                    Effect.sync(() => {
+                      expect(status.machineId).toBeDefined();
+                      expect(input.mode).toBe("queue");
+                      expect(input.text).toContain("Which checks passed?");
+                      receipts.add(input.commandId);
+                      throw new Error("Simulated shutdown after durable dispatch");
+                    }),
+                }),
+              );
+              yield* (yield* build).reconcile(device);
+              expect(receipts.size).toBe(1);
+              expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
+                items: [{ state: "claimed" }],
+              });
+              stopped = true;
+              yield* (yield* build).reconcile(device);
+              expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
+                items: [],
+              });
+              expect(yield* call("banneret_chat_read", { thread: root })).toMatchObject({
+                items: expect.arrayContaining([
+                  expect.objectContaining({ progress: { state: "stopped", steps: [] } }),
+                ]),
+              });
+            }),
+          ),
+        { chat: true },
+      ),
+  );
+  it.live(
     "offers the tools once the relay names them, though the Hub missed capabilities.changed",
     () =>
       withFake((fake, relay) =>
@@ -906,7 +984,7 @@ describe("agent lease tools against the fake relay", () => {
             );
             const relays = yield* AgentRelays.BanneretAgentRelays;
             expect([...(yield* relays.offered(COMPANY_THREAD))].sort()).toEqual(
-              [...BANNERET_AGENT_TOOLS].sort(),
+              BANNERET_AGENT_TOOLS.filter((n) => !n.startsWith("banneret_chat_")).sort(),
             );
           }),
         ),

@@ -15,6 +15,7 @@ import { RelativeTime } from "../ui/RelativeTime";
 import { useEnterpriseFeed, type EnterpriseFeed } from "../useEnterpriseFeed";
 import { useTabsStore, keep } from "../tabs/tabsStore";
 import {
+  handles,
   conversations,
   conversationTitle,
   members,
@@ -26,7 +27,7 @@ import {
 import { chatHref } from "./ChannelRows";
 import { Markdown } from "./Markdown";
 
-type Person = Extract<ChatMember, { kind: "person" }>;
+type Person = Pick<Extract<ChatMember, { kind: "person" }>, "id" | "login">;
 const day = new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric" });
 const time = new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" });
 const author = (m: ChatMessage) =>
@@ -49,12 +50,51 @@ export function ChannelPage({ id, root }: Omit<View, "enterprise">) {
     />
   );
 }
+export function DmPrivacy({
+  channel,
+  title,
+  login,
+}: {
+  channel: Extract<ChatConversation, { kind: "dm" }>;
+  title: string;
+  login: string | undefined;
+}) {
+  return (
+    <>
+      <p>
+        {channel.members.length === 2
+          ? "Private to you and " + title + "."
+          : "Private to the " + channel.members.length + " participants."}{" "}
+        The relay's operator can read it.
+      </p>
+      {channel.members
+        .filter((m) => m.kind === "agent")
+        .map((h) => (
+          <p key={h.id}>
+            {h.ownerLogin === login
+              ? "Messages go to your agent’s thread."
+              : "Questions only. This agent takes instructions from " + h.ownerLogin + "."}
+          </p>
+        ))}
+      {channel.agentReaders.map((p) => (
+        <p key={p.personId}>{p.login}'s agents can read this conversation.</p>
+      ))}
+    </>
+  );
+}
 function ChannelView({ enterprise, id, root }: View) {
   const { environmentId, relayOrigin } = enterprise.target;
   const load = () => conversations({ environmentId, relayOrigin });
   const loadPeople = () => members({ environmentId, relayOrigin }, id);
   const revision = enterprise.feed.chatRevision ?? 0;
   const rows = useChatRead(load, revision);
+  const agents = useChatRead(
+    () =>
+      enterprise.feed.chatFlags?.includes("agents")
+        ? handles(enterprise.target)
+        : Promise.resolve([]),
+    revision,
+  );
   const people = useChatRead(loadPeople, revision);
   const channel = rows.value?.find((c) => c.id === id);
   const title = channel ? conversationTitle(channel, enterprise.enrolment.me?.login) : "";
@@ -85,19 +125,16 @@ function ChannelView({ enterprise, id, root }: View) {
                   {channel.kind === "channel" ? channel.name : title}
                 </h1>
                 {channel.kind === "dm" ? (
-                  <>
-                    <p>
-                      {channel.members.length === 2
-                        ? "Private to you and " + title + "."
-                        : "Private to the " + channel.members.length + " participants."}{" "}
-                      The relay's operator can read it.
-                    </p>
-                    {channel.agentReaders.map((p) => (
-                      <p key={p.personId}>{p.login}'s agents can read this conversation.</p>
-                    ))}
-                  </>
+                  <DmPrivacy
+                    channel={channel}
+                    title={title}
+                    login={enterprise.enrolment.me?.login}
+                  />
                 ) : (
-                  <p>{channel.purpose}</p>
+                  <p>
+                    {channel.purpose}{" "}
+                    {channel.agents !== "off" && "Only an explicit @mention wakes another agent."}
+                  </p>
                 )}
               </div>
               <button onClick={() => setMembers(!showMembers)}>
@@ -165,7 +202,14 @@ function ChannelView({ enterprise, id, root }: View) {
               enterprise={enterprise}
               channel={channel}
               root={undefined}
-              people={people.value ?? []}
+              people={[
+                ...(people.value ?? []),
+                ...(agents.value ?? []).filter(
+                  (h) =>
+                    enterprise.feed.chatFlags?.includes("others_agents") ||
+                    h.owner === enterprise.enrolment.me?.login,
+                ),
+              ]}
               query={q}
               open={open}
               tabId={tabId}
@@ -185,7 +229,14 @@ function ChannelView({ enterprise, id, root }: View) {
                 enterprise={enterprise}
                 channel={channel}
                 root={root}
-                people={people.value ?? []}
+                people={[
+                  ...(people.value ?? []),
+                  ...(agents.value ?? []).filter(
+                    (h) =>
+                      enterprise.feed.chatFlags?.includes("others_agents") ||
+                      h.owner === enterprise.enrolment.me?.login,
+                  ),
+                ]}
                 query=""
                 open={open}
                 tabId={tabId}
@@ -357,7 +408,7 @@ function Timeline({
     setDraft(m.text);
     input.current?.focus();
   }
-  const mention = /(?:^|\s)@([\w-]*)$/.exec(draft);
+  const mention = /(?:^|\s)@([\w/-]*)$/.exec(draft);
   return (
     <>
       {read.error && <p role="alert">{read.error}</p>}
@@ -406,10 +457,60 @@ function Timeline({
                       {group && (
                         <div data-chat-by>
                           <strong>{author(m)}</strong>
+                          {m.author.kind === "agent" && (
+                            <small>
+                              Agent · {m.author.provider} · on behalf of {m.author.ownerLogin}
+                            </small>
+                          )}
                           <time dateTime={m.createdAt}>{time.format(date)}</time>
                         </div>
                       )}
                       {m.deleted ? <i>Message deleted</i> : <Markdown text={m.text} />}
+                      {!m.deleted && m.progress && (
+                        <section data-agent-progress>
+                          <strong>
+                            {m.progress.state === "stale"
+                              ? "Cannot reach this agent"
+                              : m.progress.state}
+                          </strong>
+                          <ul>
+                            {m.progress.steps.map((step) => (
+                              <li key={step.title}>
+                                {step.title} · {step.state}
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
+                      {!m.deleted && m.card && (
+                        <section data-agent-card data-tone={m.card.tone}>
+                          <strong>{m.card.title}</strong>
+                          <dl>
+                            {m.card.fields.map((f) => (
+                              <div key={f.label}>
+                                <dt>{f.label}</dt>
+                                <dd>{f.value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                          {m.card.links
+                            .filter(
+                              (l) =>
+                                /^https:\/\//i.test(l.url) ||
+                                /^\/relay\/v1\/tasks\/[\w-]{1,64}$/.test(l.url),
+                            )
+                            .map((l) => (
+                              <a
+                                key={l.url}
+                                href={new URL(l.url, relayOrigin).href}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {l.label}
+                              </a>
+                            ))}
+                        </section>
+                      )}
                       {m.editedAt && !m.deleted && <small>Edited</small>}
                       {!root && m.replyCount > 0 && (
                         <button data-chat-replies onClick={() => open(m.id)}>

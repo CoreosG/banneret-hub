@@ -89,46 +89,51 @@ export class BanneretAgentRelays extends Context.Service<
   }
 >()("t3/banneret/agents/AgentRelays/BanneretAgentRelays") {}
 
+export const makeThreadRelay = Effect.gen(function* () {
+  const threads = yield* ThreadManagementService;
+  const projects = yield* ProjectService;
+  const enrolment = yield* BanneretEnrolment;
+  const folders = yield* ManagedProjectFolders;
+  const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
+  const context = yield* Effect.context<Effect.Services<ReturnType<typeof Workspaces.list>>>();
+
+  return Effect.fn("BanneretAgentRelays.forThread")(function* (threadId: ThreadId) {
+    const thread = yield* threads.getThreadShell(threadId);
+    if (thread === null) return null;
+    const project = yield* projects.getShell(thread.projectId);
+    if (Option.isNone(project)) return null;
+    const { workspaces } = yield* Workspaces.list().pipe(Effect.provideContext(context));
+    let relay = enterpriseRelayOf({ workspaces, project: project.value, environmentId });
+    if (
+      !relay &&
+      !thread.archivedAt &&
+      !thread.deletedAt &&
+      (yield* folders.isScratchProject(thread.projectId))
+    ) {
+      const roles = yield* readDesignations.pipe(Effect.provideContext(context));
+      relay = workspaces.find(
+        (w) => !w.deleted && w.kind === "enterprise" && roles[w.id]?.main === threadId,
+      )?.relay;
+    }
+    if (relay === undefined) return null;
+    const view = yield* enrolment.status(relay.origin);
+    if (view.state !== "configured" || view.me === undefined) return null;
+    return {
+      relayOrigin: view.relayOrigin,
+      company: view.displayName ?? relay.displayName,
+      me: view.me,
+      projectId: thread.projectId,
+    } satisfies AgentRelay;
+  }, Effect.mapError(readFailed));
+});
+
 export const layer = Layer.effect(
   BanneretAgentRelays,
   Effect.gen(function* () {
-    const threads = yield* ThreadManagementService;
-    const projects = yield* ProjectService;
-    const enrolment = yield* BanneretEnrolment;
+    const forThread = yield* makeThreadRelay;
     const feed = yield* BanneretRelayFeed;
-    const folders = yield* ManagedProjectFolders;
-    const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
+    const enrolment = yield* BanneretEnrolment;
     const context = yield* Effect.context<Effect.Services<ReturnType<typeof Workspaces.list>>>();
-
-    const forThread = Effect.fn("BanneretAgentRelays.forThread")(function* (threadId: ThreadId) {
-      const thread = yield* threads.getThreadShell(threadId);
-      if (thread === null) return null;
-      const project = yield* projects.getShell(thread.projectId);
-      if (Option.isNone(project)) return null;
-      const { workspaces } = yield* Workspaces.list().pipe(Effect.provideContext(context));
-      let relay = enterpriseRelayOf({ workspaces, project: project.value, environmentId });
-      if (
-        !relay &&
-        !thread.archivedAt &&
-        !thread.deletedAt &&
-        (yield* folders.isScratchProject(thread.projectId))
-      ) {
-        const roles = yield* readDesignations.pipe(Effect.provideContext(context));
-        relay = workspaces.find(
-          (w) => !w.deleted && w.kind === "enterprise" && roles[w.id]?.main === threadId,
-        )?.relay;
-      }
-      if (relay === undefined) return null;
-      const view = yield* enrolment.status(relay.origin);
-      if (view.state !== "configured" || view.me === undefined) return null;
-      return {
-        relayOrigin: view.relayOrigin,
-        company: view.displayName ?? relay.displayName,
-        me: view.me,
-        projectId: thread.projectId,
-      } satisfies AgentRelay;
-    }, Effect.mapError(readFailed));
-
     const lookupOffer = Effect.fn("BanneretAgentRelays.lookupOffer")(
       function* (threadId: ThreadId) {
         const relay = yield* forThread(threadId);

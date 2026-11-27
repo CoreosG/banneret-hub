@@ -103,6 +103,7 @@
 }
 [data-chat-by] {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.55rem;
   align-items: baseline;
   margin-bottom: 0.15rem;
@@ -263,4 +264,29 @@
 [data-chat-notifications] {
   color: var(--muted-foreground);
   font-size: 0.78rem;
+}
+
+[data-agent-progress],
+[data-agent-card] {
+  margin-block-start: 0.4rem;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--primary);
+  border-radius: 0.5rem;
+  background: var(--card);
+  padding: 0.55rem 0.8rem;
+}
+[data-agent-progress] strong {
+  text-transform: capitalize;
+}
+[data-agent-card] dl > div {
+  display: flex;
+  gap: 0.75rem;
+}
+[data-agent-card] dt {
+  color: var(--muted-foreground);
+}
+[data-agent-card] a {
+  color: var(--primary);
+  text-decoration: underline;
+  margin-inline-end: 0.75rem;
 }
