@@ -1176,6 +1176,25 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     ]).map(needsView);
   };
 
+  const approvalViews = () =>
+    new Map(
+      [...people.values()]
+        .filter((person) => !person.removed)
+        .map((person) => [person, JSON.stringify(approvalNeeds(person))] as const),
+    );
+  const notifyApprovalChanges = (before: Map<Person, string>) => {
+    for (const [person, previous] of before) {
+      if (previous !== JSON.stringify(approvalNeeds(person))) {
+        emit(
+          "needs.changed",
+          "NeedsChangedEvent",
+          { at: iso(Date.now()), count: personalNeeds(person).length },
+          person.id,
+        );
+      }
+    }
+  };
+
   // The needs-you, working, stuck and health blocks of Today for one person. Reads no visit state.
   const todayBlocks = (person: Person) => {
     const now = Date.now();
@@ -2609,6 +2628,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const seededBoards = seedBoards(input.boards);
       const boardIds = new Set(seededBoards.map((board) => board.id));
       const now = Date.now();
+      const before = approvalViews();
       boardTasks = list.map((raw: Record<string, unknown>) => {
         const login = raw.holder === undefined ? null : String(raw.holder);
         const known = login === null ? undefined : peopleByLogin.get(login);
@@ -2664,6 +2684,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       for (const task of boardTasks) feedReleases(task);
       boardSeeded = true;
       refreshAllHeads();
+      notifyApprovalChanges(before);
       reply({ tasks: boardTasks.length });
       return;
     }
@@ -2784,6 +2805,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ? undefined
           : `${checker.login} does not hold the sign-off role.`;
       const valid = ignoredReason === undefined;
+      const before = approvalViews();
       task.holder = null;
       task.prs = [
         {
@@ -2808,6 +2830,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         ...(ignoredReason === undefined ? {} : { ignoredReason }),
       };
       refreshAllHeads();
+      notifyApprovalChanges(before);
       reply({ valid });
       return;
     }

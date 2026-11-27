@@ -1842,7 +1842,9 @@ describe("feed, graveyard, tasks and checked", () => {
     };
     const seed = (approvalOnly: boolean) =>
       seedTasks([{ id: task, prs: [{ ...pr, approvalOnly }] }]);
+    const events = await openEvents(reviewer);
     await seed(true);
+    expect(await nextEvent(events)).toMatchObject({ event: "needs.changed", data: { count: 1 } });
     const reply = await readTask(reviewer, task);
     expectSchema("TaskRead", reply.body);
     expect(reply.body).toMatchObject({
@@ -1858,6 +1860,8 @@ describe("feed, graveyard, tasks and checked", () => {
     expect(await kinds(reviewer)).toContain("pr_approval");
     expect(await kinds(author)).toContain("waiting_for_approver");
     await seed(false);
+    expect(await nextEvent(events)).toMatchObject({ event: "needs.changed", data: { count: 0 } });
+    await events.cancel();
     expect(await kinds(reviewer)).not.toContain("pr_approval");
     expect(await kinds(author)).not.toContain("waiting_for_approver");
   });
