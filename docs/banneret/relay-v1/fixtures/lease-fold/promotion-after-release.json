@@ -1,0 +1,54 @@
+{
+  "name": "promotion-after-release",
+  "description": "The holder releases while a later claim still stands: that claimant becomes the holder.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "bob-example",
+        "createdAt": "2026-11-20T10:02:00Z",
+        "body": "claim: bob-example/hub"
+      },
+      {
+        "id": "12",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:03:00Z",
+        "body": "release: handing_over · free to continue"
+      }
+    ],
+    "assignees": [
+      "bob-example"
+    ],
+    "labels": [
+      "claimed"
+    ],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "bob-example",
+      "state": "active",
+      "since": "2026-11-20T10:02:00Z",
+      "claimants": [
+        "bob-example"
+      ]
+    },
+    "lastRelease": null,
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:03:00Z",
+        "reason": "handing_over",
+        "freeToContinue": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "take-settling",
+  "description": "A claim 30 seconds ago, not yet assigned: still active inside the 60 s settle window.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:29:30Z",
+        "body": "claim: ada-example/hub"
+      }
+    ],
+    "assignees": [],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "ada-example",
+      "state": "active",
+      "since": "2026-11-20T10:29:30Z",
+      "claimants": [
+        "ada-example"
+      ]
+    },
+    "lastRelease": null,
+    "releases": []
+  }
+}

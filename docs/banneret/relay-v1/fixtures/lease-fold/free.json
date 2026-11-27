@@ -1,0 +1,23 @@
+{
+  "name": "free",
+  "description": "No protocol comments, nobody assigned: free.",
+  "input": {
+    "comments": [
+      {
+        "id": "1",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "Looks good to me."
+      }
+    ],
+    "assignees": [],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": null,
+    "releases": []
+  }
+}

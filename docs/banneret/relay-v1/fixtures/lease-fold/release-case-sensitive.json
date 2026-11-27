@@ -1,0 +1,50 @@
+{
+  "name": "release-case-sensitive",
+  "description": "Prefixes and reason ids are matched exactly: Release: is not a protocol line, and DONE reads as other.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:02:00Z",
+        "body": "Release: done"
+      },
+      {
+        "id": "12",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:03:00Z",
+        "body": "release: DONE"
+      }
+    ],
+    "assignees": [],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": {
+      "by": "ada-example",
+      "at": "2026-11-20T10:03:00Z",
+      "reason": "other",
+      "freeToContinue": false,
+      "reasonText": "DONE"
+    },
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:03:00Z",
+        "reason": "other",
+        "freeToContinue": false,
+        "reasonText": "DONE"
+      }
+    ]
+  }
+}

@@ -39,7 +39,17 @@
       },
       "column": "free",
       "status": "planned",
-      "statusWhy": "Open and nobody has taken it yet.",
+      "statusWhy": "Open and free to continue from bo-example.",
+      "lastRelease": {
+        "by": {
+          "id": "p_Wm4c9B",
+          "login": "bo-example"
+        },
+        "at": "2026-11-25T17:30:00Z",
+        "reason": "out_of_usage",
+        "freeToContinue": true,
+        "note": "**Goal:** Limit invites per guild.\n**Done:** Counter and tests.\n**Next:** Return 429 from the invite route."
+      },
       "prs": [],
       "restsOn": [
         "t_K9w3Ls"

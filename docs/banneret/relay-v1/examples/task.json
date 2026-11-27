@@ -14,6 +14,15 @@
   "column": "shipped",
   "status": "checked",
   "statusWhy": "A sign-off role holder checked it after the merge.",
+  "lastRelease": {
+    "by": {
+      "id": "p_7Hq2xK",
+      "login": "ada-example"
+    },
+    "at": "2026-11-26T09:12:00Z",
+    "reason": "done",
+    "freeToContinue": false
+  },
   "prs": [
     {
       "number": 58,

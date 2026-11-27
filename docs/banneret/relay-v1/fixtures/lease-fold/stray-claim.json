@@ -1,0 +1,23 @@
+{
+  "name": "stray-claim",
+  "description": "A claim naming someone other than its author is ignored.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "bob-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      }
+    ],
+    "assignees": [],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": null,
+    "releases": []
+  }
+}

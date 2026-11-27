@@ -1,0 +1,46 @@
+{
+  "name": "release-free-to-continue-still-assigned",
+  "description": "Free to continue as written, but the assignee is still set inside the settle window: no lease yet, and not free to continue.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:29:40Z",
+        "body": "release: handing_over · free to continue"
+      }
+    ],
+    "assignees": [
+      "ada-example"
+    ],
+    "labels": [
+      "claimed"
+    ],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": {
+      "by": "ada-example",
+      "at": "2026-11-20T10:29:40Z",
+      "reason": "handing_over",
+      "freeToContinue": false
+    },
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:29:40Z",
+        "reason": "handing_over",
+        "freeToContinue": true
+      }
+    ]
+  }
+}

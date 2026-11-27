@@ -51,6 +51,34 @@
       "status": "built"
     },
     {
+      "id": "f_Wd54Mb",
+      "type": "released",
+      "at": "2026-11-25T17:30:00Z",
+      "author": {
+        "id": "p_Wm4c9B",
+        "login": "bo-example"
+      },
+      "importance": "normal",
+      "summary": "bo-example released Rate limits: out of usage, free to continue.",
+      "link": "https://github.com/example-org/example-app/issues/51",
+      "task": {
+        "id": "t_R4k1Vd",
+        "title": "Rate limits",
+        "ref": {
+          "tracker": "github",
+          "scope": "example-org/example-app",
+          "key": "51",
+          "url": "https://github.com/example-org/example-app/issues/51"
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
+      },
+      "status": "planned",
+      "reason": "out_of_usage",
+      "freeToContinue": true,
+      "note": "**Goal:** Limit invites per guild.\n**Done:** Counter and tests.\n**Next:** Return 429 from the invite route."
+    },
+    {
       "id": "f_Xa63Nc",
       "type": "lease_expired",
       "at": "2026-11-25T18:00:00Z",
