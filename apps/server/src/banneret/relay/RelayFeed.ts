@@ -85,7 +85,7 @@ const DEFAULT_OPTIONS: RelayFeedOptions = {
 
 /** One relay's feed. */
 interface RelayFeedInstance {
-  readonly today: (visit: boolean) => Effect.Effect<BanneretFeedTodayRead>;
+  readonly today: (since?: string) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (cursor: string | undefined) => Effect.Effect<BanneretFeedNeedsRead>;
   /** An older feed page, from a `nextCursor`. */
   readonly feedPage: (cursor: string) => Effect.Effect<BanneretFeedEntryPageRead>;
@@ -106,7 +106,7 @@ export interface RelayMcpTool {
 
 /** Every call names its relay; a relay this environment has no enrolment with answers as not joined. */
 interface FeedService {
-  readonly today: (relayOrigin: string, visit: boolean) => Effect.Effect<BanneretFeedTodayRead>;
+  readonly today: (relayOrigin: string, since?: string) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (
     relayOrigin: string,
     cursor: string | undefined,
@@ -287,7 +287,6 @@ export const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedTod
   const needsYou = fields(source?.needsYou);
   return {
     generatedAt,
-    lastVisitAt: text(source?.lastVisitAt, 64) ?? null,
     needsYou: {
       ...block(needsYou, (item) => needsItem(item, labelFor)),
       nextCursor: text(needsYou?.nextCursor, 1024) ?? null,
@@ -317,11 +316,9 @@ export const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedTod
     working: block(source?.working, (value) => {
       const item = fields(value);
       const who = person(item?.person);
-      const lastActivityAt = text(item?.lastActivityAt, 64);
-      if (who === undefined || lastActivityAt === undefined) return undefined;
+      if (who === undefined) return undefined;
       return {
         person: who,
-        lastActivityAt,
         ...optional("task", task(item?.task)),
         ...optional("branch", text(item?.branch, 200)),
         ...optional(
@@ -557,7 +554,11 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   // Never reset, so a client can tell any two states apart.
   let revision = 0;
   let needsCount: number | null = null;
-  let today: { readonly value: BanneretFeedToday; readonly fetchedAt: string } | null = null;
+  let today: {
+    readonly since: string | undefined;
+    readonly value: BanneretFeedToday;
+    readonly fetchedAt: string;
+  } | null = null;
   let needsFirst: { readonly value: BanneretFeedNeedsPage; readonly fetchedAt: string } | null =
     null;
   let problem: { readonly message: string; readonly since: string } | null = null;
@@ -701,18 +702,24 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
 
   const withProblem = () => (problem === null ? {} : { problem });
 
-  const readToday = Effect.fn("BanneretRelayFeed.today")(function* (open: boolean) {
+  const readToday = Effect.fn("BanneretRelayFeed.today")(function* (since?: string) {
     yield* adopt(joinedOf(yield* enrolment.status));
-    const outcome = yield* read(open ? "/relay/v1/today?visit=1" : "/relay/v1/today", reshapeToday);
+    const outcome = yield* read(
+      since === undefined
+        ? "/relay/v1/today"
+        : `/relay/v1/today?since=${encodeURIComponent(since)}`,
+      reshapeToday,
+    );
     if (outcome.ok) {
-      if (stillJoined(outcome.key)) today = { value: outcome.value, fetchedAt: outcome.fetchedAt };
+      if (stillJoined(outcome.key))
+        today = { since, value: outcome.value, fetchedAt: outcome.fetchedAt };
       return { joined: true, value: outcome.value, fetchedAt: outcome.fetchedAt };
     }
     if (!outcome.joined) return NOT_JOINED;
     return {
       joined: true,
-      value: today?.value ?? null,
-      fetchedAt: today?.fetchedAt ?? null,
+      value: today?.since === since ? (today?.value ?? null) : null,
+      fetchedAt: today?.since === since ? (today?.fetchedAt ?? null) : null,
       ...withProblem(),
     };
   });
@@ -1432,7 +1439,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   });
 
   const service: FeedService = {
-    today: (relayOrigin, visit) => notJoined(relayOrigin, (feed) => feed.today(visit)),
+    today: (relayOrigin, since) => notJoined(relayOrigin, (feed) => feed.today(since)),
     needs: (relayOrigin, cursor) => notJoined(relayOrigin, (feed) => feed.needs(cursor)),
     feedPage: (relayOrigin, cursor) => notJoined(relayOrigin, (feed) => feed.feedPage(cursor)),
     graveyardPage: (relayOrigin, cursor) =>
@@ -1466,11 +1473,8 @@ export const layer = layerWith({});
 export const rpcHandlers = {
   [BANNERET_RELAY_FEED_WS_METHODS.today]: (input: {
     readonly relayOrigin: string;
-    readonly visit?: boolean | undefined;
-  }) =>
-    Effect.flatMap(BanneretRelayFeed, (feed) =>
-      feed.today(input.relayOrigin, input.visit === true),
-    ),
+    readonly since?: string | undefined;
+  }) => Effect.flatMap(BanneretRelayFeed, (feed) => feed.today(input.relayOrigin, input.since)),
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: (input: {
     readonly relayOrigin: string;
     readonly cursor?: string | undefined;

@@ -32,6 +32,30 @@ const readmeVectors = NodeFS.readFileSync(`${specDirectory}README.md`, "utf8")
   });
 
 describe("relay v1 contract", () => {
+  it("keeps snapshot person and working-row schemas free of activity timestamps", () => {
+    const { schemas } = readOpenApi().components as {
+      schemas: Record<string, { properties: Record<string, unknown> }>;
+    };
+    const items = schemas.WorkingBlock!.properties.items as {
+      items: { properties: Record<string, unknown> };
+    };
+    expect(Object.keys(items.items.properties).toSorted()).toEqual([
+      "branch",
+      "deepLink",
+      "person",
+      "sessions",
+      "state",
+      "task",
+    ]);
+    expect(Object.keys(schemas.PersonRef!.properties).toSorted()).toEqual(["id", "login"]);
+    expect(Object.keys(schemas.TeamPerson!.properties).toSorted()).toEqual([
+      "id",
+      "login",
+      "role",
+      "sessions",
+    ]);
+  });
+
   it("compiles every schema", () => {
     const components = readOpenApi().components as { schemas: Record<string, unknown> };
     expect(spec.schemaNames.toSorted()).toEqual(Object.keys(components.schemas).toSorted());

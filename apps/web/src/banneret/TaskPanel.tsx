@@ -132,10 +132,7 @@ function checkedValue(props: {
   return (
     <span className="flex flex-col gap-1" data-testid="task-checked">
       {view.kind === "valid" ? (
-        <span data-checked="valid">
-          {view.by === "" ? "Checked " : `Checked by ${view.by} `}
-          <RelativeTime at={view.at} />
-        </span>
+        <span data-checked="valid">{view.by === "" ? "Checked" : `Checked by ${view.by}`}</span>
       ) : null}
       {view.kind === "ignored" ? (
         <span role="note" data-checked="ignored" className="text-muted-foreground text-xs">
@@ -164,7 +161,6 @@ function LastReleaseValue(props: { readonly release: LastReleaseView }) {
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-medium">{release.by}</span>
         <span>{releaseReasonLine(release)}</span>
-        <RelativeTime at={release.at} className={TYPE.meta} />
         {release.freeToContinue ? (
           <span className={CHIP} {...toneProps("ok", "tint", "edge", "fg")}>
             Free to continue
@@ -284,19 +280,11 @@ function taskFacts(
         ) : (
           <span className="flex flex-wrap items-center gap-2" data-testid="owner-from-tracker">
             <span className="font-medium">{checked.holder}</span>
-            {checked.since === null ? null : (
-              <RelativeTime at={checked.since} prefix="claimed" className={TYPE.meta} />
-            )}
           </span>
         )
       ) : (
         <span className="flex flex-wrap items-center gap-2">
-          <LeaseChip
-            holder={held.holder.login}
-            state={held.state}
-            lastSignalAt={held.lastSignalAt}
-          />
-          <RelativeTime at={held.since} prefix="claimed" className={TYPE.meta} />
+          <LeaseChip holder={held.holder.login} state={held.state} staleAt={held.staleAt} />
         </span>
       ),
     },

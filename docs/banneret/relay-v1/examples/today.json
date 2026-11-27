@@ -1,6 +1,5 @@
 {
   "generatedAt": "2026-11-26T10:00:05Z",
-  "lastVisitAt": "2026-11-25T22:10:00Z",
   "needsYou": { "state": "ok", "items": [ {
         "id": "n_Wd7Kp3",
         "kind": "thread_approval",
@@ -26,7 +25,7 @@
     "state": "partial",
     "items": [
       { "person": { "id": "p_7Hq2xK", "login": "ada-example" }, "task": { "id": "t_K9w3Ls", "title": "Guild invites" },
-        "branch": "work/42-guild-invites", "sessions": 2, "state": "working", "lastActivityAt": "2026-11-26T10:00:00Z",
+        "branch": "work/42-guild-invites", "sessions": 2, "state": "working",
         "deepLink": { "environmentId": "env_9d8c7b6a-1e2f-4a3b-8c9d-0e1f2a3b4c5d", "threadId": "th_01JDX3K9" } }
     ],
     "notMeasured": [ { "source": "github", "reason": "rate_limited", "since": "2026-11-26T09:55:00Z" } ]

@@ -352,8 +352,8 @@ describe("Enterprise board", () => {
 
     const tone = (taskId: string) => chipOf(taskId)?.getAttribute("data-tone");
     expect(chipOf("1")).toBeNull();
-    expect(chipOf("2")?.textContent).toBe("bo-exampleactive 12 min ago");
-    expect(chipOf("3")?.textContent).toBe("cy-examplequiet 7 h");
+    expect(chipOf("2")?.textContent).toBe("bo-examplelive");
+    expect(chipOf("3")?.textContent).toBe("cy-examplequiet");
     expect(tone("3")).toBe("warn");
     expect(chipOf("4")?.textContent).toBe("di-exampleexpired, should be released");
     expect(tone("4")).toBe("error");
@@ -837,7 +837,7 @@ describe("Enterprise board", () => {
       );
       await emit(state(["board"], boardRead(boardOf(taken))));
       await vi.waitFor(() => expect(cardOf("1").querySelector("[data-local-lease]")).toBeNull());
-      expect(chipOf("1")?.textContent).toBe("ada-exampleactive 1 min ago");
+      expect(chipOf("1")?.textContent).toBe("ada-examplelive");
     });
 
     it("names the reason in the menu when take is off, and has no menu without the flag", async () => {

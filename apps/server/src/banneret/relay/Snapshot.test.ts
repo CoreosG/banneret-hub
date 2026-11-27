@@ -198,7 +198,7 @@ const control = (fake: FakeRelay, path: string, body: unknown) =>
 
 /** The feed of the relay under test (the one `withFake` started last). */
 const focusedFeed = Effect.map(RelayFeed.BanneretRelayFeed, (service) => ({
-  today: (visit: boolean) => service.today(focus.origin, visit),
+  today: (since?: string) => service.today(focus.origin, since),
   needs: (cursor: string | undefined) => service.needs(focus.origin, cursor),
   feedPage: (cursor: string) => service.feedPage(focus.origin, cursor),
   graveyardPage: (cursor: string) => service.graveyardPage(focus.origin, cursor),

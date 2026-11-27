@@ -66,12 +66,12 @@ async function settled<T>(run: Promise<AtomCommandResult<T, unknown>>): Promise<
 export const feedRpc = {
   today: (
     { environmentId, relayOrigin }: RelayTarget,
-    visit: boolean,
+    since: string | undefined,
   ): Promise<BanneretFeedTodayRead | null> =>
     settled(
       runAtomCommand(appAtomRegistry, todayCommand, {
         environmentId,
-        input: visit ? { relayOrigin, visit: true } : { relayOrigin },
+        input: since === undefined ? { relayOrigin } : { relayOrigin, since },
       }),
     ),
   needs: (
@@ -141,6 +141,7 @@ export interface EnvironmentFeed {
   /** From the last `needs.changed`; null until one arrives. */
   readonly needsCount: number | null;
   readonly today: BanneretFeedToday | null;
+  readonly sinceVisit: boolean;
   readonly todayFetchedAt: string | null;
   readonly todayProblem: FeedProblem | null;
   readonly needs: ReadonlyArray<BanneretFeedNeedsItem> | null;
@@ -173,6 +174,7 @@ const EMPTY_FEED: EnvironmentFeed = {
   sections: [],
   needsCount: null,
   today: null,
+  sinceVisit: false,
   todayFetchedAt: null,
   todayProblem: null,
   needs: null,
@@ -212,9 +214,31 @@ export function useEnvironmentFeed(target: RelayTarget | null): EnvironmentFeed 
   );
 }
 
-/** Reads Today. `visit` only when the person opens Today; refetches never send it. */
+/** Each Enterprise workspace has its own relay. Only an explicit open moves its local cursor. */
+function shippedSince(target: RelayTarget, open: boolean): string | undefined {
+  const key = `banneret.today.visit.${relayKey(target)}`;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) ?? "null") as {
+      opened?: unknown;
+      since?: unknown;
+    } | null;
+    const opened = typeof saved?.opened === "number" ? saved.opened : undefined;
+    const now = Date.now();
+    const since =
+      open && opened !== undefined && now - opened >= 30 * 60_000 ? opened : saved?.since;
+    const cutoff =
+      typeof since === "number" && Number.isFinite(new Date(since).getTime()) ? since : null;
+    if (open) localStorage.setItem(key, JSON.stringify({ opened: now, since: cutoff }));
+    return cutoff === null ? undefined : new Date(cutoff).toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
 export async function refreshToday(target: RelayTarget, visit = false) {
-  const read = await feedRpc.today(target, visit);
+  const since = shippedSince(target, visit);
+  const read = await feedRpc.today(target, since);
+  if (since !== shippedSince(target, false)) return;
   if (read === null) {
     update(target, { unreachable: true });
     return;
@@ -223,7 +247,9 @@ export async function refreshToday(target: RelayTarget, visit = false) {
     joined: read.joined,
     unreachable: false,
     todayProblem: read.problem ?? null,
-    ...(read.value === null ? {} : { today: read.value, todayFetchedAt: read.fetchedAt }),
+    ...(read.value === null
+      ? {}
+      : { today: read.value, sinceVisit: since !== undefined, todayFetchedAt: read.fetchedAt }),
   });
 }
 

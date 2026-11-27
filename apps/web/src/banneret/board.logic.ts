@@ -3,7 +3,6 @@
 import type {
   BanneretBoard,
   BanneretBoardCard,
-  BanneretBoardLease,
   BanneretBoardPr,
   BanneretBoardTask,
 } from "@t3tools/contracts";
@@ -34,53 +33,6 @@ export function statusWord(status: string): StatusWord {
   return known === undefined
     ? { mark: "·", word: status.replaceAll("_", " ") }
     : { mark: known.mark, word: known.word };
-}
-
-export type LeaseTone = "ok" | "warn" | "error" | "muted";
-
-export interface LeaseChip {
-  readonly label: string;
-  readonly tone: LeaseTone;
-}
-
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-
-/** "12 min ago", "3 h ago", "2 d ago"; "just now" under a minute. */
-export function agoLabel(at: string, nowMs: number): string {
-  const elapsed = Math.max(0, nowMs - Date.parse(at));
-  if (!Number.isFinite(elapsed) || elapsed < MINUTE) return "just now";
-  if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)} min ago`;
-  if (elapsed < 24 * HOUR) return `${Math.floor(elapsed / HOUR)} h ago`;
-  return `${Math.floor(elapsed / (24 * HOUR))} d ago`;
-}
-
-function quietLabel(at: string, nowMs: number): string {
-  const elapsed = Math.max(0, nowMs - Date.parse(at));
-  if (!Number.isFinite(elapsed)) return "quiet";
-  return elapsed < 24 * HOUR
-    ? `quiet ${Math.floor(elapsed / HOUR)} h`
-    : `quiet ${Math.floor(elapsed / (24 * HOUR))} d`;
-}
-
-/** The lease chip: holder and state. An empty login drops the name, never leaving a separator. */
-export function leaseChip(lease: BanneretBoardLease, nowMs: number): LeaseChip {
-  const login = cleanLogin(lease.holder.login);
-  const who = (text: string) => (login === "" ? text : `${login} · ${text}`);
-  switch (lease.state) {
-    case "active":
-      return { label: who(`active ${agoLabel(lease.lastSignalAt, nowMs)}`), tone: "ok" };
-    case "stale":
-      return { label: who(quietLabel(lease.lastSignalAt, nowMs)), tone: "warn" };
-    case "expired":
-      return { label: who("expired, should be released"), tone: "error" };
-    case "paused":
-      return { label: who("paused"), tone: "muted" };
-    case "conflict":
-      return { label: who("conflict, two people claim this"), tone: "error" };
-    default:
-      return { label: who(lease.state.replaceAll("_", " ")), tone: "muted" };
-  }
 }
 
 const PR_STATES: Readonly<Record<string, string>> = {

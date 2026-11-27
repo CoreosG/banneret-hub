@@ -270,21 +270,10 @@ export function WorkingRow(props: { readonly item: WorkingItem }) {
             />
             <span className="truncate">
               {login}
-              {item.state === "not_heard_from" ? (
-                <>
-                  {" · not heard from "}
-                  <RelativeTime at={item.lastActivityAt} kind="duration" />
-                </>
-              ) : (
-                <>
-                  {state === null ? null : ` · ${state}`}
-                  {item.sessions === undefined
-                    ? null
-                    : ` · ${item.sessions} ${item.sessions === 1 ? "session" : "sessions"}`}
-                  {" · "}
-                  <RelativeTime at={item.lastActivityAt} />
-                </>
-              )}
+              {state === null ? null : ` · agent ${state}`}
+              {item.sessions === undefined
+                ? null
+                : ` · ${item.sessions} ${item.sessions === 1 ? "session" : "sessions"}`}
               {atWork ? <span className="sr-only">, agent at work</span> : null}
             </span>
           </span>

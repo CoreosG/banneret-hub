@@ -17,7 +17,7 @@ const CHIP =
 export function LeaseChip(props: {
   readonly holder?: string | undefined;
   readonly state: string;
-  readonly lastSignalAt: string;
+  readonly staleAt: string;
   readonly nowMs?: number;
   readonly className?: string;
 }) {
@@ -35,7 +35,7 @@ export function LeaseChip(props: {
       <UserRoundIcon
         aria-hidden
         className="size-3 shrink-0"
-        {...toneProps(props.state === "active" ? "ok" : tone, "fg")}
+        {...toneProps(label === "live" ? "ok" : tone, "fg")}
       />
       {holder === "" ? null : <span className="break-all text-foreground">{holder}</span>}
       <span {...toneProps(tone, "fg")}>{label}</span>
