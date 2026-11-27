@@ -8,6 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   BANNERET_RELAY_WS_METHODS,
+  type WarningPolicy,
   type BanneretEnrolmentList,
   type BanneretEnrolmentMachine,
   type BanneretEnrolmentView,
@@ -22,6 +23,18 @@ import { create } from "zustand";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 
+const resourcesCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:resources",
+  tag: BANNERET_RELAY_WS_METHODS.resources,
+});
+const foldersCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:folders",
+  tag: BANNERET_RELAY_WS_METHODS.folders,
+});
+const poolCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:pool",
+  tag: BANNERET_RELAY_WS_METHODS.pool,
+});
 const statusCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret-relay:status",
   tag: BANNERET_RELAY_WS_METHODS.status,
@@ -88,6 +101,19 @@ export const relayKey = (target: RelayTarget) =>
 
 /** Every relay call a screen makes; tests replace these. */
 export const enrolmentRpc = {
+  resources: (environmentId: EnvironmentId, policy?: WarningPolicy) =>
+    outcome(
+      runAtomCommand(appAtomRegistry, resourcesCommand, {
+        environmentId,
+        input: policy ? { policy } : {},
+      }),
+    ),
+  folders: (environmentId: EnvironmentId) =>
+    outcome(runAtomCommand(appAtomRegistry, foldersCommand, { environmentId, input: {} })),
+  pool: ({ environmentId, relayOrigin }: RelayTarget) =>
+    outcome(
+      runAtomCommand(appAtomRegistry, poolCommand, { environmentId, input: { relayOrigin } }),
+    ),
   status: (environmentId: EnvironmentId): Promise<RelayOutcome<BanneretEnrolmentList>> =>
     outcome(runAtomCommand(appAtomRegistry, statusCommand, { environmentId, input: {} })),
   probe: (

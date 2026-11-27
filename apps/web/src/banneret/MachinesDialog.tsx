@@ -1,6 +1,8 @@
 // Banneret Hub: one company's machines as its relay lists them, with revoke, and Leave for this
 // machine. Both act on the relay of the Enterprise workspace they were opened from. Labels and logins
 // come from the relay and render only as text.
+import { MachineResources, usePoolResources } from "./ui/MachineResources";
+import { useEnvironmentFeed } from "./relayFeedStore";
 import type { BanneretRelayMachine } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
@@ -30,6 +32,8 @@ export function MachinesPanel(props: { readonly origin: string; readonly onClose
   const environmentId = usePrimaryEnvironmentId();
   const view = useEnrolmentView(environmentId, props.origin);
   const target = environmentId === null ? null : { environmentId, relayOrigin: props.origin };
+  const feed = useEnvironmentFeed(target);
+  const pool = usePoolResources(target, feed.sections.includes("pool"));
   const [items, setItems] = useState<ReadonlyArray<BanneretRelayMachine> | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +123,15 @@ export function MachinesPanel(props: { readonly origin: string; readonly onClose
                       .filter((part) => part !== "")
                       .join(" \u00b7 ")}
                   </p>
+                  {target && machine.revokedAt === undefined && (
+                    <MachineResources
+                      target={target}
+                      machineId={machine.id}
+                      hostId={machine.poolHostId}
+                      owner={machine.ownerLogin}
+                      pool={pool}
+                    />
+                  )}
                 </div>
                 {machine.revocable && !machine.thisMachine ? (
                   <Button

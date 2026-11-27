@@ -32,6 +32,8 @@ import * as NodeOS from "node:os";
 import {
   BANNERET_MACHINE_LABEL_PATTERN,
   BANNERET_RELAY_WS_METHODS,
+  PoolResources,
+  type WarningPolicy,
   BanneretMachineKind,
   BanneretRelayError,
   type BanneretEnrolmentMachine,
@@ -57,6 +59,7 @@ import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 
+import { ownResources, biggestFolders } from "../resources/OwnCgroup.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -185,6 +188,7 @@ const MachinesReply = Schema.Struct({
       ownerLogin: Schema.String,
       label: Schema.String,
       kind: Schema.String,
+      poolHostId: Schema.optional(Schema.String),
       hostname: Schema.String,
       os: Schema.String,
       lastHeardAt: Schema.NullOr(Schema.String),
@@ -242,6 +246,9 @@ const sanitize = (
 
 /** The hostname and Hub version this machine reports, as the relay's `pairings list` shows them. */
 const hostFacts = () => ({
+  ...(/^[A-Za-z0-9_-]{1,64}$/.test(process.env.BANNERET_POOL_HOST_ID ?? "")
+    ? { poolHostId: process.env.BANNERET_POOL_HOST_ID }
+    : {}),
   hostname: sanitize(
     NodeOS.hostname(),
     /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/,
@@ -1347,6 +1354,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
         id: machine.id,
         label: machine.label,
         kind: machine.kind,
+        poolHostId: machine.poolHostId,
         hostname: machine.hostname,
         os: machine.os,
         ownerLogin: machine.ownerLogin,
@@ -1610,6 +1618,27 @@ export const layer = layerWith({});
 
 /** Handlers for the `banneretRelay.*` RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
+  [BANNERET_RELAY_WS_METHODS.resources]: (input: { readonly policy?: WarningPolicy | undefined }) =>
+    Effect.tryPromise({
+      try: () => ownResources(input.policy),
+      catch: () => new BanneretRelayError({ message: "Resources could not be read." }),
+    }),
+  [BANNERET_RELAY_WS_METHODS.folders]: () =>
+    Effect.tryPromise({
+      try: biggestFolders,
+      catch: () => new BanneretRelayError({ message: "Home folder sizes could not be read." }),
+    }),
+  [BANNERET_RELAY_WS_METHODS.pool]: Effect.fn("BanneretEnrolment.pool")(function* (input: {
+    readonly relayOrigin: string;
+  }) {
+    const service = yield* BanneretEnrolment;
+    const relay = yield* service.relay(input.relayOrigin);
+    if (!relay) return yield* fail("This machine has not joined the company.");
+    return yield* relay.signedGet("/relay/v1/pool").pipe(
+      Effect.flatMap((reply) => decodeReply(PoolResources, reply)),
+      Effect.mapError(() => new BanneretRelayError({ message: "Pool resources are unavailable." })),
+    );
+  }),
   [BANNERET_RELAY_WS_METHODS.probe]: (input: { readonly origin: string }) =>
     Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.probe(input.origin)),
   [BANNERET_RELAY_WS_METHODS.status]: () =>

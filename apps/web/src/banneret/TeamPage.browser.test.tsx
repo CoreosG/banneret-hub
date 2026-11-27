@@ -23,9 +23,11 @@ import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
-import { usePrimaryEnvironmentId } from "../state/environments";
+import poolExample from "../../../../docs/banneret/relay-v1/examples/pool.json";
+import ownExample from "../../../../docs/banneret/relay-v1/examples/pool-resources-local.json";
+import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
 import { CompanySearchHost } from "./CompanySearch";
-import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
+import { enrolmentRpc, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
 import { TaskDialogHost } from "./TaskDialog";
@@ -307,6 +309,59 @@ const shownLogins = () =>
   [...document.querySelectorAll("li[data-person]")].map((row) => row.getAttribute("data-person"));
 
 describe("Team page", () => {
+  it("keeps quota bars on the owner's card and shares only host pressure with a colleague", async () => {
+    using stack = new DisposableStack();
+    vi.mocked(useConnectedEnvironmentIds).mockReturnValue([LOCAL]);
+    const { emit, screen } = await openTeam(stack);
+    await using _screen = screen;
+    const host = poolExample.hosts[0]!;
+    vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({
+      ok: true,
+      value: {
+        hosts: poolExample.hosts,
+        me: {
+          workspaces: poolExample.me.workspaces.map((w) => ({
+            ...w,
+            resources: {
+              ...w.resources,
+              disk: { used: 51 * 2 ** 30, limit: 60 * 2 ** 30, warn: true },
+            },
+          })),
+        },
+      },
+    });
+    const read = vi.spyOn(enrolmentRpc, "resources").mockResolvedValue({
+      ok: true,
+      value: {
+        own: {
+          ...ownExample,
+          memory: {
+            used: 14 * 2 ** 30,
+            limit: 16 * 2 ** 30,
+            floor: 2 ** 30,
+            oomKills: 0,
+            warn: true,
+          },
+        },
+        host: host.contention,
+        recentOomKill: false,
+        cpuCores: 1.25,
+        coreLimit: 4,
+      },
+    });
+    const team = TEAM();
+    const people = team.people.map((p) => ({
+      ...p,
+      machines: p.machines.slice(0, 1).map((m) => ({ ...m, poolHostId: "dev" })),
+    }));
+    await emit(state([...ALL, "pool"], teamRead({ people })));
+    await vi.waitFor(() => expect(personRow("ada-example")?.textContent).toContain("14.0 GiB"));
+    const colleague = personRow("bo-example")!;
+    expect(colleague.textContent).toContain("Host available");
+    expect(colleague.textContent).not.toContain("Storage quota");
+    expect(colleague.textContent).not.toContain("CPU cores");
+    expect(read.mock.calls.every(([id]) => id === LOCAL)).toBe(true);
+  });
   it("shows one row per person: role, machines, held leases and live agents by state", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openTeam(stack);

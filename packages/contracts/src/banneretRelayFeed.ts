@@ -427,6 +427,7 @@ export type BanneretFeedMapRead = typeof BanneretFeedMapRead.Type;
 
 /** One of a person's machines, from the relay's `machines` file. Revoked machines are left out. */
 export const BanneretTeamMachine = Schema.Struct({
+  poolHostId: Schema.optional(Schema.String),
   id: Schema.String,
   label: Schema.String,
   /** Open: `laptop`, `desktop`, `server`, `cloud`. */

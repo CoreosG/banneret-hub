@@ -84,10 +84,16 @@ interface Started {
   readonly expiresAt: string;
 }
 
-const startPairing = async (environmentId = `env_${NodeCrypto.randomUUID()}`): Promise<Started> => {
+const startPairing = async (
+  environmentId = `env_${NodeCrypto.randomUUID()}`,
+  poolHostId?: string,
+): Promise<Started> => {
   const key = generateMachineKey();
   const reply = await client.send(key, "POST", "/relay/v1/enroll/start", {
-    body: { publicKey: key.publicKey, machine: machineFacts(environmentId) },
+    body: {
+      publicKey: key.publicKey,
+      machine: { ...machineFacts(environmentId), ...(poolHostId ? { poolHostId } : {}) },
+    },
   });
   expect(reply.status, JSON.stringify(reply.body)).toBe(200);
   expectSchema("EnrolStartResponse", reply.body);
@@ -122,10 +128,15 @@ interface Enrolled {
 }
 
 const enrol = async (
-  options: { login?: string; role?: "founder" | "limited_staff"; environmentId?: string } = {},
+  options: {
+    login?: string;
+    role?: "founder" | "limited_staff";
+    environmentId?: string;
+    poolHostId?: string;
+  } = {},
 ): Promise<Enrolled> => {
   const login = options.login ?? newLogin();
-  const started = await startPairing(options.environmentId);
+  const started = await startPairing(options.environmentId, options.poolHostId);
   await confirm(started, { login, role: options.role ?? "founder" });
   const approved = await poll(started);
   expect(approved.state).toBe("approved");
@@ -2977,8 +2988,13 @@ describe("chat contract", () => {
 
 describe("shared machines", () => {
   it("binds host facts and sandbox offers to host credentials and serves quota only to its owner", async () => {
-    const owner = await enrol();
+    const owner = await enrol({ poolHostId: "dev" });
     const colleague = await enrol();
+    expect((await call(owner, "GET", "/relay/v1/machines")).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: owner.machineId, poolHostId: "dev" }),
+      ]),
+    });
     const prefix = "/relay/v1/pool";
     const hub = (method: string, path: string, body?: unknown) =>
       call(owner, method, prefix + path, body);

@@ -1,8 +1,10 @@
 // Banneret Hub: the Team page. One row per person (role, machines, held leases, live agents by state);
 // expanding one shows the working tree. Drawn from the relay's `team` file and the boards and map the
-// feed holds, so it asks the relay for nothing and never checks a lease. URL: `q` filters, `person`
+// feed holds. Resource cards join host pressure from the pool with the owner's linked Hub. URL: `q` filters, `person`
 // expands.
-import type { BanneretBoardTask, BanneretTeamMachine } from "@t3tools/contracts";
+import { MachineResources, usePoolResources } from "./ui/MachineResources";
+import type { RelayTarget } from "./enrolmentStore";
+import type { PoolResources, BanneretBoardTask, BanneretTeamMachine } from "@t3tools/contracts";
 import { ChevronRightIcon, UsersIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 
@@ -189,6 +191,8 @@ function SessionLine(props: {
 }
 
 function PersonLine(props: {
+  readonly target: RelayTarget;
+  readonly pool: PoolResources | null;
   readonly row: PersonRow;
   readonly expanded: boolean;
   readonly onToggle: () => void;
@@ -235,7 +239,18 @@ function PersonLine(props: {
           {person.machines.length === 0 ? (
             <span className={TYPE.meta}>Not joined yet · No machines</span>
           ) : (
-            person.machines.map((machine) => <MachineDot key={machine.id} machine={machine} />)
+            person.machines.map((machine) => (
+              <span className="flex flex-col" key={machine.id}>
+                <MachineDot machine={machine} />
+                <MachineResources
+                  target={props.target}
+                  machineId={machine.id}
+                  hostId={machine.poolHostId}
+                  owner={person.login}
+                  pool={props.pool}
+                />
+              </span>
+            ))
           )}
         </span>
         <span
@@ -298,6 +313,10 @@ const personFromUrl = (raw: Readonly<Record<string, unknown>>) =>
 
 export function TeamPage() {
   const enterprise = useEnterpriseFeed();
+  const pool = usePoolResources(
+    enterprise?.target ?? null,
+    enterprise?.feed.sections.includes("pool") ?? false,
+  );
   const openTask = useOpenTask(enterprise?.target ?? null);
   const [rawSearch, setSearch] = useUrlSearch();
   if (enterprise === null) {
@@ -371,6 +390,8 @@ export function TeamPage() {
               return (
                 <PersonLine
                   key={row.person.id}
+                  target={enterprise.target}
+                  pool={pool}
                   row={row}
                   expanded={expanded}
                   onToggle={() =>
