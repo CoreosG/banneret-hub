@@ -17,7 +17,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { commands, page } from "vite-plus/test/browser";
 import { act, render } from "../../../test/render";
 import { SidebarProvider } from "../../components/ui/sidebar";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../../state/environments";
 import { storeEnrolmentView } from "../enrolmentStore";
 import { feedRpc } from "../relayFeedStore";
 import { useWorkspacesStore } from "../workspacesStore";
@@ -67,6 +67,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     me: { login: "ada", role: "founder" },
   });
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(env);
+  vi.mocked(useConnectedEnvironmentIds).mockReturnValue([]);
   vi.spyOn(feedRpc, "today").mockResolvedValue(null);
   vi.spyOn(feedRpc, "needs").mockResolvedValue(null);
   let publish: ((state: BanneretFeedState) => void) | undefined;
@@ -230,7 +231,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   const dm = screen.getByRole("textbox", { name: "Direct message" });
   await dm.fill("Can we review the release together?");
   await screen.getByRole("button", { name: "Send message" }).click();
-  await expect.element(screen.getByText("Can we review the release together?")).toBeVisible();
+  await expect.element(messageRow("Can we review the release together?")).toBeVisible();
   await proof("group-dm");
   await screen.getByRole("button", { name: "Start direct message" }).click();
   await screen.getByRole("checkbox", { name: /leo\/reviewer/ }).click();

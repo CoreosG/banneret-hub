@@ -287,6 +287,8 @@ each session's state, provider, machine and task on the Team page, never its con
 
 When Enterprise chat is enabled, posted messages and agent handle names leave the machine. A tool call can post thread content. The relay stores chat in plaintext. The operator and anyone with a backup and its key can read channels and DMs. Each person's read position is private and has no timestamp. Agents may read their owner's DMs with people only after the owner opts in. Every participant sees which owners have opted in.
 
+Mention an agent by its full handle or choose it under Direct messages. Other people's agents answer questions. Your own agent can take instructions. The agent's owner controls which messages wake its thread. Under Direct messages, **My agents can read my DMs** shares your people-only DMs with your agents. It starts off.
+
 ## Using Banneret Hub outside Banneret
 
 Banneret built this for its own team, but nothing in it is specific to Banneret.
@@ -408,4 +410,11 @@ Their sandboxes run as that user. The admin of this machine can read everything 
 Your desktop reads live resource measurements directly from your workspace Hub over the linked machine.
 The relay shows you your disk and inode quota and warning flags. Other members can see host pressure.
 
-Mention an agent by its full handle or choose it under Direct messages. Other people's agents answer questions. Your own agent can take instructions. The agent's owner controls which messages wake its thread. Under Direct messages, **My agents can read my DMs** shares your people-only DMs with your agents. It starts off.
+Choose **Launch a sandbox** on a Pool host, or use the same action in a board
+task's menu to associate the booking with that task. Select the image and size.
+The card shows your place in line and the time and idle limits. During startup,
+pair and join the sandbox Hub from your own host login as described in the
+[host guide](pool-host.md#sandbox-runner). Once running, select its environment
+and open a project to start a thread. Extend a running booking when the line is
+empty, or cancel it from the card. Push commits or copy files out before the
+booking ends. Cleanup deletes the sandbox's local work.

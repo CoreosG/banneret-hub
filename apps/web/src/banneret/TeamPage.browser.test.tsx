@@ -382,6 +382,49 @@ describe("Team page", () => {
     await expect.element(page.getByText("Storage quota", { exact: true })).toBeVisible();
   });
 
+  it("launches, follows and cancels the owner's booking", async () => {
+    using stack = new DisposableStack();
+    vi.mocked(useEnvironmentScope).mockReturnValue(true);
+    vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({ ok: true, value: poolExample });
+    const waiting = {
+      id: "sb1",
+      state: "waiting" as const,
+      place: 2,
+      waitSeconds: 60,
+      endsAt: null,
+      machineId: null,
+      reason: null,
+    };
+    let cancelled = false;
+    const sandbox = vi
+      .spyOn(enrolmentRpc, "sandbox")
+      .mockImplementation(async (_target, action) => {
+        if (action.kind === "cancel") cancelled = true;
+        return {
+          ok: true,
+          value: cancelled
+            ? { ...waiting, state: "ended", place: null, reason: "cancelled" }
+            : waiting,
+        };
+      });
+    const { emit, screen } = await openTeam(stack, "/pool");
+    await using _screen = screen;
+    await emit(state(["pool"], null));
+    await userEvent.click(page.getByRole("button", { name: "Launch a sandbox" }));
+    expect(sandbox).toHaveBeenCalledWith(
+      { environmentId: LOCAL, relayOrigin: configured.relayOrigin },
+      {
+        kind: "launch",
+        size: "small",
+        hostId: "dev",
+        image: poolExample.sandboxes!.images[0]!.digest,
+      },
+    );
+    await expect.element(page.getByText(/Place in line: 2/)).toBeVisible();
+    await userEvent.click(page.getByRole("button", { name: "Cancel sandbox" }));
+    await expect.element(page.getByText("Sandbox sb1: ended")).toBeVisible();
+  });
+
   it("requests a seat on the selected company host and shows the receipt", async () => {
     using stack = new DisposableStack();
     vi.mocked(useEnvironmentScope).mockReturnValue(true);
@@ -413,7 +456,7 @@ describe("Team page", () => {
     vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({
       ok: true,
       value: {
-        hosts: poolExample.hosts,
+        ...poolExample,
         me: {
           workspaces: poolExample.me.workspaces.map((w) => ({
             ...w,

@@ -35,6 +35,8 @@ import {
   PoolResources,
   PoolFounderView,
   type PoolFounderAction,
+  SandboxReceipt,
+  type SandboxAction,
   WorkspaceReceipt,
   type WarningPolicy,
   BanneretMachineKind,
@@ -336,6 +338,9 @@ export interface RelayEnrolment {
   readonly poolFounder: (
     action?: PoolFounderAction,
   ) => Effect.Effect<PoolFounderView, BanneretRelayError>;
+  readonly sandbox: (
+    action: typeof SandboxAction.Type,
+  ) => Effect.Effect<typeof SandboxReceipt.Type, BanneretRelayError>;
   readonly requestWorkspace: (
     hostId: string,
   ) => Effect.Effect<typeof WorkspaceReceipt.Type, BanneretRelayError>;
@@ -1490,6 +1495,24 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
         Effect.flatMap((reply) => decodeReply(PoolFounderView, reply)),
         Effect.mapError((error) => new BanneretRelayError({ message: error.message })),
       ),
+    sandbox: (action) =>
+      configuredNow.pipe(
+        Effect.flatMap((from) => {
+          const path = "/relay/v1/pool/sandboxes";
+          if (action.kind === "launch") {
+            const { hostId, size, image, taskId } = action;
+            return signedCall(from, "POST", path, undefined, { hostId, size, image, taskId });
+          }
+          const target = path + "/" + encodeURIComponent(action.id);
+          return signedCall(
+            from,
+            action.kind === "read" ? "GET" : action.kind === "extend" ? "POST" : "DELETE",
+            action.kind === "extend" ? target + "/extend" : target,
+          );
+        }),
+        Effect.flatMap((reply) => decodeReply(SandboxReceipt, reply)),
+        Effect.mapError((error) => new BanneretRelayError({ message: error.message })),
+      ),
     requestWorkspace: (hostId) =>
       configuredNow.pipe(
         Effect.flatMap((from) =>
@@ -1683,6 +1706,15 @@ export const rpcHandlers = {
       return yield* relay.poolFounder(input.action);
     },
   ),
+  [BANNERET_RELAY_WS_METHODS.sandbox]: Effect.fn("BanneretEnrolment.sandbox")(function* (input: {
+    relayOrigin: string;
+    action: typeof SandboxAction.Type;
+  }) {
+    const service = yield* BanneretEnrolment;
+    const relay = yield* service.relay(input.relayOrigin);
+    if (!relay) return yield* fail("This machine has not joined the company.");
+    return yield* relay.sandbox(input.action);
+  }),
   [BANNERET_RELAY_WS_METHODS.requestWorkspace]: Effect.fn("BanneretEnrolment.requestWorkspace")(
     function* (input: { relayOrigin: string; hostId: string }) {
       const service = yield* BanneretEnrolment;

@@ -13,7 +13,9 @@ sys.dont_write_bytecode = True
 
 from facts import collect, quota_rows
 from provision import HOMES, IMAGE, checked_seat_policy, filesystem, mounted, provision, run
-from relay import join, post, save, utc
+from cryptography.exceptions import InvalidSignature
+from sandbox import Bookings, Podman
+from relay import join, pool_post, post, save, utc
 
 
 def main():
@@ -25,6 +27,9 @@ def main():
     commands.add_parser("join")
     agent = commands.add_parser("agent")
     agent.add_argument("--once", action="store_true")
+    cleanup = commands.add_parser("cleanup")
+    cleanup.add_argument("sandbox_id")
+    cleanup.add_argument("offer_id")
     seat = commands.add_parser("seat")
     seat.add_argument("person")
     seat.add_argument("login")
@@ -40,6 +45,7 @@ def main():
             "filesystem": f"Allocate {getattr(args, 'size', '')} at {IMAGE} if absent and mount XFS with project quotas at {HOMES}.",
             "seat": f"Reserve {getattr(args, 'login', '')} for {getattr(args, 'person', '')}, apply its home quota and user slice, create its account and start its Hub on loopback port {getattr(args, 'port', '')}.",
             "join": "Generate a host key and request founder confirmation from the configured relay.",
+            "cleanup": "Retry verified cleanup of the matching quarantined sandbox.",
             "agent": "Read host pressure and seat quotas, post signed facts and cache the effective policy.",
         }
         print("Dry run under", root, plans[args.command])
@@ -50,7 +56,7 @@ def main():
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     if directory.stat().st_uid != os.geteuid() or directory.stat().st_mode & 0o077:
         raise ValueError("Host state must be owner-only")
-    with (directory / ("agent.lock" if args.command == "agent" else "admin.lock")).open("a") as lock:
+    with (directory / ("agent.lock" if args.command in ("agent", "cleanup") else "admin.lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if args.command == "filesystem":
             return filesystem(root, args.size)
@@ -65,6 +71,16 @@ def main():
         if args.command == "seat":
             return provision(root, directory, args.person, args.login, args.uid, args.port,
                              checked_seat_policy(json.loads(policy.read_text()), config["limits"]))
+        bookings = None
+        if config.get("runner") or (directory / "bookings.json").exists():
+            if root != Path("/"):
+                raise ValueError("Fixture roots use the injected sandbox runtime")
+            boot = (root / "proc/sys/kernel/random/boot_id").read_text().strip()
+            bookings = Bookings(directory, config, Podman(), lambda path, body: pool_post(state, path, body), boot)
+        if args.command == "cleanup":
+            if not bookings:
+                raise ValueError("No quarantined booking")
+            return bookings.retry_cleanup(args.sandbox_id, args.offer_id)
         history = {}
         while True:
             warnings = json.loads(policy.read_text())["warnings"] if policy.exists() else config["warnings"]
@@ -80,12 +96,35 @@ def main():
                     report = path.read_text() if path.exists() else ""
                 quotas.append(quota_rows(report, scale, warnings["quota_percent"]))
             facts = collect(root, config, warnings, seats, quotas, history, utc())
+            previous = json.loads(policy.read_text()) if policy.exists() else config
+            directives = []
+            if bookings:
+                slots = previous["limits"]["sandbox_slots"] if config.get("runner") else {"small":0,"large":0}
+                bookings.facts(facts, {s:min(n, config["limits"]["sandbox_slots"][s]) for s,n in slots.items()})
             try:
-                save(policy, post(state, "facts", facts, enrolled=True))
-            except (URLError, TimeoutError) as err:
+                effective = post(state, "facts", facts, enrolled=True)
+                save(policy, effective)
+                directives = effective["directives"]
+                if bookings and config.get("runner"):
+                    for size, free in facts["contention"]["freeSlots"].items():
+                        if free <= 0 or facts["contention"]["busy"]:
+                            continue
+                        pull = post(state, "next", {"size":size}, enrolled=True)
+                        directives = pull["directives"]
+                        if pull["offer"]:
+                            bookings.accept(pull["offer"], size, effective, seats)
+            except (URLError, TimeoutError, InvalidSignature, ValueError) as err:
                 if args.once:
                     raise
-                print("Facts report failed:", err, file=sys.stderr, flush=True)
+                print("Pool report failed:", type(err).__name__, file=sys.stderr, flush=True)
+            if bookings:
+                for key in list(bookings.jobs):
+                    try:
+                        bookings.step(key, directives)
+                    except (URLError, TimeoutError) as err:
+                        if args.once:
+                            raise
+                        print("Sandbox report failed:", type(err).__name__, file=sys.stderr, flush=True)
             if args.once:
                 return
             time.sleep(30)

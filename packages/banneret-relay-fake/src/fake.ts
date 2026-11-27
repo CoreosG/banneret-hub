@@ -39,7 +39,7 @@ import type {
 } from "@t3tools/contracts";
 import { createPool } from "./pool.ts";
 import { openAlarmStore, type Alarm } from "./alarms.ts";
-import { publicKeyFromBase64, verify } from "./signing.ts";
+import { rawPublicKey, publicKeyFromBase64, verify } from "./signing.ts";
 import { loadSpec, type SchemaName } from "./spec.ts";
 import { checkStagePlan, type StagePlan } from "./stage-plan.ts";
 
@@ -2629,6 +2629,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           200,
           "PoolSandbox",
           pool.enqueue(owner, input, {
+            publicKey: rawPublicKey(caller.machine.publicKey),
             machineId: caller.machine.id,
             ...signingHeaders(request),
             bodyBase64: body.toString("base64"),

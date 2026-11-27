@@ -3365,7 +3365,8 @@ describe("shared machines", () => {
     const offer = (offered.body as PoolNextResponse).offer!;
     expect(offer.id).toBe(id);
     expect(Buffer.from(offer.bodyBase64, "base64").toString()).toBe(JSON.stringify(request));
-    const signer = publicKeyFromBase64(owner.key.publicKey);
+    expect(offer.publicKey).toBe(owner.key.publicKey);
+    const signer = publicKeyFromBase64(offer.publicKey);
     expect(
       signer &&
         verify(
