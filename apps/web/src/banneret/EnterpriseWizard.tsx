@@ -94,7 +94,6 @@ function JoinForm(props: {
   readonly notice: string | null;
   /** The relay this form joins or found already joined; the wizard then follows that relay. */
   readonly onRelay: (origin: string) => void;
-  readonly onClose: () => void;
 }) {
   const id = useId();
   const environments = useEnvironmentIdentities();
@@ -108,11 +107,14 @@ function JoinForm(props: {
   const [error, setError] = useState<string | null>(null);
   // The previous attempt's result shows only until this form starts a new one.
   const [attempted, setAttempted] = useState(false);
+  // The company this address belongs to, when this machine has joined it already.
+  const [joinedAlready, setJoinedAlready] = useState<string | null>(null);
 
   const check = async () => {
     setAttempted(true);
     setBusy(true);
     setError(null);
+    setJoinedAlready(null);
     const result = await enrolmentRpc.probe(props.environmentId, address);
     if (!result.ok) {
       setBusy(false);
@@ -123,10 +125,10 @@ function JoinForm(props: {
     setBusy(false);
     const existing = views?.find((view) => view.relayOrigin === result.value.origin);
     if (existing !== undefined && alreadyJoined(existing)) {
-      // Joined already: open that company's workspace; joining: show where it stands.
+      // Joined already: say so and open that company's workspace; joining: show where it stands.
       if (existing.state === "configured") {
         setActiveWorkspace(existing.workspaceId);
-        props.onClose();
+        setJoinedAlready(existing.displayName ?? result.value.displayName);
       } else props.onRelay(existing.relayOrigin);
       return;
     }
@@ -218,6 +220,11 @@ function JoinForm(props: {
       {error !== null ? (
         <p role="alert" className="text-destructive text-sm">
           {error}
+        </p>
+      ) : null}
+      {joinedAlready !== null ? (
+        <p role="status" className="text-sm">
+          This machine has already joined {joinedAlready}. Its workspace is now open.
         </p>
       ) : null}
       <div className="flex justify-end gap-2">
@@ -542,7 +549,6 @@ export function EnterpriseWizard(props: {
                 setJoiningAgain(false);
                 setOrigin(next);
               }}
-              onClose={props.onClose}
             />
           ) : step === "code" || step === "awaiting" ? (
             <CodeStep target={target} view={view} />

@@ -28,6 +28,8 @@ vi.mock("../components/issue/IssueDetailPanel", () => ({
 }));
 
 const LOCAL = EnvironmentId.make("local");
+/** The relay the tests' tasks belong to, on this environment. */
+const RELAY = { environmentId: LOCAL, relayOrigin: "https://relay.example.com" };
 const ME = "ada-example";
 const MINUTE = 60_000;
 const minuteStart = () => Date.parse(`${minuteTick.getSnapshot()}:00.000Z`);
@@ -191,7 +193,7 @@ async function openTask(shown: BanneretBoardCard) {
   document.head.append(style);
   const screen = await render(
     <>
-      <TaskPanel surface={taskSurface(LOCAL, shown.task)} threadRef={null} />
+      <TaskPanel surface={taskSurface(RELAY, shown.task)} threadRef={null} />
       <ReleaseDialogHost />
     </>,
   );
@@ -221,8 +223,8 @@ describe("Take", () => {
     await emit(feed([card()]));
 
     await userEvent.click(button("Take"));
-    expect(rpc.check).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "2" }));
-    expect(rpc.take).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "2" }));
+    expect(rpc.check).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
+    expect(rpc.take).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
     await expect
       .element(page.getByTestId("lease-progress"))
       .toHaveTextContent("Taking… confirming who claimed first.");
@@ -292,7 +294,7 @@ describe("Take", () => {
       .element(page.getByText("bo-example took it first. Withdraw your claim."))
       .toBeVisible();
     await userEvent.click(button("Withdraw"));
-    expect(rpc.withdraw).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "2" }));
+    expect(rpc.withdraw).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
     await expect.element(page.getByText("Your claim is withdrawn.")).toBeVisible();
   });
 
@@ -442,7 +444,7 @@ describe("Release", () => {
     await expect.element(release()).toBeEnabled();
     await userEvent.click(release());
     expect(rpc.release).toHaveBeenCalledWith(
-      LOCAL,
+      RELAY,
       expect.objectContaining({
         key: "2",
         reason: "other",
@@ -474,7 +476,7 @@ describe("Release", () => {
     await expect.element(page.getByTestId("counter-bytes")).toHaveTextContent("70 / 2048 bytes");
     await userEvent.click(release());
     expect(rpc.release).toHaveBeenCalledWith(
-      LOCAL,
+      RELAY,
       expect.objectContaining({
         reason: "out_of_usage",
         freeToContinue: true,
@@ -521,7 +523,7 @@ describe("Incomplete", () => {
       .toBeVisible();
     await expect.element(button("Withdraw")).toBeVisible();
     await userEvent.click(button("Finish"));
-    expect(rpc.finish).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "2" }));
+    expect(rpc.finish).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
     await expect.element(page.getByText("Taken by you.")).toBeVisible();
     expect(rpc.withdraw).not.toHaveBeenCalled();
   });
