@@ -1003,6 +1003,9 @@ importers:
       '@t3tools/banneret-relay-fake':
         specifier: workspace:*
         version: link:../../packages/banneret-relay-fake
+      '@t3tools/banneret-plugin-kit':
+        specifier: workspace:*
+        version: link:../../packages/banneret-plugin-kit
       '@t3tools/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

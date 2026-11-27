@@ -1,3 +1,4 @@
+import { pluginHandlers } from "../plugins/registry.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { memorySettingsHandlers } from "../memory/providerMemoryPolicy.ts";
 import type { memoryReviewInput } from "@t3tools/contracts";
@@ -766,6 +767,7 @@ export const rpcHandlers = {
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),
+  ...pluginHandlers,
   "memory.summary": Effect.fn("BanneretMemory.summary")(
     function* ({ threadId }: { threadId: ThreadId }) {
       const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;
