@@ -2,6 +2,7 @@ import appCss from "../../index.css?inline";
 import {
   EnvironmentId,
   type BanneretFeedState,
+  type BanneretFeedNeedsItem,
   type BanneretTeamPerson,
   type ChannelAction,
   type ChannelResult,
@@ -27,6 +28,7 @@ import { useTabsStore } from "../tabs/tabsStore";
 import * as Schema from "effect/Schema";
 import { ChatConversations } from "@t3tools/contracts";
 import { DmPrivacy, ChannelPage } from "./ChannelPage";
+import { NeedsRow } from "../TodayRows";
 import { chatRpc } from "./client";
 const decodeConversations = Schema.decodeUnknownSync(ChatConversations);
 declare module "vite-plus/test/browser" {
@@ -34,11 +36,33 @@ declare module "vite-plus/test/browser" {
     companyChat: {
       (op: "start"): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
       (op: "call" | "leo", arg: ChannelAction): Promise<ChannelResult>;
+      (op: "ask"): Promise<BanneretFeedNeedsItem>;
       (op: "stop"): Promise<void>;
     };
   }
 }
 vi.mock("../../state/environments", { spy: true });
+it("answers a named agent question from its Needs you row", async () => {
+  await commands.companyChat("start");
+  await using resources = new AsyncDisposableStack();
+  resources.defer(() => commands.companyChat("stop"));
+  const item = await commands.companyChat("ask");
+  using rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => {
+    const result = await commands.companyChat("call", action);
+    if (!result.ok) throw new Error(result.message);
+    return result.value;
+  });
+  const target = { environmentId: EnvironmentId.make("local"), relayOrigin: "https://chat.test" };
+  await using screen = await render(<NeedsRow item={item} target={target} />);
+  await expect.element(screen.getByRole("textbox", { name: "Your answer" })).toBeVisible();
+  await screen.getByRole("button", { name: "Linux" }).click();
+  await expect.element(screen.getByText("Answer sent")).toBeVisible();
+  expect(rpc).toHaveBeenCalledWith(target, {
+    kind: "answer",
+    id: item.ask?.id,
+    answer: { choice: "Linux" },
+  });
+});
 it("opens only when offered, reads the channel, posts, replies, edits and deletes through the fake relay", async () => {
   const { root: message, people } = await commands.companyChat("start");
   await using resources = new AsyncDisposableStack();

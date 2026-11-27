@@ -12,6 +12,8 @@ import {
 } from "@t3tools/contracts/leaseProtocol";
 
 import type {
+  ChatAnswer,
+  ChatTask,
   ChatDelivery,
   ChatHandle,
   ChatRegister,
@@ -1399,16 +1401,23 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   });
 
   // README, Lease protocol. Founders are the enrolled people holding the founder role.
-  const foldTracker = (tracker: TrackerIssue, now: number): LeaseFoldResult =>
-    foldLease({
-      comments: tracker.comments,
-      assignees: tracker.assignees,
-      labels: tracker.labels,
-      founders: [...peopleByLogin.values()]
-        .filter((person) => person.role === "founder" && person.removed !== true)
-        .map((person) => person.login),
-      now: iso(now),
-    });
+  const foldTracker = (
+    tracker: TrackerIssue,
+    now: number,
+    onTransition?: Parameters<typeof foldLease>[1],
+  ): LeaseFoldResult =>
+    foldLease(
+      {
+        comments: tracker.comments,
+        assignees: tracker.assignees,
+        labels: tracker.labels,
+        founders: [...peopleByLogin.values()]
+          .filter((person) => person.role === "founder" && person.removed !== true)
+          .map((person) => person.login),
+        now: iso(now),
+      },
+      onTransition,
+    );
 
   // The lease a card shows. A tracker-backed task folds its comments; `active` then ages from the holder's latest
   // comment or heartbeat, while `conflict` and `incomplete` never age.
@@ -2054,6 +2063,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       .filter(([, ids]) => ids.size > 0)
       .map(([emoji, ids]) => ({ emoji, count: ids.size, mine: ids.has(person) })),
   });
+  const taskThreads = new Map<string, string>();
   let chatSeq = 0;
   if (options.chat)
     channels.set("c_general", {
@@ -2200,6 +2210,40 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       },
     };
   };
+
+  function systemMessage(
+    channel: Channel,
+    taskRef: string,
+    systemEvent: string,
+    text: string,
+    root?: ChatMessage,
+  ) {
+    const m: ChatMessage = {
+      id: randomId("m"),
+      conversationId: channel.id,
+      seq: ++chatSeq,
+      author: { kind: "system" },
+      kind: "system",
+      systemEvent,
+      taskRef,
+      text: text.replace(/\s+/g, " "),
+      mentions: [],
+      reactions: [],
+      replyCount: 0,
+      createdAt: iso(Date.now()),
+      deleted: false,
+      ...(root ? { threadRootId: root.id } : {}),
+    };
+    messages.set(m.id, m);
+    if (root)
+      messages.set(root.id, { ...root, replyCount: root.replyCount + 1, lastReplyAt: m.createdAt });
+    chatChange(channel, { kind: "message.created", seq: m.seq, message: m });
+    return m;
+  }
+  function echoLease(task: BoardTask, event: string, text: string) {
+    const root = messages.get(taskThreads.get(task.id) ?? "");
+    if (root) systemMessage(channels.get(root.conversationId)!, task.id, event, text, root);
+  }
 
   function chatNeeds(person: Person) {
     return [...messages.values()].flatMap((m) => {
@@ -2448,6 +2492,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     kind: "chat",
                     version: 1,
                     flags: [
+                      "task_links",
                       "channels",
                       "private_channels",
                       "threads",
@@ -3216,19 +3261,100 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ),
         });
       }
-      if (resource === "messages" && !id && method === "POST") {
-        const post = parseJson(body, "ChatPost") as ChatPost;
+      if (
+        (resource === "threads" &&
+          action === "task" &&
+          (method === "PUT" || method === "DELETE")) ||
+        (resource === "tasks" && action === "thread" && method === "PUT")
+      ) {
+        const root = resource === "threads" ? messageFor(id) : undefined;
+        if (root) {
+          const channel = channelFor(root.conversationId);
+          if (root.threadRootId || root.deleted)
+            throw new RelayError("malformed", "Choose a current thread root.");
+          if (!channel.members.has(person.id) || channel.archived)
+            throw new RelayError("forbidden", "Join an open channel to link a task.");
+        }
+        const linked = root && [...taskThreads].find(([, messageId]) => messageId === id)?.[0];
+        if (method === "DELETE") {
+          if (linked && root) {
+            taskThreads.delete(linked);
+            const { taskRef: _task, ...updated } = root;
+            messages.set(id, updated);
+            chatChange(channelFor(root.conversationId), {
+              kind: "message.edited",
+              seq: ++chatSeq,
+              message: updated,
+            });
+          }
+          response.writeHead(204).end();
+          return;
+        }
+        const taskId = root ? (parseJson(body, "ChatTask") as ChatTask).taskRef : id;
+        const task = boardTasks.find((t) => t.id === taskId);
+        if (!task) throw new RelayError("not_found", "Unknown board task.");
+        const existing = taskThreads.get(taskId);
+        let destination = existing ? messageFor(existing) : root;
+        if (!existing) {
+          if (linked) throw new RelayError("malformed", "Unlink this thread first.");
+          if (root) {
+            const updated = { ...root, taskRef: taskId };
+            messages.set(id, updated);
+            chatChange(channelFor(root.conversationId), {
+              kind: "message.edited",
+              seq: ++chatSeq,
+              message: updated,
+            });
+          } else {
+            const channel = channelFor("c_general");
+            if (channel.archived || channel.private)
+              throw new RelayError("forbidden", "No public discussion channel is available.");
+            destination = systemMessage(channel, taskId, "task_linked", task.title);
+          }
+          taskThreads.set(taskId, destination!.id);
+        }
+        return send("ChatThreadLocation", {
+          conversationId: destination!.conversationId,
+          threadRootId: destination!.id,
+        });
+      }
+      const explicitAnswer = resource === "asks" && action === "answer" && method === "POST";
+      if ((resource === "messages" && !id && method === "POST") || explicitAnswer) {
+        const question = explicitAnswer
+          ? [...messages.values()].find((m) => m.ask?.id === id)
+          : undefined;
+        let post: ChatPost;
+        if (explicitAnswer) {
+          if (!question?.ask || question.deleted)
+            throw new RelayError("not_found", "Unknown question.");
+          channelFor(question.conversationId);
+          if (question.ask.to.id !== person.id)
+            throw new RelayError("forbidden", "This question is addressed to someone else.");
+          const answer = parseJson(body, "ChatAnswer") as ChatAnswer;
+          const text = "choice" in answer ? answer.choice : answer.text;
+          if (!text.trim() || ("choice" in answer && !question.ask.choices.includes(text)))
+            throw new RelayError("malformed", "Choose an offered option or enter an answer.");
+          if (question.ask.state !== "open")
+            throw new RelayError("malformed", "This question is closed.");
+          post = {
+            conversationId: question.conversationId,
+            threadRootId: question.threadRootId ?? question.id,
+            text,
+            key: randomId("k"),
+          };
+        } else post = parseJson(body, "ChatPost") as ChatPost;
         const h = post.asHandle ? owned(post.asHandle) : undefined;
         const c = channels.get(post.conversationId);
         if (
           !c ||
           c.archived ||
+          (explicitAnswer && c.agents === "off") ||
           (h
             ? c.agents === "off" ||
               (c.private &&
                 !c.members.has(h.view.id) &&
                 !(post.threadRootId && follows.get(post.threadRootId)?.has(h.view.id)))
-            : !c.members.has(person.id))
+            : !explicitAnswer && !c.members.has(person.id))
         )
           throw new RelayError("forbidden", "Cannot post in this channel.");
         const actor = h?.view.id ?? person.id;
@@ -3298,9 +3424,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         };
         messages.set(m.id, m);
         const answered = new Set<string>();
+        const edits: ChatMessage[] = [];
         if (!h && root) {
           for (const question of messages.values()) {
             if (
+              (explicitAnswer && question.ask?.id !== id) ||
+              question.deleted ||
               question.author.kind !== "agent" ||
               question.ask?.state !== "open" ||
               question.ask.to.id !== person.id ||
@@ -3312,7 +3441,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               ask: { ...question.ask, state: "answered" as const, answerMessageId: m.id },
             };
             messages.set(question.id, updated);
-            chatChange(c, { kind: "message.edited", seq: ++chatSeq, message: updated });
+            edits.push(updated);
             answered.add(question.author.id);
           }
         }
@@ -3362,7 +3491,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             lastReplyAt: m.createdAt,
           });
         chatChange(c, { kind: "message.created", seq: m.seq, message: m });
-        return send("ChatMessage", m);
+        for (const updated of edits)
+          chatChange(c, { kind: "message.edited", seq: ++chatSeq, message: updated });
+        return explicitAnswer
+          ? send("ChatAsk", messages.get(question!.id)!.ask)
+          : send("ChatMessage", m);
       }
       if (resource === "messages" && id && !action && (method === "PATCH" || method === "DELETE")) {
         const m = messageFor(id);
@@ -3383,7 +3516,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               editedAt: iso(Date.now()),
             }
           : { ...base, text: "", mentions: [], deleted: true };
-        if (!input) reactions.delete(id);
+        if (!input) {
+          reactions.delete(id);
+          if (m.taskRef && taskThreads.get(m.taskRef) === id) taskThreads.delete(m.taskRef);
+        }
         messages.set(id, edited);
         chatChange(channelFor(m.conversationId), {
           kind: input ? "message.edited" : "message.deleted",
@@ -3911,13 +4047,26 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           "That task was seeded without comments, assignees or labels.",
         );
       const now = Date.now();
-      task.tracker.comments.push(
-        ...seedComments(input.comments, now, task.tracker.comments.length),
-      );
+      const comments = seedComments(input.comments, now, task.tracker.comments.length);
+      task.tracker.comments.push(...comments);
       if (input.assignees !== undefined)
         task.tracker.assignees = seedNames(input.assignees, "assignees");
       if (input.labels !== undefined) task.tracker.labels = seedNames(input.labels, "labels");
       feedReleases(task);
+      if (taskThreads.has(task.id) && comments.length) {
+        const fresh = new Set(comments);
+        foldTracker(task.tracker, now, (comment, holder, release) => {
+          if (!fresh.has(comment)) return;
+          if (release) {
+            const reason = release.reasonText ?? REASON_WORDS[release.reason] ?? release.reason;
+            echoLease(
+              task,
+              release.reason === "handing_over" ? "lease_handed_over" : "lease_released",
+              release.by + " released the task: " + reason + ".",
+            );
+          } else echoLease(task, "lease_taken", holder + " took the task.");
+        });
+      }
       refreshAllHeads();
       reply({ comments: task.tracker.comments.length });
       return;

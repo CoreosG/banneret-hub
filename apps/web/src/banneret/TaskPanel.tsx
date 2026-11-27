@@ -3,6 +3,7 @@
 // upstream's issue thread when a project here is on the task's tracker, else one row that links out.
 // Relay strings stay text.
 import {
+  ChatThreadLocation,
   allBoardCards,
   EnvironmentId,
   type BanneretBoardCard,
@@ -15,7 +16,10 @@ import {
 } from "@t3tools/contracts";
 import { ExternalLinkIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect } from "react";
+import * as Schema from "effect/Schema";
+import { chatRpc } from "./chat/client";
+import { chatHref } from "./chat/ChannelRows";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { IssueDetailPanel } from "../components/issue/IssueDetailPanel";
 import { ApprovalLine } from "./ApprovalLine";
@@ -371,6 +375,8 @@ function taskFacts(
   ];
 }
 
+const decodeThreadLocation = Schema.decodeUnknownSync(ChatThreadLocation);
+
 function TaskHeader(props: {
   readonly target: RelayTarget;
   readonly view: TaskView;
@@ -615,6 +621,21 @@ function TaskPanelBody(props: {
             ? "The task could not be read."
             : null;
   const navigate = useNavigate();
+  const [opening, setOpening] = useState(false);
+  const [discussionError, setDiscussionError] = useState("");
+  async function discuss() {
+    setOpening(true);
+    setDiscussionError("");
+    try {
+      const result = await chatRpc.run(target, { kind: "discuss", id: taskId });
+      const location = decodeThreadLocation(result);
+      await navigate({ href: chatHref(location.conversationId, location.threadRootId) });
+      openTaskDialog(null);
+    } catch (e) {
+      setDiscussionError(String(e));
+    }
+    setOpening(false);
+  }
   const showOnMap =
     feed.map?.restsOn === true
       ? (itemId: string) => {
@@ -644,6 +665,14 @@ function TaskPanelBody(props: {
         lease={lease}
         note={note}
       />
+      {feed.chatFlags?.includes("task_links") && !notFound && (
+        <div className="flex items-center gap-2 px-4 pb-2">
+          <Button variant="outline" size="sm" disabled={opening} onClick={() => void discuss()}>
+            Discuss this task
+          </Button>
+          {discussionError && <span role="alert">{discussionError}</span>}
+        </div>
+      )}
       <FactsGrid
         facts={facts}
         className={notFound ? "shrink-0 px-4 pb-3 sm:grid-cols-1" : "shrink-0 px-4 pb-3"}

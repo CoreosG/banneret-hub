@@ -843,6 +843,30 @@ paths:
                 $ref: '#/components/schemas/ChatMessage'
         default:
           $ref: '#/components/responses/Error'
+  /chat/tasks/{taskId}/thread:
+    put:
+      tags:
+      - chat
+      operationId: discussTask
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: taskId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Canonical task discussion.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThreadLocation'
+        default:
+          $ref: '#/components/responses/Error'
   /chat/threads/{rootId}/task:
     put:
       tags:
@@ -865,8 +889,12 @@ paths:
             schema:
               $ref: '#/components/schemas/ChatTask'
       responses:
-        '204':
-          description: Updated.
+        '200':
+          description: Canonical task discussion.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThreadLocation'
         default:
           $ref: '#/components/responses/Error'
     delete:
@@ -3493,6 +3521,13 @@ components:
           maxItems: 12
         asHandle:
           $ref: '#/components/schemas/Id'
+    ChatThreadLocation:
+      type: object
+      additionalProperties: false
+      required: [conversationId, threadRootId]
+      properties:
+        conversationId: { $ref: '#/components/schemas/Id' }
+        threadRootId: { $ref: '#/components/schemas/Id' }
     ChatTask:
       type: object
       additionalProperties: false
@@ -3532,6 +3567,7 @@ components:
         asHandle:
           $ref: '#/components/schemas/Id'
     ChatAnswer:
+      description: Only the named recipient may answer an open ask. Choice must equal an offered label. Text must contain a non-whitespace character.
       oneOf:
       - type: object
         additionalProperties: false

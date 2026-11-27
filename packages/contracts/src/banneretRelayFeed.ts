@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 
 import { AuthOrchestrationOperateScope, EnvironmentAuthorizationError } from "./auth.ts";
 
-import { ChatRead, ChatNotice, ChannelAction, ChannelResult } from "./banneretChat.ts";
+import { ChatAsk, ChatRead, ChatNotice, ChannelAction, ChannelResult } from "./banneretChat.ts";
 
 export const BANNERET_RELAY_FEED_WS_METHODS = {
   chat: "banneretRelay.chat",
@@ -36,6 +36,7 @@ export const BanneretFeedTask = Schema.Struct({
 
 /** `kind` is an open set; an unknown kind is shown as a generic item. */
 export const BanneretFeedNeedsItem = Schema.Struct({
+  ask: Schema.optional(ChatAsk),
   chatRead: Schema.optional(ChatRead),
   id: Schema.String,
   kind: Schema.String,

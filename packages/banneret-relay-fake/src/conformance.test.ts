@@ -3040,6 +3040,31 @@ describe("chat contract", () => {
     expect((await call(colleague, "GET", "/relay/v1/needs")).body).toMatchObject({
       items: expect.arrayContaining([expect.objectContaining({ kind: "chat_ask", ask: ask.body })]),
     });
+    for (const answer of [{ choice: "Linux" }, { text: "A custom answer" }]) {
+      const extra = await call(owner, "POST", path + "asks", {
+        to: person,
+        question: "Choose a build",
+        choices: ["Linux", "Mac"],
+        key: randomText(8),
+        asHandle: h,
+        threadRootId: root.id,
+      });
+      const answerPath = path + "asks/" + (extra.body as { id: string }).id + "/answer";
+      expect((await call(owner, "POST", answerPath, answer)).status).toBe(403);
+      expect((await call(colleague, "POST", answerPath, { choice: "Unknown" })).status).toBe(400);
+      const result = await call(colleague, "POST", answerPath, answer);
+      expectSchema("ChatAsk", result.body);
+      expect(result.body).toMatchObject({ state: "answered" });
+      expect((await call(colleague, "POST", answerPath, answer)).status).toBe(400);
+      expect((await inbox()).body).toMatchObject({
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            reason: "answer",
+            message: expect.objectContaining({ text: answer.choice ?? answer.text }),
+          }),
+        ]),
+      });
+    }
     await call(colleague, "POST", path + "messages", {
       conversationId: c.id,
       threadRootId: root.id,
@@ -3047,7 +3072,67 @@ describe("chat contract", () => {
       key: "answer",
     });
     expect((await inbox()).body).toMatchObject({
-      items: [{ reason: "mention" }, { reason: "mention" }, { reason: "answer" }],
+      items: [
+        { reason: "mention" },
+        { reason: "mention" },
+        { reason: "answer" },
+        { reason: "answer" },
+        { reason: "answer" },
+      ],
+    });
+  });
+  it("opens one discussion per task and echoes lease transitions only while linked", async () => {
+    const member = await enrol();
+    const taskId = "t_" + randomText(6);
+    const path = "/relay/v1/chat/";
+    await client.control("/board/seed", {
+      tasks: [{ id: taskId, title: "Build upload", comments: [], assignees: [], labels: [] }],
+    });
+    const open = () => call(member, "PUT", path + "tasks/" + taskId + "/thread");
+    const location = await open();
+    expectSchema("ChatThreadLocation", location.body);
+    expect((await open()).body).toEqual(location.body);
+    const { conversationId, threadRootId } = location.body as {
+      conversationId: string;
+      threadRootId: string;
+    };
+    const caps = await call(member, "GET", "/relay/v1/capabilities");
+    const personId = (caps.body as { me: { id: string } }).me.id;
+    expect(
+      (await call(member, "PUT", path + "conversations/" + conversationId + "/members/" + personId))
+        .status,
+    ).toBe(204);
+    const other = await call(member, "POST", path + "messages", {
+      conversationId,
+      text: "Another root",
+      key: randomText(6),
+    });
+    const otherLink = path + "threads/" + (other.body as { id: string }).id + "/task";
+    expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual(location.body);
+    const tracker = (body: string, held: boolean) =>
+      client.control("/board/tracker", {
+        taskId,
+        comments: [{ author: member.login, body }],
+        assignees: held ? [member.login] : [],
+        labels: held ? ["claimed"] : [],
+      });
+    for (const reason of ["done", "handing_over"]) {
+      await tracker("claim: " + member.login + "/hub", true);
+      await tracker("release: " + reason, false);
+    }
+    const thread = path + "threads/" + threadRootId;
+    expect((await call(member, "GET", thread)).body).toMatchObject({
+      items: [
+        { kind: "system", systemEvent: "lease_taken" },
+        { systemEvent: "lease_released", text: expect.stringContaining("done") },
+        { systemEvent: "lease_taken" },
+        { systemEvent: "lease_handed_over" },
+      ],
+    });
+    expect((await call(member, "DELETE", thread + "/task")).status).toBe(204);
+    expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual({
+      conversationId,
+      threadRootId: (other.body as { id: string }).id,
     });
   });
   it("opens the same private DM for either participant and resolves its inbox item on read", async () => {

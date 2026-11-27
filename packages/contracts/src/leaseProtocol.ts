@@ -305,7 +305,10 @@ interface Claim {
  * The fold (README, "Lease protocol"): the holder is the earliest standing claim, ordered by `createdAt` then
  * comment id; an edited claim or release is ignored; a counted release or the author's withdrawal ends a claim; more than one standing claim is a conflict.
  */
-export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
+export const foldLease = (
+  input: LeaseFoldInput,
+  onTransition?: (comment: LeaseComment, holder: string, release?: LeaseRelease) => void,
+): LeaseFoldResult => {
   const comments = input.comments
     .map((comment, index) => ({ comment, index }))
     .sort((a, b) => compareLeaseComments(a.comment, b.comment) || a.index - b.index)
@@ -327,6 +330,7 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
     if (Date.parse(comment.updatedAt) > Date.parse(comment.createdAt)) continue;
     if (line.kind === "claim") {
       if (!same(line.login, author) || indexOf(author) >= 0) continue;
+      if (!standing.length) onTransition?.(comment, author);
       standing.push({
         login: author,
         at: comment.createdAt,
@@ -358,6 +362,7 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
       ...(line.reasonText === undefined ? {} : { reasonText: line.reasonText }),
       ...(line.note === undefined ? {} : { note: line.note }),
     };
+    onTransition?.(comment, holder.login, release);
     releases.push(release);
     lastRelease = { release, holderSince: holder.at };
     lastEventAt = comment.createdAt;
