@@ -114,7 +114,6 @@ export type LeaseLine =
 const LOGIN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const AGENT = /^[A-Za-z0-9._-]{1,64}$/;
 // Control characters other than tab and newline never survive into text a client shows.
-// eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F]/g;
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -193,7 +192,9 @@ export const parseLeaseLine = (body: string): LeaseLine | null => {
 export const formatClaimLine = (login: string, agent: string): string => `claim: ${login}/${agent}`;
 
 export const formatWithdrawLine = (reason: LeaseSystemReason, text?: string): string =>
-  text === undefined || text === "" ? `release: ${reason}` : `release: ${reason}${SEPARATOR}${text}`;
+  text === undefined || text === ""
+    ? `release: ${reason}`
+    : `release: ${reason}${SEPARATOR}${text}`;
 
 export interface ReleaseCommentInput {
   readonly reason: LeaseReleaseReason;
@@ -262,15 +263,8 @@ interface Claim {
 }
 
 /**
- * The fold. Comments are read in order of `createdAt`, then comment id.
- *
- * - A claim stands from its comment until its author withdraws it or a counted release ends it. A claim counts
- *   only when its login is the comment's author, and only while that person has no standing claim.
- * - The holder is the earliest standing claim. More than one standing claim is a conflict.
- * - A `release:` counts when the holder writes it, or when a founder writes it about someone else's lease. It ends
- *   the holder's claim, and the next standing claim, if any, becomes the holder.
- * - A `release:` by another claimant, or a system reason by any claimant, withdraws only that author's claim.
- * - Everything else is ignored.
+ * The fold (README, "Lease protocol"): the holder is the earliest standing claim, ordered by `createdAt` then
+ * comment id; a counted release or the author's withdrawal ends a claim; more than one standing claim is a conflict.
  */
 export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
   const comments = input.comments
@@ -353,7 +347,8 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
       lease = {
         holder: residue,
         state: "incomplete",
-        since: released !== null && same(residue, released) ? (lastRelease?.holderSince ?? null) : null,
+        since:
+          released !== null && same(residue, released) ? (lastRelease?.holderSince ?? null) : null,
         claimants: [],
       };
     }

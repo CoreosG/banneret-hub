@@ -16,9 +16,7 @@
         "body": "release: take_failed"
       }
     ],
-    "assignees": [
-      "ada-example"
-    ],
+    "assignees": ["ada-example"],
     "labels": [],
     "founders": [],
     "now": "2026-11-20T10:30:00Z"

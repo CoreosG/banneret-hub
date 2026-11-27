@@ -16,7 +16,12 @@ import {
   BANNERET_RELAY_FEED_RPC_SCOPES,
 } from "./banneretRelayFeed.ts";
 
+import { TASK_LEASE_RPCS, TASK_LEASE_RPC_AGGREGATES, TASK_LEASE_RPC_SCOPES } from "./taskLeases.ts";
+
 export * from "./banneretRelayFeed.ts";
+// Take and release are not relay calls, but they share the relay's one hook into the RPC group.
+export * from "./taskLeases.ts";
+export * from "./leaseProtocol.ts";
 
 export const BANNERET_RELAY_WS_METHODS = {
   probe: "banneretRelay.probe",
@@ -187,6 +192,7 @@ export const BANNERET_RELAY_RPCS = [
   WsBanneretRelayRevokeMachineRpc,
   WsBanneretRelayMatchProjectsRpc,
   ...BANNERET_RELAY_FEED_RPCS,
+  ...TASK_LEASE_RPCS,
 ] as const;
 
 /** Spread into `CLIENT_GUARDED_RPC_SCOPES`. Probing dials an address the user typed. */
@@ -200,6 +206,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.revokeMachine]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.matchProjects]: AuthOrchestrationOperateScope,
   ...BANNERET_RELAY_FEED_RPC_SCOPES,
+  ...TASK_LEASE_RPC_SCOPES,
 } as const;
 
 /** Spread into the server's `RPC_AGGREGATES`. */
@@ -213,6 +220,7 @@ export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.revokeMachine]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.matchProjects]: "banneret-relay",
   ...BANNERET_RELAY_FEED_RPC_AGGREGATES,
+  ...TASK_LEASE_RPC_AGGREGATES,
 } as const;
 
 export type BanneretRelayAddress =

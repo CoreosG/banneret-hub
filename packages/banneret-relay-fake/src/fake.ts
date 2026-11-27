@@ -1145,7 +1145,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (folded === null) return undefined;
     const holder = folded.holder;
     const latestComment = task.tracker.comments
-      .filter((comment) => comment.author !== null && comment.author.toLowerCase() === holder.toLowerCase())
+      .filter(
+        (comment) =>
+          comment.author !== null && comment.author.toLowerCase() === holder.toLowerCase(),
+      )
       .reduce((latest, comment) => Math.max(latest, Date.parse(comment.createdAt)), 0);
     const since = folded.since === null ? task.since : Date.parse(folded.since);
     const lastSignalAt = Math.max(latestComment, task.lastSignalAt, since);
@@ -2233,10 +2236,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const task = boardTasks.find((candidate) => candidate.id === String(input.taskId));
       if (task === undefined) throw new RelayError("not_found", "No such task.");
       if (task.tracker === null)
-        throw new RelayError("malformed", "That task was seeded without comments, assignees or labels.");
+        throw new RelayError(
+          "malformed",
+          "That task was seeded without comments, assignees or labels.",
+        );
       const now = Date.now();
-      task.tracker.comments.push(...seedComments(input.comments, now, task.tracker.comments.length));
-      if (input.assignees !== undefined) task.tracker.assignees = seedNames(input.assignees, "assignees");
+      task.tracker.comments.push(
+        ...seedComments(input.comments, now, task.tracker.comments.length),
+      );
+      if (input.assignees !== undefined)
+        task.tracker.assignees = seedNames(input.assignees, "assignees");
       if (input.labels !== undefined) task.tracker.labels = seedNames(input.labels, "labels");
       feedReleases(task);
       refreshAllHeads();

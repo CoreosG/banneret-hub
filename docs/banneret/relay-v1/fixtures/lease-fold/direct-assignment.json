@@ -3,9 +3,7 @@
   "description": "Assigned on the tracker with no claim comment: incomplete, held by the assignee, with no claim time.",
   "input": {
     "comments": [],
-    "assignees": [
-      "carol-example"
-    ],
+    "assignees": ["carol-example"],
     "labels": [],
     "founders": [],
     "now": "2026-11-20T10:30:00Z"

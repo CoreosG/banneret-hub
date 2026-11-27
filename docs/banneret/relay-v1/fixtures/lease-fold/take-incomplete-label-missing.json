@@ -10,9 +10,7 @@
         "body": "claim: ada-example/hub"
       }
     ],
-    "assignees": [
-      "ada-example"
-    ],
+    "assignees": ["ada-example"],
     "labels": [],
     "founders": [],
     "now": "2026-11-20T10:30:00Z"
@@ -22,9 +20,7 @@
       "holder": "ada-example",
       "state": "incomplete",
       "since": "2026-11-20T10:01:00Z",
-      "claimants": [
-        "ada-example"
-      ]
+      "claimants": ["ada-example"]
     },
     "lastRelease": null,
     "releases": []

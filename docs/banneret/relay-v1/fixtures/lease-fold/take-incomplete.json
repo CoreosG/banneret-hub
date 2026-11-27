@@ -20,9 +20,7 @@
       "holder": "ada-example",
       "state": "incomplete",
       "since": "2026-11-20T10:01:00Z",
-      "claimants": [
-        "ada-example"
-      ]
+      "claimants": ["ada-example"]
     },
     "lastRelease": null,
     "releases": []

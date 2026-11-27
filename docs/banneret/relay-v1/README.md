@@ -481,6 +481,42 @@ with `freeToContinue` as written. Every reader of the protocol runs all of them:
 (`packages/contracts/src/leaseProtocol.ts`, run by the fake relay's tests) and the Go relay. Time-based states
 (`stale`, `expired`) are applied after the fold and are not in the fixtures.
 
+### How the Hub writes
+
+Not part of the relay contract; it explains the states a relay sees. The Hub's `LeaseService`
+(`apps/server/src/banneret/lease/LeaseService.ts`) writes through the tracker's issue API and, for `paused`, its pull
+request API (GitHub's issue update resolves a number as an issue and refuses a pull request). It keeps one operation
+per task in memory and nothing on disk; every step reads the issue again before it writes.
+
+- **Take:** read and fold, and stop unless the task is free and the person may comment, label and assign. Comment
+  `claim: <login>/<agent>`. Assign the person and add `claimed` in one update, up to three tries; if all fail,
+  comment `release: take_failed`. Wait 10 seconds, read again: the earliest claim wins. The winner removes `paused`
+  from the task's open pull requests. The loser comments `release: lost_claim · @<winner>` and unassigns only
+  themself; `claimed` stays.
+- **Release:** read and fold, and stop unless the person holds it. Comment the release first, since the reason is
+  the record. Then unassign the person, remove `claimed` unless another claim stands, and add `paused` to the open
+  draft pull request. A retry finds its own release comment and posts no second one.
+- **Finish** re-runs the steps after the comment. **Withdraw** comments `take_failed` (or `lost_claim` for a loser)
+  and unassigns.
+
+| From | Event | To |
+|---|---|---|
+| free | take refused by the pre-read (held, no permission, wrong account) | free; nothing written |
+| free | claim comment fails | free; nothing written |
+| free | claim posted | taking (in memory) |
+| taking | assign and label fail three times, `take_failed` posted | free |
+| taking | ... and `take_failed` fails too, or the Hub stops | incomplete after 60 s |
+| taking | read-back: my claim is earliest | taken |
+| taking | read-back: an earlier claim, `lost_claim` posted, unassigned | free for me |
+| taking | ... and the withdrawal fails | conflict, until Withdraw |
+| taken | release comment posted, then unassign, unlabel, pause the draft | free, `lastRelease` set |
+| taken | a step after the release comment fails, or the Hub stops | incomplete after 60 s |
+| incomplete | Finish | taken or free |
+| incomplete | Withdraw | free |
+
+A second operation on a task while one runs is refused as busy. After a restart nothing is remembered: every task
+is what the tracker says, folded as above.
+
 **Heartbeat from facts.** An activity fact refreshes a lease only when **all** of these hold:
 
 - the machine that sent it belongs to the **lease holder**. A coworker's agent on the same task or branch never

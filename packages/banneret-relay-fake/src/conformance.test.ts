@@ -1824,7 +1824,6 @@ describe("lease protocol", () => {
     readonly note?: string;
   }
   const id = () => `t_${randomText(5)}`;
-  const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
   const headFile = async (machine: Enrolled, kind: "board" | "feed", schema: string) => {
     await client.rebuildSnapshot(machine.login);
     const head = await call(machine, "GET", "/relay/v1/snapshot/head");
@@ -1875,7 +1874,7 @@ describe("lease protocol", () => {
         {
           id: task,
           title: "Handed over task",
-          comments: [{ author: holder, body: `claim: ${holder}/hub`, createdAt: ago(120) }],
+          comments: [{ author: holder, body: `claim: ${holder}/hub` }],
           assignees: [holder],
           labels: ["claimed"],
         },
@@ -1920,15 +1919,15 @@ describe("lease protocol", () => {
     const first = newLogin();
     const second = newLogin();
     const task = id();
-    const at = ago(5);
     await client.control("/board/seed", {
       tasks: [
         {
           id: task,
           title: "Raced task",
           comments: [
-            { id: "1002", author: first, body: `claim: ${first}/hub`, createdAt: at },
-            { id: "998", author: second, body: `claim: ${second}/hub`, createdAt: at },
+            // Seeded in one call, both get the same time.
+            { id: "1002", author: first, body: `claim: ${first}/hub` },
+            { id: "998", author: second, body: `claim: ${second}/hub` },
           ],
           assignees: [first, second],
           labels: ["claimed"],
@@ -1951,23 +1950,15 @@ describe("lease protocol", () => {
   it("marks a take that never landed as incomplete after the settle window", async () => {
     const machine = await enrol();
     const holder = newLogin();
-    const settling = id();
     const stuck = id();
     await client.control("/board/seed", {
       tasks: [
-        {
-          id: settling,
-          title: "Settling",
-          comments: [{ author: holder, body: `claim: ${holder}/hub`, createdAt: ago(10) }],
-        },
-        {
-          id: stuck,
-          title: "Stuck",
-          comments: [{ author: holder, body: `claim: ${holder}/hub`, createdAt: ago(120) }],
-        },
+        { id: stuck, title: "Stuck", comments: [{ author: holder, body: `claim: ${holder}/hub` }] },
       ],
     });
-    expect((await cardFor(machine, settling))?.lease?.state).toBe("active");
+    expect((await cardFor(machine, stuck))?.lease?.state).toBe("active");
+    // Three minutes on: past the 60 s settle window, still unassigned.
+    await client.control("/lease/age", { taskId: stuck, hours: 0.05 });
     const card = await cardFor(machine, stuck);
     expect(card?.lease).toMatchObject({ holder: { login: holder }, state: "incomplete" });
     expect(card?.column).toBe("stuck");
@@ -1985,8 +1976,8 @@ describe("lease protocol", () => {
           id: task,
           title: "Founder release",
           comments: [
-            { author: holder, body: `claim: ${holder}/hub`, createdAt: ago(300) },
-            { author: stranger, body: "release: done", createdAt: ago(200) },
+            { author: holder, body: `claim: ${holder}/hub` },
+            { author: stranger, body: "release: done" },
           ],
           assignees: [holder],
           labels: ["claimed"],

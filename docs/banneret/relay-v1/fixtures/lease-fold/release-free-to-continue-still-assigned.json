@@ -16,12 +16,8 @@
         "body": "release: handing_over · free to continue"
       }
     ],
-    "assignees": [
-      "ada-example"
-    ],
-    "labels": [
-      "claimed"
-    ],
+    "assignees": ["ada-example"],
+    "labels": ["claimed"],
     "founders": [],
     "now": "2026-11-20T10:30:00Z"
   },

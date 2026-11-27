@@ -16,13 +16,8 @@
         "body": "claim: bob-example/hub"
       }
     ],
-    "assignees": [
-      "ada-example",
-      "bob-example"
-    ],
-    "labels": [
-      "claimed"
-    ],
+    "assignees": ["ada-example", "bob-example"],
+    "labels": ["claimed"],
     "founders": [],
     "now": "2026-11-20T10:30:00Z"
   },
@@ -31,10 +26,7 @@
       "holder": "bob-example",
       "state": "conflict",
       "since": "2026-11-20T10:01:00Z",
-      "claimants": [
-        "bob-example",
-        "ada-example"
-      ]
+      "claimants": ["bob-example", "ada-example"]
     },
     "lastRelease": null,
     "releases": []

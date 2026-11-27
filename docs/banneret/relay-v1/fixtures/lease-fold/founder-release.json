@@ -18,9 +18,7 @@
     ],
     "assignees": [],
     "labels": [],
-    "founders": [
-      "ada-example"
-    ],
+    "founders": ["ada-example"],
     "now": "2026-11-20T10:30:00Z"
   },
   "expected": {

@@ -16,12 +16,8 @@
         "body": "release: done"
       }
     ],
-    "assignees": [
-      "ada-example"
-    ],
-    "labels": [
-      "claimed"
-    ],
+    "assignees": ["ada-example"],
+    "labels": ["claimed"],
     "founders": [],
     "now": "2026-11-20T10:30:00Z"
   },
@@ -30,9 +26,7 @@
       "holder": "ada-example",
       "state": "active",
       "since": "2026-11-20T10:01:00Z",
-      "claimants": [
-        "ada-example"
-      ]
+      "claimants": ["ada-example"]
     },
     "lastRelease": null,
     "releases": []
