@@ -33,11 +33,14 @@
           "scope": "example-org/example-app",
           "key": "51",
           "url": "https://github.com/example-org/example-app/issues/51"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
       },
       "column": "free",
       "status": "planned",
       "statusWhy": "Open and nobody has taken it yet.",
+      "prs": [],
       "restsOn": [
         "t_K9w3Ls"
       ]
@@ -51,7 +54,9 @@
           "scope": "example-org/example-app",
           "key": "42",
           "url": "https://github.com/example-org/example-app/issues/42"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
       },
       "column": "taken",
       "status": "planned",
@@ -67,6 +72,7 @@
         "staleAt": "2026-11-26T15:58:00Z",
         "expiresAt": "2026-11-27T09:58:00Z"
       },
+      "prs": [],
       "restsOn": []
     },
     {
@@ -78,11 +84,13 @@
           "scope": "example-org/example-app",
           "key": "47",
           "url": "https://github.com/example-org/example-app/issues/47"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": null
       },
       "column": "stuck",
       "status": "needs_you",
-      "statusWhy": "bo-example has been quiet for 7 hours, so the claim is stale.",
+      "statusWhy": "Required checks are failing on pull request 88.",
       "lease": {
         "holder": {
           "id": "p_3Nc8vR",
@@ -94,14 +102,21 @@
         "staleAt": "2026-11-26T09:00:00Z",
         "expiresAt": "2026-11-27T03:00:00Z"
       },
-      "pr": {
-        "number": 88,
-        "url": "https://github.com/example-org/example-app/pull/88",
-        "state": "open"
-      },
-      "checks": {
-        "state": "failing"
-      },
+      "prs": [
+        {
+          "number": 86,
+          "url": "https://github.com/example-org/example-app/pull/86",
+          "state": "closed"
+        },
+        {
+          "number": 88,
+          "url": "https://github.com/example-org/example-app/pull/88",
+          "state": "open",
+          "checks": {
+            "state": "failing"
+          }
+        }
+      ],
       "restsOn": []
     },
     {
@@ -113,19 +128,23 @@
           "scope": "example-org/example-app",
           "key": "44",
           "url": "https://github.com/example-org/example-app/issues/44"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": "2026-11-26T08:20:00Z"
       },
       "column": "validating",
       "status": "built",
       "statusWhy": "The pull request merged and nobody has checked it yet.",
-      "pr": {
-        "number": 85,
-        "url": "https://github.com/example-org/example-app/pull/85",
-        "state": "merged"
-      },
-      "checks": {
-        "state": "passing"
-      },
+      "prs": [
+        {
+          "number": 85,
+          "url": "https://github.com/example-org/example-app/pull/85",
+          "state": "merged",
+          "checks": {
+            "state": "passing"
+          }
+        }
+      ],
       "restsOn": []
     },
     {
@@ -137,19 +156,23 @@
           "scope": "example-org/example-app",
           "key": "39",
           "url": "https://github.com/example-org/example-app/issues/39"
-        }
+        },
+        "openedAt": "2026-11-20T09:00:00Z",
+        "closedAt": "2026-11-25T16:00:00Z"
       },
       "column": "shipped",
       "status": "checked",
       "statusWhy": "A founder checked it after the merge.",
-      "pr": {
-        "number": 80,
-        "url": "https://github.com/example-org/example-app/pull/80",
-        "state": "merged"
-      },
-      "checks": {
-        "state": "passing"
-      },
+      "prs": [
+        {
+          "number": 80,
+          "url": "https://github.com/example-org/example-app/pull/80",
+          "state": "merged",
+          "checks": {
+            "state": "passing"
+          }
+        }
+      ],
       "restsOn": []
     }
   ]
