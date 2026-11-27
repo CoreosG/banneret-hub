@@ -5,6 +5,7 @@ import type {
   BanneretBoardCard,
   BanneretBoardLease,
   BanneretBoardPr,
+  BanneretBoardTask,
 } from "@t3tools/contracts";
 
 import { cleanLogin } from "./enterprise.logic";
@@ -100,9 +101,103 @@ export function prLine(pr: BanneretBoardPr): string {
   return `${head} \u00b7 ${CHECK_STATES[pr.checks.state] ?? `checks ${pr.checks.state.replaceAll("_", " ")}`}`;
 }
 
-/** One line per linked pull request, oldest first; empty when none is linked. */
-export const prLines = (card: Pick<BanneretBoardCard, "prs">): ReadonlyArray<string> =>
-  card.prs.map(prLine);
+const CHECK_RANK: Readonly<Record<string, number>> = { passing: 0, pending: 1, failing: 3 };
+const checkRank = (state: string) => CHECK_RANK[state] ?? 2;
+
+export interface PrSummary {
+  readonly label: string;
+  /** All linked pull requests merged. */
+  readonly merged: boolean;
+  /** The worst check state among open pull requests, when the relay read any. */
+  readonly checks: { readonly state: string; readonly label: string } | null;
+}
+
+/**
+ * One line for a card's pull requests: "#61 open" for one, "3 pull requests, 1 open" for more,
+ * with the worst check state among the open ones. Checks on closed or merged ones no longer
+ * matter, so they are left out. Null when none is linked.
+ */
+export function prSummary(prs: ReadonlyArray<BanneretBoardPr>): PrSummary | null {
+  const first = prs[0];
+  if (first === undefined) return null;
+  const open = prs.filter((pr) => pr.state === "open");
+  const label =
+    prs.length === 1
+      ? `#${first.number} ${PR_STATES[first.state] ?? first.state.replaceAll("_", " ")}`
+      : `${prs.length} pull requests, ${open.length} open`;
+  let worst: string | null = null;
+  for (const pr of open) {
+    const state = pr.checks?.state;
+    if (state !== undefined && (worst === null || checkRank(state) > checkRank(worst))) {
+      worst = state;
+    }
+  }
+  return {
+    label,
+    merged: prs.every((pr) => pr.state === "merged"),
+    checks:
+      worst === null
+        ? null
+        : {
+            state: worst,
+            label: CHECK_STATES[worst] ?? `checks ${worst.replaceAll("_", " ")}`,
+          },
+  };
+}
+
+/** "banneret-hub" and "#58": the last part of the tracker scope and the task's key. */
+export function taskRef(task: BanneretBoardTask): {
+  readonly repo: string;
+  readonly number: string;
+} {
+  const repo =
+    task.ref.scope
+      .split("/")
+      .filter((part) => part.trim() !== "")
+      .at(-1) ?? "";
+  return { repo, number: `#${task.ref.key}` };
+}
+
+/** Whether `login` holds the card's lease. Logins compare case-insensitively. */
+export function heldBy(card: Pick<BanneretBoardCard, "lease">, login: string): boolean {
+  const holder = cleanLogin(card.lease?.holder.login).toLowerCase();
+  return holder !== "" && holder === cleanLogin(login).toLowerCase();
+}
+
+const LEGEND_ZEROS = ["needs_you", "sent_back", "built", "checked", "planned", "ruled_dead"];
+
+/** Cards per status for the legend: every known status starts at 0, except `blocked`. */
+export function statusCounts(
+  cards: ReadonlyArray<Pick<BanneretBoardCard, "status">>,
+): Record<string, number> {
+  const counts: Record<string, number> = Object.fromEntries(LEGEND_ZEROS.map((s) => [s, 0]));
+  for (const card of cards) counts[card.status] = (counts[card.status] ?? 0) + 1;
+  return counts;
+}
+
+const COLUMN_HINTS: Readonly<Record<string, string>> = {
+  free: "Nobody has claimed these.",
+  taken: "Claimed and being built.",
+  validating: "A pull request is ready.",
+  stuck: "Blocked, quiet or failing.",
+  shipped: "Merged or closed as done.",
+};
+
+/** A short line under a known column's name; none for a column the hub does not know. */
+export const columnHint = (id: string): string | undefined => COLUMN_HINTS[id];
+
+/** "3 free to take, 2 taken, 3 stuck, 4 shipped" from the known columns that exist. */
+export function columnCountsLine(columns: ReadonlyArray<BoardColumnView>): string {
+  const count = (id: string) => columns.find((column) => column.id === id)?.cards.length;
+  const parts: Array<string> = [];
+  const free = count("free");
+  if (free !== undefined) parts.push(`${free} free to take`);
+  for (const id of ["taken", "stuck", "shipped"]) {
+    const n = count(id);
+    if (n !== undefined) parts.push(`${n} ${id}`);
+  }
+  return parts.join(", ");
+}
 
 export interface BoardColumnView {
   readonly id: string;
@@ -111,14 +206,17 @@ export interface BoardColumnView {
 }
 
 /** The relay's columns in its order; a card naming an unknown column goes to a trailing "Other". */
-export function boardColumns(board: BanneretBoard): ReadonlyArray<BoardColumnView> {
+export function boardColumns(
+  board: BanneretBoard,
+  cards: ReadonlyArray<BanneretBoardCard> = board.cards,
+): ReadonlyArray<BoardColumnView> {
   const known = new Set(board.columns.map((column) => column.id));
   const columns = board.columns.map((column) => ({
     id: column.id,
     title: column.title,
-    cards: board.cards.filter((card) => card.column === column.id),
+    cards: cards.filter((card) => card.column === column.id),
   }));
-  const other = board.cards.filter((card) => !known.has(card.column));
+  const other = cards.filter((card) => !known.has(card.column));
   return other.length === 0 ? columns : [...columns, { id: "", title: "Other", cards: other }];
 }
 

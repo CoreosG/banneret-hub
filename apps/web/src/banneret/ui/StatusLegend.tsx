@@ -9,6 +9,8 @@ export function StatusLegend(props: {
   readonly counts?: Readonly<Record<string, number>>;
   readonly statuses?: ReadonlyArray<string>;
   readonly showAtWork?: boolean;
+  /** How many items an agent is at work on; a zero dims the chip like a status. */
+  readonly atWorkCount?: number;
   readonly className?: string;
 }) {
   const { counts } = props;
@@ -47,9 +49,20 @@ export function StatusLegend(props: {
         );
       })}
       {props.showAtWork === false ? null : (
-        <li className="inline-flex h-6 items-center gap-1.5 px-2 text-2xs text-muted-foreground">
+        <li
+          data-slot="legend-at-work"
+          className={cn(
+            "inline-flex h-6 items-center gap-1.5 px-2 text-2xs text-muted-foreground",
+            props.atWorkCount === 0 && "opacity-45",
+          )}
+        >
           <span aria-hidden className="inline-flex size-3 rounded-full ring-2 ring-primary" />
           Agent at work
+          {props.atWorkCount === undefined ? null : (
+            <span data-count className="font-semibold text-foreground tabular-nums">
+              {props.atWorkCount}
+            </span>
+          )}
         </li>
       )}
     </ul>

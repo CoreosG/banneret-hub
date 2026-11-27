@@ -232,8 +232,13 @@ async function openBoard(stack: DisposableStack, path = "/board") {
 
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
 const column = (name: string) => page.getByRole("region", { name });
+const cardOf = (taskId: string) => document.querySelector(`[data-task-id="${taskId}"]`)!;
 const chipOf = (taskId: string) =>
-  document.querySelector(`[data-task-id="${taskId}"] [data-testid="lease-chip"]`);
+  document.querySelector<HTMLElement>(`[data-task-id="${taskId}"] [data-slot="lease-chip"]`);
+const summaryText = () =>
+  page.getByRole("heading", { level: 1 }).element().closest("header")?.querySelector("p")
+    ?.textContent ?? "";
+const legend = () => document.querySelector('[aria-label="Status legend"]')!;
 
 describe("Enterprise board", () => {
   it("draws the relay's five columns in order, each card opening its Task tab", async () => {
@@ -244,33 +249,74 @@ describe("Enterprise board", () => {
 
     await userEvent.click(sidebar().getByRole("button", { name: "Board" }));
     expect(router.state.location.pathname).toBe("/board");
+    await expect.element(page.getByRole("heading", { level: 1, name: "Board" })).toBeVisible();
     const titles = [...document.querySelectorAll("section[aria-label] h2")].map(
-      (heading) => heading.firstElementChild?.textContent,
+      (heading) => heading.textContent,
     );
     expect(titles).toEqual(["Free", "Taken", "Validating", "Stuck", "Shipped"]);
     await expect.element(column("Stuck").getByText("Profile blocks")).toBeVisible();
     await expect.element(column("Taken").getByText("Guild invites")).toBeVisible();
     expect(column("Validating").element().querySelectorAll("li")).toHaveLength(0);
+    await expect.element(column("Validating").getByText("No tasks.")).toBeVisible();
 
-    // The status mark shows its word and the relay's reason on hover; PR and checks show too.
-    const invites = document.querySelector('[data-task-id="2"]')!;
-    const mark = invites.querySelector("[data-status]")!;
-    expect(mark.textContent).toContain("◆");
-    expect(mark.textContent).toContain("needs you");
-    await userEvent.hover(mark);
+    // The summary counts the known columns.
+    expect(summaryText()).toBe("7 tasks. 1 free to take, 2 taken, 3 stuck, 1 shipped");
+
+    // The pill says the status; the relay's reason is only its tooltip, never printed.
+    const invites = cardOf("2");
+    expect(invites.querySelector('[data-slot="status-pill"]')?.textContent).toBe("Needs you");
+    expect(invites.textContent).not.toContain("Required checks are failing.");
+    expect(invites.querySelector('[data-slot="task-ref"]')?.textContent).toBe("example-app#2");
+    await userEvent.hover(invites.querySelector('[data-slot="status-pill"]')!);
     await expect.element(page.getByText("Required checks are failing.")).toBeVisible();
-    expect(invites.textContent).toContain("PR #76 closed");
-    expect(invites.textContent).toContain("PR #77 open · checks failing");
-    expect(invites.querySelectorAll("[data-pr]")).toHaveLength(2);
+    // Linked PRs sum to one line with the worst check state of the open ones.
+    expect(invites.querySelector("[data-pr]")?.textContent).toBe(
+      "2 pull requests, 1 open·checks failing",
+    );
+    expect(invites.querySelector("[data-checks]")?.getAttribute("data-tone")).toBe("error");
     expect(invites.querySelector("a")).toBeNull();
+    expect(cardOf("1").querySelector("[data-pr]")).toBeNull();
 
-    await expect.element(page.getByRole("list", { name: "Status legend" })).toBeVisible();
+    // Only needs_you and sent_back cards carry the accent bar.
+    const accented = [...document.querySelectorAll("[data-task-id]")]
+      .filter((row) => row.querySelector('[data-slot="accent-bar"]') !== null)
+      .map((row) => (row as HTMLElement).dataset.taskId);
+    expect(accented).toEqual(["2", "6"]);
 
     // No thread is routed on the board, so the card opens the Task tab in its dialog.
-    await userEvent.click(invites.querySelector("[data-open-task]")!);
+    await userEvent.click(invites.querySelector('[data-slot="task-card"]')!);
     const dialog = page.getByRole("dialog");
     await expect.element(dialog.getByRole("heading", { name: "Guild invites" })).toBeVisible();
     expect(document.querySelector('[data-task-panel="2"]')).not.toBeNull();
+  });
+
+  it("fits five columns of at least 180px without sideways scroll in a 1280px window with the sidebar open", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    // The main area of a 1280px window with the 256px sidebar open is 1024px wide.
+    const nav = sidebar().element().getBoundingClientRect().width;
+    await page.viewport(1024 + Math.ceil(nav), 800);
+    await emit(state(["board"], boardRead(boardOf(CARDS()))));
+    await expect.element(page.getByText("Guild invites")).toBeVisible();
+    const grid = document.querySelector<HTMLElement>('[data-layout="board-columns"]')!;
+    const widths = [...grid.children].map((child) => child.getBoundingClientRect().width);
+    expect(widths).toHaveLength(5);
+    for (const width of widths) expect(width).toBeGreaterThanOrEqual(180);
+    expect(grid.scrollWidth).toBeLessThanOrEqual(grid.clientWidth);
+
+    // A long column scrolls on its own; the grid and the other columns stay put.
+    const many = Array.from({ length: 20 }, (_, index) =>
+      card(`s${index}`, `Stuck task ${index}`, "stuck"),
+    );
+    await emit(state(["board"], boardRead(boardOf([...CARDS(), ...many]))));
+    await expect.element(page.getByText("Stuck task 19")).toBeInTheDocument();
+    const list = column("Stuck").element().querySelector("ul")!;
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(grid.scrollHeight).toBeLessThanOrEqual(grid.clientHeight);
+    expect(column("Free").element().getBoundingClientRect().height).toBe(
+      column("Stuck").element().getBoundingClientRect().height,
+    );
   });
 
   it("shows each lease state on its chip", async () => {
@@ -280,22 +326,23 @@ describe("Enterprise board", () => {
     await emit(state(["board"], boardRead(boardOf(CARDS()))));
     await expect.element(page.getByText("Guild invites")).toBeVisible();
 
+    const tone = (taskId: string) => chipOf(taskId)?.getAttribute("data-tone");
     expect(chipOf("1")).toBeNull();
-    expect(chipOf("2")?.textContent).toBe("bo-example · active 12 min ago");
-    expect(chipOf("3")?.textContent).toBe("cy-example · quiet 7 h");
-    expect(chipOf("3")?.className).toContain("warning");
-    expect(chipOf("4")?.textContent).toBe("di-example · expired, should be released");
-    expect(chipOf("4")?.className).toContain("destructive");
-    expect(chipOf("5")?.textContent).toBe("ed-example · paused");
-    expect(chipOf("6")?.textContent).toBe("fi-example · conflict, two people claim this");
-    expect(chipOf("6")?.className).toContain("destructive");
+    expect(chipOf("2")?.textContent).toBe("bo-exampleactive 12 min ago");
+    expect(chipOf("3")?.textContent).toBe("cy-examplequiet 7 h");
+    expect(tone("3")).toBe("warn");
+    expect(chipOf("4")?.textContent).toBe("di-exampleexpired, should be released");
+    expect(tone("4")).toBe("error");
+    expect(chipOf("5")?.textContent).toBe("ed-examplepaused");
+    expect(chipOf("6")?.textContent).toBe("fi-exampleconflict, two people claim this");
+    expect(tone("6")).toBe("error");
 
     // Without the section's leases flag the chips stay off.
     await emit(state(["board"], boardRead(boardOf(CARDS()), { leases: false })));
-    await vi.waitFor(() => expect(document.querySelector('[data-testid="lease-chip"]')).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector('[data-slot="lease-chip"]')).toBeNull());
   });
 
-  it("shows the checked mark on a checked card and only lists it in the legend when the board flags it", async () => {
+  it("counts statuses in the legend, dims zeros, and lists Checked only when the board flags it", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openBoard(stack);
     await using _screen = screen;
@@ -303,41 +350,88 @@ describe("Enterprise board", () => {
       ...CARDS(),
       card("8", "Signed off", "shipped", { status: "checked", statusWhy: "Checked after merge." }),
     ];
-    const legend = () => document.querySelector('[aria-label="Status legend"]')!.textContent ?? "";
+    const chip = (status: string) =>
+      legend().querySelector<HTMLElement>(`[data-status="${status}"]`);
 
     await emit(state(["board"], boardRead(boardOf(cards()))));
     await expect.element(page.getByText("Signed off")).toBeVisible();
-    const signedOff = document.querySelector('[data-task-id="8"] [data-status]')!;
-    expect(signedOff.textContent).toContain("●");
-    expect(signedOff.textContent).toContain("checked");
+    expect(cardOf("8").querySelector('[data-slot="status-pill"]')?.textContent).toBe("Checked");
     // The card carries no who and when, and a built card carries no notice about a rejected check.
-    expect(document.querySelector('[data-task-id="8"]')?.querySelector("time")).toBeNull();
-    const built = document.querySelector('[data-task-id="7"]')!;
-    expect(built.textContent).toContain("built, unchecked");
-    expect(built.textContent).not.toContain("does not count");
-    expect(legend()).toContain("●");
-    expect(legend()).toContain("◐");
-    expect(legend()).toContain("⊘");
-    expect(legend()).toContain("blocked");
+    expect(cardOf("8").querySelector("time")).toBeNull();
+    expect(cardOf("7").textContent).toContain("Built, needs a check");
+    expect(cardOf("7").textContent).not.toContain("does not count");
 
-    await emit(state(["board"], boardRead(boardOf(cards()), { checked: false })));
-    await vi.waitFor(() => expect(legend()).not.toContain("●"));
-    expect(legend()).toContain("built, unchecked");
+    expect(chip("planned")?.querySelector("[data-count]")?.textContent).toBe("4");
+    expect(chip("needs_you")?.querySelector("[data-count]")?.textContent).toBe("2");
+    expect(chip("checked")?.querySelector("[data-count]")?.textContent).toBe("1");
+    expect(chip("ruled_dead")?.className).toContain("opacity-45");
+    expect(chip("planned")?.className).not.toContain("opacity-45");
+    // Blocked shows only once a card is blocked.
+    expect(chip("blocked")).toBeNull();
+
+    await emit(
+      state(
+        ["board"],
+        boardRead(boardOf([...cards(), card("9", "Waits", "stuck", { status: "blocked" })]), {
+          checked: false,
+        }),
+      ),
+    );
+    await vi.waitFor(() => expect(chip("checked")).toBeNull());
+    expect(chip("blocked")?.querySelector("[data-count]")?.textContent).toBe("1");
+    expect(chip("built")).not.toBeNull();
   });
 
   it("rings a card whose task has a live agent session in the work file", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openBoard(stack);
     await using _screen = screen;
-    await emit(state(["board"], boardRead(boardOf(CARDS()), { atWork: ["3"] })));
+    await emit(state(["board"], boardRead(boardOf(CARDS()), { atWork: ["3", "gone"] })));
     await expect.element(page.getByText("Profile blocks")).toBeVisible();
     const ringed = [...document.querySelectorAll("[data-at-work]")].map(
       (element) => (element as HTMLElement).dataset.taskId,
     );
     expect(ringed).toEqual(["3"]);
-    const ring = document.querySelector('[data-task-id="3"] [data-status] > span[aria-hidden]')!;
-    expect(ring.className).toContain("ring-2");
-    expect(document.querySelector('[data-task-id="3"]')?.textContent).toContain("agent at work");
+    const pill = cardOf("3").querySelector<HTMLElement>('[data-slot="status-pill"]')!;
+    expect(pill.className).toContain("ring-2");
+    expect(pill.textContent).toContain("agent at work");
+    expect(cardOf("1").querySelector('[data-slot="status-pill"]')?.className).not.toContain(
+      "ring-2",
+    );
+    // The legend counts only cards on the board.
+    expect(legend().querySelector('[data-slot="legend-at-work"] [data-count]')?.textContent).toBe(
+      "1",
+    );
+  });
+
+  it("filters to the tasks this person holds with Mine, and back", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    const cards = () => [
+      ...CARDS(),
+      card("8", "My work", "taken", { lease: lease("Ada-Example", "active", MINUTE) }),
+    ];
+    await emit(state(["board"], boardRead(boardOf(cards()))));
+    await expect.element(page.getByText("My work")).toBeVisible();
+
+    await userEvent.click(page.getByRole("button", { name: "Mine" }));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(1));
+    expect(cardOf("8")).not.toBeNull();
+    expect(summaryText()).toBe("You hold 1 task. 0 free to take, 1 taken, 0 stuck, 0 shipped");
+    expect(legend().querySelector('[data-status="planned"] [data-count]')?.textContent).toBe("1");
+
+    // Without leases there is nothing to filter by, so the toggle goes and everyone shows.
+    await emit(state(["board"], boardRead(boardOf(cards()), { leases: false })));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(8));
+    expect(page.getByRole("button", { name: "Mine" }).elements()).toHaveLength(0);
+
+    await emit(state(["board"], boardRead(boardOf(CARDS()))));
+    await userEvent.click(page.getByRole("button", { name: "Mine" }));
+    await expect.element(page.getByText("Nothing of yours here.")).toBeVisible();
+    expect(summaryText()).toBe("You hold no tasks.");
+    await userEvent.click(page.getByRole("button", { name: "Everyone" }));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(7));
   });
 
   it("has no row without the board section, and says so when the board is empty or partial", async () => {
@@ -403,7 +497,7 @@ describe("Enterprise board", () => {
       lease: lease(HOSTILE, "active", MINUTE),
     };
     await emit(state(["board"], boardRead(boardOf([evil]))));
-    await expect.element(page.getByText(HOSTILE, { exact: true })).toBeVisible();
+    await expect.element(page.getByText(HOSTILE, { exact: true }).first()).toBeVisible();
     const row = document.querySelector('[data-task-id="9"]')!;
     expect(row.querySelector("img")).toBeNull();
     expect(row.querySelector("a")).toBeNull();

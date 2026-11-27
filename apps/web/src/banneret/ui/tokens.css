@@ -84,4 +84,15 @@
   [data-radius="panel"] {
     border-radius: 0.625rem;
   }
+
+  /* Board columns: flexible, at least 180px, so five fit at 1280px with the sidebar open. A
+     trailing extra column needs no count. Narrower than that, the grid scrolls, not the page. */
+  [data-layout="board-columns"] {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(180px, 1fr);
+    gap: 0.75rem;
+    min-height: 20rem;
+    overflow-x: auto;
+  }
 }

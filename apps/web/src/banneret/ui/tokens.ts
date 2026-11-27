@@ -31,6 +31,8 @@ export const TEXT_SECTION = { "data-text": "section" } as const;
 export const TEXT_SUMMARY = { "data-text": "summary" } as const;
 /** The 10px radius of sections and board columns. */
 export const RADIUS_PANEL = { "data-radius": "panel" } as const;
+/** The Board's column grid. */
+export const LAYOUT_BOARD_COLUMNS = { "data-layout": "board-columns" } as const;
 
 // Spacing uses only Tailwind steps 1, 2, 3, 4, 6, 8 (4 to 32 px): 4 inside chips; 8 between chips,
 // rows and cards; 12 card padding and column gaps; 16 header to content and between sections; 24
