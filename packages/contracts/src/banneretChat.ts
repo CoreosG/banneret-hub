@@ -28,6 +28,7 @@ export const ChatConversation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literals(["channel"]),
     name: Schema.String,
+    defaultChannel: Schema.optionalKey(Schema.Literal(true)),
     private: Schema.Boolean,
     id: Schema.String,
     purpose: Schema.String,

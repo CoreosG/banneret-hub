@@ -26,10 +26,11 @@ import { EnterpriseSidebarRows } from "../EnterpriseSidebarRows";
 import { TabsFrame } from "../tabs/TabsFrame";
 import { useTabsStore } from "../tabs/tabsStore";
 import * as Schema from "effect/Schema";
-import { ChatConversations } from "@t3tools/contracts";
+import { ChatConversations, ChatMessages } from "@t3tools/contracts";
 import { DmPrivacy, ChannelPage } from "./ChannelPage";
 import { NeedsRow } from "../TodayRows";
 import { chatRpc } from "./client";
+const decodeMessages = Schema.decodeUnknownSync(ChatMessages);
 const decodeConversations = Schema.decodeUnknownSync(ChatConversations);
 declare module "vite-plus/test/browser" {
   interface BrowserCommands {
@@ -53,7 +54,11 @@ it("answers a named agent question from its Needs you row", async () => {
     return result.value;
   });
   const target = { environmentId: EnvironmentId.make("local"), relayOrigin: "https://chat.test" };
-  await using screen = await render(<NeedsRow item={item} target={target} />);
+  {
+    await using limited = await render(<NeedsRow item={item} target={target} />);
+    expect(limited.getByRole("textbox", { name: "Your answer" }).elements()).toHaveLength(0);
+  }
+  await using screen = await render(<NeedsRow asks item={item} target={target} />);
   await expect.element(screen.getByRole("textbox", { name: "Your answer" })).toBeVisible();
   await screen.getByRole("button", { name: "Linux" }).click();
   await expect.element(screen.getByText("Answer sent")).toBeVisible();
@@ -100,22 +105,25 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     return () => {};
   });
   let revision = 0;
+  let limited = true;
   const emit = (sections: string[]) =>
     publish?.({
       sections: ["today", "needs", "board", "map", "feed", "team", ...sections],
       sectionsKnown: true,
-      chatFlags: [
-        "channels",
-        "threads",
-        "private_channels",
-        "reactions",
-        "dms",
-        "group_dms",
-        "agents",
-        "agent_dms",
-        "others_agents",
-        "agent_owner_dm_read",
-      ],
+      chatFlags: limited
+        ? ["channels", "threads", "private_channels"]
+        : [
+            "channels",
+            "threads",
+            "private_channels",
+            "reactions",
+            "dms",
+            "group_dms",
+            "agents",
+            "agent_dms",
+            "others_agents",
+            "agent_owner_dm_read",
+          ],
       chatRevision: ++revision,
       revision: 1,
       joined: true,
@@ -137,6 +145,17 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       )
     )
       emit(["chat"]);
+    if (limited && action.kind === "messages") {
+      const page = decodeMessages(result.value);
+      return {
+        ...page,
+        items: page.items.map((m) => ({
+          ...m,
+          taskRef: "hidden-task",
+          reactions: [{ emoji: "👍", count: 1, mine: false }],
+        })),
+      };
+    }
     return result.value;
   });
   const style = document.createElement("style");
@@ -178,7 +197,19 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await vi.waitFor(() => expect(publish).toBeDefined());
   await act(() => emit([]));
   expect(screen.getByText("Channels", { exact: true }).elements()).toHaveLength(0);
+  const created = await commands.companyChat("leo", {
+    kind: "create",
+    name: "design",
+    purpose: "",
+    private: false,
+  });
+  if (!created.ok) throw new Error(created.message);
   await act(() => emit(["chat"]));
+  await screen.getByRole("button", { name: "design", exact: true }).click();
+  await expect.element(screen.getByRole("heading", { name: "Welcome to #design" })).toBeVisible();
+  await expect.element(screen.getByText("Join #design to post")).toBeVisible();
+  await screen.getByRole("button", { name: "Join", exact: true }).click();
+  await expect.element(screen.getByRole("textbox", { name: "Channel message" })).toBeVisible();
   await expect
     .element(screen.getByRole("button", { name: /^platform\b/ }))
     .toHaveAttribute("data-unread", "true");
@@ -199,6 +230,19 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   }
   expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: false });
   await proof("channel");
+  expect(screen.getByText("Direct messages", { exact: true }).elements()).toHaveLength(0);
+  expect(screen.getByRole("textbox", { name: "Search conversation" }).elements()).toHaveLength(0);
+  expect(screen.getByText("hidden-task").elements()).toHaveLength(0);
+  expect(screen.getByRole("button", { name: "👍 1" }).elements()).toHaveLength(0);
+  expect(screen.getByText("Upload verification").elements()).toHaveLength(0);
+  const actions = screen.getByLabelText("Message actions").first();
+  await actions.click();
+  expect(screen.getByRole("button", { name: "Post to GitHub" }).elements()).toHaveLength(0);
+  expect(screen.getByRole("button", { name: "React with thumbs up" }).elements()).toHaveLength(0);
+  expect(screen.getByText(/Only an explicit @mention/).elements()).toHaveLength(0);
+  await actions.click();
+  limited = false;
+  await act(() => emit(["chat"]));
   const level = screen.getByRole("combobox", { name: "Channel notifications" });
   await level.selectOptions("all");
   await expect.element(level).toHaveValue("all");
@@ -218,16 +262,18 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await expect.element(messageRow("Test passed on Linux.")).toBeVisible();
   expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
   await proof("thread");
+  await messageRow("Test passed on Linux.").getByLabelText("Message actions").click();
   await messageRow("Test passed on Linux.")
     .getByRole("button", { name: "Edit", exact: true })
-    .click({ force: true });
+    .click();
   await reply.fill("Checked on Linux.");
   await screen.getByRole("button", { name: "Send message" }).last().click();
   await expect.element(messageRow("Checked on Linux.")).toBeVisible();
   await messageRow("Checked on Linux.")
     .getByRole("button", { name: "Delete", exact: true })
-    .click({ force: true });
+    .click();
   await expect.element(screen.getByText("Message deleted")).toBeVisible();
+  await expect.element(screen.getByRole("button", { name: /2 replies/ })).toBeVisible();
   await screen.getByRole("button", { name: "Start direct message" }).click();
   await screen.getByRole("checkbox", { name: "kim" }).click();
   await screen.getByRole("checkbox", { name: "leo" }).click();
@@ -246,7 +292,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   if (secondDm?.kind !== "dm") throw new Error("Leo cannot open the DM.");
   {
     await using leoScreen = await render(
-      <DmPrivacy channel={secondDm} login="leo" title="ada, kim" />,
+      <DmPrivacy showAgentReaders channel={secondDm} login="leo" title="ada, kim" />,
     );
     await expect
       .element(leoScreen.getByText("ada's agents can read this conversation."))

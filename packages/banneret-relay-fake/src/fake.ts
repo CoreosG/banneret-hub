@@ -129,7 +129,7 @@ interface HealthSource {
 }
 
 export interface FakeRelayOptions {
-  readonly chat?: boolean;
+  readonly chat?: boolean | { readonly defaultChannels: readonly string[] };
   readonly teamPreset?: "company" | "community";
   readonly promote?: boolean;
   readonly search?: boolean;
@@ -719,6 +719,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     options.publicOrigin === undefined ? undefined : parsePublicOrigin(options.publicOrigin);
   if (options.pool && spec.check("PoolConfig", options.pool))
     throw new Error("Invalid pool configuration.");
+  const defaultNames =
+    typeof options.chat === "object"
+      ? options.chat.defaultChannels
+      : options.chat
+        ? ["general"]
+        : [];
+  if (spec.check("ChatDefaultChannels", defaultNames))
+    throw new Error("Invalid chat.defaultChannels.");
   const board = options.board ?? { staleSeconds: 21600, expirySeconds: 86400 };
   if (spec.check("LeaseClocks", board) || board.expirySeconds <= board.staleSeconds)
     throw new Error("Invalid lease clocks.");
@@ -822,12 +830,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       networkIdentity: input.networkIdentity ?? null,
       removed: false,
     };
+    for (const channel of defaultChannels) channel.members.add(person.id);
     people.set(person.id, person);
     peopleByLogin.set(person.login, person);
     return person;
   };
-
-  personFor({ login: "cy-example", role: "limited_staff" });
 
   const writeEvent = (stream: Stream, event: RelayEvent) => {
     stream.response.write(
@@ -2273,17 +2280,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   });
   const taskThreads = new Map<string, string>();
   let chatSeq = 0;
-  if (options.chat)
-    channels.set("c_general", {
-      id: "c_general",
-      name: "general",
+  const defaultChannels = defaultNames.map((name) => {
+    const channel: Channel = {
+      id: "c_" + name,
+      name,
       purpose: "",
       private: false,
       agents: "allowed",
       archived: false,
       members: new Set(),
       creator: "",
-    });
+    };
+    channels.set(channel.id, channel);
+    return channel;
+  });
+  personFor({ login: "cy-example", role: "limited_staff" });
   const visible = (c: Channel, p: string) => !c.private || c.members.has(p);
   const chatChange = (channel: Channel, value: ChatChange, person?: string) => {
     if (value.kind === "read.moved") {
@@ -2397,7 +2408,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               .map((personId) => ({ personId, login: people.get(personId)!.login })),
             members: [...channel.members].map(member),
           }
-        : { kind: "channel" as const, private: channel.private, name: channel.name }),
+        : {
+            kind: "channel" as const,
+            ...(defaultChannels.includes(channel) && { defaultChannel: true as const }),
+            private: channel.private,
+            name: channel.name,
+          }),
       purpose: channel.purpose,
       agents: channel.agents,
       archived: channel.archived,
@@ -2511,6 +2527,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (!person || person.removed) throw new RelayError("not_found", "No such person.");
     presence.delete(person.id);
     person.removed = true;
+    for (const channel of defaultChannels) channel.members.delete(person.id);
     ownersAllowingDmReads.delete(person.id);
     snapshotHeads.delete(person.id);
     for (const machine of machines.values())
@@ -2711,6 +2728,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                       "dms",
                       "group_dms",
                       "agents",
+                      "asks",
                       "agent_dms",
                       "others_agents",
                       "agent_owner_dm_read",
@@ -3471,6 +3489,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             [...channels.values()].some((other) => other.id !== id && other.name === patch.name)
           )
             throw new RelayError("malformed", "This channel name is taken.");
+          if (
+            defaultChannels.includes(c) &&
+            ((patch.name && patch.name !== c.name) || patch.archived || patch.private)
+          )
+            throw new RelayError("forbidden", "Default channels must remain available.");
           Object.assign(c, patch);
           chatChange(c, {
             kind: "conversation.updated",
@@ -3494,6 +3517,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               throw new RelayError("not_found", "Unknown person.");
             if (method === "PUT" && c.members.size >= 200 && !c.members.has(memberId))
               throw new RelayError("malformed", "Channel member limit reached.");
+            if (method === "DELETE" && defaultChannels.includes(c) && people.has(memberId))
+              throw new RelayError("forbidden", "All staff belong to default channels.");
             if (method === "PUT") c.members.add(memberId);
             else c.members.delete(memberId);
             chatChange(c, {
@@ -3587,8 +3612,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               message: updated,
             });
           } else {
-            const channel = channelFor("c_general");
-            if (channel.archived || channel.private)
+            const channel = defaultChannels[0];
+            if (!channel || channel.archived || channel.private)
               throw new RelayError("forbidden", "No public discussion channel is available.");
             destination = systemMessage(channel, taskId, "task_linked", task.title);
           }
@@ -3799,6 +3824,19 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           : { ...base, text: "", mentions: [], deleted: true };
         if (!input) {
           reactions.delete(id);
+          if (m.threadRootId) {
+            const root = messages.get(m.threadRootId)!;
+            const { lastReplyAt: _last, ...parent } = root;
+            const replies = [...messages.values()].filter(
+              (reply) => reply.threadRootId === root.id && !reply.deleted && reply.id !== id,
+            );
+            const last = replies.at(-1);
+            messages.set(root.id, {
+              ...parent,
+              replyCount: replies.length,
+              ...(last && { lastReplyAt: last.createdAt }),
+            });
+          }
           if (m.taskRef && taskThreads.get(m.taskRef) === id) taskThreads.delete(m.taskRef);
         }
         messages.set(id, edited);

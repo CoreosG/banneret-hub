@@ -3474,6 +3474,16 @@ describe("chat contract", () => {
   });
   it("creates a channel, syncs edits, and keeps each person's read position private", async () => {
     const owner = await enrol();
+    const listing = await call(owner, "GET", "/relay/v1/chat/conversations");
+    expect(listing.body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          name: "general",
+          defaultChannel: true,
+          me: expect.objectContaining({ member: true }),
+        }),
+      ]),
+    });
     const otherMachine = await enrol({ login: owner.login });
     const outsider = await enrol();
     const path = "/relay/v1/chat";
@@ -3526,7 +3536,7 @@ describe("chat contract", () => {
       });
     }
     expect((await call(owner, "POST", path + "/messages", post)).body).toEqual(root.body);
-    await call(owner, "POST", path + "/messages", {
+    const reply = await call(owner, "POST", path + "/messages", {
       ...post,
       key: randomText(8),
       threadRootId: message.id,
@@ -3536,6 +3546,10 @@ describe("chat contract", () => {
       root: { replyCount: 1 },
       items: [{ text: "Reply" }],
     });
+    await call(owner, "DELETE", path + "/messages/" + (reply.body as { id: string }).id);
+    const after = await call(owner, "GET", path + "/threads/" + message.id);
+    expect(after.body).toMatchObject({ root: { replyCount: 0 }, items: [{ deleted: true }] });
+    expect((after.body as { root: unknown }).root).not.toHaveProperty("lastReplyAt");
     expect(
       (await call(owner, "PATCH", path + "/messages/" + message.id, { text: "Edited" })).body,
     ).toMatchObject({ text: "Edited" });

@@ -21,6 +21,7 @@ import {
   handles,
   conversations,
   conversationTitle,
+  offersConversation,
   members,
   history,
   replyAuthors,
@@ -55,7 +56,7 @@ export function ChannelPage({ id, root, focus }: Omit<View, "enterprise">) {
       key={relayKey(enterprise.target) + "/" + id + "/" + (focus ?? "")}
       enterprise={enterprise}
       id={id}
-      root={root}
+      root={enterprise.feed.chatFlags?.includes("threads") ? root : undefined}
       focus={focus}
     />
   );
@@ -64,10 +65,12 @@ export function DmPrivacy({
   channel,
   title,
   login,
+  showAgentReaders,
 }: {
   channel: Extract<ChatConversation, { kind: "dm" }>;
   title: string;
   login: string | undefined;
+  showAgentReaders: boolean;
 }) {
   return (
     <>
@@ -86,18 +89,21 @@ export function DmPrivacy({
               : "Questions only. This agent takes instructions from " + h.ownerLogin + "."}
           </p>
         ))}
-      {channel.agentReaders.map((p) => (
-        <p key={p.personId}>{p.login}'s agents can read this conversation.</p>
-      ))}
+      {showAgentReaders &&
+        channel.agentReaders.map((p) => (
+          <p key={p.personId}>{p.login}'s agents can read this conversation.</p>
+        ))}
     </>
   );
 }
 function ChannelView({ enterprise, id, root, focus }: View) {
   const { environmentId, relayOrigin } = enterprise.target;
   const load = () => conversations({ environmentId, relayOrigin });
-  const loadPeople = () => members({ environmentId, relayOrigin }, id);
+  const flags = enterprise.feed.chatFlags ?? [];
   const revision = enterprise.feed.chatRevision ?? 0;
-  const rows = useChatRead(load, revision);
+  const [membershipRevision, updateMembership] = useState(0);
+  const membershipChanged = () => updateMembership((n) => n + 1);
+  const rows = useChatRead(load, revision + ":" + membershipRevision);
   const agents = useChatRead(
     () =>
       enterprise.feed.chatFlags?.includes("agents")
@@ -105,8 +111,11 @@ function ChannelView({ enterprise, id, root, focus }: View) {
         : Promise.resolve([]),
     revision,
   );
-  const people = useChatRead(loadPeople, revision);
-  const channel = rows.value?.find((c) => c.id === id);
+  const channel = rows.value?.find((c) => c.id === id && offersConversation(c, flags));
+  const people = useChatRead(
+    () => (channel ? members({ environmentId, relayOrigin }, id) : Promise.resolve([])),
+    revision + ":" + (channel?.id ?? ""),
+  );
   const title = channel ? conversationTitle(channel, enterprise.enrolment.me?.login) : "";
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -138,18 +147,24 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                   <DmPrivacy
                     channel={channel}
                     title={title}
+                    showAgentReaders={
+                      flags.includes("agents") && flags.includes("agent_owner_dm_read")
+                    }
                     login={enterprise.enrolment.me?.login}
                   />
                 ) : (
                   <p>
                     {channel.purpose}{" "}
-                    {channel.agents !== "off" && "Only an explicit @mention wakes another agent."}
+                    {flags.includes("agents") &&
+                      channel.agents !== "off" &&
+                      "Only an explicit @mention wakes another agent."}
                   </p>
                 )}
               </div>
               <button onClick={() => setMembers(!showMembers)}>
                 <UsersIcon size={15} />
-                {channel.memberCount.people} people · {channel.memberCount.agents} agents
+                {channel.memberCount.people} people
+                {flags.includes("agents") && ` · ${channel.memberCount.agents} agents`}
               </button>
               {channel.kind === "channel" && channel.me.member && (
                 <label data-chat-notifications>
@@ -178,31 +193,34 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                   </select>
                 </label>
               )}
-              <FilterBox
-                value={q}
-                onChange={setQ}
-                label="Search conversation"
-                placeholder={"Search " + title}
-              />
+              {flags.includes("search") && (
+                <FilterBox
+                  value={q}
+                  onChange={setQ}
+                  label="Search conversation"
+                  placeholder={"Search " + title}
+                />
+              )}
             </header>
             {showMembers && (
               <section data-chat-members>
                 <b>Members</b> {people.value?.map((p) => p.login).join(", ")} {people.error}
-                {channel.kind === "channel" && (
+                {channel.kind === "channel" && !channel.defaultChannel && channel.me.member && (
                   <button
                     onClick={async () => {
                       try {
                         await chatRpc.run(enterprise.target, {
-                          kind: channel.me.member ? "leave" : "join",
+                          kind: "leave",
                           id,
                         });
+                        membershipChanged();
                         setMembers(false);
                       } catch (e) {
                         setError(String(e));
                       }
                     }}
                   >
-                    {channel.me.member ? "Leave channel" : "Join channel"}
+                    Leave channel
                   </button>
                 )}
               </section>
@@ -215,15 +233,16 @@ function ChannelView({ enterprise, id, root, focus }: View) {
               focus={root ? undefined : focus}
               people={[
                 ...(people.value ?? []),
-                ...(agents.value ?? []).filter(
+                ...(flags.includes("agents") ? (agents.value ?? []) : []).filter(
                   (h) =>
                     enterprise.feed.chatFlags?.includes("others_agents") ||
                     h.owner === enterprise.enrolment.me?.login,
                 ),
               ]}
-              query={q}
+              query={flags.includes("search") ? q : ""}
               open={open}
               tabId={tabId}
+              membershipChanged={membershipChanged}
             />
           </section>
           {root && (
@@ -243,7 +262,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                 focus={focus}
                 people={[
                   ...(people.value ?? []),
-                  ...(agents.value ?? []).filter(
+                  ...(flags.includes("agents") ? (agents.value ?? []) : []).filter(
                     (h) =>
                       enterprise.feed.chatFlags?.includes("others_agents") ||
                       h.owner === enterprise.enrolment.me?.login,
@@ -252,6 +271,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                 query=""
                 open={open}
                 tabId={tabId}
+                membershipChanged={membershipChanged}
               />
             </aside>
           )}
@@ -327,6 +347,7 @@ function Timeline({
   query,
   open,
   tabId,
+  membershipChanged,
   focus,
 }: {
   enterprise: EnterpriseFeed;
@@ -337,8 +358,10 @@ function Timeline({
   query: string;
   open: (root: string) => void;
   tabId: string | undefined;
+  membershipChanged: () => void;
 }) {
   const { environmentId, relayOrigin } = enterprise.target;
+  const flags = enterprise.feed.chatFlags ?? [];
   const [pages, setPages] = useState(1);
   const [localRevision, refresh] = useState(0);
   const [openingCursor] = useState(channel.me.readSeq);
@@ -394,6 +417,7 @@ function Timeline({
     setBusy(true);
     try {
       await chatRpc.run(enterprise.target, action);
+      if (action.kind === "join") membershipChanged();
       refresh((n) => n + 1);
       setError("");
       setBusy(false);
@@ -435,16 +459,23 @@ function Timeline({
         {read.value?.more && (
           <button onClick={() => setPages((n) => n + 1)}>Load more messages</button>
         )}
-        {!last && (
-          <QuietLine
-            fact={
-              read.value
-                ? query
-                  ? "No matching messages."
-                  : "No messages yet."
-                : "Loading messages."
-            }
-          />
+        {!last && read.value && !root && !query && channel.kind === "channel" ? (
+          <section data-chat-empty>
+            <h2>Welcome to #{channel.name}</h2>
+            <p>No messages yet.</p>
+          </section>
+        ) : (
+          !last && (
+            <QuietLine
+              fact={
+                read.value
+                  ? query
+                    ? "No matching messages."
+                    : "No messages yet."
+                  : "Loading messages."
+              }
+            />
+          )
         )}
         {items.length > 0 && (
           <LegendList
@@ -486,7 +517,7 @@ function Timeline({
                       {group && (
                         <div data-chat-by>
                           <strong>{author(m)}</strong>
-                          {m.author.kind === "agent" && (
+                          {flags.includes("agents") && m.author.kind === "agent" && (
                             <small>
                               Agent · {m.author.provider} · on behalf of {m.author.ownerLogin}
                             </small>
@@ -495,7 +526,7 @@ function Timeline({
                         </div>
                       )}
                       {m.deleted ? <i>Message deleted</i> : <Markdown text={m.text} />}
-                      {!m.deleted && m.taskRef && (
+                      {!m.deleted && flags.includes("task_links") && m.taskRef && (
                         <div className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
                           {task ? (
                             <button
@@ -521,7 +552,7 @@ function Timeline({
                           )}
                         </div>
                       )}
-                      {!m.deleted && m.progress && (
+                      {!m.deleted && flags.includes("agents") && m.progress && (
                         <section data-agent-progress>
                           <strong>
                             {m.progress.state === "stale"
@@ -537,7 +568,7 @@ function Timeline({
                           </ul>
                         </section>
                       )}
-                      {!m.deleted && m.card && (
+                      {!m.deleted && flags.includes("agents") && m.card && (
                         <section data-agent-card data-tone={m.card.tone}>
                           <strong>{m.card.title}</strong>
                           <dl>
@@ -552,7 +583,8 @@ function Timeline({
                             .filter(
                               (l) =>
                                 /^https:\/\//i.test(l.url) ||
-                                /^\/relay\/v1\/tasks\/[\w-]{1,64}$/.test(l.url),
+                                (flags.includes("task_links") &&
+                                  /^\/relay\/v1\/tasks\/[\w-]{1,64}$/.test(l.url)),
                             )
                             .map((l) => (
                               <a
@@ -567,7 +599,7 @@ function Timeline({
                         </section>
                       )}
                       {m.editedAt && !m.deleted && <small>Edited</small>}
-                      {!root && m.replyCount > 0 && (
+                      {flags.includes("threads") && !root && m.replyCount > 0 && (
                         <button data-chat-replies onClick={() => open(m.id)}>
                           <ReplyAvatars enterprise={enterprise} message={m} />
                           {m.replyCount} {m.replyCount === 1 ? "reply" : "replies"}
@@ -580,7 +612,7 @@ function Timeline({
                         </button>
                       )}
                     </div>
-                    {m.reactions.length > 0 && (
+                    {flags.includes("reactions") && m.reactions.length > 0 && (
                       <div>
                         {m.reactions.map((r) => (
                           <button
@@ -601,59 +633,64 @@ function Timeline({
                         ))}
                       </div>
                     )}
-                    <div data-chat-actions>
-                      {!m.deleted && enterprise.feed.chatFlags?.includes("reactions") && (
+                    <details data-chat-actions>
+                      <summary aria-label="Message actions">⋯</summary>
+                      <div>
+                        {!m.deleted && enterprise.feed.chatFlags?.includes("reactions") && (
+                          <button
+                            disabled={busy}
+                            aria-label="React with thumbs up"
+                            onClick={() =>
+                              void write({
+                                kind: "reaction",
+                                id: m.id,
+                                emoji: "👍",
+                                add: !m.reactions.find((r) => r.emoji === "👍")?.mine,
+                              })
+                            }
+                          >
+                            👍
+                          </button>
+                        )}
+                        {!m.deleted && enterprise.feed.chatFlags?.includes("promote") && (
+                          <PostToGitHub
+                            enterprise={enterprise}
+                            id={m.id}
+                            linked={
+                              m.taskRef ??
+                              (root ? items.find((item) => item.id === root)?.taskRef : undefined)
+                            }
+                          />
+                        )}
+                        {flags.includes("threads") && !root && (
+                          <button onClick={() => open(m.id)}>Reply in thread</button>
+                        )}
                         <button
-                          disabled={busy}
-                          aria-label="React with thumbs up"
                           onClick={() =>
-                            void write({
-                              kind: "reaction",
-                              id: m.id,
-                              emoji: "👍",
-                              add: !m.reactions.find((r) => r.emoji === "👍")?.mine,
-                            })
+                            void navigator.clipboard
+                              .writeText(
+                                new URL(chatHref(channel.id, root, m.id), location.origin).href,
+                              )
+                              .catch((e) => setError(String(e)))
                           }
                         >
-                          👍
+                          Copy link
                         </button>
-                      )}
-                      {!m.deleted && enterprise.feed.chatFlags?.includes("promote") && (
-                        <PostToGitHub
-                          enterprise={enterprise}
-                          id={m.id}
-                          linked={
-                            m.taskRef ??
-                            (root ? items.find((item) => item.id === root)?.taskRef : undefined)
-                          }
-                        />
-                      )}
-                      {!root && <button onClick={() => open(m.id)}>Reply in thread</button>}
-                      <button
-                        onClick={() =>
-                          void navigator.clipboard
-                            .writeText(
-                              new URL(chatHref(channel.id, root, m.id), location.origin).href,
-                            )
-                            .catch((e) => setError(String(e)))
-                        }
-                      >
-                        Copy link
-                      </button>
-                      {!m.deleted &&
-                        m.author.kind === "person" &&
-                        m.author.login === enterprise.enrolment.me?.login && (
-                          <>
-                            <button onClick={() => startEdit(m)}>Edit</button>
-                            <button
-                              disabled={busy}
-                              onClick={() => void write({ kind: "delete", id: m.id })}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
-                    </div>
+                        {!m.deleted &&
+                          m.author.kind === "person" &&
+                          m.author.login === enterprise.enrolment.me?.login && (
+                            <>
+                              <button onClick={() => startEdit(m)}>Edit</button>
+                              <button
+                                disabled={busy}
+                                onClick={() => void write({ kind: "delete", id: m.id })}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                      </div>
+                    </details>
                   </div>
                 </article>
               );
@@ -737,10 +774,15 @@ function Timeline({
           </button>
         </form>
       ) : (
-        !channel.archived && (
-          <button onClick={() => void write({ kind: "join", id: channel.id })}>
-            Join channel to post
-          </button>
+        !channel.archived &&
+        channel.kind === "channel" &&
+        !channel.private && (
+          <div data-chat-composer>
+            <span>Join #{channel.name} to post</span>
+            <button disabled={busy} onClick={() => void write({ kind: "join", id: channel.id })}>
+              Join
+            </button>
+          </div>
         )
       )}
     </>

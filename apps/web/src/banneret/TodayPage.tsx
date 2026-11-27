@@ -236,7 +236,12 @@ export function TodayPage() {
             >
               <ul aria-label="Needs you items">
                 {today.needsYou.items.map((item) => (
-                  <NeedsRow target={enterprise.target} key={item.id} item={item} />
+                  <NeedsRow
+                    asks={enterprise.feed.chatFlags?.includes("asks")}
+                    target={enterprise.target}
+                    key={item.id}
+                    item={item}
+                  />
                 ))}
               </ul>
             </Block>

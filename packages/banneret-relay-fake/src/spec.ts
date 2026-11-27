@@ -53,6 +53,7 @@ export type SchemaName =
   | "ChatAct"
   | "ChatRefuse"
   | "ChatPromotion"
+  | "ChatDefaultChannels"
   | "ChatLimits"
   | "Capabilities"
   | "EnrolStartRequest"
