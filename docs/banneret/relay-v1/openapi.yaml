@@ -1693,7 +1693,8 @@ paths:
       operationId: listMachines
       summary: The Team machines list.
       description: |
-        Owners and founders see their machines. Founders see all machines. Colleagues see only machines shared with their name. A revoked machine
+        Owners always see their own machines, including `poolHostId` when configured, regardless of sharing.
+        Founders see all machines. Other callers see a colleague's machine only when it is shared with its name. A revoked machine
         is listed only to its owner and to founders, with `revokedAt` set; everyone else never sees it. Live machines
         come first, newest heartbeat first (machines never heard from last); revoked machines follow, most recently
         revoked first.
@@ -5142,7 +5143,7 @@ components:
         ignoredReason: { type: string, minLength: 1, maxLength: 240 }
     SnapshotMachines:
       description: |
-        Live machines that share their name with colleagues. The administrative GET /machines list also includes
+        Only live machines shared with their name appear here, including `poolHostId` when configured. GET /machines also includes
         private machines visible to the caller. Truncated is true when the snapshot reaches its item cap and more remain.
       type: object
       required: [items, truncated]
