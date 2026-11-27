@@ -96,7 +96,7 @@ jobs:
       - name: Setup dependencies
         uses: ./.github/actions/setup-ci-deps
         with:
-          install-args: --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts...
+          install-args: --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts... --filter=@t3tools/banneret-plugin-kit...
 
       # Share only the verification results, not the large registry metadata cache.
       - name: Upload dependency verification
@@ -123,6 +123,16 @@ jobs:
 
       - name: Build JS bundle
         run: vp run build:desktop:bundle
+
+      - name: Build plugin checker
+        run: vp run --filter @t3tools/banneret-plugin-kit build:checker
+
+      - name: Upload plugin checker
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-plugin-checker
+          path: packages/banneret-plugin-kit/dist/banneret-plugin-check.mjs
+          if-no-files-found: error
 
       # Upload only the expected hidden file, without opting all build outputs into hidden uploads.
       - name: Stage web asset manifest
@@ -287,4 +297,4 @@ jobs:
             release-assets/*.exe release-assets/*.AppImage release-assets/*.deb \
             release-assets/*.dmg release-assets/*.zip release-assets/*.blockmap \
             release-assets/*.yml release-assets/*.tar.gz release-assets/SHA256SUMS \
-            release-assets/install.sh release-assets/install.ps1
+            release-assets/install.sh release-assets/install.ps1 release-assets/banneret-plugin-check.mjs
