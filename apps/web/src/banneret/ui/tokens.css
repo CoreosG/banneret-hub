@@ -4,6 +4,10 @@
  * Lint accepts only classes index.css declares, so kit elements opt in with data attributes
  * (`toneProps`, `TEXT_*` and `RADIUS_PANEL` in tokens.ts).
  */
+/* Declares the app's layer order first: Vite can load this chunk's CSS before index.css, and the first
+   statement fixes the order. Without it `components` ranks below Tailwind's base reset. */
+@layer properties, theme, base, clerk, components, utilities;
+
 @reference "../../index.css";
 
 :root {
