@@ -49,6 +49,7 @@
         "reason": "out_of_usage",
         "note": "**Goal:** Limit invites per guild.\n**Done:** Counter and tests.\n**Next:** Return 429 from the invite route."
       },
+      "assignees": [],
       "prs": [],
       "restsOn": [
         "t_K9w3Ls"
@@ -81,6 +82,12 @@
         "staleAt": "2026-11-26T15:58:00Z",
         "expiresAt": "2026-11-27T09:58:00Z"
       },
+      "assignees": [
+        {
+          "id": "p_7Hq2xK",
+          "login": "ada-example"
+        }
+      ],
       "prs": [],
       "restsOn": []
     },
@@ -111,6 +118,12 @@
         "staleAt": "2026-11-26T09:00:00Z",
         "expiresAt": "2026-11-27T03:00:00Z"
       },
+      "assignees": [
+        {
+          "id": "p_3Nc8vR",
+          "login": "bo-example"
+        }
+      ],
       "prs": [
         {
           "number": 86,
@@ -144,6 +157,7 @@
       "column": "validating",
       "status": "built",
       "statusWhy": "The pull request merged and nobody has checked it yet.",
+      "assignees": [],
       "prs": [
         {
           "number": 85,
@@ -172,6 +186,7 @@
       "column": "shipped",
       "status": "checked",
       "statusWhy": "A founder checked it after the merge.",
+      "assignees": [],
       "prs": [
         {
           "number": 80,

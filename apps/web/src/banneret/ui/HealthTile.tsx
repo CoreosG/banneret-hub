@@ -6,7 +6,8 @@ import { TYPE, toneProps } from "./tokens";
 
 /**
  * `state` is open: `good`, `warning`, `bad` and `not_measured` are known. The time line reads
- * "As of 4 min ago" (`timePrefix` changes the words), or "Not checked yet" when `observedAt` is null.
+ * "As of 4 min ago" (`timePrefix` changes the words; `timeKind` "duration" reads "Off for 2 days"), or
+ * "Not checked yet" when `observedAt` is null.
  */
 export function HealthTile(props: {
   readonly label: string;
@@ -14,6 +15,7 @@ export function HealthTile(props: {
   readonly summary?: string | undefined;
   readonly observedAt?: string | null | undefined;
   readonly timePrefix?: string;
+  readonly timeKind?: "ago" | "duration";
   readonly nowMs?: number;
   readonly className?: string;
 }) {
@@ -38,6 +40,7 @@ export function HealthTile(props: {
         <RelativeTime
           at={props.observedAt}
           prefix={props.timePrefix ?? "As of"}
+          kind={props.timeKind ?? "ago"}
           className={cn(TYPE.meta, "mt-1 self-start")}
           {...(props.nowMs === undefined ? {} : { nowMs: props.nowMs })}
         />

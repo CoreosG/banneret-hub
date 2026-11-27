@@ -1297,6 +1297,7 @@ describe("board and leases", () => {
       readonly state: string;
       readonly lastSignalAt: string;
     };
+    readonly assignees: ReadonlyArray<{ readonly id: string; readonly login: string }>;
   }
   interface Board {
     readonly columns: ReadonlyArray<{ readonly id: string; readonly title: string }>;
@@ -1363,6 +1364,11 @@ describe("board and leases", () => {
     const freeCard = board.cards.find((card) => card.task.id === free);
     expect(freeCard?.column).toBe("free");
     expect(freeCard?.lease).toBeUndefined();
+    // README, "Free and Taken": no Free card has a lease or an assignee.
+    for (const card of board.cards.filter((each) => each.column === "free")) {
+      expect(card.lease).toBeUndefined();
+      expect(card.assignees).toEqual([]);
+    }
     const takenCard = board.cards.find((card) => card.task.id === taken);
     expect(takenCard?.column).toBe("taken");
     expect(takenCard?.lease?.state).toBe("active");
@@ -1814,6 +1820,7 @@ describe("lease protocol", () => {
     readonly status: string;
     readonly lease?: { readonly holder: { readonly login: string }; readonly state: string };
     readonly lastRelease?: LastRelease;
+    readonly assignees: ReadonlyArray<{ readonly id: string; readonly login: string }>;
   }
   interface FeedEntry {
     readonly type: string;
@@ -1964,15 +1971,27 @@ describe("lease protocol", () => {
     expect(card?.column).toBe("stuck");
   });
 
-  it("shows a plain assignee as Taken with no lease", async () => {
+  it("shows a plain assignee as Taken with no lease, and names the assignees", async () => {
     const machine = await enrol();
     const task = id();
+    const nobody = id();
+    const assignee = newLogin();
     await client.control("/board/seed", {
-      tasks: [{ id: task, title: "Assigned elsewhere", assignees: [newLogin()] }],
+      tasks: [
+        { id: task, title: "Assigned elsewhere", assignees: [assignee] },
+        { id: nobody, title: "Nobody assigned", assignees: [] },
+      ],
     });
     const card = await cardFor(machine, task);
     expect(card?.lease).toBeUndefined();
     expect(card?.column).toBe("taken");
+    expect(card?.assignees.map((person) => person.login)).toEqual([assignee]);
+    expect(card?.assignees[0]?.id).toEqual(expect.any(String));
+    // README, "Free and Taken": Free = no assignee and no lease.
+    const free = await cardFor(machine, nobody);
+    expect(free?.column).toBe("free");
+    expect(free?.lease).toBeUndefined();
+    expect(free?.assignees).toEqual([]);
   });
 
   it("ignores another person's release and counts a founder's", async () => {

@@ -1295,7 +1295,8 @@ components:
       description: |
         The task board with leases, relay-wide. The relay computes every status, column and lease
         state; the Hub only draws them. `state` and `notMeasured` say when a source (for example the claims) could not
-        be read, so a partial board is never shown as complete. A card with no `lease` is Free. The "agent at work"
+        be read, so a partial board is never shown as complete. A card with no `lease` and no `assignees` is Free; a
+        card with a `lease` or an assignee is Taken, unless Validating, Stuck or Shipped applies. The "agent at work"
         ring is not here: the Hub derives it from the `work` file, joined by task id.
       type: object
       additionalProperties: false
@@ -1331,7 +1332,7 @@ components:
         version of this schema.
       type: object
       additionalProperties: false
-      required: [task, column, status, statusWhy, prs, restsOn]
+      required: [task, column, status, statusWhy, assignees, prs, restsOn]
       properties:
         task: { $ref: "#/components/schemas/BoardTask" }
         column: { description: "A `columns[].id`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
@@ -1344,12 +1345,21 @@ components:
         statusWhy: { description: "One plain sentence that says why the card has this status.", type: string, minLength: 1, maxLength: 240 }
         lease: { $ref: "#/components/schemas/BoardLease" }
         lastRelease: { $ref: "#/components/schemas/LeaseLastRelease" }
+        assignees: { $ref: "#/components/schemas/BoardAssignees" }
         prs: { $ref: "#/components/schemas/BoardPrs" }
         restsOn:
           description: Ids of the tasks this one rests on.
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/Id" }
+    BoardAssignees:
+      description: |
+        Everyone the tracker names as assigned to the task, in the tracker's order; empty when nobody is. An
+        assignee is not a lease (README, "Lease protocol"): a card can have assignees and no `lease`. Any
+        assignee puts an open card in Taken.
+      type: array
+      maxItems: 10
+      items: { $ref: "#/components/schemas/PersonRef" }
     BoardTask:
       description: |
         A task as the relay names it, wherever it appears: board cards, map items, TaskRead, feed and graveyard
@@ -1377,7 +1387,7 @@ components:
         url: { type: string, format: uri }
     BoardLease:
       description: |
-        Present only on a held task; a task with no lease is Free. `state` is an open string with known values
+        Present only on a held task; a task with no lease and no assignee is Free. `state` is an open string with known values
         `active`, `stale`, `expired`, `paused`, `conflict` and `incomplete` (README, "Lease protocol": the tracker's
         assignee and `claimed` label disagree with the claim comments for longer than the 60 s settle window). A relay
         that cannot read claims says so in the board's `notMeasured`, never as a lease state. A relay only reads:
@@ -1621,7 +1631,7 @@ components:
         when they exist. Closed.
       type: object
       additionalProperties: false
-      required: [task, column, status, statusWhy, prs, restsOn]
+      required: [task, column, status, statusWhy, assignees, prs, restsOn]
       properties:
         task: { $ref: "#/components/schemas/BoardTask" }
         column: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
@@ -1629,6 +1639,7 @@ components:
         statusWhy: { type: string, minLength: 1, maxLength: 240 }
         lease: { $ref: "#/components/schemas/BoardLease" }
         lastRelease: { $ref: "#/components/schemas/LeaseLastRelease" }
+        assignees: { $ref: "#/components/schemas/BoardAssignees" }
         prs: { $ref: "#/components/schemas/BoardPrs" }
         restsOn:
           type: array

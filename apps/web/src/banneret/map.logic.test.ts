@@ -69,7 +69,7 @@ describe("map shape", () => {
       "done",
       "current",
       "todo",
-      "done",
+      "ahead",
     ]);
     expect(spineStates([p(0, 0), p(0, 2)])).toEqual(["todo", "current"]);
   });

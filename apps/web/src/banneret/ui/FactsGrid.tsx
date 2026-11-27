@@ -8,14 +8,20 @@ export interface Fact {
   readonly value: ReactNode;
   /** Spans both columns, for a value that runs long (a note). */
   readonly wide?: boolean;
+  /** Said in a quiet tone when there is no value; "Not known" by default. */
+  readonly empty?: string;
 }
 
-/** Facts with no value (`undefined` or `null`) are left out rather than shown blank. */
+/**
+ * Every fact keeps its row, so the grid has the same shape for every task: a fact whose value is
+ * missing (`undefined`) shows its `empty` words. `null` means the fact does not apply here (the
+ * relay has no leases or no sign-off rule), and only then is the row left out.
+ */
 export function FactsGrid(props: {
   readonly facts: ReadonlyArray<Fact>;
   readonly className?: string;
 }) {
-  const facts = props.facts.filter((fact) => fact.value !== undefined && fact.value !== null);
+  const facts = props.facts.filter((fact) => fact.value !== null);
   if (facts.length === 0) return null;
   return (
     <dl className={cn("grid grid-cols-1 gap-x-4 sm:grid-cols-2", props.className)}>
@@ -28,7 +34,15 @@ export function FactsGrid(props: {
           )}
         >
           <dt className="truncate text-muted-foreground text-xs">{fact.label}</dt>
-          <dd className="min-w-0 text-sm">{fact.value}</dd>
+          <dd className="min-w-0 text-sm">
+            {fact.value === undefined ? (
+              <span className="text-muted-foreground text-xs" data-fact-empty="">
+                {fact.empty ?? "Not known"}
+              </span>
+            ) : (
+              fact.value
+            )}
+          </dd>
         </div>
       ))}
     </dl>

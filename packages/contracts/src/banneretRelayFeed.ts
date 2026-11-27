@@ -217,6 +217,11 @@ export const BanneretBoardCard = Schema.Struct({
   statusWhy: Schema.String,
   lease: Schema.optional(BanneretBoardLease),
   lastRelease: Schema.optional(BanneretLastRelease),
+  /**
+   * Everyone the tracker names as assigned, in its order; empty when nobody is. An assignee is not
+   * a lease: a card can be assigned with no `lease` (Taken, not claimed).
+   */
+  assignees: Schema.Array(BanneretFeedPerson),
   /** Every linked pull request, oldest first; empty when none is linked. */
   prs: Schema.Array(BanneretBoardPr),
   restsOn: Schema.Array(Schema.String),

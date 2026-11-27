@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { healthLabel, leaseLabel, reasonLabel } from "./labels";
-import { agoLabel, exactTimeLabel, spanLabel } from "./relativeTime";
+import { agoLabel, durationLabel, exactTimeLabel, spanLabel } from "./relativeTime";
 import { legendStatuses, statusView } from "./status";
 
 const NOW = Date.parse("2026-11-27T12:00:00.000Z");
@@ -62,6 +62,18 @@ describe("relative time", () => {
   ])("%s", (at, agoText, spanText) => {
     expect(agoLabel(at, NOW)).toBe(agoText);
     expect(spanLabel(at, NOW)).toBe(spanText);
+  });
+
+  it("says how long a state lasted, and the date once it is a week old", () => {
+    expect(durationLabel(ago(10_000), NOW)).toBe("for under a minute");
+    expect(durationLabel(ago(12 * MIN), NOW)).toBe("for 12 min");
+    expect(durationLabel(ago(HOUR + MIN), NOW)).toBe("for 1 hour");
+    expect(durationLabel(ago(3 * HOUR), NOW)).toBe("for 3 hours");
+    expect(durationLabel(ago(DAY + HOUR), NOW)).toBe("for 1 day");
+    expect(durationLabel(ago(6 * DAY), NOW)).toBe("for 6 days");
+    expect(durationLabel(ago(8 * DAY), NOW)).toMatch(/^since Nov 1[89]$/);
+    expect(durationLabel(ago(400 * DAY), NOW)).toMatch(/^since [A-Z][a-z]{2} \d{1,2}, 2025$/);
+    expect(durationLabel("not a date", NOW)).toBe("");
   });
 
   it("formats the exact time in English whatever the system locale", () => {

@@ -59,18 +59,19 @@ export function stageProgress(counts: Readonly<Record<string, number>>): StagePr
 }
 
 /** Where a stage sits on the spine. */
-export type SpineState = "done" | "current" | "todo";
+export type SpineState = "done" | "ahead" | "current" | "todo";
 
 /**
- * One state per stage, in order: `done` when every item to build is built, `current` for the
- * first stage with something still to build, `todo` otherwise. A stage with nothing to build is
- * never done nor current.
+ * One state per stage, in order. `current` is the first stage not fully built. Every built stage
+ * before it is `done`; a built stage after it is `ahead` (built ahead of an earlier stage: it keeps
+ * its check but the spine does not fill through it). Anything else is `todo`. A stage with nothing
+ * to build is never done, ahead nor current.
  */
 export function spineStates(progress: ReadonlyArray<StageProgress>): ReadonlyArray<SpineState> {
   let currentTaken = false;
   return progress.map(({ built, total }) => {
     if (total === 0) return "todo";
-    if (built === total) return "done";
+    if (built === total) return currentTaken ? "ahead" : "done";
     if (currentTaken) return "todo";
     currentTaken = true;
     return "current";

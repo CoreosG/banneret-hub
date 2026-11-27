@@ -5,9 +5,12 @@ import type { BanneretBoardCard, BanneretBoardTask, EnvironmentId } from "@t3too
 import { useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
+import { cn } from "../lib/utils";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
+import { Button } from "../components/ui/button";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import {
   boardColumns,
@@ -15,22 +18,27 @@ import {
   columnCountsLine,
   columnHint,
   heldBy,
+  isMine,
+  mineSummary,
+  needsRelease,
   prSummary,
   statusCounts,
   taskRef,
+  unclaimedAssignees,
   type BoardColumnView,
 } from "./board.logic";
 import { BoardCardMenu } from "./BoardCardMenu";
 import { useEnrolmentView } from "./enrolmentStore";
-import { FeedStatus, When } from "./FeedParts";
+import { FeedStatus } from "./FeedParts";
 import { freeToContinueFirst, freeToContinueLine, isFreeToContinue } from "./lease.logic";
+import { LeaseButtons, LeaseNoticeLine, useLeaseCheck } from "./LeaseControls";
 import { useLeaseEntry } from "./leaseStore";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { LeaseChip } from "./ui/Chips";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
 import { legendStatuses } from "./ui/status";
-import { useNowMs } from "./ui/RelativeTime";
+import { RelativeTime, useNowMs } from "./ui/RelativeTime";
 import { StatusLegend } from "./ui/StatusLegend";
 import { TaskCard } from "./ui/TaskCard";
 import {
@@ -42,6 +50,7 @@ import {
 } from "./ui/tokens";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
+import { useTaskIssueRef } from "./useTaskIssueRef";
 
 const CHECK_TONES: Readonly<Record<string, Tone>> = {
   passing: "ok",
@@ -102,6 +111,8 @@ function BoardCard(props: {
   readonly atWork: boolean;
   readonly leases: boolean;
   readonly me: string;
+  /** Reviewing the person's expired or incomplete claims: the card shows its lease buttons. */
+  readonly review: boolean;
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { card } = props;
@@ -119,6 +130,18 @@ function BoardCard(props: {
       </span>
     );
   const continues = props.leases && isFreeToContinue(card) ? card.lastRelease : undefined;
+  // Without leases the relay says nothing about claims, so "not claimed" would be a guess.
+  const unclaimed = props.leases ? unclaimedAssignees(card) : [];
+  const assigned =
+    unclaimed.length === 0 ? undefined : (
+      <span
+        data-testid="assigned-not-claimed"
+        className={cn(CHIP, "flex-wrap")}
+        {...toneProps("muted", "edge", "fg")}
+      >
+        assigned · not claimed · <span className="break-all">{unclaimed.join(", ")}</span>
+      </span>
+    );
   return (
     <li
       data-task-id={card.task.id}
@@ -137,7 +160,9 @@ function BoardCard(props: {
         lease={
           local ??
           (lease === undefined ? (
-            continues === undefined ? undefined : (
+            continues === undefined ? (
+              assigned
+            ) : (
               <span
                 data-testid="free-to-continue"
                 className={CHIP}
@@ -160,7 +185,65 @@ function BoardCard(props: {
       {props.leases ? (
         <BoardCardMenu environmentId={props.environmentId} card={card} onOpen={props.onOpen} />
       ) : null}
+      {props.review ? <ClaimReviewActions environmentId={props.environmentId} card={card} /> : null}
     </li>
+  );
+}
+
+/**
+ * The buttons for one of the person's expired or incomplete claims. They follow the server's
+ * `leases.check`, read for these few cards only; Release opens the Release dialog.
+ */
+function ClaimReviewActions(props: {
+  readonly environmentId: EnvironmentId;
+  readonly card: BanneretBoardCard;
+}) {
+  const { card, environmentId } = props;
+  const issueRef = useTaskIssueRef(environmentId, card.task);
+  const entry = useLeaseCheck(environmentId, card.task.id, issueRef, true);
+  if (issueRef === null) {
+    return (
+      <p className="px-1 pt-1 text-muted-foreground text-xs" data-testid="review-off">
+        Release needs a local project for {taskRef(card.task).repo}.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1 px-1 pt-1.5" data-testid="claim-review">
+      <LeaseButtons
+        environmentId={environmentId}
+        taskId={card.task.id}
+        title={card.task.title}
+        issueRef={issueRef}
+        entry={entry}
+        continues={false}
+      />
+      <LeaseNoticeLine entry={entry} />
+    </div>
+  );
+}
+
+/** An empty column: a narrow strip with its name and 0; the other columns take the width. */
+function EmptyColumn(props: { readonly column: BoardColumnView }) {
+  const { column } = props;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <section
+            aria-label={`${column.title}, no tasks`}
+            data-column-empty=""
+            className="flex min-h-0 flex-col items-center border bg-muted py-3"
+            {...RADIUS_PANEL}
+          />
+        }
+      >
+        <h2 data-slot="column-strip-label" className="text-muted-foreground" {...TEXT_SECTION}>
+          {column.title} · <span data-count>0</span>
+        </h2>
+      </TooltipTrigger>
+      <TooltipPopup>Nothing in {column.title} right now.</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -170,10 +253,12 @@ function BoardColumn(props: {
   readonly atWork: ReadonlySet<string>;
   readonly leases: boolean;
   readonly me: string;
+  readonly review: boolean;
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { column } = props;
   const hint = columnHint(column.id);
+  if (column.cards.length === 0) return <EmptyColumn column={column} />;
   return (
     <section
       aria-label={column.title}
@@ -196,28 +281,23 @@ function BoardColumn(props: {
           </span>
         )}
       </header>
-      {column.cards.length === 0 ? (
-        <div className="px-2 pb-2">
-          <QuietLine fact="No tasks." />
-        </div>
-      ) : (
-        <ul className="flex min-h-0 flex-col gap-2 overflow-y-auto px-2 pb-2">
-          {(props.leases && column.id === "free"
-            ? freeToContinueFirst(column.cards)
-            : column.cards
-          ).map((card) => (
-            <BoardCard
-              key={card.task.id}
-              environmentId={props.environmentId}
-              card={card}
-              atWork={props.atWork.has(card.task.id)}
-              leases={props.leases}
-              me={props.me}
-              onOpen={props.onOpen}
-            />
-          ))}
-        </ul>
-      )}
+      <ul className="flex min-h-0 flex-col gap-2 overflow-y-auto px-2 pb-2">
+        {(props.leases && column.id === "free"
+          ? freeToContinueFirst(column.cards)
+          : column.cards
+        ).map((card) => (
+          <BoardCard
+            key={card.task.id}
+            environmentId={props.environmentId}
+            card={card}
+            atWork={props.atWork.has(card.task.id)}
+            leases={props.leases}
+            me={props.me}
+            review={props.review}
+            onOpen={props.onOpen}
+          />
+        ))}
+      </ul>
     </section>
   );
 }
@@ -247,15 +327,19 @@ function BoardFrame(props: { readonly company?: string; readonly children: React
 }
 
 const tasksLabel = (count: number) => (count === 1 ? "1 task." : `${count} tasks.`);
-const yoursLabel = (count: number) =>
-  count === 1 ? "You hold 1 task." : `You hold ${count} tasks.`;
+
+/** Mine: held by or assigned to the person. Review: only their expired or incomplete claims. */
+type MineView = "mine" | "review";
 
 export function BoardPage() {
   const enterprise = useEnterpriseFeed();
   const enrolment = useEnrolmentView(enterprise?.environmentId ?? null);
   const openTask = useOpenTask(enterprise?.environmentId ?? "");
   // The workspace Mine was chosen in, so switching workspaces falls back to Everyone.
-  const [mineIn, setMineIn] = useState<string | null>(null);
+  const [mineIn, setMineIn] = useState<{
+    readonly workspaceId: string;
+    readonly view: MineView;
+  } | null>(null);
   if (enterprise === null) {
     return (
       <BoardFrame>
@@ -281,9 +365,20 @@ export function BoardPage() {
   const leases = read?.leases === true;
   const me = enrolment?.me?.login.trim() ?? "";
   const canFilter = leases && me !== "";
-  const mine = canFilter && mineIn === workspace.id;
+  const view: MineView | null =
+    canFilter && mineIn?.workspaceId === workspace.id ? mineIn.view : null;
+  const mine = view !== null;
+  const review = view === "review";
+  const toReview =
+    board === null || !canFilter ? [] : board.cards.filter((c) => needsRelease(c, me));
   const cards =
-    board === null ? [] : mine ? board.cards.filter((card) => heldBy(card, me)) : board.cards;
+    board === null
+      ? []
+      : review
+        ? toReview
+        : mine
+          ? board.cards.filter((card) => isMine(card, me))
+          : board.cards;
   const columns = board === null ? [] : boardColumns(board, cards);
   const atWork = new Set(read?.atWork ?? []);
   const counts = statusCounts(cards);
@@ -291,12 +386,11 @@ export function BoardPage() {
     (status) => read?.checked === true || status !== "checked",
   );
   const summary =
-    board === null || board.cards.length === 0 ? undefined : mine && cards.length === 0 ? (
-      <SummaryFigure>You hold no tasks.</SummaryFigure>
+    board === null || board.cards.length === 0 ? undefined : mine ? (
+      <SummaryFigure>{mineSummary(board.cards, me)}</SummaryFigure>
     ) : (
       <>
-        <SummaryFigure>{mine ? yoursLabel(cards.length) : tasksLabel(cards.length)}</SummaryFigure>{" "}
-        {columnCountsLine(columns)}
+        <SummaryFigure>{tasksLabel(cards.length)}</SummaryFigure> {columnCountsLine(columns)}
       </>
     );
   return (
@@ -309,7 +403,7 @@ export function BoardPage() {
             value={[mine ? "mine" : "everyone"]}
             onValueChange={(value) => {
               const next = value[0];
-              if (next === "mine") setMineIn(workspace.id);
+              if (next === "mine") setMineIn({ workspaceId: workspace.id, view: "mine" });
               else if (next === "everyone") setMineIn(null);
             }}
           >
@@ -341,7 +435,8 @@ export function BoardPage() {
               <ul>
                 {board.notMeasured.map((line) => (
                   <li key={`${line.source}:${line.since}`}>
-                    {line.source}: {notMeasuredReason(line.reason)} since <When at={line.since} />
+                    {line.source}: {notMeasuredReason(line.reason)}{" "}
+                    <RelativeTime at={line.since} kind="duration" />
                   </li>
                 ))}
               </ul>
@@ -356,8 +451,50 @@ export function BoardPage() {
                 statuses={statuses}
                 atWorkCount={cards.filter((card) => atWork.has(card.task.id)).length}
               />
-              {mine && cards.length === 0 ? (
-                <QuietLine fact="Nothing of yours here." hint="Tasks you take appear here." />
+              {!review && toReview.length > 0 ? (
+                <div
+                  role="note"
+                  data-testid="claims-nudge"
+                  className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+                  {...toneProps("warn", "tint", "edge")}
+                >
+                  <span className="min-w-0 flex-1">
+                    {toReview.length === 1
+                      ? "1 of your claims is expired or incomplete."
+                      : `${toReview.length} of your claims are expired or incomplete.`}
+                  </span>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => setMineIn({ workspaceId: workspace.id, view: "review" })}
+                  >
+                    Review your expired claims
+                  </Button>
+                </div>
+              ) : null}
+              {review ? (
+                <div
+                  data-testid="claims-review"
+                  className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0 flex-1 text-muted-foreground">
+                    {cards.length === 0
+                      ? "No expired or incomplete claims of yours left."
+                      : "Your expired and incomplete claims. Release each one, or finish it."}
+                  </span>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setMineIn({ workspaceId: workspace.id, view: "mine" })}
+                  >
+                    Show all of mine
+                  </Button>
+                </div>
+              ) : mine && cards.length === 0 ? (
+                <QuietLine
+                  fact="Nothing of yours here."
+                  hint="Tasks you take or are assigned appear here."
+                />
               ) : null}
               <div className="min-h-0 flex-1" {...LAYOUT_BOARD_COLUMNS}>
                 {columns.map((column) => (
@@ -368,6 +505,7 @@ export function BoardPage() {
                     atWork={atWork}
                     leases={leases}
                     me={me}
+                    review={review}
                     onOpen={openTask}
                   />
                 ))}

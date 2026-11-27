@@ -67,7 +67,7 @@ export function FeedStatus(props: {
           </>
         ) : feed.liveSince === null ? null : (
           <>
-            Live updates paused since <RelativeTime at={feed.liveSince} />.
+            Live updates paused <RelativeTime at={feed.liveSince} kind="duration" />.
           </>
         )}
       </span>

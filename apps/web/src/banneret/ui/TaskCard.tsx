@@ -49,7 +49,7 @@ export function TaskCard(props: {
           )}
         </span>
       )}
-      <span className={cn(TYPE.cardTitle, "line-clamp-2", view.struck && "line-through")}>
+      <span className={cn(TYPE.cardTitle, "line-clamp-3", view.struck && "line-through")}>
         {props.title}
       </span>
       <StatusPill

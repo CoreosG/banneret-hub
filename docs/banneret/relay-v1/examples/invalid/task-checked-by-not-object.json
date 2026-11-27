@@ -14,6 +14,7 @@
   "column": "shipped",
   "status": "checked",
   "statusWhy": "A sign-off role holder checked it after the merge.",
+  "assignees": [],
   "prs": [
     {
       "number": 58,

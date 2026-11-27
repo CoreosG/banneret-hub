@@ -15,6 +15,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { isElectron } from "../env";
+import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -194,7 +195,8 @@ export function TodayPage() {
             state="not_measured"
             summary={line.detail ?? `${humanizeWord(notMeasuredReason(line.reason))}.`}
             observedAt={line.since}
-            timePrefix="Since"
+            timePrefix="Off"
+            timeKind="duration"
           />
         </li>
       )),
@@ -268,7 +270,7 @@ export function TodayPage() {
               </ul>
             </Block>
             <Block
-              title={today.lastVisitAt === null ? "Shipped" : "Shipped since your last visit"}
+              title="Shipped"
               icon={PullRequestGlyph.merged}
               items={today.shipped.items}
               notMeasured={today.shipped.notMeasured}
@@ -282,7 +284,11 @@ export function TodayPage() {
               }
               action={
                 today.lastVisitAt === null ? undefined : (
-                  <RelativeTime at={today.lastVisitAt} className={TYPE.meta} />
+                  <RelativeTime
+                    at={today.lastVisitAt}
+                    prefix="last visit"
+                    className={cn(TYPE.meta, "whitespace-nowrap")}
+                  />
                 )
               }
             >

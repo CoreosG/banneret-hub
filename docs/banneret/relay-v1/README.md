@@ -357,7 +357,7 @@ protocol"). The relay has no write endpoint for them.
 
 - `columns` are the relay's five, each `{id, title}`: `free` (Free), `taken` (Taken), `validating` (Validating),
   `stuck` (Stuck), `shipped` (Shipped). Ids are open strings.
-- A card is `{task, column, status, statusWhy, lease?, prs[], restsOn[taskId]}`. Objects in the file are closed, so
+- A card is `{task, column, status, statusWhy, lease?, lastRelease?, assignees[], prs[], restsOn[taskId]}`. Objects in the file are closed, so
   an unknown field is a relay defect and a conformance failure. New fields come with a new minor version.
 - `task` is `{id, title, ref{tracker, host?, scope, key, url}, openedAt, closedAt}`. `openedAt` is when the tracker
   issue was opened. `closedAt` is when it was closed, or null while it is open. Every task in the protocol has this
@@ -366,8 +366,14 @@ protocol"). The relay has no write endpoint for them.
   an array, empty when none is linked. `state` is an open string, known values `open`, `merged`, `closed`. `checks` is
   the state of the required checks on that pull request's head (known values `passing`, `failing`, `pending`), present
   when the relay has read them. There is no card-level `pr` or `checks`.
-- `lease` is `{holder{id, login}, state, since, lastSignalAt, staleAt, expiresAt}`. A card with no `lease` is
-  Free. A relay that cannot read claims says so in the board's `state` and `notMeasured`, never as a lease state.
+- `lease` is `{holder{id, login}, state, since, lastSignalAt, staleAt, expiresAt}`. A relay that cannot read claims
+  says so in the board's `state` and `notMeasured`, never as a lease state.
+- `assignees` is `[{id, login}]`: everyone the tracker names as assigned, in the tracker's order, and empty when
+  nobody is. It is always present. An assignee is not a lease (see "Lease protocol"), so a card can have
+  assignees and no `lease`. The same field is on `GET /tasks/{taskId}`.
+- **Free and Taken.** Taken = has a lease or an assignee. Free = no assignee and no lease. Validating, Stuck and
+  Shipped come first: the rule only chooses between Free and Taken for a task that is in none of them. So a
+  card assigned without a claim is in Taken with no lease chip; the Hub shows it as assigned but not claimed.
 - `lastRelease` is `{by{id, login}, at, reason, freeToContinue, reasonText?, note?}`: the latest counted release,
   present only while nobody holds a standing claim, and absent as soon as one stands (see "Lease protocol"). The same object is on `GET /tasks/{taskId}`.
 - The "agent at work" ring is not in the file. The Hub derives it from the `work` file, joined by task id.
@@ -486,13 +492,13 @@ Time runs from the claim, or, with no standing claim, from the last protocol com
 shows the claim as `active`, or the release as done, because the Hub writes the comment first and the assignee a
 moment later. An `incomplete` lease with no standing claim is held by the released holder when they are still
 assigned or `claimed` is still on; otherwise by the ended claimant who is still assigned, or by the first assignee
-when only the label is left. Its `since` in the fold is the claim time of the released holder, and only when that holder is the one shown. In every other case (the ended claimant or the first assignee, or a leftover `claimed` label) the fold gives null, because no claim comment backs it. The fold never reads assignment or issue times. A card still needs a timestamp in `BoardLease.since`, and the fold does not say which one a relay should use then. A
+when only the label is left. Its `since` in the fold is the claim time of the released holder, and only when that holder is the one shown. In every other case (the ended claimant or the first assignee, or a leftover `claimed` label) the fold gives null, because no claim comment backs it. The fold never reads assignment or issue times. A card still needs a timestamp in `BoardLease.since`, and the fold does not say which one a relay should use then. When the fold gives no time, a relay uses the latest assignment time of the shown holder, otherwise the issue's opened time. A
 `claimed` label with nobody named anywhere (no assignee, no release) has no holder to show, so it makes no lease.
 
 **A plain assignee is not a lease.** Many issues are assigned outside the protocol. An assignee with no standing
 claim, no `claimed` label and no release or withdrawal for that person is not an `incomplete` lease: the card has no
 `lease` and shows no lease chip, and it is Free for lease purposes (anyone may take it). The board column still
-follows the assignee as usual, so the relay may show such a card in Taken. When someone takes it, the Hub's claim
+follows the assignee as usual, so the card is in Taken (see "Free and Taken"). When someone takes it, the Hub's claim
 comment starts a lease and the Hub leaves the existing assignees as they are, adding the taker.
 
 **lastRelease.** The latest counted release, present only while nobody holds a standing claim. It is not "the

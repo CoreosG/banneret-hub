@@ -54,7 +54,15 @@ A stuck item can have several reasons. They are shown most important first.
 ### Board
 
 The Board has five columns: Free, Taken, Validating, Stuck and Shipped. Each card shows a status mark, a short
-plain reason for that status, the pull request and its checks, and who holds the claim.
+plain reason for that status, the pull request and its checks, and who holds the claim. An empty column shrinks to
+a narrow strip with its name and 0, so the others get more room.
+
+A task is **Taken** when someone holds a claim on it or is assigned to it, and **Free** when nobody is. A task
+assigned without a claim says "assigned · not claimed" with the assignee's login. Anyone may still take it.
+
+**Mine** shows the tasks you hold or are assigned, with how many there are and how many of your claims expired.
+When one of your claims has expired or stopped half way, a strip says so. **Review your expired claims** shows
+only those, each with its Release button (or Finish and Withdraw for one that stopped half way).
 
 A claim is a **lease**. It stays active while its holder works: pushes, comments and their own running agent
 sessions all count. A lease turns **stale after 6 hours** without a signal, and the card moves to Stuck. It
@@ -86,6 +94,10 @@ The Map shows the build in stages. Each item has a status, and each item can res
 an item rests on needs you, was sent back or was ruled dead, the item that rests on it needs you too, and the
 reason names the blocker. The map is drawn from a [stage plan](#the-stage-plan). If the plan is broken, the Map
 says so. It never shows a broken plan as an empty one.
+
+The line on the left marks progress. The current stage is the first one that is not fully built. A later stage
+that is already built keeps its check, but the line does not fill through it: it was built ahead of an earlier
+stage.
 
 ### Feed and Graveyard
 

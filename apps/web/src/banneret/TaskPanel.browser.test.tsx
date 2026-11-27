@@ -94,6 +94,7 @@ const card = (key: string, title: string, extra: Partial<BanneretBoardCard> = {}
         checks: { state: "failing" },
       },
     ],
+    assignees: [],
     restsOn: [],
     ...extra,
   }) satisfies BanneretBoardCard;

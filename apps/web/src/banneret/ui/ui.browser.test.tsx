@@ -47,13 +47,14 @@ function contrast(a: readonly [number, number, number], b: readonly [number, num
   return (hi + 0.05) / (lo + 0.05);
 }
 
-// tokens.md "Resolved values and contrast", reproduced by contrast.py.
+// tokens.md "Resolved values and contrast", reproduced by contrast.py. "Not built yet" is one step
+// stronger than the other neutral text: zinc-700 light, neutral-300 dark.
 const EXPECTED: Record<string, { readonly dark: number; readonly light: number }> = {
   checked: { dark: 7.7, light: 5.0 },
   built: { dark: 6.0, light: 6.2 },
   needs_you: { dark: 8.4, light: 4.8 },
   sent_back: { dark: 5.5, light: 5.7 },
-  planned: { dark: 5.7, light: 7.0 },
+  planned: { dark: 9.9, light: 9.5 },
   ruled_dead: { dark: 7.3, light: 7.7 },
 };
 
@@ -217,9 +218,9 @@ describe("StatusLegend", () => {
     );
     const [busy, idle] = screen.container.querySelectorAll('[data-slot="legend-at-work"]');
     expect(busy?.querySelector("[data-count]")?.textContent).toBe("2");
-    expect(busy?.className).not.toContain("opacity-45");
+    expect(busy?.className).not.toContain("opacity-60");
     expect(idle?.querySelector("[data-count]")?.textContent).toBe("0");
-    expect(idle?.className).toContain("opacity-45");
+    expect(idle?.className).toContain("opacity-60");
   });
 });
 
@@ -271,10 +272,12 @@ describe("page pieces", () => {
     await userEvent.click(screen.getByRole("button", { name: /Release train/ }));
     expect(onSelect).toHaveBeenCalledTimes(1);
     const zero = screen.container.querySelector<HTMLElement>("li[data-status=planned]");
-    expect(zero && getComputedStyle(zero).opacity).toBe("0.45");
+    expect(zero && getComputedStyle(zero).opacity).toBe("0.6");
     expect(screen.container.querySelector("[data-slot=attention-bar]")).not.toBeNull();
     await expect.element(screen.getByText("As of 3 h ago")).toBeVisible();
     await expect.element(screen.getByText("Not checked yet")).toBeVisible();
-    expect(screen.container.querySelectorAll("dt")).toHaveLength(1);
+    // A fact with no value keeps its row and says so quietly.
+    expect(screen.container.querySelectorAll("dt")).toHaveLength(2);
+    expect(screen.container.querySelector("[data-fact-empty]")?.textContent).toBe("Not known");
   });
 });
