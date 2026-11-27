@@ -11,6 +11,8 @@ on:
     paths:
       - apps/server/**
       - apps/web/**
+      - packages/client-runtime/**
+      - scripts/mobile-behavior/fake-fx.ts
       - packages/contracts/**
       - packages/banneret-relay-fake/**
       - packages/shared/**
@@ -23,6 +25,8 @@ on:
     paths:
       - apps/server/**
       - apps/web/**
+      - packages/client-runtime/**
+      - scripts/mobile-behavior/fake-fx.ts
       - packages/contracts/**
       - packages/banneret-relay-fake/**
       - packages/shared/**
@@ -73,6 +77,9 @@ jobs:
       - name: Server relay and workspace tests
         working-directory: apps/server
         run: vp test run src/banneret/
+
+      - name: Stock mobile compatibility
+        run: bash scripts/banneret/mobile/check.sh
 
       - name: Identity check
         run: node scripts/banneret/check-identity.mjs
