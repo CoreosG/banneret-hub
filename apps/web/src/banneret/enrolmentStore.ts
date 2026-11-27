@@ -136,11 +136,12 @@ export const enrolmentRpc = {
   leave: (
     { environmentId, relayOrigin }: RelayTarget,
     mode: "revoke" | "forget",
+    keepWorkspace = false,
   ): Promise<RelayOutcome<BanneretEnrolmentView>> =>
     outcome(
       runAtomCommand(appAtomRegistry, leaveCommand, {
         environmentId,
-        input: { relayOrigin, mode },
+        input: { relayOrigin, mode, keepWorkspace },
       }),
     ),
   machines: (
@@ -245,6 +246,16 @@ export function useEnrolmentMachine(
 ): BanneretEnrolmentMachine | null {
   return useEnrolmentStore((state) =>
     environmentId === null ? null : (state.machines[environmentId] ?? null),
+  );
+}
+
+export function useJoinedElsewhere(environmentId: EnvironmentId | null, origin: string) {
+  return useEnrolmentStore(({ views }) =>
+    Object.entries(views).some(
+      ([id, entries]) =>
+        id !== environmentId &&
+        entries.some((entry) => entry.relayOrigin === origin && entry.state === "configured"),
+    ),
   );
 }
 

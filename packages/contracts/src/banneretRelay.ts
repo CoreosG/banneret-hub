@@ -185,7 +185,11 @@ const WsBanneretRelayCancelRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.cancel, {
  * is the only way out of `approved` besides `cancel`.
  */
 const WsBanneretRelayLeaveRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.leave, {
-  payload: Schema.Struct({ ...RelayTarget, mode: Schema.Literals(["revoke", "forget"]) }),
+  payload: Schema.Struct({
+    ...RelayTarget,
+    mode: Schema.Literals(["revoke", "forget"]),
+    keepWorkspace: Schema.Boolean,
+  }),
   success: BanneretEnrolmentView,
   error: RelayRpcError,
 });

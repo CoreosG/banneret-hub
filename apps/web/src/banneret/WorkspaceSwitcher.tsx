@@ -134,27 +134,25 @@ export function WorkspaceSwitcher(props: {
                 Join again…
               </MenuItem>
             ) : null}
+            <MenuItem
+              onClick={() =>
+                active.relay !== undefined &&
+                openWorkspaceDialog({ kind: "machines", origin: active.relay.origin })
+              }
+            >
+              <LaptopIcon />
+              Machines…
+            </MenuItem>
             {joinedHere ? (
-              <>
-                <MenuItem
-                  onClick={() =>
-                    active.relay !== undefined &&
-                    openWorkspaceDialog({ kind: "machines", origin: active.relay.origin })
-                  }
-                >
-                  <LaptopIcon />
-                  Machines…
-                </MenuItem>
-                <MenuItem
-                  onClick={() =>
-                    active.relay !== undefined &&
-                    openWorkspaceDialog({ kind: "leave", origin: active.relay.origin })
-                  }
-                >
-                  <LogOutIcon />
-                  Leave…
-                </MenuItem>
-              </>
+              <MenuItem
+                onClick={() =>
+                  active.relay !== undefined &&
+                  openWorkspaceDialog({ kind: "leave", origin: active.relay.origin })
+                }
+              >
+                <LogOutIcon />
+                Leave…
+              </MenuItem>
             ) : (
               <MenuItem
                 onClick={() =>

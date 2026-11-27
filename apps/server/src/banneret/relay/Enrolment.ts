@@ -313,6 +313,7 @@ export interface RelayEnrolment {
   readonly cancel: Effect.Effect<BanneretEnrolmentView, BanneretRelayError>;
   readonly leave: (
     mode: "revoke" | "forget",
+    keepWorkspace?: boolean,
   ) => Effect.Effect<BanneretEnrolmentView, BanneretRelayError>;
   readonly machines: (
     cursor: string | undefined,
@@ -364,6 +365,7 @@ interface EnrolmentService {
   readonly leave: (
     relayOrigin: string,
     mode: "revoke" | "forget",
+    keepWorkspace?: boolean,
   ) => Effect.Effect<BanneretEnrolmentView, BanneretRelayError>;
   readonly machines: (
     relayOrigin: string,
@@ -1293,7 +1295,10 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     Effect.withSpan("BanneretEnrolment.cancel"),
   );
 
-  const leave = Effect.fn("BanneretEnrolment.leave")(function* (mode: "revoke" | "forget") {
+  const leave = Effect.fn("BanneretEnrolment.leave")(function* (
+    mode: "revoke" | "forget",
+    keepWorkspace = false,
+  ) {
     const from = current;
     // While approved only forget is offered: setup never finished, so there may be no relay to tell.
     if (!isEnrolled(from) || (from.state === "approved" && mode !== "forget")) {
@@ -1328,7 +1333,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
         if (mode === "forget") yield* toNone("forgotten");
         else if (unknown) yield* toNone("unknown_machine", unknownMachineMessage(from.displayName));
         else yield* toNone("left");
-        yield* tombstoneWorkspace(from.relayOrigin);
+        if (!keepWorkspace) yield* tombstoneWorkspace(from.relayOrigin);
       }),
     );
     yield* wake;
@@ -1567,7 +1572,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     relay: lookup,
     start,
     cancel: (relayOrigin) => Effect.flatMap(joined(relayOrigin), (relay) => relay.cancel),
-    leave: (relayOrigin, mode) => Effect.flatMap(joined(relayOrigin), (relay) => relay.leave(mode)),
+    leave: (relayOrigin, mode, keepWorkspace) =>
+      Effect.flatMap(joined(relayOrigin), (relay) => relay.leave(mode, keepWorkspace)),
     machines: (relayOrigin, cursor) =>
       Effect.flatMap(joined(relayOrigin), (relay) => relay.machines(cursor)),
     revokeMachine: (relayOrigin, machineId) =>
@@ -1658,9 +1664,10 @@ export const rpcHandlers = {
   [BANNERET_RELAY_WS_METHODS.leave]: (input: {
     readonly relayOrigin: string;
     readonly mode: "revoke" | "forget";
+    readonly keepWorkspace: boolean;
   }) =>
     Effect.flatMap(BanneretEnrolment, (enrolment) =>
-      enrolment.leave(input.relayOrigin, input.mode),
+      enrolment.leave(input.relayOrigin, input.mode, input.keepWorkspace),
     ),
   [BANNERET_RELAY_WS_METHODS.machines]: (input: {
     readonly relayOrigin: string;

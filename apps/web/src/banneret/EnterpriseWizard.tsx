@@ -16,7 +16,12 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { namedClipboardTarget, useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
-import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
+import { Select, SelectItem, SelectPopup, SelectTrigger } from "../components/ui/select";
+import {
+  useConnectedEnvironmentIds,
+  useEnvironmentIdentities,
+  usePrimaryEnvironmentId,
+} from "../state/environments";
 import {
   canForget,
   canJoinAgain,
@@ -42,6 +47,7 @@ import {
   storeEnrolmentView,
   useEnrolmentMachine,
   useEnrolmentView,
+  useJoinedElsewhere,
 } from "./enrolmentStore";
 import { deleteWorkspace } from "./workspaces.logic";
 import {
@@ -52,6 +58,7 @@ import {
   workspaceWithProjects,
 } from "./WorkspaceProjectPicker";
 import {
+  openWorkspaceDialog,
   loadEnvironmentWorkspaces,
   saveWorkspaces,
   setActiveWorkspace,
@@ -188,7 +195,9 @@ function JoinForm(props: {
           <div className="flex items-center gap-3">
             <CompanyAvatar name={relay.displayName} />
             <div className="min-w-0">
-              <p className="truncate font-medium text-sm">Join {relay.displayName}</p>
+              <p className="truncate font-medium text-sm">
+                Joining {environmentLabel || props.environmentId} to {relay.displayName}
+              </p>
               <p className="truncate text-muted-foreground text-xs">{relay.origin}</p>
             </div>
           </div>
@@ -258,7 +267,7 @@ function useNow(intervalMs: number) {
 }
 
 /** A quiet link that copies what support needs to find this join in the relay's `pairings list`. */
-function CopyDetails(props: {
+export function CopyDetails(props: {
   readonly target: RelayTarget;
   readonly view: BanneretEnrolmentView;
 }) {
@@ -334,6 +343,7 @@ function FinishingStep(props: {
   readonly target: RelayTarget;
   readonly view: BanneretEnrolmentView;
 }) {
+  const keepWorkspace = useJoinedElsewhere(props.target.environmentId, props.target.relayOrigin);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const line = props.view.health === undefined ? null : healthLine(props.view).text;
@@ -380,7 +390,9 @@ function FinishingStep(props: {
             type="button"
             variant="destructive-outline"
             disabled={busy}
-            onClick={() => void act(() => enrolmentRpc.leave(props.target, "forget"))}
+            onClick={() =>
+              void act(() => enrolmentRpc.leave(props.target, "forget", keepWorkspace))
+            }
           >
             Forget this machine here
           </Button>
@@ -499,10 +511,12 @@ function ProjectStep(props: {
 }
 
 function RevokedStep(props: {
+  readonly target: RelayTarget;
   readonly view: BanneretEnrolmentView;
   readonly onJoinAgain: () => void;
   readonly onClose: () => void;
 }) {
+  const keepWorkspace = useJoinedElsewhere(props.target.environmentId, props.target.relayOrigin);
   const workspaces = useWorkspaces();
   const workspace = workspaces.find((entry) => entry.id === props.view.workspaceId) ?? null;
   const remove = () => {
@@ -517,9 +531,15 @@ function RevokedStep(props: {
         {revokedMessage(props.view)}
       </p>
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="destructive-outline" onClick={remove}>
-          Remove workspace
-        </Button>
+        {keepWorkspace ? (
+          <Button type="button" variant="outline" onClick={props.onClose}>
+            Close
+          </Button>
+        ) : (
+          <Button type="button" variant="destructive-outline" onClick={remove}>
+            Remove workspace
+          </Button>
+        )}
         <Button type="button" onClick={props.onJoinAgain}>
           Join again
         </Button>
@@ -529,11 +549,19 @@ function RevokedStep(props: {
 }
 
 export function EnterpriseWizard(props: {
+  readonly selectedId: EnvironmentId | undefined;
   /** The relay to show, from a workspace's "Join on this machine"; none for a new join. */
   readonly initialOrigin: string | undefined;
   readonly onClose: () => void;
 }) {
-  const environmentId = usePrimaryEnvironmentId();
+  const primary = usePrimaryEnvironmentId();
+  const connected = useConnectedEnvironmentIds();
+  const identities = useEnvironmentIdentities();
+  const selected = props.selectedId ?? primary;
+  const environmentId = selected !== null && connected.includes(selected) ? selected : null;
+  const labelOf = (id: EnvironmentId) =>
+    identities.find((entry) => entry.environmentId === id)?.label ?? id;
+  const workspaces = useWorkspaces();
   // The relay this wizard follows: none until the address is checked, so a new join never lands on
   // a company this machine joined before.
   const [origin, setOrigin] = useState<string | undefined>(props.initialOrigin);
@@ -551,7 +579,11 @@ export function EnterpriseWizard(props: {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Join a company</DialogTitle>
+        <DialogTitle>
+          {environmentId !== null && origin !== undefined
+            ? `Joining ${labelOf(environmentId)} to ${view?.displayName ?? workspaces.find((entry) => entry.relay?.origin === origin)?.name ?? origin}`
+            : "Join a company"}
+        </DialogTitle>
         <DialogDescription>
           An Enterprise workspace joins this machine to your company's relay. Only facts about your
           work are shared, never your code or conversations. A machine can join several companies.
@@ -559,6 +591,28 @@ export function EnterpriseWizard(props: {
       </DialogHeader>
       <DialogPanel>
         <div className="flex flex-col gap-4">
+          <Select
+            value={environmentId}
+            onValueChange={(id) => {
+              if (id !== null)
+                openWorkspaceDialog({
+                  kind: "enterprise",
+                  environmentId: id,
+                  ...(origin === undefined ? {} : { origin }),
+                });
+            }}
+          >
+            <SelectTrigger aria-label="Machine">
+              {environmentId === null ? "Choose a machine" : labelOf(environmentId)}
+            </SelectTrigger>
+            <SelectPopup>
+              {connected.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {labelOf(id)}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
           {step === "address" ? <WorkspaceKindChoice kind="enterprise" /> : null}
           {environmentId === null ? (
             <p className="text-muted-foreground text-sm">Connect to an environment first.</p>
@@ -579,6 +633,7 @@ export function EnterpriseWizard(props: {
             <FinishingStep target={target} view={view} />
           ) : step === "revoked" ? (
             <RevokedStep
+              target={target}
               view={view}
               onJoinAgain={() => setJoiningAgain(true)}
               onClose={props.onClose}

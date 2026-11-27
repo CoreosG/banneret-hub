@@ -44,6 +44,11 @@ ABCD2345". Pick one to get back to its join screen.
 the environment id, the hostname and the Banneret Hub version. These are what the relay's `pairings list`
 shows, so support can find your join.
 
+**Join a linked machine from your desktop.** Select the company workspace, open the switcher and choose
+**Machines…**. Under **Your machines**, choose **Join** beside the server you want. Check the machine
+and company in the wizard, then sign in from the desktop. You can change the target with the machine
+picker. Return to **Machines…** to see each pending code, copy its details or leave from a joined machine.
+
 **Machines.** The switcher shows this machine's status for each Enterprise workspace, and lists that company's
 machines: who owns each one,
 whether it is online, its Banneret Hub version, its policy fingerprint and whether its sandbox is on. You can
