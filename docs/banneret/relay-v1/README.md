@@ -30,7 +30,7 @@ All under `/relay/v1`.
 | `GET /today` | Needs you, shipped, working, stuck and optionally health. `?since=...` filters shipped work (see below). |
 | `GET /needs` | Needs-you items, paged, most urgent first. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
-| `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
+| `GET /events` | Server-sent events: `needs.changed`, `mention`, `chat.changed`, `chat.delivery`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
 | `GET /snapshot/head` | The caller's current snapshot head: the SHA-256 of each snapshot file. |
 | `GET /snapshot/files/{sha256}` | One immutable snapshot file, by hash. |
 
@@ -160,8 +160,7 @@ The key is the Ed25519 key from the 32-byte seed `00 01 02 … 1f`. Its public k
 
 `POST /facts` and everything inside it is closed (`additionalProperties: false`), and every free string has a
 pattern. A heartbeat never carries prompts, replies, code, command text, thread or task titles, local paths or
-file contents. The only thread content that ever leaves a Hub is a thread its owner chose to share, and that
-goes through a different call.
+file contents. Shared threads and messages explicitly posted to chat use separate calls.
 
 - **Machine facts:** `environmentId`, `label`, `kind` (`laptop`, `desktop`, `server`, `cloud`), `hostname`, `os`,
   `hubVersion`, `policyFingerprint` (or null), `sandbox {enabled, image}` (image or null). The relay sets the
@@ -282,7 +281,7 @@ class. [Orchestrator]
 
 | Class | Means | Kinds |
 |---|---|---|
-| 1 | An agent is blocked on a question or approval from you | `thread_question`, `thread_approval` |
+| 1 | An agent is blocked on a question or approval from you | `thread_question`, `thread_approval`, `chat_ask` |
 | 2 | Something waits on your review or decision | `pull_request`, `pr_approval`, `waiting_for_approver`, `promotion`, `founder_question`, `health` |
 | 3 | You were mentioned, or an agent or persona wrote to you | `mention`, `agent_message`, `persona_ask` |
 | 4 | A dispatcher suggestion | `suggestion` |
@@ -911,3 +910,225 @@ A critical active occurrence adds one health Needs-you item for each configured 
 `criticalRecipients` holds stable person ids. Omitting it selects current founders. An empty list
 routes to nobody. Resolution or a lower severity removes the need. Alarm state belongs to the relay
 database and is never published to the work tracker.
+
+## Chat
+
+
+Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf of an agent supplies the `asHandle` query parameter. The relay verifies the active handle, owner and signing machine before applying the same read filter to every result. An agent request must never fall back to the person’s authority. Paged with `cursor` and `limit` (1–100) like today.
+
+| Call | Does |
+|---|---|
+| `GET /chat/conversations` | The caller's sidebar: channels they are in, public channels they can join, DMs; each with unread count, mention count and last seq |
+| `POST /chat/conversations` | Create a channel `{kind: channel, name, purpose?, private, agents}` or open a DM `{kind: dm, members[]}` (an existing DM with the same members is returned) |
+| `PATCH /chat/conversations/{id}` | Rename, purpose, private, agents switch, archive |
+| `GET /chat/conversations/{id}/members` | Page through channel members |
+| `PUT /chat/conversations/{id}/members/{memberId}` / `DELETE` | Join, add a person or an agent (`h_` id), leave, remove |
+| `PUT /chat/conversations/{id}/settings` | The caller's notification level and mute |
+| `GET /chat/me/settings` / `PUT` | The caller's own chat settings: `{agentsReadMyDms: bool}` (default false). Changing it emits `conversation.updated` for each of the caller's DMs to all participants |
+| `GET /chat/conversations/{id}/messages` | Top-level messages, `before` / `after` / `around` a message, newest page first |
+| `GET /chat/threads/{rootId}` | The root and its replies |
+| `POST /chat/messages` | Post `{conversationId, threadRootId?, text, card?, taskRef?, key, asHandle?}`; the author is the caller's person, or the handle in `asHandle` (only from the handle's machine and owner) |
+| `PATCH /chat/messages/{id}` | Edit (author only) |
+| `DELETE /chat/messages/{id}` | Delete (author; founders) |
+| `PUT /chat/messages/{id}/progress` | Create or edit the caller agent's progress message in a thread |
+| `PUT /chat/messages/{id}/reactions/{emoji}` / `DELETE` | React |
+| `PUT /chat/threads/{rootId}/task` / `DELETE` | Link or unlink the thread and a task |
+| `PUT /chat/threads/{rootId}/follow` / `DELETE` | Follow or unfollow |
+| `POST /chat/read` | Move read cursors `{conversationId, threadRootId?, seq}` |
+| `GET /chat/search` | `q`, `limit`, `cursor`; results with snippet and location |
+| `POST /chat/asks` | An agent asks `{to, question, choices?, threadRootId?, taskRef?, key}` |
+| `POST /chat/asks/{id}/answer` | The named person answers `{choice?, text?}` |
+| `POST /chat/asks/{id}/cancel` | The agent or its owner |
+| `GET /chat/changes` | `after=<seq>`, `limit`; every change the caller may see |
+| `PUT /chat/handles/{id}` / `DELETE` | The owner's Hub registers or removes a handle `{name, threadRef, provider, machineId}` |
+| `GET /chat/handles` | Handles the caller may mention, with owner and reachable (yes/no) |
+| `GET /chat/deliveries` | Pending deliveries for this machine's handles |
+| `POST /chat/deliveries/{id}/claim`, `/consume`, `/refuse` | The delivery transitions below |
+| `POST /chat/messages/{id}/promote` | Only when `promote` is on: returns the text and link for the Hub to post on GitHub as the person. The relay itself writes nothing to GitHub |
+
+**Events** on the existing `GET /events`: `chat.changed {seq, change?}`, `chat.delivery {deliveryId, handleId}`
+(to the handle's machine only). Both are live only and never replayed. Mentions and asks also raise the
+existing `needs.changed` and `mention`.
+
+**Shapes.** The objects most calls return:
+
+```text
+Conversation { id, kind: channel|dm, name?, purpose, private, agents: allowed|mentions_only|off,
+               members[] {kind: person|agent, id, login | handle, ownerLogin?},  // DMs; channels page members
+               memberCount {people, agents}, archived, lastSeq,
+               agentReaders[] {personId, login},  // DMs only: participants whose agents may read it
+               me {member, notify: all|mentions|nothing, muted, readSeq, unread, mentions} }  // me: caller only
+
+Message      { id, conversationId, threadRootId?, seq,
+               author {kind: person|agent|system, id?, login?, handle?, ownerLogin?, provider?},
+               kind: text|progress|ask|system, text, card?, systemEvent?,
+               progress? {state: working|stale|done|blocked|stopped, steps[] {title, state}},
+               ask? {id, to {id, login}, choices[], state, answerMessageId?},
+               taskRef?, mentions[] {kind, id}, replyCount, lastReplyAt?,
+               reactions[] {emoji, count, mine}, createdAt, editedAt?, deleted }
+
+Handle       { id, owner {id, login}, claimName, shortName?, provider, machine {id, label}, reachable, wake }
+```
+
+**Capabilities.** A section `{kind: "chat", version: 1, flags}` plus a `chat` object with limits:
+
+| Flag | Means |
+|---|---|
+| `channels` | Channels exist |
+| `private_channels` | Private channels can be made |
+| `dms`, `group_dms` | People can DM |
+| `threads` | Replies in threads |
+| `agents` | Agents can be members, be mentioned and post |
+| `agent_dms` | People can DM agents |
+| `agent_owner_dm_read` | People may turn on "My agents can read my DMs" |
+| `others_agents` | People can mention and DM other people's agents |
+| `task_links` | Task threads, task chips and lease echoes |
+| `reactions` | Reactions |
+| `search` | Message search |
+| `promote` | "Post to GitHub" on messages |
+
+The `chat` object: `{maxTextBytes, editWindowSeconds, rate {postsPerMinute, postsPerHour, openAsks,
+hopCap, pairPerMinute}, retentionDays {channels, dms}}`. Tool descriptions read these numbers.
+
+An edit window of zero permits the author to edit at any age. Text and card limits count UTF-8 bytes. Post keys are idempotent per author. Reusing a key in another conversation is refused. Card links accept HTTPS URLs or relay-relative task URLs.
+
+**Relay config** (`chat:` in the relay's one config file, all optional):
+
+| Key | Default |
+|---|---|
+| `chat.enabled` | `false`. Everything below applies only when true |
+| `chat.channels.defaults` | `[general]`, made on first start |
+| `chat.channels.privateAllowed` | `true` |
+| `chat.dms.enabled` / `chat.dms.groupMax` | `true` / `8` |
+| `chat.agents.enabled` | `true` |
+| `chat.agents.othersCanMention` | `questions` (`off`, `questions`, `full`) |
+| `chat.agents.readPublic` | `true` |
+| `chat.agents.ownerDmRead` | `true`: the per-person switch is offered. Each person's switch still starts off |
+| `chat.agents.wakeOnMention` | `owner_and_others` (`owner_only`, `owner_and_others`) |
+| `chat.agents.rate` | `{postsPerMinute: 10, postsPerHour: 120, openAsks: 5, hopCap: 4, pairPerMinute: 20}` |
+| `chat.asks.expireAfter` | `7d` |
+| `chat.deliveries.expireAfter` | `24h` |
+| `chat.taskLinks.enabled` / `chat.taskLinks.leaseEvents` | `true` / `true` |
+| `chat.boards[].channel` | none |
+| `chat.retention.channels` / `chat.retention.dms` | `0` (keep) / `0` (keep) |
+| `chat.promote.enabled` | `false` (Banneret's preset: `true`) |
+| `chat.search.enabled` | `true` |
+
+Banneret's preset sets `chat.enabled: true`, `chat.promote.enabled: true`, channels `general`, `platform`, `hub`,
+`ops`, and maps each board to its channel. Nothing Banneret-specific is in code.
+
+
+### Chat state transitions
+
+Deliveries, asks, progress and handle registration persist across restarts. The hop counter, pair budget and rate windows reset on restart. A chat store schema change bumps its user version. The relay refuses an old chat store.
+
+#### Delivery
+
+| From | Event | To | Who |
+|---|---|---|---|
+| (none) | message stored and the rules say deliver | `pending` | relay, same transaction as the message |
+| `pending` | `POST …/claim` from `machine_id` | `claimed` | Hub |
+| `claimed` | `POST …/consume` | `consumed` | Hub, after the turn or queue entry exists |
+| `claimed` | 10 min without consume | `pending` | relay sweeper |
+| `pending`, `claimed` | `POST …/refuse` | `refused` | Hub |
+| `pending`, `claimed` | `expires_at` passed | `expired` | relay sweeper |
+| `pending`, `claimed` | handle removed | `expired` | relay |
+| `pending`, `claimed` | restore from backup | `expired` | restore |
+| `consumed`, `refused`, `expired` | (none) | final | |
+
+- `refused` and `expired` write a `system` message `not_delivered` into the conversation.
+- The Hub writes the delivery id into the turn it creates. Before creating a turn it looks for that id in the
+  thread, so a crash between creating the turn and `consume` never sends twice.
+- Claims by any machine other than `machine_id` are refused with 403 `forbidden`.
+
+### Ask
+
+| From | Event | To |
+|---|---|---|
+| (none) | `POST /chat/asks` | `open` (+ Needs-you item `chat_ask` for `to_person`) |
+| `open` | `to_person` answers (choice or thread reply) | `answered` (+ delivery `answer`) |
+| `open` | agent or owner cancels | `cancelled` |
+| `open` | `expires_at` passed | `expired` |
+| `open` | handle removed | `orphaned` |
+| any final | (none) | final |
+
+The Needs-you item is derived from `open`, so every exit removes it. A choice click posts the choice as the
+person's message, so `answer_message_id` is always set. A thread reply by `to_person` while
+an ask is open in that thread answers it (with the reply text, no choice).
+
+### Progress message (`messages.progress_state`)
+
+| From | Event | To | Who |
+|---|---|---|---|
+| (none) | `banneret_chat_progress` with no working message in that thread | `working` | agent via Hub |
+| `working` | progress call | `working` (edited) | agent |
+| `working` | progress call with `done`, `blocked`, `stopped` | that state | agent |
+| `working`, `stale` | session stops, errors or is archived | `stopped` | owner's Hub |
+| `working`, `stale` | Hub restart finds no live session for it | `stopped` | owner's Hub, before serving |
+| `working` | handle's machine "not heard from" (90 s) | `stale` | relay sweeper |
+| `stale` | the same handle calls progress again | `working` (same message) | agent via Hub |
+| `working`, `stale` | handle removed | `stopped` | relay |
+| final | (none) | final | |
+
+### Handle
+
+| From | Event | To |
+|---|---|---|
+| (none) | `PUT /chat/handles/{id}` from the owner's machine | `active` |
+| `active` | owner removes it; Hub reports thread deleted; machine revoked; owner leaves staff | `removed` |
+
+`unreachable` is derived (the machine is "not heard from", 90 s), never stored, so it cannot get stuck.
+
+On restart the relay reconciles: any `active` handle whose owner is no longer staff, or whose machine is revoked,
+is removed with the full cleanup.
+
+**Writing as a handle.** Any write with `asHandle` (message, reply, progress, ask, reaction, delivery calls) is
+accepted only when the signed call comes from `handles.machine_id`, the token's person is `handles.owner_id`,
+and `state = 'active'`. Otherwise 403 `forbidden`.
+
+### Who may read what
+
+| Reader | Can read |
+|---|---|
+| Person | Public channels; private channels they are a member of; DMs they are in |
+| Agent (handle) | Public channels (when `chat.agents.readPublic`); channels it is a member of; DMs it is in; threads it follows; its owner's DMs with people only while `person_settings.agents_read_dms = 1` for the owner and `chat.agents.ownerDmRead` is true. Read and search only: never a delivery or a wake |
+| Founder | Same as a person. Founders do not read others' DMs through the API. The operator can read the file |
+
+One read filter implements this table. `chat_read`, `chat_search`, `/chat/changes` and `/chat/conversations` all
+use it, so the A3 switch cannot be bypassed through a second path. Turning the switch off takes effect on the next
+call; it cannot take back what an agent already read.
+
+### Delivery rules (the write path)
+
+For a stored message M by author A in conversation C:
+
+1. For each agent `@mention` H in M: deliver to H if C allows agents (not `off`), and A is H's owner or
+   `othersCanMention` is not `off`; if A is an agent, also check the hop cap and the pair budget.
+2. If C is a DM with agent H and A is a person: deliver to H (reason `dm`).
+3. If M is a reply and A is a **person**: deliver to every agent following that thread, except ones already
+   covered by 1 (reason `follow`). Agent authors never trigger follow deliveries.
+4. If M answers an open ask: deliver to the asking agent (reason `answer`).
+5. If H's `wake` is `owner_only` and A is not the owner, the delivery is still written. The Hub leaves it
+   `pending` until the owner next opens the thread; the 24 h expiry still applies.
+6. At most one delivery per (H, M): the first matching reason of answer, mention, dm, follow.
+
+### Chat events
+
+On the existing `GET /events` stream:
+
+| Event | To | Payload |
+|---|---|---|
+| `chat.changed` | every person who may see the change, on all their machines | `{seq, change?}`. `change` is the full change (message with text) when it fits in 8 KiB, otherwise absent and the Hub reads `/chat/changes` |
+| `chat.delivery` | the handle's machine only | `{deliveryId, handleId}` |
+| `needs.changed` | the person | existing; raised for asks, mentions and DMs |
+| `mention` | the person | existing; carries the Needs-you item |
+| `reset` | as today | the Hub also re-reads `/chat/changes` from its last seq and `/chat/deliveries` |
+
+Only `mention` and `chat.changed` may include content. Live chat events omit the SSE event ID so reconnects retain the last replayable ID. `chat.changed` and `chat.delivery` are live only. They never enter the relay's 1000-event replay ring, so chat
+traffic cannot push other events out of it. After any reconnect the Hub reads `/chat/changes` from its last seq
+and `/chat/deliveries`, which are the truth.
+
+`GET /chat/changes?after=<seq>` returns `{items[], nextSeq, resync}`. `resync: true` means the feed was pruned
+past `after`; the Hub then reloads the conversation list and the open conversation.
+
+Message changes resolve to the current message, including its tombstone after deletion. Conversation changes carry a reference so each participant fetches their own view. A private cursor update reaches only the same person’s machines. A chat ask adds `ask` to its class 1 Needs item so the named person can answer by id.

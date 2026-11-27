@@ -1,0 +1,38 @@
+{
+  "items": [
+    {
+      "seq": 1,
+      "kind": "message.created",
+      "message": {
+        "id": "example_1",
+        "conversationId": "example_1",
+        "seq": 1,
+        "author": {
+          "kind": "person",
+          "id": "example_1",
+          "login": "ada"
+        },
+        "kind": "text",
+        "text": "example",
+        "mentions": [
+          {
+            "kind": "person",
+            "id": "example_1"
+          }
+        ],
+        "replyCount": 1,
+        "reactions": [
+          {
+            "emoji": "example",
+            "count": 1,
+            "mine": false
+          }
+        ],
+        "createdAt": "2026-11-27T12:00:00Z",
+        "deleted": false
+      }
+    }
+  ],
+  "nextSeq": 1,
+  "resync": false
+}

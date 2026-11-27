@@ -107,6 +107,18 @@ export class RelayClient {
     });
   }
 
+  /** Opens the signed stream. Live chat events intentionally have no replay id. */
+  async events(key: MachineKey, token: string, device: string, lastEventId?: string) {
+    const response = await this.raw(key, "GET", "/relay/v1/events", {
+      token,
+      device,
+      ...(lastEventId === undefined ? {} : { headers: { "Last-Event-ID": lastEventId } }),
+    });
+    if (!response.ok || !response.headers.get("content-type")?.startsWith("text/event-stream"))
+      throw new Error("Invalid event stream response: " + response.status);
+    return new SseReader(response);
+  }
+
   /** A call to the relay's test control surface (FAKE.md); never part of /relay/v1. */
   async control(path: string, body: unknown = {}): Promise<Record<string, unknown>> {
     const response = await fetch(`${this.origin}/conformance/v1${path}`, {

@@ -173,3 +173,5 @@ Board seed PRs accept `baseBranch`, `approvals` (the wire object or null), `auth
 `canApprove` (eligible logins) and `approvalOnly` (GitHub's only blocker is review).
 Omitting approvals seeds a measured branch with no approval rule. Personal reads resolve
 eligible logins against active company people. Reseeding replaces the prior review state.
+
+Pass `--chat` to enable the channel and thread calls. The fake keeps chat in memory and starts with a public `general` channel. Configure the real conformance target with `chat.enabled: true`.

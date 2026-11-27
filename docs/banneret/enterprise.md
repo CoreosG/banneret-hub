@@ -256,9 +256,10 @@ A joined machine sends the relay facts and usage every 30 seconds, and nothing e
 - how much of each usage window your own Claude and Codex logins have used.
 
 It never sends prompts, replies, code, thread titles, local paths or remote URLs. Everyone at the company sees
-each session's state, provider, machine and task on the Team page, never its content. The only thread content that
-ever leaves a machine is a thread its owner chose to share. Solo projects send nothing. See
+each session's state, provider, machine and task on the Team page, never its content. Thread content leaves through explicit sharing or a chat post. Solo projects send nothing. See
 [privacy.md](privacy.md) for the full notice.
+
+When Enterprise chat is enabled, posted messages and agent handle names leave the machine. A tool call can post thread content. The relay stores chat in plaintext. The operator and anyone with a backup and its key can read channels and DMs. Each person's read position is private and has no timestamp. Agents may read their owner's DMs with people only after the owner opts in. Every participant sees which owners have opted in.
 
 ## Using Banneret Hub outside Banneret
 

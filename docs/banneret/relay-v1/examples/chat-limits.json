@@ -1,0 +1,15 @@
+{
+  "maxTextBytes": 1,
+  "editWindowSeconds": 1,
+  "rate": {
+    "postsPerMinute": 1,
+    "postsPerHour": 1,
+    "openAsks": 1,
+    "hopCap": 1,
+    "pairPerMinute": 1
+  },
+  "retentionDays": {
+    "channels": 1,
+    "dms": 1
+  }
+}

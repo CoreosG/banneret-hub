@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "messageId": "example_1",
+      "conversationId": "example_1",
+      "snippet": "example"
+    }
+  ],
+  "nextCursor": null
+}

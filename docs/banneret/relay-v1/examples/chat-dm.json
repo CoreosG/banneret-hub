@@ -1,0 +1,39 @@
+{
+  "kind": "dm",
+  "private": true,
+  "id": "c_pair",
+  "purpose": "example",
+  "agents": "allowed",
+  "memberCount": {
+    "people": 2,
+    "agents": 0
+  },
+  "archived": false,
+  "lastSeq": 1,
+  "me": {
+    "member": true,
+    "notify": "all",
+    "muted": false,
+    "readSeq": 1,
+    "unread": 1,
+    "mentions": 1
+  },
+  "members": [
+    {
+      "kind": "person",
+      "id": "p_ada",
+      "login": "ada"
+    },
+    {
+      "kind": "person",
+      "id": "p_leo",
+      "login": "leo"
+    }
+  ],
+  "agentReaders": [
+    {
+      "personId": "p_leo",
+      "login": "leo"
+    }
+  ]
+}

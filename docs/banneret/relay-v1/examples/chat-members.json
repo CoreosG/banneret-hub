@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "kind": "person",
+      "id": "example_1",
+      "login": "ada"
+    }
+  ],
+  "nextCursor": null
+}

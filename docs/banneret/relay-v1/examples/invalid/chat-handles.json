@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "id": "example_1",
+      "owner": {
+        "id": "example_1",
+        "login": "ada"
+      },
+      "claimName": "example",
+      "provider": "example",
+      "machine": {
+        "id": "example_1",
+        "label": "example"
+      },
+      "reachable": false,
+      "wake": "everyone"
+    }
+  ],
+  "nextCursor": null,
+  "unexpected": true
+}

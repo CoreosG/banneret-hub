@@ -1,0 +1,6 @@
+{
+  "kind": "channel",
+  "name": "example",
+  "private": false,
+  "agents": "allowed"
+}

@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "id": "n_question",
+      "kind": "chat_ask",
+      "title": "Proceed with the release?",
+      "ask": {
+        "id": "a_question",
+        "to": {
+          "id": "example_1",
+          "login": "ada"
+        },
+        "choices": [
+          "yes",
+          "no"
+        ],
+        "state": "open"
+      },
+      "createdAt": "2026-11-27T12:00:00Z"
+    }
+  ],
+  "nextCursor": null
+}

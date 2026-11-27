@@ -1,0 +1,10 @@
+{
+  "id": "example_1",
+  "handleId": "example_1",
+  "messageId": "example_1",
+  "machineId": "example_1",
+  "reason": "answer",
+  "fromOwner": false,
+  "state": "pending",
+  "expiresAt": "2026-11-27T12:00:00Z"
+}

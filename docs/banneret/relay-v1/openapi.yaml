@@ -25,8 +25,969 @@ tags:
   - name: board
   - name: feed
   - name: events
+  - name: chat
   - name: snapshot
 paths:
+  /chat/conversations:
+    get:
+      tags:
+      - chat
+      operationId: listConversations
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Conversations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversations'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags:
+      - chat
+      operationId: createConversation
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCreate'
+      responses:
+        '200':
+          description: Chat Conversation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversation'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/conversations/{id}:
+    patch:
+      tags:
+      - chat
+      operationId: updateChannel
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatPatch'
+      responses:
+        '200':
+          description: Chat Conversation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversation'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/conversations/{id}/members:
+    get:
+      tags:
+      - chat
+      operationId: listMembers
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMembers'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/conversations/{id}/members/{memberId}:
+    put:
+      tags:
+      - chat
+      operationId: addMember
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: path
+        name: memberId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Updated.
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - chat
+      operationId: removeMember
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: path
+        name: memberId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Updated.
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/conversations/{id}/settings:
+    put:
+      tags:
+      - chat
+      operationId: setNotifications
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatNotifications'
+      responses:
+        '200':
+          description: Chat Notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatNotifications'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/me/settings:
+    get:
+      tags:
+      - chat
+      operationId: getChatSettings
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      responses:
+        '200':
+          description: Chat Settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSettings'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      tags:
+      - chat
+      operationId: setChatSettings
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatSettings'
+      responses:
+        '200':
+          description: Chat Settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSettings'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/conversations/{id}/messages:
+    get:
+      tags:
+      - chat
+      operationId: listMessages
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - in: query
+        name: before
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: after
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: around
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Messages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessages'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/threads/{rootId}:
+    get:
+      tags:
+      - chat
+      operationId: getThread
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: rootId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Thread.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/messages:
+    post:
+      tags:
+      - chat
+      operationId: postMessage
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatPost'
+      responses:
+        '200':
+          description: Chat Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/messages/{id}:
+    patch:
+      tags:
+      - chat
+      operationId: editMessage
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatEdit'
+      responses:
+        '200':
+          description: Chat Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - chat
+      operationId: deleteMessage
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/messages/{id}/progress:
+    put:
+      tags:
+      - chat
+      operationId: setProgress
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatWriteProgress'
+      responses:
+        '200':
+          description: Chat Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/messages/{id}/reactions/{emoji}:
+    put:
+      tags:
+      - chat
+      operationId: addReaction
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: path
+        name: emoji
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - chat
+      operationId: removeReaction
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: path
+        name: emoji
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/threads/{rootId}/task:
+    put:
+      tags:
+      - chat
+      operationId: linkTask
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: rootId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatTask'
+      responses:
+        '204':
+          description: Updated.
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - chat
+      operationId: unlinkTask
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: rootId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Updated.
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/threads/{rootId}/follow:
+    put:
+      tags:
+      - chat
+      operationId: followThread
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: rootId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Updated.
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - chat
+      operationId: unfollowThread
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: rootId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Updated.
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/read:
+    post:
+      tags:
+      - chat
+      operationId: moveReadCursor
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRead'
+      responses:
+        '200':
+          description: Chat Read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatRead'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/search:
+    get:
+      tags:
+      - chat
+      operationId: searchMessages
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: q
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Chat Search.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSearch'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/asks:
+    post:
+      tags:
+      - chat
+      operationId: createAsk
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatNewAsk'
+      responses:
+        '200':
+          description: Chat Ask.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAsk'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/asks/{id}/answer:
+    post:
+      tags:
+      - chat
+      operationId: answerAsk
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatAnswer'
+      responses:
+        '200':
+          description: Chat Ask.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAsk'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/asks/{id}/cancel:
+    post:
+      tags:
+      - chat
+      operationId: cancelAsk
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Ask.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAsk'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/changes:
+    get:
+      tags:
+      - chat
+      operationId: listChatChanges
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: query
+        name: asHandle
+        required: false
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: query
+        name: after
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Chat Changes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatChanges'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/handles/{id}:
+    put:
+      tags:
+      - chat
+      operationId: registerHandle
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRegister'
+      responses:
+        '200':
+          description: Chat Handle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatHandle'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags:
+      - chat
+      operationId: removeHandle
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Updated.
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/handles:
+    get:
+      tags:
+      - chat
+      operationId: listHandles
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Chat Handles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatHandles'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/deliveries:
+    get:
+      tags:
+      - chat
+      operationId: listDeliveries
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Chat Deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatDeliveries'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/deliveries/{id}/claim:
+    post:
+      tags:
+      - chat
+      operationId: claimDelivery
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatAct'
+      responses:
+        '200':
+          description: Chat Delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatDelivery'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/deliveries/{id}/consume:
+    post:
+      tags:
+      - chat
+      operationId: consumeDelivery
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatAct'
+      responses:
+        '200':
+          description: Chat Delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatDelivery'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/deliveries/{id}/refuse:
+    post:
+      tags:
+      - chat
+      operationId: refuseDelivery
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRefuse'
+      responses:
+        '200':
+          description: Chat Delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatDelivery'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/messages/{id}/promote:
+    post:
+      tags:
+      - chat
+      operationId: promoteMessage
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Chat Promotion.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatPromotion'
+        default:
+          $ref: '#/components/responses/Error'
   /hooks/{sourceId}:
     post:
       operationId: receiveAlarm
@@ -306,7 +1267,7 @@ paths:
         founder, mentions and dispatcher suggestions. Most urgent first: ordered by class, then oldest `createdAt`
         first within a class (ties in the order the relay recorded them). The classes, most urgent first, and the
         kinds in each:
-          1. an agent blocked on the caller: `thread_question`, `thread_approval`;
+          1. an agent blocked on the caller: `chat_ask`, `thread_question`, `thread_approval`;
           2. something waiting on the caller's review or decision: `pull_request`, `pr_approval`, `waiting_for_approver`, `promotion`, `founder_question`,
              `health`;
           3. a mention, or an agent or persona writing to the caller: `mention`, `agent_message` (an agent's message
@@ -423,13 +1384,13 @@ paths:
       operationId: streamEvents
       summary: Server-sent events for the caller.
       description: |
-        `text/event-stream`. Each event has an `id:` line, an `event:` line naming one of `x-sse-events` below, and
+        `text/event-stream`. Each replayable event has an `id:` line, an `event:` line naming one of `x-sse-events` below, and
         one `data:` line holding the JSON payload. Without `Last-Event-ID` the stream is live only: it starts with
         the next event. With `Last-Event-ID` the relay replays the caller's events after that id, reaching back
         over the smaller of the last 1000 events and the last 24 hours. When the relay no longer holds every event
         after that id, or does not know the id, it sends one `reset` event instead of a replay, then continues live; on `reset` the client refetches
-        `GET /today`, `GET /needs` and `GET /capabilities`. A comment line (`:`) is sent every 25 seconds. Events say what changed, never the content; the client refetches through the
-        normal calls, except `mention`, which carries the needs-you item. The stream is closed when the machine is
+        `GET /today`, `GET /needs` and `GET /capabilities`. A comment line (`:`) is sent every 25 seconds. Only `mention` and `chat.changed` may carry content. Chat events omit the id and bypass replay.
+        On reconnect read /chat/changes and /chat/deliveries. The stream is closed when the machine is
         revoked or its person is removed.
       parameters:
         - $ref: "#/components/parameters/Device"
@@ -441,6 +1402,8 @@ paths:
           required: false
           schema: { type: string, maxLength: 128 }
       x-sse-events:
+        chat.changed: { $ref: "#/components/schemas/ChatChangedEvent" }
+        chat.delivery: { $ref: "#/components/schemas/ChatDeliveryEvent" }
         needs.changed: { $ref: "#/components/schemas/NeedsChangedEvent" }
         mention: { $ref: "#/components/schemas/MentionEvent" }
         bundle.changed: { $ref: "#/components/schemas/BundleChangedEvent" }
@@ -627,6 +1590,1107 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    ChatPerson:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - login
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        login:
+          $ref: '#/components/schemas/Login'
+    ChatMember:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - id
+        - login
+        properties:
+          kind:
+            type: string
+            enum:
+            - person
+          id:
+            $ref: '#/components/schemas/Id'
+          login:
+            $ref: '#/components/schemas/Login'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - id
+        - handle
+        - ownerLogin
+        properties:
+          kind:
+            type: string
+            enum:
+            - agent
+          id:
+            $ref: '#/components/schemas/Id'
+          handle:
+            type: string
+          ownerLogin:
+            $ref: '#/components/schemas/Login'
+    ChatMe:
+      type: object
+      additionalProperties: false
+      required:
+      - member
+      - notify
+      - muted
+      - readSeq
+      - unread
+      - mentions
+      properties:
+        member:
+          type: boolean
+        notify:
+          type: string
+          enum:
+          - all
+          - mentions
+          - nothing
+        muted:
+          type: boolean
+        readSeq:
+          type: integer
+          minimum: 0
+        unread:
+          type: integer
+          minimum: 0
+        mentions:
+          type: integer
+          minimum: 0
+    ChatConversation:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - name
+        - private
+        - id
+        - purpose
+        - agents
+        - memberCount
+        - archived
+        - lastSeq
+        - me
+        properties:
+          kind:
+            type: string
+            enum:
+            - channel
+          name:
+            type: string
+            pattern: ^[a-z0-9][a-z0-9-]{0,39}$
+          private:
+            type: boolean
+          id:
+            $ref: '#/components/schemas/Id'
+          purpose:
+            type: string
+            maxLength: 250
+          agents:
+            type: string
+            enum:
+            - allowed
+            - mentions_only
+            - 'off'
+          memberCount:
+            type: object
+            additionalProperties: false
+            required:
+            - people
+            - agents
+            properties:
+              people:
+                type: integer
+                minimum: 0
+              agents:
+                type: integer
+                minimum: 0
+          archived:
+            type: boolean
+          lastSeq:
+            type: integer
+            minimum: 0
+          me:
+            $ref: '#/components/schemas/ChatMe'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - private
+        - members
+        - agentReaders
+        - id
+        - purpose
+        - agents
+        - memberCount
+        - archived
+        - lastSeq
+        - me
+        properties:
+          kind:
+            type: string
+            enum:
+            - dm
+          private:
+            const: true
+          members:
+            type: array
+            items:
+              $ref: '#/components/schemas/ChatMember'
+            minItems: 2
+            maxItems: 8
+          agentReaders:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required:
+              - personId
+              - login
+              properties:
+                personId:
+                  $ref: '#/components/schemas/Id'
+                login:
+                  $ref: '#/components/schemas/Login'
+          id:
+            $ref: '#/components/schemas/Id'
+          purpose:
+            type: string
+            maxLength: 250
+          agents:
+            type: string
+            enum:
+            - allowed
+            - mentions_only
+            - 'off'
+          memberCount:
+            type: object
+            additionalProperties: false
+            required:
+            - people
+            - agents
+            properties:
+              people:
+                type: integer
+                minimum: 0
+              agents:
+                type: integer
+                minimum: 0
+          archived:
+            type: boolean
+          lastSeq:
+            type: integer
+            minimum: 0
+          me:
+            $ref: '#/components/schemas/ChatMe'
+    ChatCard:
+      type: object
+      additionalProperties: false
+      required:
+      - title
+      - tone
+      - fields
+      - links
+      properties:
+        title:
+          type: string
+        tone:
+          type: string
+          enum:
+          - ok
+          - warn
+          - error
+          - info
+        fields:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - label
+            - value
+            properties:
+              label:
+                type: string
+              value:
+                type: string
+          maxItems: 6
+        links:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - label
+            - url
+            properties:
+              label:
+                type: string
+              url:
+                type: string
+                format: uri-reference
+                pattern: '^(https://[^/ ]+|/relay/v1/tasks/[A-Za-z0-9_-]{1,64}$)'
+          maxItems: 4
+    ChatProgress:
+      type: object
+      additionalProperties: false
+      required:
+      - state
+      - steps
+      properties:
+        state:
+          type: string
+          enum:
+          - working
+          - stale
+          - done
+          - blocked
+          - stopped
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - title
+            - state
+            properties:
+              title:
+                type: string
+              state:
+                type: string
+          maxItems: 12
+    ChatAsk:
+      if: { properties: { state: { const: answered } } }
+      then: { required: [answerMessageId] }
+      else: { not: { required: [answerMessageId] } }
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - to
+      - choices
+      - state
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        to:
+          $ref: '#/components/schemas/ChatPerson'
+        choices:
+          anyOf: [{ maxItems: 0 }, { minItems: 2 }]
+          type: array
+          items:
+            type: string
+          maxItems: 5
+        state:
+          type: string
+          enum:
+          - open
+          - answered
+          - cancelled
+          - expired
+          - orphaned
+        answerMessageId:
+          $ref: '#/components/schemas/Id'
+    ChatAuthor:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - id
+        - login
+        properties:
+          kind:
+            type: string
+            enum:
+            - person
+          id:
+            $ref: '#/components/schemas/Id'
+          login:
+            $ref: '#/components/schemas/Login'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - id
+        - handle
+        - ownerLogin
+        - provider
+        properties:
+          kind:
+            type: string
+            enum:
+            - agent
+          id:
+            $ref: '#/components/schemas/Id'
+          handle:
+            type: string
+          ownerLogin:
+            $ref: '#/components/schemas/Login'
+          provider:
+            type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - system
+    ChatMessage:
+      allOf:
+        - if: { properties: { kind: { const: progress } } }
+          then: { required: [progress] }
+          else: { not: { required: [progress] } }
+        - if: { properties: { kind: { const: ask } } }
+          then: { required: [ask] }
+          else: { not: { required: [ask] } }
+        - if: { properties: { kind: { const: system } } }
+          then: { required: [systemEvent], properties: { author: { properties: { kind: { const: system } } } } }
+          else: { not: { anyOf: [{ required: [systemEvent] }, { properties: { author: { properties: { kind: { const: system } } } } }] } }
+        - if: { properties: { deleted: { const: true } } }
+          then: { properties: { text: { const: "" }, mentions: { maxItems: 0 } }, not: { required: [card] } }
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - conversationId
+      - seq
+      - author
+      - kind
+      - text
+      - mentions
+      - replyCount
+      - reactions
+      - createdAt
+      - deleted
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        conversationId:
+          $ref: '#/components/schemas/Id'
+        threadRootId:
+          $ref: '#/components/schemas/Id'
+        seq:
+          type: integer
+          minimum: 0
+        author:
+          $ref: '#/components/schemas/ChatAuthor'
+        kind:
+          type: string
+          enum:
+          - text
+          - progress
+          - ask
+          - system
+        text:
+          type: string
+          maxLength: 16384
+        card:
+          $ref: '#/components/schemas/ChatCard'
+        systemEvent:
+          type: string
+        progress:
+          $ref: '#/components/schemas/ChatProgress'
+        ask:
+          $ref: '#/components/schemas/ChatAsk'
+        taskRef:
+          $ref: '#/components/schemas/Id'
+        mentions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - kind
+            - id
+            properties:
+              kind:
+                type: string
+                enum:
+                - person
+                - agent
+              id:
+                $ref: '#/components/schemas/Id'
+          maxItems: 50
+        replyCount:
+          type: integer
+          minimum: 0
+        lastReplyAt:
+          $ref: '#/components/schemas/Timestamp'
+        reactions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - emoji
+            - count
+            - mine
+            properties:
+              emoji:
+                type: string
+              count:
+                type: integer
+                minimum: 0
+              mine:
+                type: boolean
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        editedAt:
+          $ref: '#/components/schemas/Timestamp'
+        deleted:
+          type: boolean
+    ChatHandle:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - owner
+      - claimName
+      - provider
+      - machine
+      - reachable
+      - wake
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        owner:
+          $ref: '#/components/schemas/ChatPerson'
+        claimName:
+          type: string
+        shortName:
+          type: string
+        provider:
+          type: string
+        machine:
+          type: object
+          additionalProperties: false
+          required:
+          - id
+          - label
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            label:
+              type: string
+        reachable:
+          type: boolean
+        wake:
+          type: string
+          enum:
+          - everyone
+          - owner_only
+    ChatDelivery:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - handleId
+      - messageId
+      - machineId
+      - reason
+      - fromOwner
+      - state
+      - expiresAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        handleId:
+          $ref: '#/components/schemas/Id'
+        messageId:
+          $ref: '#/components/schemas/Id'
+        machineId:
+          $ref: '#/components/schemas/Id'
+        reason:
+          type: string
+          enum:
+          - answer
+          - mention
+          - dm
+          - follow
+        fromOwner:
+          type: boolean
+        state:
+          type: string
+          enum:
+          - pending
+          - claimed
+          - consumed
+          - refused
+          - expired
+        expiresAt:
+          $ref: '#/components/schemas/Timestamp'
+    ChatRead:
+      type: object
+      additionalProperties: false
+      required:
+      - conversationId
+      - seq
+      properties:
+        conversationId:
+          $ref: '#/components/schemas/Id'
+        threadRootId:
+          $ref: '#/components/schemas/Id'
+        seq:
+          type: integer
+          minimum: 0
+    ChatChange:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - seq
+        - kind
+        - message
+        properties:
+          seq:
+            type: integer
+            minimum: 0
+          kind:
+            type: string
+            enum:
+            - message.created
+            - message.edited
+            - message.deleted
+          message:
+            $ref: '#/components/schemas/ChatMessage'
+      - type: object
+        additionalProperties: false
+        required:
+        - seq
+        - kind
+        - read
+        properties:
+          seq:
+            type: integer
+            minimum: 0
+          kind:
+            type: string
+            enum:
+            - read.moved
+          read:
+            $ref: '#/components/schemas/ChatRead'
+      - type: object
+        additionalProperties: false
+        required:
+        - seq
+        - kind
+        - refId
+        properties:
+          seq:
+            type: integer
+            minimum: 0
+          kind:
+            type: string
+            enum:
+            - reaction
+            - member.added
+            - member.removed
+            - conversation.updated
+            - settings.updated
+            - ask.updated
+            - task_thread.linked
+            - handle.updated
+          refId:
+            $ref: '#/components/schemas/Id'
+          conversationId:
+            $ref: '#/components/schemas/Id'
+    ChatChangedEvent:
+      type: object
+      additionalProperties: false
+      required:
+      - seq
+      properties:
+        seq:
+          type: integer
+          minimum: 0
+        change:
+          $ref: '#/components/schemas/ChatChange'
+    ChatDeliveryEvent:
+      type: object
+      additionalProperties: false
+      required:
+      - deliveryId
+      - handleId
+      properties:
+        deliveryId:
+          $ref: '#/components/schemas/Id'
+        handleId:
+          $ref: '#/components/schemas/Id'
+    ChatChanges:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextSeq
+      - resync
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatChange'
+        nextSeq:
+          type: integer
+          minimum: 0
+        resync:
+          type: boolean
+    ChatConversations:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatConversation'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatMessages:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatMembers:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMember'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatHandles:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatHandle'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatDeliveries:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatDelivery'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatSearch:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - messageId
+            - conversationId
+            - snippet
+            properties:
+              messageId:
+                $ref: '#/components/schemas/Id'
+              conversationId:
+                $ref: '#/components/schemas/Id'
+              threadRootId:
+                $ref: '#/components/schemas/Id'
+              snippet:
+                type: string
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatThread:
+      type: object
+      additionalProperties: false
+      required:
+      - root
+      - items
+      - nextCursor
+      properties:
+        root:
+          $ref: '#/components/schemas/ChatMessage'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatCreate:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - name
+        - private
+        - agents
+        properties:
+          kind:
+            type: string
+            enum:
+            - channel
+          name:
+            type: string
+            pattern: ^[a-z0-9][a-z0-9-]{0,39}$
+          purpose:
+            type: string
+            maxLength: 250
+          private:
+            type: boolean
+          agents:
+            type: string
+            enum:
+            - allowed
+            - mentions_only
+            - 'off'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - members
+        properties:
+          kind:
+            type: string
+            enum:
+            - dm
+          members:
+            type: array
+            items:
+              $ref: '#/components/schemas/Id'
+            minItems: 1
+            maxItems: 8
+            uniqueItems: true
+    ChatPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9-]{0,39}$
+        purpose:
+          type: string
+          maxLength: 250
+        private:
+          type: boolean
+        agents:
+          type: string
+          enum:
+          - allowed
+          - mentions_only
+          - 'off'
+        archived:
+          type: boolean
+      minProperties: 1
+    ChatSettings:
+      type: object
+      additionalProperties: false
+      required:
+      - agentsReadMyDms
+      properties:
+        agentsReadMyDms:
+          type: boolean
+    ChatNotifications:
+      type: object
+      additionalProperties: false
+      required:
+      - notify
+      - muted
+      properties:
+        notify:
+          type: string
+          enum:
+          - all
+          - mentions
+          - nothing
+        muted:
+          type: boolean
+    ChatPost:
+      type: object
+      additionalProperties: false
+      required:
+      - conversationId
+      - text
+      - key
+      properties:
+        conversationId:
+          $ref: '#/components/schemas/Id'
+        threadRootId:
+          $ref: '#/components/schemas/Id'
+        text:
+          type: string
+          maxLength: 16384
+        card:
+          $ref: '#/components/schemas/ChatCard'
+        taskRef:
+          $ref: '#/components/schemas/Id'
+        key:
+          $ref: '#/components/schemas/Id'
+        asHandle:
+          $ref: '#/components/schemas/Id'
+    ChatEdit:
+      type: object
+      additionalProperties: false
+      required:
+      - text
+      properties:
+        text:
+          type: string
+          maxLength: 16384
+        card:
+          $ref: '#/components/schemas/ChatCard'
+        asHandle:
+          $ref: '#/components/schemas/Id'
+    ChatWriteProgress:
+      type: object
+      additionalProperties: false
+      required:
+      - text
+      - state
+      - asHandle
+      properties:
+        text:
+          type: string
+          maxLength: 16384
+        state:
+          type: string
+          enum:
+          - working
+          - done
+          - blocked
+          - stopped
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - title
+            - state
+            properties:
+              title:
+                type: string
+              state:
+                type: string
+          maxItems: 12
+        asHandle:
+          $ref: '#/components/schemas/Id'
+    ChatTask:
+      type: object
+      additionalProperties: false
+      required:
+      - taskRef
+      properties:
+        taskRef:
+          $ref: '#/components/schemas/Id'
+    ChatNewAsk:
+      type: object
+      additionalProperties: false
+      required:
+      - to
+      - question
+      - key
+      - asHandle
+      properties:
+        to:
+          $ref: '#/components/schemas/Id'
+        question:
+          type: string
+          maxLength: 16384
+        choices:
+          type: array
+          items:
+            type: string
+            maxLength: 80
+          minItems: 2
+          maxItems: 5
+          uniqueItems: true
+        threadRootId:
+          $ref: '#/components/schemas/Id'
+        taskRef:
+          $ref: '#/components/schemas/Id'
+        key:
+          $ref: '#/components/schemas/Id'
+        asHandle:
+          $ref: '#/components/schemas/Id'
+    ChatAnswer:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - choice
+        properties:
+          choice:
+            type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - text
+        properties:
+          text:
+            type: string
+            maxLength: 16384
+    ChatRegister:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - threadRef
+      - provider
+      - machineId
+      properties:
+        name:
+          type: string
+        threadRef:
+          $ref: '#/components/schemas/Id'
+        provider:
+          type: string
+        machineId:
+          $ref: '#/components/schemas/Id'
+        wake:
+          type: string
+          enum:
+          - everyone
+          - owner_only
+    ChatAct:
+      type: object
+      additionalProperties: false
+      required:
+      - asHandle
+      properties:
+        asHandle:
+          $ref: '#/components/schemas/Id'
+    ChatRefuse:
+      type: object
+      additionalProperties: false
+      required:
+      - asHandle
+      - reason
+      properties:
+        asHandle:
+          $ref: '#/components/schemas/Id'
+        reason:
+          type: string
+    ChatPromotion:
+      type: object
+      additionalProperties: false
+      required:
+      - text
+      - link
+      properties:
+        text:
+          type: string
+          maxLength: 16384
+        link:
+          type: string
+          format: uri
+          pattern: ^https?://
+    ChatLimits:
+      type: object
+      additionalProperties: false
+      required:
+      - maxTextBytes
+      - editWindowSeconds
+      - rate
+      - retentionDays
+      properties:
+        maxTextBytes:
+          type: integer
+          minimum: 0
+        editWindowSeconds:
+          type: integer
+          minimum: 0
+        rate:
+          type: object
+          additionalProperties: false
+          required:
+          - postsPerMinute
+          - postsPerHour
+          - openAsks
+          - hopCap
+          - pairPerMinute
+          properties:
+            postsPerMinute:
+              type: integer
+              minimum: 0
+            postsPerHour:
+              type: integer
+              minimum: 0
+            openAsks:
+              type: integer
+              minimum: 0
+            hopCap:
+              type: integer
+              minimum: 0
+            pairPerMinute:
+              type: integer
+              minimum: 0
+        retentionDays:
+          type: object
+          additionalProperties: false
+          required:
+          - channels
+          - dms
+          properties:
+            channels:
+              type: integer
+              minimum: 0
+            dms:
+              type: integer
+              minimum: 0
     Id:
       description: An opaque id. Never a GitHub numeric id; never parsed by clients.
       type: string
@@ -673,6 +2737,12 @@ components:
               type: object
               description: Optional machine-readable detail, such as the refused field name. Never secrets.
     Capabilities:
+      if:
+        required: [sections]
+        properties:
+          sections: { contains: { required: [kind], properties: { kind: { const: chat } } } }
+      then: { required: [me, chat] }
+      else: { not: { required: [chat] } }
       type: object
       required: [displayName, iconUrl, enrolment]
       properties:
@@ -701,6 +2771,7 @@ components:
           type: array
           maxItems: 64
           items: { $ref: "#/components/schemas/Section" }
+        chat: { $ref: "#/components/schemas/ChatLimits" }
         dashboards: { $ref: "#/components/schemas/Dashboards" }
         mcpTools:
           description: |
@@ -756,6 +2827,11 @@ components:
       type: object
       required: [id, kind, version, flags]
       allOf:
+        - if: { properties: { kind: { const: chat } } }
+          then:
+            properties:
+              version: { const: 1 }
+              flags: { type: array, uniqueItems: true, items: { enum: [channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, task_links, reactions, search, promote] } }
         - if: { properties: { kind: { const: board } } }
           then:
             required: [params]
@@ -765,8 +2841,9 @@ components:
         id: { $ref: "#/components/schemas/Id" }
         kind:
           description: |
-            One of the fixed section types: today, needs, machines, health, board, map, feed, task, channel, team,
+            One of the fixed section types: today, needs, machines, health, board, map, feed, task, chat, team,
             knowledge. Clients ignore kinds they do not know.
+          not: { const: channel }
           type: string
           pattern: "^[a-z][a-z0-9_]{0,31}$"
         version: { type: integer, minimum: 1 }
@@ -1094,13 +3171,15 @@ components:
         id: { $ref: "#/components/schemas/Id" }
         login: { $ref: "#/components/schemas/Login" }
     NeedsItem:
+      if: { properties: { kind: { const: chat_ask } } }
+      then: { required: [ask] }
       type: object
       required: [id, kind, title, createdAt]
       properties:
         id: { $ref: "#/components/schemas/Id" }
         kind:
           description: |
-            Open set. Known values: `thread_question`, `thread_approval`, `pull_request`, `pr_approval`, `waiting_for_approver`, `founder_question`,
+            Open set. Known values: `chat_ask`, `thread_question`, `thread_approval`, `pull_request`, `pr_approval`, `waiting_for_approver`, `founder_question`,
             `promotion`, `health`, `mention`, `agent_message`, `persona_ask`, `suggestion`, `other` (class 5, the explicit
             catch-all). Not a closed enum:
             a client shows an unknown kind as a generic item and never fails on it.
@@ -1108,6 +3187,7 @@ components:
           pattern: "^[a-z][a-z0-9_]{0,63}$"
         title: { type: string, maxLength: 300 }
         recommendation: { type: string, maxLength: 500 }
+        ask: { $ref: "#/components/schemas/ChatAsk" }
         from: { $ref: "#/components/schemas/PersonRef" }
         url:
           description: Link out, such as the GitHub issue or pull request.

@@ -1,0 +1,12 @@
+{
+  "id": "example_1",
+  "to": {
+    "id": "example_1",
+    "login": "ada"
+  },
+  "choices": [
+    "example"
+  ],
+  "state": "open",
+  "unexpected": true
+}

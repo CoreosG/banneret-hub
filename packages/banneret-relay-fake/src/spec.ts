@@ -14,6 +14,44 @@ export const specDirectory = NodeURL.fileURLToPath(
 const specUrl = "https://relay-v1.invalid/openapi.json";
 
 export type SchemaName =
+  | "ChatPerson"
+  | "ChatMember"
+  | "ChatMe"
+  | "ChatConversation"
+  | "ChatCard"
+  | "ChatProgress"
+  | "ChatAsk"
+  | "ChatAuthor"
+  | "ChatMessage"
+  | "ChatHandle"
+  | "ChatDelivery"
+  | "ChatRead"
+  | "ChatChange"
+  | "ChatChangedEvent"
+  | "ChatDeliveryEvent"
+  | "ChatChanges"
+  | "ChatConversations"
+  | "ChatMessages"
+  | "ChatMembers"
+  | "ChatHandles"
+  | "ChatDeliveries"
+  | "ChatSearch"
+  | "ChatThread"
+  | "ChatCreate"
+  | "ChatPatch"
+  | "ChatSettings"
+  | "ChatNotifications"
+  | "ChatPost"
+  | "ChatEdit"
+  | "ChatWriteProgress"
+  | "ChatTask"
+  | "ChatNewAsk"
+  | "ChatAnswer"
+  | "ChatRegister"
+  | "ChatAct"
+  | "ChatRefuse"
+  | "ChatPromotion"
+  | "ChatLimits"
   | "Capabilities"
   | "EnrolStartRequest"
   | "EnrolStartResponse"
@@ -92,6 +130,46 @@ export const loadSpec = (): SpecValidator => {
 
 /** The valid examples and the schema each one shows; the same map as the Go contract test. */
 export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
+  "chat-person.json": "ChatPerson",
+  "chat-member.json": "ChatMember",
+  "chat-me.json": "ChatMe",
+  "chat-conversation.json": "ChatConversation",
+  "chat-card.json": "ChatCard",
+  "chat-progress.json": "ChatProgress",
+  "chat-ask.json": "ChatAsk",
+  "chat-author.json": "ChatAuthor",
+  "chat-message.json": "ChatMessage",
+  "chat-handle.json": "ChatHandle",
+  "chat-delivery.json": "ChatDelivery",
+  "chat-read.json": "ChatRead",
+  "chat-change.json": "ChatChange",
+  "chat-changed-event.json": "ChatChangedEvent",
+  "chat-delivery-event.json": "ChatDeliveryEvent",
+  "chat-changes.json": "ChatChanges",
+  "chat-conversations.json": "ChatConversations",
+  "chat-messages.json": "ChatMessages",
+  "chat-members.json": "ChatMembers",
+  "chat-handles.json": "ChatHandles",
+  "chat-deliveries.json": "ChatDeliveries",
+  "chat-search.json": "ChatSearch",
+  "chat-thread.json": "ChatThread",
+  "chat-create.json": "ChatCreate",
+  "chat-patch.json": "ChatPatch",
+  "chat-settings.json": "ChatSettings",
+  "chat-notifications.json": "ChatNotifications",
+  "chat-post.json": "ChatPost",
+  "chat-edit.json": "ChatEdit",
+  "chat-write-progress.json": "ChatWriteProgress",
+  "chat-task.json": "ChatTask",
+  "chat-new-ask.json": "ChatNewAsk",
+  "chat-answer.json": "ChatAnswer",
+  "chat-register.json": "ChatRegister",
+  "chat-dm.json": "ChatConversation",
+  "chat-ask-needs.json": "NeedsPage",
+  "chat-act.json": "ChatAct",
+  "chat-refuse.json": "ChatRefuse",
+  "chat-promotion.json": "ChatPromotion",
+  "chat-limits.json": "ChatLimits",
   "capabilities-public.json": "Capabilities",
   "capabilities.json": "Capabilities",
   "enroll-start-request.json": "EnrolStartRequest",
@@ -135,7 +213,8 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
 
 /** Invalid examples are refused facts, except the enrolment ones; the same rule as the Go contract test. */
 export const invalidExampleSchema = (file: string): SchemaName =>
-  file.startsWith("alarm-")
+  exampleSchemas[file] ??
+  (file.startsWith("alarm-")
     ? "Alarm"
     : file.startsWith("enroll-poll")
       ? "EnrolPollResponse"
@@ -169,7 +248,7 @@ export const invalidExampleSchema = (file: string): SchemaName =>
                                   ? "Today"
                                   : file.startsWith("snapshot-health")
                                     ? "HealthBlock"
-                                    : "FactsRequest";
+                                    : "FactsRequest");
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

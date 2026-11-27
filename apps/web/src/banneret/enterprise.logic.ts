@@ -306,7 +306,7 @@ const KNOWN_SECTION_KINDS = new Set([
   "map",
   "feed",
   "task",
-  "channel",
+  "chat",
   "team",
   "knowledge",
 ]);

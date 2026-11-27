@@ -1,0 +1,16 @@
+{
+  "title": "example",
+  "tone": "ok",
+  "fields": [
+    {
+      "label": "example",
+      "value": "example"
+    }
+  ],
+  "links": [
+    {
+      "label": "example",
+      "url": "https://example.org/issue"
+    }
+  ]
+}
