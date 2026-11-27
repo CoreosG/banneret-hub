@@ -1724,9 +1724,9 @@ paths:
       description: |
         Allowed for the machine's owner and for a founder. The machine's token is refused within 1 minute, open
         event streams from it are closed, and it leaves the Machines list of everyone except its owner and
-        founders. Revoking is final; the machine enrols again to return. Revoking an already revoked machine
-        answers 204. A `machineId` that is malformed (not an `Id`) or unknown answers 404 `not_found`; this call
-        never answers 400.
+        founders. Revoking is final; the machine enrols again to return. Owners and founders receive 204 even if the machine was already revoked.
+        Other callers receive 403 `forbidden` for a visible machine. A hidden machine or an unknown or
+        malformed id returns 404 `not_found`.
       parameters:
         - name: machineId
           in: path
