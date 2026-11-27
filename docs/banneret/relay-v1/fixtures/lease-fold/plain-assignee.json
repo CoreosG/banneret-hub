@@ -1,0 +1,16 @@
+{
+  "name": "plain-assignee",
+  "description": "Assigned on the tracker with no claim comment and no claimed label: not a lease, however old.",
+  "input": {
+    "comments": [],
+    "assignees": ["carol-example"],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": null,
+    "releases": []
+  }
+}

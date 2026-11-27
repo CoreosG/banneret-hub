@@ -1184,7 +1184,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const column =
       held && lease.state !== "active" && lease.state !== "paused"
         ? "stuck"
-        : held && task.column === "free"
+        : task.column === "free" &&
+            (held || (task.tracker !== null && task.tracker.assignees.length > 0))
           ? "taken"
           : task.column;
     const status = held && lease.state === "conflict" ? "needs_you" : task.status;

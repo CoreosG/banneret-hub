@@ -1,0 +1,42 @@
+{
+  "name": "plain-assignee-after-other-release",
+  "description": "A release by someone else, then a plain assignment to another person: the new assignee is not a lease.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:02:00Z",
+        "body": "release: done"
+      }
+    ],
+    "assignees": ["carol-example"],
+    "labels": [],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": null,
+    "lastRelease": {
+      "by": "ada-example",
+      "at": "2026-11-20T10:02:00Z",
+      "reason": "done",
+      "freeToContinue": false
+    },
+    "releases": [
+      {
+        "by": "ada-example",
+        "holder": "ada-example",
+        "at": "2026-11-20T10:02:00Z",
+        "reason": "done",
+        "freeToContinue": false
+      }
+    ]
+  }
+}

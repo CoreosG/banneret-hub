@@ -1964,6 +1964,17 @@ describe("lease protocol", () => {
     expect(card?.column).toBe("stuck");
   });
 
+  it("shows a plain assignee as Taken with no lease", async () => {
+    const machine = await enrol();
+    const task = id();
+    await client.control("/board/seed", {
+      tasks: [{ id: task, title: "Assigned elsewhere", assignees: [newLogin()] }],
+    });
+    const card = await cardFor(machine, task);
+    expect(card?.lease).toBeUndefined();
+    expect(card?.column).toBe("taken");
+  });
+
   it("ignores another person's release and counts a founder's", async () => {
     const machine = await enrol();
     const founder = await enrol({ role: "founder" });
