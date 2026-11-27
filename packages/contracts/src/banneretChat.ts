@@ -303,14 +303,20 @@ export const ChatThread = Schema.Struct({
 });
 export type ChatThread = typeof ChatThread.Type;
 
+export const ChannelTemplate = Schema.Literals([
+  "general",
+  "team",
+  "private",
+  "announcement",
+  "shared",
+  "community",
+]);
 export const ChatCreate = Schema.Union([
   Schema.Struct({
     kind: Schema.Literals(["channel"]),
     name: Schema.String,
     purpose: Schema.optionalKey(Schema.String),
-    template: Schema.optionalKey(
-      Schema.Literals(["general", "team", "private", "announcement", "shared", "community"]),
-    ),
+    template: Schema.optionalKey(ChannelTemplate),
     access: Schema.optionalKey(ChatAccess),
     managers: Schema.optionalKey(Schema.Array(ChatPerson)),
     agents: Schema.optionalKey(Schema.Literals(["allowed", "mentions_only", "off"])),
@@ -433,8 +439,30 @@ export const ThreadChatAction = Schema.Struct({
   thread: Schema.String,
   settings: Schema.optionalKey(Schema.Struct({ name: Schema.String, wake: ChatWake })),
 });
-export const ChannelAction = Schema.Union([
+export const RoleWrite = Schema.Struct({
+  name: Schema.NonEmptyString,
+  forOutside: Schema.Boolean,
+  permissions: Schema.Record(
+    Schema.String,
+    Schema.Union([Schema.Literal(true), Schema.String, Schema.Array(Schema.String)]),
+  ),
+});
+export const RoleDetail = Schema.Struct({
+  ...RoleWrite.fields,
+  ...RoleRef.fields,
+  memberCount: Schema.Int,
+  template: Schema.optionalKey(RoleId),
+});
+export type RoleDetail = typeof RoleDetail.Type;
+export const RoleAction = Schema.Union([
+  Schema.Struct({ op: Schema.Literal("list") }),
+  Schema.Struct({ op: Schema.Literals(["reset", "delete"]), id: RoleId }),
+  Schema.Struct({ op: Schema.Literal("save"), id: RoleId, role: RoleWrite }),
+  Schema.Struct({ op: Schema.Literal("assign"), person: Id, roleId: RoleId }),
+]);
+export const ChatAction = Schema.Union([
   ThreadChatAction,
+  Schema.Struct({ kind: Schema.Literal("settings"), id: Id, patch: ChatPatch }),
   Schema.Struct({ kind: Schema.Literal("handles"), ...Page }),
   Schema.Struct({ kind: Schema.Literal("dmSettings") }),
   Schema.Struct({ kind: Schema.Literal("setDmSettings"), settings: ChatSettings }),
@@ -467,7 +495,7 @@ export const ChannelAction = Schema.Union([
     kind: Schema.Literal("create"),
     name: Schema.String,
     purpose: Schema.String,
-    private: Schema.Boolean,
+    template: ChannelTemplate,
   }),
   Schema.Struct({
     kind: Schema.Literal("post"),
@@ -482,17 +510,28 @@ export const ChannelAction = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("delete"), id: Id }),
   Schema.Struct({ kind: Schema.Literal("read"), read: ChatRead }),
 ]);
-export type ChannelAction = typeof ChannelAction.Type;
+export type ChannelAction =
+  | typeof ChatAction.Type
+  | { readonly kind: "roles"; readonly action: typeof RoleAction.Type };
 export const ChannelResult = Schema.Union([
   Schema.Struct({ ok: Schema.Literal(true), value: Schema.Unknown }),
-  Schema.Struct({ ok: Schema.Literal(false), message: Schema.String }),
+  Schema.Struct({
+    ok: Schema.Literal(false),
+    message: Schema.String,
+    code: Schema.optionalKey(Schema.String),
+  }),
 ]);
 export type ChannelResult = typeof ChannelResult.Type;
 
 /** The device RPC permits only the people-channel calls implemented by the Hub. */
 export function callChannel<A>(
   action: ChannelAction,
-  call: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => A,
+  call: (
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+    path: string,
+    body?: unknown,
+    namespace?: "roles",
+  ) => A,
 ): A {
   const page =
     "cursor" in action && action.cursor
@@ -500,6 +539,23 @@ export function callChannel<A>(
       : "?limit=100";
 
   switch (action.kind) {
+    case "roles": {
+      const r = action.action;
+      switch (r.op) {
+        case "list":
+          return call("GET", "roles", undefined, "roles");
+        case "save":
+          return call("PUT", "roles/" + r.id, r.role, "roles");
+        case "delete":
+          return call("DELETE", "roles/" + r.id, undefined, "roles");
+        case "reset":
+          return call("POST", "roles/" + r.id + "/reset", undefined, "roles");
+        case "assign":
+          return call("PUT", "staff/" + r.person + "/role", { roleId: r.roleId }, "roles");
+      }
+    }
+    case "settings":
+      return call("PATCH", "conversations/" + action.id, action.patch);
     case "around":
       return call(
         "GET",
@@ -556,8 +612,7 @@ export function callChannel<A>(
         kind: "channel",
         name: action.name,
         purpose: action.purpose,
-        template: action.private ? "private" : "team",
-        agents: "allowed",
+        template: action.template,
       });
     case "answer":
       return call("POST", "asks/" + action.id + "/answer", action.answer);

@@ -22,7 +22,7 @@ export function channelAction(
   return callChannel(action, call).pipe(
     Effect.match({
       onSuccess: (r) => ({ ok: true as const, value: r.body }),
-      onFailure: (e) => ({ ok: false as const, message: e.message }),
+      onFailure: (e) => ({ ok: false as const, message: e.message, code: e.code }),
     }),
   );
 }

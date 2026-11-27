@@ -5,7 +5,7 @@ import {
   generateMachineKey,
 } from "../../packages/banneret-relay-fake/src/index.ts";
 import { callChannel } from "../../packages/contracts/src/banneretChat.ts";
-let session;
+const sessions = new Map();
 async function enrol(relay, login, admission = "member") {
   const client = new RelayClient(relay.url),
     key = generateMachineKey();
@@ -38,23 +38,31 @@ async function enrol(relay, login, admission = "member") {
       device: approved.body.machineId,
       body,
     });
-    if (result.status >= 400) throw new Error(JSON.stringify(result.body));
+    if (result.status >= 400)
+      throw Object.assign(new Error(result.body.error.message), { code: result.body.error.code });
     return result;
   };
   const me = (await call("GET", "capabilities")).body.me;
   const run = async (action) => {
     try {
-      const result = await callChannel(action, (method, path, body) =>
-        call(method, "chat/" + path.replace(/\/members\/@me$/, "/members/" + me.id), body),
+      const result = await callChannel(action, (method, path, body, namespace) =>
+        call(
+          method,
+          (namespace === "roles" ? "" : "chat/") +
+            path.replace(/\/members\/@me$/, "/members/" + me.id),
+          body,
+        ),
       );
       return { ok: true, value: result.body };
     } catch (error) {
-      return { ok: false, message: error.message };
+      return { ok: false, message: error.message, code: error.code };
     }
   };
   return Object.assign(run, { me, call });
 }
-export async function command(op, arg) {
+export async function command(operation, arg) {
+  const [key, op] = operation.includes(":") ? operation.split(":") : ["chat", operation];
+  let session = sessions.get(key);
   if (op === "outsideStart") {
     const relay = await startFakeRelay({ chat: true, autoApprove: false });
     try {
@@ -67,7 +75,7 @@ export async function command(op, arg) {
         template: "shared",
       });
       await ana.call("PUT", "chat/conversations/" + channel.id + "/members/" + guest.me.id, {});
-      session = { relay, ada: guest };
+      sessions.set(key, { relay, ada: guest });
       return guest.me;
     } catch (error) {
       await relay.close();
@@ -77,6 +85,7 @@ export async function command(op, arg) {
   if (op === "start") {
     const relay = await startFakeRelay({ chat: true, autoApprove: false });
     session = { relay };
+    sessions.set(key, session);
     try {
       const ada = await enrol(relay, "ada"),
         leo = await enrol(relay, "leo");
@@ -87,7 +96,7 @@ export async function command(op, arg) {
           kind: "create",
           name: "platform",
           purpose: "API changes and release coordination.",
-          private: false,
+          template: "team",
         })
       ).value;
       await ada({ kind: "join", id: c.id });
@@ -163,7 +172,7 @@ export async function command(op, arg) {
   }
   if (op === "stop") {
     await session?.relay.close();
-    session = undefined;
+    sessions.delete(key);
     return;
   }
   if (op === "ask") {

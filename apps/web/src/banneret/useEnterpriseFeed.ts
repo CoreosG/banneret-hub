@@ -20,6 +20,13 @@ export interface EnterpriseFeed {
   readonly feed: EnvironmentFeed;
 }
 
+export function hasRelayPermission(
+  me: BanneretEnrolmentView["me"] | undefined,
+  permission: string,
+) {
+  return me?.permissions.includes(permission) ?? false;
+}
+
 export function useEnterpriseFeed(): EnterpriseFeed | null {
   const environmentId = usePrimaryEnvironmentId();
   const workspaces = useWorkspaces();
@@ -48,6 +55,11 @@ export function useEnterpriseFeed(): EnterpriseFeed | null {
     return watchFeed({ environmentId, relayOrigin: watchedOrigin });
   }, [environmentId, watchedOrigin]);
 
+  const outside = enrolment?.me?.admission === "outside";
+  const can = (permission: string) => hasRelayPermission(enrolment?.me, permission);
+  const allowedSections = feed.sections.filter(
+    (s) => !["team", "health", "pool"].includes(s) || can("hub." + s),
+  );
   return target === null || workspace === null || enrolment === null
     ? null
     : {
@@ -55,24 +67,15 @@ export function useEnterpriseFeed(): EnterpriseFeed | null {
         target,
         workspace,
         enrolment,
-        feed:
-          enrolment.me?.admission === "outside"
-            ? {
-                ...feed,
-                sectionsKnown: true,
-                chatFlags: feed.chatFlags?.filter((flag) => flag !== "group_dms") ?? [],
-                sections: feed.sections.filter(
-                  (s) =>
-                    !["team", "pool", "health"].includes(s) ||
-                    enrolment.me?.permissions.includes("hub." + s),
-                ),
-                team: enrolment.me.permissions.includes("hub.team") ? feed.team : null,
-                needs:
-                  feed.needs?.filter(
-                    (item) =>
-                      item.kind !== "health" || enrolment.me?.permissions.includes("hub.health"),
-                  ) ?? null,
-              }
-            : feed,
+        feed: {
+          ...feed,
+          chatFlags: outside
+            ? (feed.chatFlags?.filter((flag) => flag !== "group_dms") ?? [])
+            : feed.chatFlags,
+          sectionsKnown: outside || feed.sectionsKnown || !can("hub.team"),
+          sections: allowedSections,
+          team: can("hub.team") ? feed.team : null,
+          needs: feed.needs?.filter((it) => it.kind !== "health" || can("hub.health")) ?? null,
+        },
       };
 }

@@ -1,3 +1,4 @@
+import { WorkspaceRoles } from "./chat/Roles";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { SettingsSection } from "../components/settings/settingsLayout";
@@ -88,6 +89,7 @@ export function AccountsSettings({
   const primary = usePrimaryEnvironmentId();
   return (
     <SettingsSection id="accounts" title="Accounts">
+      <WorkspaceRoles />
       {machines.map((machine) => (
         <MachineAccounts
           key={machine.environmentId}

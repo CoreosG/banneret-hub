@@ -351,6 +351,7 @@ export interface RelayEnrolment {
     method: "GET" | "PUT" | "POST" | "PATCH" | "DELETE",
     path: string,
     body?: unknown,
+    namespace?: "roles",
   ) => Effect.Effect<RelayReply, RelayCallError>;
   readonly officeEdit: (action: OfficeEdit) => Effect.Effect<void, BanneretRelayError>;
   readonly officeHeard: (
@@ -1103,15 +1104,10 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     );
   });
 
-  // Refetched when the heartbeat's capabilitiesVersion moves, so `me` stays current.
-  const refreshCapabilities = Effect.fn("BanneretEnrolment.capabilities")(function* (
+  const applyCapabilities = Effect.fn("BanneretEnrolment.applyCapabilities")(function* (
     from: Configured,
+    reply: RelayReply,
   ) {
-    const outcome = yield* signedCall(from, "GET", "/relay/v1/capabilities", etag).pipe(
-      Effect.result,
-    );
-    if (Result.isFailure(outcome)) return;
-    const reply = outcome.success;
     if (reply.etag !== undefined) etag = reply.etag;
     const lastOkAt = yield* nowIso;
     const decoded = reply.status === 304 ? Option.none() : decodeEnrolledCapabilities(reply.body);
@@ -1142,6 +1138,15 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     } else {
       yield* touchLastOk(from);
     }
+  });
+
+  const refreshCapabilities = Effect.fn("BanneretEnrolment.capabilities")(function* (
+    from: Configured,
+  ) {
+    yield* signedCall(from, "GET", "/relay/v1/capabilities", etag).pipe(
+      Effect.flatMap((reply) => applyCapabilities(from, reply)),
+      Effect.ignore,
+    );
   });
 
   // The heartbeat (P1-15): machine facts, plus activity facts for this relay's Enterprise projects
@@ -1564,12 +1569,12 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     revokeMachine,
     matchProjects: matchRepositories,
     nextChange: Effect.sync(() => Deferred.await(changeSignal)),
-    signedChat: (method, path, body) =>
+    signedChat: (method, path, body, namespace) =>
       Effect.flatMap(configuredNow, (from) =>
         signedCall(
           from,
           method,
-          "/relay/v1/chat/" +
+          (namespace === "roles" ? "/relay/v1/" : "/relay/v1/chat/") +
             path.replace(/\/members\/@me$/, "/members/" + encodeURIComponent(from.me.id)),
           undefined,
           body,
@@ -1661,7 +1666,18 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       ),
     signedGet: (target, options = {}) =>
       Effect.flatMap(configuredNow, (from) =>
-        signedCall(from, "GET", target, options.ifNoneMatch, undefined, options.maxResponseBytes),
+        signedCall(
+          from,
+          "GET",
+          target,
+          options.ifNoneMatch,
+          undefined,
+          options.maxResponseBytes,
+        ).pipe(
+          Effect.tap((reply) =>
+            target === "/relay/v1/capabilities" ? applyCapabilities(from, reply) : Effect.void,
+          ),
+        ),
       ),
     snapshotEtag: Effect.sync(() => snapshotEtag),
     capabilitiesVersion: Effect.sync(() => capabilitiesVersion),

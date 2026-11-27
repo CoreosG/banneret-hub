@@ -28,6 +28,7 @@ import {
   chatRpc,
   useChatRead,
 } from "./client";
+import { ChannelSettings } from "./ChannelSettings";
 import { chatHref } from "./ChannelRows";
 import { PostToGitHub } from "./PostToGitHub";
 import { Markdown } from "./Markdown";
@@ -111,7 +112,12 @@ function ChannelView({ enterprise, id, root, focus }: View) {
         : Promise.resolve([]),
     revision,
   );
-  const channel = rows.value?.find((c) => c.id === id && offersConversation(c, flags));
+  const [missingAt, setMissingAt] = useState<number | null>(null);
+  const missing = () => setMissingAt(revision);
+  const channel =
+    missingAt === revision
+      ? undefined
+      : rows.value?.find((c) => c.id === id && offersConversation(c, flags));
   const people = useChatRead(
     () => (channel ? members({ environmentId, relayOrigin }, id) : Promise.resolve([])),
     revision + ":" + (channel?.id ?? ""),
@@ -119,6 +125,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
   const title = channel ? conversationTitle(channel, enterprise.enrolment.me?.login) : "";
   const router = useRouter();
   const [q, setQ] = useState("");
+  const [settings, setSettings] = useState(false);
   const [showMembers, setMembers] = useState(false);
   const [error, setError] = useState("");
   const href = chatHref(id, root, focus);
@@ -161,6 +168,19 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                   </p>
                 )}
               </div>
+              {channel.kind === "channel" && flags.includes("channel_access") && (
+                <button onClick={() => setSettings(true)}>Channel settings</button>
+              )}
+              {settings && channel.kind === "channel" && (
+                <ChannelSettings
+                  key={JSON.stringify([channel.access, channel.managers, channel.agents])}
+                  enterprise={enterprise}
+                  channel={channel}
+                  people={people.value}
+                  close={() => setSettings(false)}
+                  saved={membershipChanged}
+                />
+              )}
               <button onClick={() => setMembers(!showMembers)}>
                 <UsersIcon size={15} />
                 {channel.memberCount.people} people
@@ -235,7 +255,8 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                 ...(people.value ?? []),
                 ...(flags.includes("agents") ? (agents.value ?? []) : []).filter(
                   (h) =>
-                    enterprise.feed.chatFlags?.includes("others_agents") ||
+                    (enterprise.enrolment.me?.permissions.includes("agents.mention") &&
+                      enterprise.feed.chatFlags?.includes("others_agents")) ||
                     h.owner === enterprise.enrolment.me?.login,
                 ),
               ]}
@@ -243,6 +264,7 @@ function ChannelView({ enterprise, id, root, focus }: View) {
               open={open}
               tabId={tabId}
               membershipChanged={membershipChanged}
+              missing={missing}
             />
           </section>
           {root && (
@@ -264,7 +286,8 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                   ...(people.value ?? []),
                   ...(flags.includes("agents") ? (agents.value ?? []) : []).filter(
                     (h) =>
-                      enterprise.feed.chatFlags?.includes("others_agents") ||
+                      (enterprise.enrolment.me?.permissions.includes("agents.mention") &&
+                        enterprise.feed.chatFlags?.includes("others_agents")) ||
                       h.owner === enterprise.enrolment.me?.login,
                   ),
                 ]}
@@ -272,15 +295,33 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                 open={open}
                 tabId={tabId}
                 membershipChanged={membershipChanged}
+                missing={missing}
               />
             </aside>
           )}
         </div>
       ) : (
-        <QuietLine fact={rows.value ? "Channel unavailable." : "Loading channel."} />
+        <QuietLine
+          fact={
+            rows.value || rows.missing
+              ? "This channel is no longer available to you."
+              : "Loading channel."
+          }
+        />
       )}
     </SidebarInset>
   );
+}
+function composerRestriction(channel: ChatConversation) {
+  const reason =
+    channel.kind === "channel" &&
+    channel.access.post === "roles" &&
+    channel.access.postRoles?.join(",") === "founder"
+      ? "Only founders can post here."
+      : channel.kind === "channel" && channel.access.post === "managers"
+        ? "Only managers can post here."
+        : "This conversation is read-only.";
+  return reason + (channel.me.can.reply ? " You can reply in threads." : "");
 }
 function ReplyAvatars({
   enterprise,
@@ -348,6 +389,7 @@ function Timeline({
   open,
   tabId,
   membershipChanged,
+  missing,
   focus,
 }: {
   enterprise: EnterpriseFeed;
@@ -359,6 +401,7 @@ function Timeline({
   open: (root: string) => void;
   tabId: string | undefined;
   membershipChanged: () => void;
+  missing: () => void;
 }) {
   const { environmentId, relayOrigin } = enterprise.target;
   const flags = enterprise.feed.chatFlags ?? [];
@@ -375,7 +418,11 @@ function Timeline({
       seekUnread ? openingCursor : undefined,
       focus,
     );
-  const read = useChatRead(load, [enterprise.feed.chatRevision, localRevision, pages].join(":"));
+  const read = useChatRead(
+    load,
+    [enterprise.feed.chatRevision, localRevision, pages].join(":"),
+    root ? undefined : missing,
+  );
   const items = (read.value?.items ?? []).filter(
     (m) => !query || m.text.toLowerCase().includes(query.toLowerCase()),
   );
@@ -452,6 +499,7 @@ function Timeline({
     input.current?.focus();
   }
   const mention = /(?:^|\s)@([\w/-]*)$/.exec(draft);
+  if (read.missing) return <QuietLine fact="This channel is no longer available to you." />;
   return (
     <>
       {read.error && <p role="alert">{read.error}</p>}
@@ -699,7 +747,7 @@ function Timeline({
         )}
       </div>
       {error && <p role="alert">{error}</p>}
-      {channel.me.member && !channel.archived ? (
+      {!channel.archived && (root ? channel.me.can.reply : channel.me.can.post) ? (
         <form
           data-chat-composer
           onSubmit={(e) => {
@@ -774,17 +822,24 @@ function Timeline({
           </button>
         </form>
       ) : (
-        !channel.archived &&
-        channel.kind === "channel" &&
-        channel.kind === "channel" &&
-        channel.access.visibility === "public" && (
-          <div data-chat-composer>
-            <span>Join #{channel.name} to post</span>
-            <button disabled={busy} onClick={() => void write({ kind: "join", id: channel.id })}>
-              Join
-            </button>
-          </div>
-        )
+        <div data-chat-composer>
+          {channel.archived ? (
+            "This channel is archived."
+          ) : channel.kind === "channel" && channel.me.request ? (
+            <RelativeTime prefix="Request sent" at={channel.me.request.createdAt} />
+          ) : channel.kind === "channel" && channel.me.can.join ? (
+            <>
+              <span>Join #{channel.name} to post</span>
+              <button disabled={busy} onClick={() => void write({ kind: "join", id: channel.id })}>
+                Join
+              </button>
+            </>
+          ) : channel.kind === "channel" && channel.me.can.request ? (
+            "Ask to join #" + channel.name
+          ) : (
+            composerRestriction(channel)
+          )}
+        </div>
       )}
     </>
   );

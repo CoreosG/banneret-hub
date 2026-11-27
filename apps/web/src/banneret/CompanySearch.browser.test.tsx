@@ -71,7 +71,7 @@ const JOINED: BanneretEnrolmentView = {
   me: {
     login: "ada-example",
     id: "p_me",
-    permissions: ["relay.admin"],
+    permissions: ["relay.admin", "hub.team", "hub.pool", "hub.health"],
     role: { id: "founder", name: "Founder" },
     admission: "member" as const,
   },

@@ -13,7 +13,8 @@ import * as Schema from "effect/Schema";
 import { useState, useEffect, useEffectEvent } from "react";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { connectionAtomRuntime } from "../../connection/runtime";
-import type { RelayTarget } from "../enrolmentStore";
+import { toastManager } from "../../components/ui/toast";
+import { useEnrolmentStore, type RelayTarget } from "../enrolmentStore";
 const decodeChatConversations = Schema.decodeUnknownSync(ChatConversations);
 const decodeChatThread = Schema.decodeUnknownSync(ChatThread);
 const decodeChatMembers = Schema.decodeUnknownSync(ChatMembers);
@@ -23,14 +24,52 @@ const command = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:company-chat",
   tag: BANNERET_RELAY_FEED_WS_METHODS.chat,
 });
+const roleCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:company-roles",
+  tag: BANNERET_RELAY_FEED_WS_METHODS.roles,
+});
 export const chatRpc = {
   async run({ environmentId, relayOrigin }: RelayTarget, action: ChannelAction) {
-    const result = await runAtomCommand(appAtomRegistry, command, {
-      environmentId,
-      input: { relayOrigin, action },
-    });
+    const result =
+      action.kind === "roles"
+        ? await runAtomCommand(appAtomRegistry, roleCommand, {
+            environmentId,
+            input: { relayOrigin, action: action.action },
+          })
+        : await runAtomCommand(appAtomRegistry, command, {
+            environmentId,
+            input: { relayOrigin, action },
+          });
     if (result._tag !== "Success") throw new Error("Cannot reach this machine.");
-    if (!result.value.ok) throw new Error(result.value.message);
+    if (!result.value.ok) {
+      const { code, message } = result.value;
+      if (
+        code &&
+        [
+          "role_in_use",
+          "role_not_for_outside",
+          "role_permission_missing",
+          "chat_post_restricted",
+          "chat_not_member",
+          "chat_invite_restricted",
+          "chat_outsiders_not_allowed",
+          "chat_manage_restricted",
+          "chat_dm_restricted",
+          "chat_agent_capped",
+          "chat_request_closed",
+        ].includes(code)
+      ) {
+        const login = useEnrolmentStore
+          .getState()
+          .views[environmentId]?.find((v) => v.relayOrigin === relayOrigin)?.me?.login;
+        toastManager.add({
+          type: "error",
+          title: login ? "Refused for " + login : "Relay refused the change",
+          description: message,
+        });
+      }
+      throw Object.assign(new Error(message), { code });
+    }
     return result.value.value;
   },
 };
@@ -41,7 +80,7 @@ export async function conversations(target: RelayTarget) {
     const page = decodeChatConversations(
       await chatRpc.run(target, { kind: "list", ...(cursor ? { cursor } : {}) }),
     );
-    result.push(...page.items);
+    result.push(...page.items.filter((c) => c.me.can.read));
     cursor = page.nextCursor;
   } while (cursor);
   return result;
@@ -134,8 +173,10 @@ export async function members(target: RelayTarget, id: string) {
 export function useChatRead<T>(
   load: (revision: number | string) => Promise<T>,
   revision: number | string,
+  missing?: () => void,
 ) {
-  const [state, set] = useState<{ value?: T; error?: string }>({});
+  const [state, set] = useState<{ value?: T; error?: string; missing?: boolean }>({});
+  const markMissing = useEffectEvent(() => missing?.());
   const fetchCurrent = useEffectEvent(load);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's change watermark and discards stale reads
   useEffect(() => {
@@ -145,7 +186,10 @@ export function useChatRead<T>(
         if (current) set({ value });
       },
       (e) => {
-        if (current) set((prev) => ({ ...prev, error: String(e.message ?? e) }));
+        if (current && e.code === "not_found") {
+          set({ missing: true });
+          markMissing();
+        } else if (current) set((prev) => ({ ...prev, error: String(e.message ?? e) }));
       },
     );
     return () => {

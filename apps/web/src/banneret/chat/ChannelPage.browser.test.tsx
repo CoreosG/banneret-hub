@@ -37,10 +37,12 @@ declare module "vite-plus/test/browser" {
   interface BrowserCommands {
     companyChat: {
       (op: "outsideStart"): Promise<typeof import("@t3tools/contracts").RelayMe.Type>;
-      (op: "start"): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
-      (op: "call" | "leo", arg: ChannelAction): Promise<ChannelResult>;
+      (
+        op: "start" | "roles:start",
+      ): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
+      (op: "call" | "roles:call" | "leo", arg: ChannelAction): Promise<ChannelResult>;
       (op: "ask"): Promise<BanneretFeedNeedsItem>;
-      (op: "stop"): Promise<void>;
+      (op: "stop" | "roles:stop"): Promise<void>;
     };
   }
 }
@@ -98,7 +100,15 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     me: {
       login: "ada",
       id: "p_me",
-      permissions: ["relay.admin"],
+      permissions: [
+        "relay.admin",
+        "hub.team",
+        "hub.pool",
+        "hub.health",
+        "dm.start:anyone",
+        "dm.group",
+        "agents.dm",
+      ],
       role: { id: "founder", name: "Founder" },
       admission: "member" as const,
     },
@@ -114,6 +124,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   });
   let revision = 0;
   let limited = true;
+  let rights: "normal" | "reply" | "readonly" | "hidden" = "normal";
   const emit = (sections: string[]) =>
     publish?.({
       sections: ["today", "needs", "board", "map", "feed", "team", ...sections],
@@ -125,6 +136,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
             "threads",
             "private_channels",
             "reactions",
+            "channel_access",
             "dms",
             "group_dms",
             "agents",
@@ -153,6 +165,25 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       )
     )
       emit(["chat"]);
+    if (action.kind === "list" && rights !== "normal") {
+      const page = decodeConversations(result.value);
+      return {
+        ...page,
+        items: page.items.flatMap<(typeof page.items)[number]>((c) =>
+          c.kind !== "channel" || c.name !== "platform"
+            ? [c]
+            : rights === "hidden"
+              ? []
+              : [
+                  {
+                    ...c,
+                    access: { ...c.access, post: "roles", postRoles: ["founder"] },
+                    me: { ...c.me, can: { ...c.me.can, post: false, reply: rights === "reply" } },
+                  },
+                ],
+        ),
+      };
+    }
     if (limited && action.kind === "messages") {
       const page = decodeMessages(result.value);
       return {
@@ -209,7 +240,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     kind: "create",
     name: "design",
     purpose: "",
-    private: false,
+    template: "team",
   });
   if (!created.ok) throw new Error(created.message);
   await act(() => emit(["chat"]));
@@ -238,6 +269,25 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   }
   expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: false });
   await proof("channel");
+  for (const mode of ["reply", "readonly", "hidden"] as const) {
+    rights = mode;
+    await act(() => emit(["chat"]));
+    await expect
+      .element(
+        screen.getByText(
+          mode === "hidden"
+            ? "This channel is no longer available to you."
+            : mode === "reply"
+              ? "Only founders can post here. You can reply in threads."
+              : "Only founders can post here.",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Channel message" }).elements()).toHaveLength(0);
+  }
+  rights = "normal";
+  await act(() => emit(["chat"]));
   expect(screen.getByText("Direct messages", { exact: true }).elements()).toHaveLength(0);
   expect(screen.getByRole("textbox", { name: "Search conversation" }).elements()).toHaveLength(0);
   expect(screen.getByText("hidden-task").elements()).toHaveLength(0);
@@ -251,6 +301,14 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await actions.click();
   limited = false;
   await act(() => emit(["chat"]));
+  await screen.getByRole("button", { name: "Channel settings" }).click();
+  const settings = page.getByRole("dialog");
+  await settings.getByRole("button", { name: "Announcement" }).click();
+  await expect.element(settings.getByLabelText("Who can post")).toHaveValue("managers");
+  await expect.element(settings.getByLabelText("Agents", { exact: true })).toHaveValue("off");
+  await settings.getByRole("button", { name: "Team", exact: true }).click();
+  await settings.getByRole("button", { name: "Save settings" }).click();
+  await expect.element(settings).not.toBeInTheDocument();
   const level = screen.getByRole("combobox", { name: "Channel notifications" });
   await level.selectOptions("all");
   await expect.element(level).toHaveValue("all");

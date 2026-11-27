@@ -5,8 +5,9 @@ import { HashIcon, LockIcon, MessageSquareIcon, PlusIcon } from "lucide-react";
 import { ChatConversation } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { SidebarMenuButton } from "../../components/ui/sidebar";
-import type { EnterpriseFeed } from "../useEnterpriseFeed";
+import { hasRelayPermission, type EnterpriseFeed } from "../useEnterpriseFeed";
 import { OutsideRecipients } from "./OutsideRecipients";
+import { templates, templateSettings } from "./ChannelSettings";
 import { DmSettings } from "./AgentSettings";
 import {
   handles,
@@ -40,13 +41,6 @@ export function ChannelRows({
   const rows = useChatRead(load, enterprise.feed.chatRevision ?? 0);
   const me = enterprise.enrolment.me;
   const outside = me?.admission === "outside";
-  const allowGroup = !outside && enterprise.feed.chatFlags?.includes("group_dms");
-  const allowCreate =
-    !outside ||
-    me.permissions.some((p) => p === "channels.createPublic" || p === "channels.createPrivate");
-  const allowStart =
-    !outside ||
-    me.permissions.some((p) => p === "dm.start:shared_channel" || p === "dm.start:anyone");
   const agentList = useChatRead(
     () =>
       enterprise.feed.chatFlags?.includes("agents") &&
@@ -59,6 +53,18 @@ export function ChannelRows({
   );
   const flags = enterprise.feed.chatFlags ?? [];
   const login = enterprise.enrolment.me?.login;
+  const can = (permission: string) => hasRelayPermission(me, permission);
+  const allowStart = can("dm.start:anyone") || can("dm.start:shared_channel");
+  const allowGroup = !outside && flags.includes("group_dms") && can("dm.group");
+  const available = templates.filter(([id]) => {
+    const { access } = templateSettings(id);
+    return (
+      (access.visibility === "private"
+        ? flags.includes("private_channels") && can("channels.createPrivate")
+        : can("channels.createPublic")) &&
+      (access.outsiders === "none" || can("channels.openToOutside"))
+    );
+  });
   const tabs = useTabsStore((s) => s.tabs);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keep every open chat tab's mention count current
   useEffect(() => {
@@ -67,7 +73,10 @@ export function ChannelRows({
       if (tab.kind !== "chat" || tab.workspaceId !== enterprise.workspace.id) continue;
       const route = new URL(tab.href, location.origin);
       const channel = rows.value.find((c) => chatHref(c.id) === route.pathname);
-      if (!channel) continue;
+      if (!channel) {
+        if (tab.title !== "Channel unavailable") retitle(tab.id, "Channel unavailable");
+        continue;
+      }
       const title =
         conversationTitle(channel, login) +
         (route.searchParams.has("thread") ? " / Thread" : "") +
@@ -84,7 +93,7 @@ export function ChannelRows({
       {flags.includes("channels") && (
         <header className="mt-3 flex items-center justify-between px-2 text-xs font-semibold text-muted-foreground">
           Channels
-          {allowCreate && (
+          {available.length > 0 && (
             <button
               aria-label="Create channel"
               onClick={() => setCreating(creating === "channel" ? null : "channel")}
@@ -94,13 +103,15 @@ export function ChannelRows({
           )}
         </header>
       )}
-      {flags.includes("channels") && allowCreate && creating === "channel" && (
+      {flags.includes("channels") && creating === "channel" && available.length > 0 && (
         <form
           className="grid gap-2 p-2"
           onSubmit={async (e) => {
             e.preventDefault();
             if (pending) return;
             const data = new FormData(e.currentTarget);
+            const choice = available.find(([id]) => id === data.get("template"));
+            if (!choice) return;
             setPending(true);
             try {
               const c = decodeChatConversation(
@@ -108,7 +119,7 @@ export function ChannelRows({
                   kind: "create",
                   name: String(data.get("name")).trim(),
                   purpose: String(data.get("purpose")).trim(),
-                  private: data.has("private"),
+                  template: choice[0],
                 }),
               );
               setCreating(null);
@@ -122,11 +133,19 @@ export function ChannelRows({
         >
           <input name="name" placeholder="Channel name" aria-label="Channel name" required />
           <input name="purpose" aria-label="Purpose" placeholder="Purpose" />
-          {enterprise.feed.chatFlags?.includes("private_channels") && (
-            <label>
-              <input name="private" type="checkbox" /> Private channel
-            </label>
-          )}
+          <label>
+            Start from
+            <select
+              name="template"
+              defaultValue={available.some(([id]) => id === "team") ? "team" : available[0]?.[0]}
+            >
+              {available.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
           <button disabled={pending}>Create</button>
         </form>
       )}
@@ -197,7 +216,7 @@ export function ChannelRows({
                         target={enterprise.target}
                         channels={rows.value}
                         personId={me.id}
-                        includeOutside={me.permissions.includes("dm.outsiders")}
+                        includeOutside={can("dm.outsiders")}
                       />
                     )
                   : enterprise.feed.team?.value?.people
@@ -218,7 +237,8 @@ export function ChannelRows({
                       (h) =>
                         flags.includes("agents") &&
                         flags.includes("agent_dms") &&
-                        (enterprise.feed.chatFlags?.includes("others_agents") || h.owner === login),
+                        ((can("agents.dm") && flags.includes("others_agents")) ||
+                          h.owner === login),
                     )
                     .map((h) => (
                       <label key={h.id}>
