@@ -8,6 +8,7 @@ import { useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
+import { ApprovalLine } from "./ApprovalLine";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import {
@@ -204,7 +205,19 @@ function BoardCard(props: {
             />
           ))
         }
-        footer={card.prs.length === 0 ? undefined : <PrLine card={card} />}
+        footer={
+          card.prs.length === 0 ? undefined : (
+            <span>
+              <PrLine card={card} />
+              {card.column === "validating" &&
+                card.prs
+                  .filter((pr) => pr.state === "open")
+                  .map((pr) => (
+                    <ApprovalLine key={pr.number} pr={pr} numbered={card.prs.length > 1} />
+                  ))}
+            </span>
+          )
+        }
         onOpen={() => props.onOpen(card.task)}
       />
       {props.leases ? (

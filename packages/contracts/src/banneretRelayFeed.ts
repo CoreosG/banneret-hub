@@ -204,10 +204,31 @@ export const BanneretBoardTask = Schema.Struct({
 export type BanneretBoardTask = typeof BanneretBoardTask.Type;
 
 /** One linked pull request. `state` and `checks.state` are open strings. */
+const ApprovalPerson = Schema.Struct({ id: Schema.String, login: Schema.String });
+export const BanneretPrRules = Schema.Struct({
+  baseBranch: Schema.NonEmptyString,
+  approvals: Schema.NullOr(
+    Schema.Struct({
+      required: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      have: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      codeOwners: Schema.Struct({
+        required: Schema.Boolean,
+        satisfiedBy: Schema.optional(Schema.Array(ApprovalPerson)),
+        owners: Schema.Array(Schema.String),
+      }),
+      lastPushApproval: Schema.Boolean,
+      lastPushSatisfied: Schema.Boolean,
+      stale: Schema.Boolean,
+    }),
+  ),
+  canApprove: Schema.Array(ApprovalPerson),
+  youCanApprove: Schema.Boolean,
+});
 export const BanneretBoardPr = Schema.Struct({
   number: Schema.Number,
   url: Schema.String,
   state: Schema.String,
+  rules: Schema.optional(BanneretPrRules),
   checks: Schema.optional(Schema.Struct({ state: Schema.String })),
 });
 export type BanneretBoardPr = typeof BanneretBoardPr.Type;

@@ -18,6 +18,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect } from "react";
 
 import { IssueDetailPanel } from "../components/issue/IssueDetailPanel";
+import { ApprovalLine } from "./ApprovalLine";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -229,6 +230,7 @@ function taskFacts(
     mapItem === null ? null : (map?.stages.find((entry) => entry.id === mapItem.stageId) ?? null);
   const restsOn = card === null ? [] : restsOnItems(card.restsOn, view.cards);
   const preview = relayTask?.preview;
+  const prs = (relayTask ?? card)?.prs ?? [];
   const held = card?.lease;
   // The relay's snapshot lags a take or release; the tracker's own answer is newer.
   const checked = options.lease?.status?.lease ?? null;
@@ -310,6 +312,17 @@ function taskFacts(
             ))}
           </span>
         ),
+    },
+    {
+      label: "Merge approvals",
+      value: prs.length ? (
+        <span>
+          {prs.map((pr) => (
+            <ApprovalLine key={pr.number} pr={pr} detail numbered={prs.length > 1} />
+          ))}
+        </span>
+      ) : undefined,
+      empty: card === null ? EMPTY_NOT_KNOWN : EMPTY_NONE,
     },
     {
       label: "Stage",

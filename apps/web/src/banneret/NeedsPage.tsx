@@ -49,7 +49,7 @@ export function NeedsPage() {
               <SummaryFigure>
                 {count} {count === "1" ? "item" : "items"}
               </SummaryFigure>
-              {" waiting on you, most urgent first"}
+              {" listed, most urgent first"}
             </>
           )
         }

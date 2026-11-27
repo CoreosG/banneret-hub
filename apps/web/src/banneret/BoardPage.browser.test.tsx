@@ -618,6 +618,37 @@ describe("Enterprise board", () => {
     await expect.element(page.getByText("Guild invites")).toBeVisible();
   });
 
+  it("shows GitHub approval requirements on validating cards", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    const prs = [true, false].map((required, index) => ({
+      number: index + 1,
+      url: "https://example.com/pr",
+      state: "open",
+      rules: {
+        baseBranch: "main",
+        approvals: {
+          required: Number(required),
+          have: 0,
+          codeOwners: { required, owners: required ? ["org/team"] : [] },
+          lastPushApproval: false,
+          lastPushSatisfied: true,
+          stale: false,
+        },
+        canApprove: [],
+        youCanApprove: required,
+      },
+    }));
+    await emit(
+      state(["board"], boardRead(boardOf([card("9", "Review me", "validating", { prs })]))),
+    );
+    await expect
+      .element(page.getByText("#1 · Needs 1 more approval · code owner · You can approve"))
+      .toBeVisible();
+    await expect.element(page.getByText("#2 · No approval needed")).toBeVisible();
+  });
+
   it("renders a hostile title as inert text and never links a javascript: url", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openBoard(stack);

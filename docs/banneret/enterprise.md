@@ -97,9 +97,14 @@ filters are part of the page address, so a link, a reload or a tab keeps them. T
 filters of each board, and of the Map and the Feed, for as long as the window is open. Opening the page again from
 the sidebar brings them back. A link that names its own filters wins, and **Clear filters** forgets them.
 
-The checked mark appears only when the board says it applies a sign-off rule. A person with the sign-off role
-adds the check, and it counts only after the pull request merged, its checks passed and someone else approved
-the review.
+Validating shows which GitHub approvals each open pull request still needs and whether you can
+approve. Open the task to see the base branch and its review rule. When approval alone holds up
+a merge, Needs you lists the pull request for eligible reviewers and shows the author that it
+is waiting for an approver.
+
+Checked is a separate company label after merge. A sign-off role holder can add it after checks
+pass, including someone who reviewed the pull request. Merge approvals follow the repository's
+own branch protection, rulesets and CODEOWNERS.
 
 ### Take and release
 

@@ -789,7 +789,6 @@ describe("BanneretRelayFeed task read", () => {
         yield* control(fake, "/checked/seed", {
           taskId: "t_free",
           by: founderId,
-          reviewer: "p_someone_else",
         });
         const checked = yield* feed.task("t_free");
         expect(checked.value!.status).toBe("checked");
@@ -802,17 +801,11 @@ describe("BanneretRelayFeed task read", () => {
         expect(checked.value!.prs[0]?.checks).toEqual({ state: "passing" });
         expect(checked.value!.task.closedAt).toEqual(expect.any(String));
 
-        yield* control(fake, "/checked/seed", {
-          taskId: "t_stale",
-          by: founderId,
-          reviewer: founderId,
+        expect(checked.value!.prs[0]?.rules).toMatchObject({
+          baseBranch: "main",
+          approvals: { required: 0 },
+          youCanApprove: false,
         });
-        const ignored = yield* feed.task("t_stale");
-        expect(ignored.value!.status).toBe("built");
-        expect(ignored.value!.checked?.valid).toBe(false);
-        expect(ignored.value!.checked?.ignoredReason).toBe(
-          "The person who checked it also approved the review.",
-        );
 
         const unknown = yield* feed.task("t_unknown/../x");
         expect(unknown).toMatchObject({ joined: true, value: null, notFound: true });
@@ -823,7 +816,6 @@ describe("BanneretRelayFeed task read", () => {
           "/relay/v1/tasks/t_active",
           "/relay/v1/tasks/t_preview",
           "/relay/v1/tasks/t_free",
-          "/relay/v1/tasks/t_stale",
           `/relay/v1/tasks/${encodeURIComponent("t_unknown/../x")}`,
         ]);
       }).pipe(onFreshHub({ threads: [], reads: 0 })),

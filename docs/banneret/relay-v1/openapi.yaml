@@ -311,7 +311,7 @@ paths:
         first within a class (ties in the order the relay recorded them). The classes, most urgent first, and the
         kinds in each:
           1. an agent blocked on the caller: `thread_question`, `thread_approval`;
-          2. something waiting on the caller's review or decision: `pull_request`, `promotion`, `founder_question`,
+          2. something waiting on the caller's review or decision: `pull_request`, `pr_approval`, `waiting_for_approver`, `promotion`, `founder_question`,
              `health`;
           3. a mention, or an agent or persona writing to the caller: `mention`, `agent_message` (an agent's message
              in the person's inbox), `persona_ask` (a persona asking the person something);
@@ -1103,7 +1103,7 @@ components:
         id: { $ref: "#/components/schemas/Id" }
         kind:
           description: |
-            Open set. Known values: `thread_question`, `thread_approval`, `pull_request`, `founder_question`,
+            Open set. Known values: `thread_question`, `thread_approval`, `pull_request`, `pr_approval`, `waiting_for_approver`, `founder_question`,
             `promotion`, `health`, `mention`, `agent_message`, `persona_ask`, `suggestion`, `other` (class 5, the explicit
             catch-all). Not a closed enum:
             a client shows an unknown kind as a generic item and never fails on it.
@@ -1574,14 +1574,36 @@ components:
     BoardPr:
       type: object
       additionalProperties: false
-      required: [number, url, state]
+      required: [number, url, state, baseBranch, approvals, canApprove, youCanApprove]
       properties:
         number: { type: integer, minimum: 1 }
         url: { type: string, format: uri }
         state: { description: "Open string; known: `open`, `merged`, `closed`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+        baseBranch: { type: string, minLength: 1, maxLength: 255 }
+        approvals:
+          oneOf: [{ $ref: "#/components/schemas/PrApprovals" }, { type: "null" }]
+        canApprove: { type: array, items: { $ref: "#/components/schemas/PersonRef" } }
+        youCanApprove: { type: boolean }
         checks:
           description: The required checks on the pull request's head, when the relay has read them.
           allOf: [{ $ref: "#/components/schemas/BoardChecks" }]
+    PrApprovals:
+      description: Effective review rules and current approval evidence. Null on the PR when unreadable.
+      type: object
+      required: [required, have, codeOwners, lastPushApproval, lastPushSatisfied, stale]
+      properties:
+        required: { type: integer, minimum: 0 }
+        have: { type: integer, minimum: 0 }
+        stale: { description: Dismiss stale approvals on new commits., type: boolean }
+        lastPushApproval: { description: Requires approval of the latest reviewable push., type: boolean }
+        lastPushSatisfied: { type: boolean }
+        codeOwners:
+          type: object
+          required: [required, owners]
+          properties:
+            required: { description: A code owner review applies to the changed files., type: boolean }
+            owners: { type: array, items: { type: string, minLength: 1 } }
+            satisfiedBy: { description: Present when all applicable owner reviews are satisfied., type: array, minItems: 1, items: { $ref: "#/components/schemas/PersonRef" } }
     BoardChecks:
       type: object
       additionalProperties: false
