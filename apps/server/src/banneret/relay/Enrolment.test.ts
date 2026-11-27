@@ -650,6 +650,75 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("persists sharing on this enrolment and applies founder meeting edits", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        yield* join(fake, relay);
+        const office = (yield* (yield* Enrolment.BanneretEnrolment).relay(focus.origin))!;
+        for (const share of ["agents_only", "agents_and_name", "hidden"] as const) {
+          yield* office.officeEdit({ kind: "sharing", share, shareUsage: true });
+          expect(JSON.parse(yield* stateFileText).sharing).toEqual({ share, shareUsage: true });
+          yield* waitFor(status, () =>
+            relay.requests.some(
+              (r) =>
+                r.url === "/relay/v1/facts" &&
+                JSON.parse(r.body).machine.share === share &&
+                JSON.parse(r.body).machine.shareUsage,
+            ),
+          );
+        }
+        yield* office.officeEdit({
+          kind: "presence",
+          presence: "away",
+          status: { text: "Back tomorrow" },
+        });
+        yield* office.officeEdit({ kind: "presence", status: null });
+        expect(
+          relay.requests
+            .filter((r) => r.url === "/relay/v1/team/me")
+            .map((r) => JSON.parse(r.body)),
+        ).toEqual([{ presence: "away", status: { text: "Back tomorrow" } }, { status: null }]);
+        expect((yield* office.officeHeard(["s_missing"])).sessions).toEqual([]);
+        yield* office.officeEdit({
+          kind: "meeting",
+          board: "platform",
+          meetingUrl: "https://example.org/room",
+        });
+        expect(
+          Exit.isFailure(
+            yield* Effect.exit(
+              office.officeEdit({ kind: "meeting", board: null, meetingUrl: "http://example.org" }),
+            ),
+          ),
+        ).toBe(true);
+        for (const meetingUrl of ["https://example.org/meet", null]) {
+          yield* office.officeEdit({ kind: "meeting", board: null, meetingUrl });
+          expect(
+            relay.requests.some(
+              (r) =>
+                r.url === "/relay/v1/team/office" && JSON.parse(r.body).meetingUrl === meetingUrl,
+            ),
+          ).toBe(true);
+        }
+      }).pipe(onFreshHub()),
+    ),
+  );
+  it.live("refuses staff meeting edits before contacting the relay", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        yield* join(fake, relay, { login: "staff-example", role: "limited_staff" });
+        const office = (yield* (yield* Enrolment.BanneretEnrolment).relay(focus.origin))!;
+        expect(
+          Exit.isFailure(
+            yield* Effect.exit(
+              office.officeEdit({ kind: "meeting", board: "platform", meetingUrl: null }),
+            ),
+          ),
+        ).toBe(true);
+        expect(relay.requests.some((r) => r.url.startsWith("/relay/v1/team/rooms"))).toBe(false);
+      }).pipe(onFreshHub()),
+    ),
+  );
   it.live("matches local git remotes against the relay's repository list", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {

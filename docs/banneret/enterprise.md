@@ -204,14 +204,17 @@ the reason. A task never sits there without one. A text box narrows the entries 
 The Team list shows people, their agents and their claims. Helpers count under their lead. A waiting helper
 makes the lead count as waiting. Claim chips say live, paused or quiet.
 
-Team version 2 supplies the same facts for the planned Office, Floor and List views. Each board is one room.
-You set your own presence (Available, Focusing, Away or Off), status line and chosen room. The relay keeps
-these until you change them. Founders can set a meeting link for each room and the office. Links open in
-your browser. The Hub hosts no calls.
+On the Floor, each board has a room. Open **Office** or choose **My presence** in the workspace
+switcher to set Available, Focusing, Away or Off and a short status line. Clearing the line and
+saving removes it. Opening the Hub while Away or Off gives you a private reminder. Your presence
+stays as you set it until you save a change. Founders can edit or clear the office and room meeting
+links. Links open in your browser.
 
-Agents only is the default machine sharing choice. Sharing the machine name adds its name, kind and online dot
-for colleagues. Hidden machines share no agents. Agent and machine heartbeat times describe those devices and
-processes. Founders retain the machine list for administration.
+In **Office**, choose what to share from this machine. **Agents only** is the default. **Shared**
+also shows the machine name. **Hidden** hides its agents and name. The preview updates before you
+save. Claims remain visible as `login/private` when the machine name is private. You can share a
+stopped agent's reason separately. Stopped agents stay in the office for one hour. Expand an agent
+or machine to see when the relay heard from it.
 
 ### Search
 

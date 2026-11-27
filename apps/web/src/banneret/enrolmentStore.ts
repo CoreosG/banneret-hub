@@ -10,6 +10,7 @@ import {
   BANNERET_RELAY_WS_METHODS,
   type SandboxAction,
   type WarningPolicy,
+  type OfficeEdit,
   type PoolFounderAction,
   type BanneretEnrolmentList,
   type BanneretEnrolmentMachine,
@@ -40,6 +41,14 @@ const sandboxCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
 const requestWorkspaceCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:request-workspace",
   tag: BANNERET_RELAY_WS_METHODS.requestWorkspace,
+});
+const officeEditCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:officeEdit",
+  tag: BANNERET_RELAY_WS_METHODS.officeEdit,
+});
+const officeHeardCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:officeHeard",
+  tag: BANNERET_RELAY_WS_METHODS.officeHeard,
 });
 const founderCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:pool-founder",
@@ -137,6 +146,20 @@ export const enrolmentRpc = {
       runAtomCommand(appAtomRegistry, requestWorkspaceCommand, {
         environmentId,
         input: { relayOrigin, hostId },
+      }),
+    ),
+  officeEdit: ({ environmentId, relayOrigin }: RelayTarget, action: OfficeEdit) =>
+    outcome(
+      runAtomCommand(appAtomRegistry, officeEditCommand, {
+        environmentId,
+        input: { relayOrigin, action },
+      }),
+    ),
+  officeHeard: ({ environmentId, relayOrigin }: RelayTarget, ids: readonly string[]) =>
+    outcome(
+      runAtomCommand(appAtomRegistry, officeHeardCommand, {
+        environmentId,
+        input: { relayOrigin, ids },
       }),
     ),
   poolFounder: ({ environmentId, relayOrigin }: RelayTarget, action?: PoolFounderAction) =>

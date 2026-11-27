@@ -194,7 +194,15 @@ const lease = (value: unknown): BanneretBoardLease | undefined => {
   ) {
     return undefined;
   }
-  return { holder: { login }, state, since, lastSignalAt, staleAt, expiresAt };
+  return {
+    ...optional("claim", text(source?.claim, 160)),
+    holder: { login },
+    state,
+    since,
+    lastSignalAt,
+    staleAt,
+    expiresAt,
+  };
 };
 
 /** The card's last release; undefined when a required field is missing. Text keeps the protocol's caps. */
@@ -568,6 +576,7 @@ export const machinesByOwner = (
       label,
       ...(typeof source?.poolHostId === "string" ? { poolHostId: source.poolHostId } : {}),
       kind: text(source?.kind, 32) ?? "",
+      ...optional("lastHeardAt", text(source?.lastHeardAt, 64)),
       connected: source?.connected === true,
     };
     byOwner.set(owner, [...(byOwner.get(owner) ?? []), machine]);

@@ -186,6 +186,7 @@ export type BanneretFeedNeedsRead = typeof BanneretFeedNeedsRead.Type;
 
 /** `state` is open: `active`, `stale`, `expired`, `paused`, `conflict` are known. */
 export const BanneretBoardLease = Schema.Struct({
+  claim: Schema.optional(Schema.String),
   holder: BanneretFeedPerson,
   state: Schema.String,
   since: Schema.String,
@@ -434,6 +435,7 @@ export type BanneretFeedMapRead = typeof BanneretFeedMapRead.Type;
 
 /** One of a person's machines, from the relay's `machines` file. Revoked machines are left out. */
 export const BanneretTeamMachine = Schema.Struct({
+  lastHeardAt: Schema.optional(Schema.String),
   poolHostId: Schema.optional(Schema.String),
   id: Schema.String,
   label: Schema.String,
@@ -448,6 +450,7 @@ export type BanneretTeamMachine = typeof BanneretTeamMachine.Type;
  * `not_heard_from` are known. `since` is when it entered that state. `parentId` names its orchestrator.
  */
 export const BanneretTeamSession = Schema.Struct({
+  stopReason: Schema.optional(Schema.String),
   id: Schema.String,
   parentId: Schema.optional(Schema.String),
   machineId: Schema.optional(Schema.String),

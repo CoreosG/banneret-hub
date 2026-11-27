@@ -10,7 +10,9 @@ import {
   Settings2Icon,
   UsersIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEnterpriseFeed } from "./useEnterpriseFeed";
+import { PresencePrompt } from "./offices/OfficeSettings";
+import { useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import {
@@ -49,6 +51,7 @@ export function WorkspaceSwitcher(props: {
   readonly onBackdrop: boolean;
   readonly children: ReactNode;
 }) {
+  const [presenceOpen, showPresence] = useState(false);
   const navigate = useNavigate();
   const workspaces = useWorkspaces();
   const activeId = effectiveWorkspaceId(
@@ -63,130 +66,147 @@ export function WorkspaceSwitcher(props: {
     views.find((view) => view.workspaceId === workspace.id) ?? null;
   const enrolment = active === null ? null : viewOf(active);
   const joinedHere = active?.relay !== undefined && enrolment?.state === "configured";
+  const enterprise = useEnterpriseFeed();
+  const team = enterprise?.feed.team?.value;
+  const me = team?.office?.flags.some((f) => f === "presence" || f === "status")
+    ? team.people.find((p) => p.login === enrolment?.me?.login)
+    : undefined;
   const pending = pendingJoins(views, workspaces);
 
   return (
-    <Menu>
-      <MenuTrigger
-        render={
-          <button
-            type="button"
-            aria-label="Switch workspace"
+    <>
+      <Menu>
+        <MenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Switch workspace"
+              className={cn(
+                "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md px-1 outline-hidden ring-ring [-webkit-app-region:no-drag] hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset md:flex",
+                props.onBackdrop ? "text-white hover:bg-white/10" : "text-foreground",
+              )}
+            />
+          }
+        >
+          {props.children}
+          {activeName ? (
+            <span
+              className={cn(
+                "min-w-0 truncate text-xs",
+                props.onBackdrop ? "text-white/70" : "text-muted-foreground",
+              )}
+            >
+              {activeName}
+            </span>
+          ) : null}
+          <ChevronsUpDownIcon
+            aria-hidden
             className={cn(
-              "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md px-1 outline-hidden ring-ring [-webkit-app-region:no-drag] hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset md:flex",
-              props.onBackdrop ? "text-white hover:bg-white/10" : "text-foreground",
-            )}
-          />
-        }
-      >
-        {props.children}
-        {activeName ? (
-          <span
-            className={cn(
-              "min-w-0 truncate text-xs",
+              "size-3 shrink-0",
               props.onBackdrop ? "text-white/70" : "text-muted-foreground",
             )}
+          />
+        </MenuTrigger>
+        <MenuPopup align="start" sideOffset={6} className="min-w-56">
+          <MenuRadioGroup
+            value={activeId ?? PERSONAL_VALUE}
+            onValueChange={(value) => setActiveWorkspace(value === PERSONAL_VALUE ? null : value)}
           >
-            {activeName}
-          </span>
-        ) : null}
-        <ChevronsUpDownIcon
-          aria-hidden
-          className={cn(
-            "size-3 shrink-0",
-            props.onBackdrop ? "text-white/70" : "text-muted-foreground",
-          )}
-        />
-      </MenuTrigger>
-      <MenuPopup align="start" sideOffset={6} className="min-w-56">
-        <MenuRadioGroup
-          value={activeId ?? PERSONAL_VALUE}
-          onValueChange={(value) => setActiveWorkspace(value === PERSONAL_VALUE ? null : value)}
-        >
-          <WorkspaceRadioItem value={PERSONAL_VALUE} name="Personal" />
-          {workspaces.map((workspace) => (
-            <WorkspaceRadioItem
-              key={workspace.id}
-              value={workspace.id}
-              name={workspace.name}
-              workspace={workspace}
-              enrolment={viewOf(workspace)}
-            />
+            <WorkspaceRadioItem value={PERSONAL_VALUE} name="Personal" />
+            {workspaces.map((workspace) => (
+              <WorkspaceRadioItem
+                key={workspace.id}
+                value={workspace.id}
+                name={workspace.name}
+                workspace={workspace}
+                enrolment={viewOf(workspace)}
+              />
+            ))}
+          </MenuRadioGroup>
+          {pending.map((view) => (
+            <PendingJoinItem key={view.relayOrigin} view={view} />
           ))}
-        </MenuRadioGroup>
-        {pending.map((view) => (
-          <PendingJoinItem key={view.relayOrigin} view={view} />
-        ))}
-        {active?.relay !== undefined ? (
-          <>
-            <MenuSeparator />
-            {joinedHere && canJoinAgain(enrolment) ? (
-              <MenuItem
-                onClick={() =>
-                  openWorkspaceDialog(
-                    active.relay === undefined
-                      ? { kind: "enterprise" }
-                      : { kind: "enterprise", origin: active.relay.origin },
-                  )
-                }
-              >
-                <UsersIcon />
-                Join again…
-              </MenuItem>
-            ) : null}
-            <MenuItem
-              onClick={() =>
-                active.relay !== undefined &&
-                openWorkspaceDialog({ kind: "machines", origin: active.relay.origin })
-              }
-            >
-              <LaptopIcon />
-              Machines…
-            </MenuItem>
-            {joinedHere ? (
+          {active?.relay !== undefined ? (
+            <>
+              <MenuSeparator />
+              {me && <MenuItem onClick={() => showPresence(true)}>My presence…</MenuItem>}
+              {joinedHere && canJoinAgain(enrolment) ? (
+                <MenuItem
+                  onClick={() =>
+                    openWorkspaceDialog(
+                      active.relay === undefined
+                        ? { kind: "enterprise" }
+                        : { kind: "enterprise", origin: active.relay.origin },
+                    )
+                  }
+                >
+                  <UsersIcon />
+                  Join again…
+                </MenuItem>
+              ) : null}
               <MenuItem
                 onClick={() =>
                   active.relay !== undefined &&
-                  openWorkspaceDialog({ kind: "leave", origin: active.relay.origin })
+                  openWorkspaceDialog({ kind: "machines", origin: active.relay.origin })
                 }
               >
-                <LogOutIcon />
-                Leave…
+                <LaptopIcon />
+                Machines…
               </MenuItem>
-            ) : (
-              <MenuItem
-                onClick={() =>
-                  openWorkspaceDialog(
-                    active.relay === undefined
-                      ? { kind: "enterprise" }
-                      : { kind: "enterprise", origin: active.relay.origin },
-                  )
-                }
-              >
-                <UsersIcon />
-                {enrolment !== null && enrolment.state !== "none"
-                  ? "Enrolment…"
-                  : "Join on this machine…"}
-              </MenuItem>
-            )}
-          </>
-        ) : null}
-        <MenuSeparator />
-        <MenuItem onClick={() => openWorkspaceDialog({ kind: "create" })}>
-          <PlusIcon />
-          New workspace…
-        </MenuItem>
-        <MenuItem onClick={() => openWorkspaceDialog({ kind: "manage", workspaceId: activeId })}>
-          <Settings2Icon />
-          Manage workspaces
-        </MenuItem>
-        <MenuSeparator />
-        <MenuItem aria-label={props.homeLabel} onClick={() => void navigate({ to: "/" })}>
-          <HouseIcon />
-          Home
-        </MenuItem>
-      </MenuPopup>
-    </Menu>
+              {joinedHere ? (
+                <MenuItem
+                  onClick={() =>
+                    active.relay !== undefined &&
+                    openWorkspaceDialog({ kind: "leave", origin: active.relay.origin })
+                  }
+                >
+                  <LogOutIcon />
+                  Leave…
+                </MenuItem>
+              ) : (
+                <MenuItem
+                  onClick={() =>
+                    openWorkspaceDialog(
+                      active.relay === undefined
+                        ? { kind: "enterprise" }
+                        : { kind: "enterprise", origin: active.relay.origin },
+                    )
+                  }
+                >
+                  <UsersIcon />
+                  {enrolment !== null && enrolment.state !== "none"
+                    ? "Enrolment…"
+                    : "Join on this machine…"}
+                </MenuItem>
+              )}
+            </>
+          ) : null}
+          <MenuSeparator />
+          <MenuItem onClick={() => openWorkspaceDialog({ kind: "create" })}>
+            <PlusIcon />
+            New workspace…
+          </MenuItem>
+          <MenuItem onClick={() => openWorkspaceDialog({ kind: "manage", workspaceId: activeId })}>
+            <Settings2Icon />
+            Manage workspaces
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem aria-label={props.homeLabel} onClick={() => void navigate({ to: "/" })}>
+            <HouseIcon />
+            Home
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+      {enterprise && me && (
+        <PresencePrompt
+          key={JSON.stringify([enterprise.environmentId, enterprise.workspace.id, me.id])}
+          enterprise={enterprise}
+          person={me}
+          open={presenceOpen}
+          close={() => showPresence(false)}
+        />
+      )}
+    </>
   );
 }
 
