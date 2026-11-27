@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Office sprite atlas</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #e5e1dc;
+        color: #312e34;
+        font: 14px system-ui;
+      }
+      header,
+      main {
+        max-width: 1400px;
+        margin: auto;
+        padding: 12px 24px;
+      }
+      h1 {
+        margin-bottom: 0;
+      }
+      main {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr));
+        gap: 16px;
+      }
+      section {
+        padding: 16px;
+        border-radius: 12px;
+      }
+      h2 {
+        text-transform: capitalize;
+        margin: 0;
+      }
+      h3 {
+        text-transform: capitalize;
+        border-bottom: 1px solid currentColor;
+        padding-bottom: 4px;
+      }
+      article {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
+        gap: 6px;
+      }
+      figure {
+        margin: 0;
+        padding: 5px;
+        border: 1px solid #89848455;
+        border-radius: 6px;
+      }
+      canvas {
+        display: block;
+        max-width: 100%;
+      }
+      figcaption {
+        text-transform: capitalize;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Office sprite atlas</h1>
+      <p>Full sprite, simplified shape and room mark</p>
+    </header>
+    <main></main>
+    <script type="module">
+      import { catalog, createSpriteCache, palettes } from "./index.ts";
+
+      if (import.meta.env.DEV) {
+        const cache = createSpriteCache();
+        for (const theme of ["light", "dark"]) {
+          const section = document.createElement("section");
+          section.style.background = palettes[theme].floor;
+          section.style.color = palettes[theme].ink;
+          const heading = document.createElement("h2");
+          heading.textContent = theme;
+          section.append(heading);
+          for (const kind of ["object", "person", "agent", "presence"]) {
+            const title = document.createElement("h3");
+            title.textContent = {
+              object: "Room",
+              person: "People",
+              agent: "Agents",
+              presence: "Presence",
+            }[kind];
+            const grid = document.createElement("article");
+            section.append(title, grid);
+            for (const sprite of catalog.filter((entry) => entry.kind === kind)) {
+              const figure = document.createElement("figure");
+              const canvas = document.createElement("canvas");
+              canvas.width = 120;
+              canvas.height = 64;
+              const ctx = canvas.getContext("2d");
+              for (const [i, detail] of ["full", "simple", "mark"].entries()) {
+                const scale = i === 0 ? 3 : 2;
+                ctx.drawImage(
+                  cache.get(sprite, scale, theme, detail),
+                  [-5, 48, 74][i],
+                  32 - scale * 12,
+                );
+              }
+              const caption = document.createElement("figcaption");
+              caption.textContent =
+                sprite.name.replaceAll("-", " ") +
+                (sprite.kind === "person" ? " / " + sprite.coat : "");
+              figure.append(canvas, caption);
+              grid.append(figure);
+            }
+          }
+          document.querySelector("main").append(section);
+        }
+      }
+    </script>
+  </body>
+</html>
