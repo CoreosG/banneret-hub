@@ -1,4 +1,15 @@
-import { officeMeetingUrlValid } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { Link, useRouter } from "@tanstack/react-router";
+import { chatRpc } from "../../chat/client";
+import { PersonRoomAgents } from "../AgentDetails";
+import { DeskDetails } from "../DeskDetails";
+import { type AgentIndex, needsAgent, useAgentIndex, useAgentPage } from "../agentIndex";
+import {
+  ChatConversation,
+  type BanneretBoardCard,
+  type PoolResources,
+  officeMeetingUrlValid,
+} from "@t3tools/contracts";
 import { Meeting } from "../Meeting";
 import { LinkIcon } from "lucide-react";
 import type { BanneretBoardEntry, BanneretTeam, OfficeSummary } from "@t3tools/contracts";
@@ -19,6 +30,10 @@ type Props = {
   boards: ReadonlyMap<string, BanneretBoardEntry>;
   people: readonly Person[];
   seatFor: (p: Person, board: string) => string | undefined;
+  index: AgentIndex;
+  cardsFor: (login: string) => readonly BanneretBoardCard[];
+  pool: PoolResources | null;
+  dms: boolean;
   viewer: string | undefined;
   hallway: boolean;
   hasBoardDesk: (p: Person) => boolean;
@@ -62,6 +77,36 @@ function renderer() {
     },
   };
 }
+const decodeConversation = Schema.decodeUnknownSync(ChatConversation);
+function DirectMessage({ person, target }: { person: Person; target: RelayTarget }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <>
+      <button
+        disabled={pending}
+        aria-label={"Direct message " + person.login}
+        onClick={async () => {
+          setPending(true);
+          try {
+            const dm = decodeConversation(
+              await chatRpc.run(target, { kind: "dm", members: [person.id] }),
+            );
+            await router.navigate({ href: "/channels/" + encodeURIComponent(dm.id) });
+          } catch (e) {
+            setError(String(e));
+          }
+          setPending(false);
+        }}
+      >
+        Direct message
+      </button>
+      {error && <p role="alert">{error}</p>}
+    </>
+  );
+}
+
 function OfficeRoom({
   room,
   boardId,
@@ -77,6 +122,8 @@ function OfficeRoom({
   render,
   props,
   open,
+  picked,
+  close,
 }: {
   room: Room;
   boardId: string | null;
@@ -91,6 +138,8 @@ function OfficeRoom({
   paint: ReturnType<typeof officePaint>;
   render: ReturnType<typeof renderer>;
   props: Props;
+  picked: Item | null;
+  close: () => void;
   open: (item: Item) => void;
 }) {
   const { office, target, boards, people } = props;
@@ -102,6 +151,11 @@ function OfficeRoom({
     room.meetingUrl &&
     officeMeetingUrlValid(room.meetingUrl);
   const title = board?.title ?? boardId ?? "Hallway";
+  const selectedPerson = picked?.personId
+    ? people.find((p) => picked.personId === p.id)
+    : undefined;
+  const indexState = useAgentIndex(props.index);
+  useAgentPage(props.index, !!selectedPerson && needsAgent(indexState, selectedPerson.id));
   const desks: Desk[] = [];
   const owned = new Map<string, NonNullable<typeof sessions>[number][]>();
   for (const session of sessions ?? []) {
@@ -118,8 +172,7 @@ function OfficeRoom({
           ? !props.hasBoardDesk(p)
           : !!(agents.length || claims.length) && props.seatFor(p, boardId) === boardId;
       const seated = here && (p.presence === "available" || p.presence === "focusing");
-      if (!seated && !agents.some((s) => s.state !== "stopped") && !(boardId === null && here))
-        continue;
+      if (!claims.length && !agents.length && !(boardId === null && here)) continue;
       desks.push({
         person: p,
         presence: office.flags.includes("presence") ? p.presence : undefined,
@@ -215,7 +268,6 @@ function OfficeRoom({
   function button(item: Item, kind: "room" | "more" | "sprite") {
     const left = x + item.x * zoom,
       top = y + item.y * zoom;
-    if (left < -12 || top < -12 || left > width + 12 || top > height + 12) return null;
     const label =
       kind === "room"
         ? [title, summary, meeting && "Meeting link"].filter(Boolean).join(" · ")
@@ -230,11 +282,10 @@ function OfficeRoom({
         aria-description={item.info}
         onClick={() => {
           if (kind === "more") props.openList(boardId ?? undefined);
-          else if (sessions === null && kind === "room") retry();
           else open({ ...item, id: key + "/" + item.id });
         }}
         className={
-          "group absolute z-10 min-h-6 min-w-6 rounded hover:ring-2 focus-visible:ring-2 focus-visible:ring-inset " +
+          "group forced-colors:border forced-colors:bg-[Canvas] absolute z-10 min-h-6 min-w-6 rounded hover:ring-2 focus-visible:ring-2 focus-visible:ring-inset " +
           (detail === "mark"
             ? "flex flex-col items-start justify-start overflow-hidden px-2 py-1 text-left text-xs"
             : kind === "sprite"
@@ -256,6 +307,11 @@ function OfficeRoom({
           >
             {item.label}
             {item.presence && <span className="ml-1 rounded bg-accent px-1">{item.presence}</span>}
+          </span>
+        )}
+        {kind === "sprite" && item.id.startsWith("agent/") && (
+          <span aria-hidden className="hidden text-xs forced-colors:block">
+            {item.label}
           </span>
         )}
         {kind === "sprite" && (
@@ -288,6 +344,82 @@ function OfficeRoom({
   }
   return (
     <>
+      {picked && (!picked.personId || selectedPerson) && (
+        <aside
+          aria-label={selectedPerson?.displayName ?? selectedPerson?.login ?? title}
+          className="absolute top-2 right-2 z-30 max-h-[95%] w-72 max-w-full space-y-2 overflow-auto rounded-md border bg-card p-3 text-sm shadow"
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Escape") close();
+          }}
+          onWheel={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button autoFocus onClick={close} className="float-right">
+            Close
+          </button>
+          {selectedPerson ? (
+            <>
+              <DeskDetails
+                p={selectedPerson}
+                counts={indexState.byPerson.get(selectedPerson.id)?.counts}
+                agents={owned.get(selectedPerson.id) ?? []}
+                cards={props.cardsFor(selectedPerson.login)}
+                flags={office.flags}
+                target={target}
+                visible
+                pool={props.pool}
+              />
+              {indexState.byPerson
+                .get(selectedPerson.id)
+                ?.rooms.filter((r) => r.board !== boardId)
+                .map((r) => (
+                  <PersonRoomAgents
+                    key={r.board}
+                    board={r.board}
+                    target={target}
+                    title={boards.get(r.board)?.title ?? r.board}
+                    revision={office.files["team.room." + r.board]}
+                    personId={selectedPerson.id}
+                  />
+                ))}
+              {boardId !== null && Object.values(office.summary.hallway.counts).some(Boolean) && (
+                <PersonRoomAgents
+                  board={null}
+                  title="Hallway"
+                  target={target}
+                  revision={office.files["team.hallway"]}
+                  personId={selectedPerson.id}
+                />
+              )}
+              {props.dms && selectedPerson.login !== props.viewer && (
+                <DirectMessage key={selectedPerson.id} person={selectedPerson} target={target} />
+              )}
+            </>
+          ) : (
+            <>
+              <strong>{title}</strong>
+              {boardId !== null && (
+                <>
+                  <p>This room represents a board on the relay, not a repository.</p>
+                  <Link className="underline" to="/board" search={() => ({ board: boardId })}>
+                    Open {title} board
+                  </Link>
+                </>
+              )}
+            </>
+          )}
+          {sessions === null && <button onClick={retry}>Retry room</button>}
+          {office.flags.includes("meeting_links") && (
+            <Meeting
+              url={
+                room.meetingUrl ??
+                (selectedPerson || boardId === null ? office.summary.office.meetingUrl : undefined)
+              }
+            />
+          )}
+        </aside>
+      )}
       {button(roomItem, "room")}
       {items.map((item) => button(item, "sprite"))}
       {detail !== "mark" &&
@@ -315,8 +447,7 @@ export default function TeamOffice(props: Props) {
     document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
   const [visible, show] = useState(() => !document.hidden);
-  const [selection, pick] = useState<{ item: Item; people: readonly Person[] } | null>(null);
-  const picked = selection?.people === props.people ? selection.item : null;
+  const [picked, pick] = useState<{ boardId: string | null; item: Item } | null>(null);
   const [palette, setPalette] = useState(() => ({ theme, paint: officePaint(theme) }));
   if (palette.theme !== theme) setPalette({ theme, paint: officePaint(theme) });
   const slots: { room: Room; boardId: string | null }[] = props.rooms.map((room) => ({
@@ -389,7 +520,7 @@ export default function TeamOffice(props: Props) {
     };
   }, [render]);
   function close() {
-    const id = picked?.id;
+    const id = picked?.item.id;
     pick(null);
     const target = Array.from(
       viewport.current?.querySelectorAll<HTMLElement>("[data-office-target]") ?? [],
@@ -410,6 +541,13 @@ export default function TeamOffice(props: Props) {
       viewport.current?.querySelectorAll<HTMLButtonElement>("[data-office-target]") ?? [],
     );
     const current = all.find((b) => b === document.activeElement);
+    function focusTarget(button: HTMLButtonElement) {
+      const left = button.offsetLeft,
+        top = button.offsetTop;
+      if (left < 12 || left > camera.width - 12 || top < 12 || top > camera.height - 12)
+        pan(left - camera.width / 2, top - camera.height / 2);
+      button.focus({ preventScroll: true });
+    }
     if (event.key === "Enter" && !current) {
       all[0]?.click();
       return;
@@ -423,7 +561,7 @@ export default function TeamOffice(props: Props) {
     if (!dir) return;
     event.preventDefault();
     if (!current) {
-      all[0]?.focus();
+      if (all[0]) focusTarget(all[0]);
       return;
     }
     const cx = current.offsetLeft,
@@ -458,7 +596,7 @@ export default function TeamOffice(props: Props) {
         x: Math.max(0, Math.min(maxX, outside.point.x * c.zoom)),
         y: Math.max(0, Math.min(maxY, outside.point.y * c.zoom)),
       }));
-    } else nearest?.b.focus({ preventScroll: true });
+    } else if (nearest) focusTarget(nearest.b);
   }
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- focus the target after panning mounts its button
   useLayoutEffect(() => {
@@ -539,7 +677,9 @@ export default function TeamOffice(props: Props) {
               key={r.boardId === null ? "hallway" : "board/" + r.boardId}
               {...r}
               props={props}
-              open={(item) => pick({ item, people: props.people })}
+              picked={picked?.boardId === r.boardId ? picked.item : null}
+              close={close}
+              open={(item) => pick({ item, boardId: r.boardId })}
               ratio={ratio}
               zoom={camera.zoom}
               x={r.x * camera.zoom - x}
@@ -552,29 +692,6 @@ export default function TeamOffice(props: Props) {
             />
           ))}
       </div>
-      {picked && (
-        <aside
-          aria-label={picked.label}
-          className="rounded-md border bg-card p-3"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") close();
-          }}
-        >
-          <strong>{picked.label}</strong>
-          <p>{picked.info}</p>
-          {props.office.flags.includes("meeting_links") && (
-            <Meeting
-              url={
-                props.rooms.find((room) => picked.id === "team.room." + room.board + "/room")
-                  ?.meetingUrl
-              }
-            />
-          )}
-          <button autoFocus onClick={close}>
-            Close
-          </button>
-        </aside>
-      )}
     </section>
   );
 }

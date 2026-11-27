@@ -70,40 +70,37 @@ export function AgentDetails({
   );
 }
 
-export function Hallway({
+export function PersonRoomAgents({
   target,
+  board,
+  title,
   revision,
+  personId,
 }: {
   target: RelayTarget;
+  board: string | null;
+  title: string;
   revision: string | undefined;
+  personId: string;
 }) {
   const [open, setOpen] = useState(false);
-  const { sessions, retry } = useRoomSessions(target, null, revision, open);
+  const { sessions, retry } = useRoomSessions(target, board, revision, open);
+  const agents = sessions?.filter((s) => s.personId === personId);
   return (
-    <details className="rounded-lg border p-3" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>Hallway agents</summary>
+    <details onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>Agents in {title}</summary>
       {open &&
-        (sessions ? (
-          sessions.map((session) => (
-            <AgentDetails key={session.id} session={session} target={target} />
-          ))
+        (agents ? (
+          agents.length ? (
+            agents.map((s) => <AgentDetails key={s.id} session={s} target={target} />)
+          ) : (
+            "No agents here."
+          )
         ) : sessions === null ? (
-          <button onClick={retry}>Retry hallway</button>
+          <button onClick={retry}>Retry agents</button>
         ) : (
           "Loading agents…"
         ))}
     </details>
   );
-}
-
-export function MachineHeard({ at }: { at: string }) {
-  const [now, tick] = useState(Date.now);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- update the expanded machine's heartbeat age
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (!document.hidden) tick(Date.now());
-    }, 15000);
-    return () => clearInterval(timer);
-  }, []);
-  return <p>{heardLabel(at, now)}</p>;
 }

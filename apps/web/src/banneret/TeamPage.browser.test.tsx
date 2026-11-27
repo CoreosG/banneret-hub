@@ -818,7 +818,7 @@ describe("Team page", () => {
 
 it("opens the company office, reads only visible rooms and makes zero frame requests or paints in two idle seconds", async () => {
   using stack = new DisposableStack();
-  const { emit, screen } = await openTeam(stack);
+  const { emit, screen } = await openTeam(stack, "/team?view=office");
   await using _screen = screen;
   const people = Array.from({ length: 500 }, (_, i) => ({
     id: "p" + i,
@@ -939,7 +939,33 @@ it("explores desks with the keyboard and restores focus after closing the card",
       .element()
       .getAttribute("aria-description"),
   ).not.toMatch(/Bo laptop|m_bo_laptop/);
+  const robot = map.getByRole("button", { name: "codex · not_heard_from" });
+  await robot.click();
+  const card = page.getByRole("complementary", { name: "bo-example" });
+  await expect
+    .element(card.getByRole("button", { name: /Direct message/ }))
+    .not.toBeInTheDocument();
+  await card.getByRole("button", { name: /Profile blocks/ }).click();
+  await expect.element(page.getByRole("dialog", { name: "Task" })).toBeVisible();
+  await userEvent.keyboard("{Escape}");
+  await card.getByRole("button", { name: "Close" }).click();
+  expect(document.activeElement).toBe(robot.element());
+  await emit({
+    ...state(
+      ALL,
+      teamRead({ people, office: { ...office, summary: { ...office.summary, rooms } } }),
+    ),
+    chatFlags: ["dms"],
+  });
+  await robot.click();
+  await expect
+    .element(card.getByRole("button", { name: "Direct message bo-example" }))
+    .toBeVisible();
+  await userEvent.keyboard("{Escape}");
   await map.getByRole("button", { name: /Platform.*Meeting link/i }).click();
+  await expect
+    .element(page.getByRole("link", { name: "Open Platform board" }))
+    .toHaveAttribute("href", "/board?board=platform");
   await expect
     .element(page.getByRole("link", { name: "Meeting link" }))
     .toHaveAttribute("href", "https://example.com/meet");
@@ -956,5 +982,58 @@ it("explores desks with the keyboard and restores focus after closing the card",
       await page.screenshot({
         path: import.meta.env.VITE_OFFICE_SCREENSHOTS + "/" + label + ".png",
       });
+  }
+});
+
+it("shows the same people, presence, claims and agent counts in Floor, List and Office", async () => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openTeam(stack);
+  await using _screen = screen;
+  const people = TEAM().people.map((p, i) => ({ ...p, presence: i ? "away" : "focusing" }));
+  const agents = people.slice(0, 2).map((p, i) => ({
+    personId: p.id,
+    counts: { ...counts, working: 1 - i, waiting: i },
+    rooms: [{ board: "platform", waiting: i }],
+  }));
+  vi.mocked(feedRpc.room).mockImplementation(async (_, board) => ({
+    nextCursor: null,
+    sessions:
+      board === "platform"
+        ? people.slice(0, 2).map((p) => ({ ...p.sessions[0]!, personId: p.id }))
+        : [],
+  }));
+  await emit(
+    state(
+      ALL,
+      teamRead({
+        people,
+        office: { ...office, preset: "company", summary: { ...office.summary, agents } },
+      }),
+    ),
+  );
+  const expected = [
+    ["ada-example", "focusing", "1 working", "Guild invites", "Rate limits for invites"],
+    ["bo-example", "away", "1 waiting", "Profile blocks"],
+    ["cy-example", "away"],
+  ] as const;
+  for (const view of ["Floor", "List", "Office"]) {
+    if (view !== "Floor") await page.getByRole("button", { name: view, exact: true }).click();
+    if (view === "Floor") await page.getByText("Hallway", { exact: true }).click();
+    for (const [login, ...facts] of expected) {
+      if (view === "Office") await page.getByRole("button", { name: login, exact: true }).click();
+      await vi.waitFor(() => {
+        const row =
+          view === "Office"
+            ? page.getByRole("complementary", { name: login }).element()
+            : personRow(login);
+        for (const fact of [login, ...facts]) expect(row?.textContent).toContain(fact);
+        const chips = Array.from(
+          row!.querySelectorAll('[data-slot="lease-chip"]'),
+          (c) => c.textContent,
+        );
+        expect(chips).toEqual(facts.slice(2).map(() => login + "/privatelive"));
+      });
+      if (view === "Office") await userEvent.keyboard("{Escape}");
+    }
   }
 });
