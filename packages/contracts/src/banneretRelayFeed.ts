@@ -434,19 +434,19 @@ export type BanneretFeedState = typeof BanneretFeedState.Type;
 
 const WsBanneretRelayTodayRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.today, {
   /** `visit` only when the person actually opens Today. */
-  payload: Schema.Struct({ visit: Schema.optional(Schema.Boolean) }),
+  payload: Schema.Struct({ relayOrigin: Schema.String, visit: Schema.optional(Schema.Boolean) }),
   success: BanneretFeedTodayRead,
   error: EnvironmentAuthorizationError,
 });
 
 const WsBanneretRelayNeedsRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.needs, {
-  payload: Schema.Struct({ cursor: Schema.optional(Schema.String) }),
+  payload: Schema.Struct({ relayOrigin: Schema.String, cursor: Schema.optional(Schema.String) }),
   success: BanneretFeedNeedsRead,
   error: EnvironmentAuthorizationError,
 });
 
 const WsBanneretRelayFeedRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.feed, {
-  payload: Schema.Struct({}),
+  payload: Schema.Struct({ relayOrigin: Schema.String }),
   success: BanneretFeedState,
   error: EnvironmentAuthorizationError,
   stream: true,
@@ -454,19 +454,19 @@ const WsBanneretRelayFeedRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.feed, {
 
 const WsBanneretRelayFeedPageRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.feedPage, {
   /** The `nextCursor` of the feed file or of the previous page. */
-  payload: Schema.Struct({ cursor: Schema.String }),
+  payload: Schema.Struct({ relayOrigin: Schema.String, cursor: Schema.String }),
   success: BanneretFeedEntryPageRead,
   error: EnvironmentAuthorizationError,
 });
 
 const WsBanneretRelayGraveyardPageRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.graveyardPage, {
-  payload: Schema.Struct({ cursor: Schema.String }),
+  payload: Schema.Struct({ relayOrigin: Schema.String, cursor: Schema.String }),
   success: BanneretGraveyardPageRead,
   error: EnvironmentAuthorizationError,
 });
 
 const WsBanneretRelayTaskRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.task, {
-  payload: Schema.Struct({ taskId: Schema.String }),
+  payload: Schema.Struct({ relayOrigin: Schema.String, taskId: Schema.String }),
   success: BanneretTaskRead,
   error: EnvironmentAuthorizationError,
 });

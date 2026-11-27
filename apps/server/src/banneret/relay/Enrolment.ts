@@ -1,8 +1,13 @@
 // @effect-diagnostics nodeBuiltinImport:off - node:os machine facts and node:crypto seed and digest are synchronous.
-// Banneret Hub: this environment's enrolment in a company relay. One enrolment per environment.
+// Banneret Hub: this environment's enrolments in company relays. One enrolment per relay origin, so
+// a machine can join several companies; each relay is its own instance of the machine below, with
+// its own state file (stateDir/banneret/relays/<hash>.json), secrets (suffixed by the same hash),
+// driver fiber, counter and heartbeat. The relays never share state, so one relay's crash window
+// cannot touch another's files.
 // The persisted state is one of six values (see the state table in the PR that added this file);
 // health is run-time only. Writes go secrets first, then the state file; removals go state file
-// first, then secrets, and start-up deletes secrets that no state matches.
+// first, then secrets, and start-up deletes secrets that no state matches. A relay's state file is
+// written (as `none`) before its first secret, so every secret has a state file to match.
 //
 // Token re-issue (relay v1, README "Enrolment" step 6): until a token is used, every poll of an
 // approved pairing returns a fresh token and the one before it stops working. So `approved` keeps
@@ -48,6 +53,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 
 import packageJson from "../../../package.json" with { type: "json" };
@@ -74,10 +80,16 @@ import {
   waitBeforeSigning,
 } from "./RelaySigning.ts";
 
-export const KEY_SECRET = "banneret-relay-key";
-export const TOKEN_SECRET = "banneret-relay-token";
+/** 16 hex of sha256(origin): the relay's file name, secret suffix and Enterprise workspace id. */
+export const relayHash = (origin: string) =>
+  NodeCrypto.createHash("sha256").update(origin).digest("hex").slice(0, 16);
+
+/** The machine key of one relay's enrolment. */
+export const keySecret = (origin: string) => `banneret-relay-key-${relayHash(origin)}`;
+/** The device token of one relay's enrolment. */
+export const tokenSecret = (origin: string) => `banneret-relay-token-${relayHash(origin)}`;
 /** A new pairing's key while the old enrolment's key must survive until `requested` is saved. */
-export const NEXT_KEY_SECRET = "banneret-relay-key-next";
+export const nextKeySecret = (origin: string) => `banneret-relay-key-next-${relayHash(origin)}`;
 
 const Me = Schema.Struct({ id: Schema.String, login: Schema.String, role: Schema.String });
 
@@ -96,6 +108,7 @@ const Pending = {
 const Persisted = Schema.Union([
   Schema.Struct({
     state: Schema.Literal("none"),
+    relayOrigin: Schema.String,
     reason: Schema.optional(Schema.String),
     message: Schema.optional(Schema.String),
   }),
@@ -209,8 +222,7 @@ const decodeReply = <S extends Schema.Top>(schema: S, reply: RelayReply) =>
   );
 
 /** `ent-` + the first 16 hex of sha256(origin): one Enterprise workspace per relay, on every environment. */
-const enterpriseWorkspaceId = (origin: string) =>
-  `ent-${NodeCrypto.createHash("sha256").update(origin).digest("hex").slice(0, 16)}`;
+export const enterpriseWorkspaceId = (origin: string) => `ent-${relayHash(origin)}`;
 
 const sanitize = (
   value: string,
@@ -276,8 +288,9 @@ const DEFAULT_OPTIONS: EnrolmentOptions = {
   maxClockWaitMs: 120_000,
 };
 
-interface EnrolmentService {
-  readonly probe: (origin: string) => Effect.Effect<BanneretRelayProbeResult, BanneretRelayError>;
+/** One relay's enrolment: the state machine of the table above, for that relay only. */
+export interface RelayEnrolment {
+  readonly origin: string;
   readonly status: Effect.Effect<BanneretEnrolmentView>;
   readonly start: (input: {
     readonly origin: string;
@@ -295,7 +308,7 @@ interface EnrolmentService {
   readonly matchProjects: (
     remoteUrls: ReadonlyArray<string>,
   ) => Effect.Effect<ReadonlyArray<string>, BanneretRelayError>;
-  /** An effect that completes at the next change of the view or the files, or driver step. */
+  /** An effect that completes at the next change of this relay's view or files, or driver step. */
   readonly nextChange: Effect.Effect<Effect.Effect<void>>;
   /** RelayFeed seam: a signed GET, only while configured. */
   readonly signedGet: (
@@ -315,6 +328,42 @@ interface EnrolmentService {
   >;
 }
 
+interface EnrolmentService {
+  readonly probe: (origin: string) => Effect.Effect<BanneretRelayProbeResult, BanneretRelayError>;
+  /** Every relay this environment has a state file for, in origin order. */
+  readonly list: Effect.Effect<ReadonlyArray<BanneretEnrolmentView>>;
+  /** One relay's view; `none` when this environment never tried that relay. */
+  readonly status: (relayOrigin: string) => Effect.Effect<BanneretEnrolmentView>;
+  /** One relay's instance, if this environment has one. Never creates one, so never calls a relay. */
+  readonly relay: (relayOrigin: string) => Effect.Effect<RelayEnrolment | undefined>;
+  readonly start: (input: {
+    readonly origin: string;
+    readonly label: string;
+    readonly kind: MachineKind;
+  }) => Effect.Effect<BanneretEnrolmentView, BanneretRelayError>;
+  readonly cancel: (
+    relayOrigin: string,
+  ) => Effect.Effect<BanneretEnrolmentView, BanneretRelayError>;
+  readonly leave: (
+    relayOrigin: string,
+    mode: "revoke" | "forget",
+  ) => Effect.Effect<BanneretEnrolmentView, BanneretRelayError>;
+  readonly machines: (
+    relayOrigin: string,
+    cursor: string | undefined,
+  ) => Effect.Effect<BanneretRelayMachinesPage, BanneretRelayError>;
+  readonly revokeMachine: (
+    relayOrigin: string,
+    machineId: string,
+  ) => Effect.Effect<void, BanneretRelayError>;
+  readonly matchProjects: (
+    relayOrigin: string,
+    remoteUrls: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyArray<string>, BanneretRelayError>;
+  /** An effect that completes at the next change of any relay, or when a relay is added. */
+  readonly nextChange: Effect.Effect<Effect.Effect<void>>;
+}
+
 const notRunning = Effect.fail(
   new BanneretRelayError({ message: "Enterprise enrolment is not running on this server." }),
 );
@@ -328,6 +377,19 @@ const notConfigured = Effect.fail(
   }),
 );
 
+/** The view of a relay this environment has never tried. */
+const noneView = (relayOrigin: string): BanneretEnrolmentView => ({
+  state: "none",
+  workspaceId: enterpriseWorkspaceId(relayOrigin),
+  relayOrigin,
+});
+
+/** A relay origin as the client sent it, reduced to the form the instances are keyed by. */
+const normalizeOrigin = (input: string): string | null => {
+  const address = parseBanneretRelayAddress(input);
+  return address.ok ? address.origin : null;
+};
+
 /**
  * A reference, not a required service: a server built without the enrolment layer (upstream's
  * ws.test.ts) answers as an environment that never enrolled, and still makes no relay call.
@@ -337,18 +399,16 @@ export class BanneretEnrolment extends Context.Reference<EnrolmentService>(
   {
     defaultValue: () => ({
       probe: () => notRunning,
-      status: Effect.succeed({ state: "none" }),
+      list: Effect.succeed([]),
+      status: (relayOrigin) => Effect.succeed(noneView(normalizeOrigin(relayOrigin) ?? relayOrigin)),
+      relay: () => Effect.undefined,
       start: () => notRunning,
-      cancel: notRunning,
+      cancel: () => notRunning,
       leave: () => notRunning,
       machines: () => notRunning,
       revokeMachine: () => notRunning,
       matchProjects: () => notRunning,
       nextChange: Effect.succeed(Effect.never),
-      signedGet: () => notConfigured,
-      snapshotEtag: Effect.undefined,
-      setBoardTasks: () => Effect.void,
-      signStream: () => notConfigured,
     }),
   },
 ) {}
@@ -368,27 +428,73 @@ const plainFailure = (error: RelayCallError, relay: string): BanneretRelayError 
   return new BanneretRelayError({ message: error.message });
 };
 
-const make = Effect.fn("BanneretEnrolment.make")(function* (
-  overrides: Partial<EnrolmentOptions> = {},
+const probeRelay = Effect.fn("BanneretEnrolment.probe")(function* (input: string) {
+  const address = parseBanneretRelayAddress(input);
+  if (!address.ok) return yield* fail(address.message);
+  const reply = yield* Effect.flatMap(Clock.currentTimeMillis, (now) =>
+    relayFetch({
+      origin: address.origin,
+      method: "GET",
+      target: "/relay/v1/capabilities",
+      nowMs: now,
+    }),
+  ).pipe(Effect.mapError((error) => plainFailure(error, address.origin)));
+  const capabilities = yield* decodePublicCapabilities(reply.body).pipe(
+    Effect.mapError(
+      () => new BanneretRelayError({ message: "That address is not a Banneret relay." }),
+    ),
+  );
+  if (
+    capabilities.enrolment.start !== "/relay/v1/enroll/start" ||
+    capabilities.displayName.length === 0 ||
+    capabilities.displayName.length > 80
+  ) {
+    return yield* fail("That address is not a relay this version of Banneret Hub can join.");
+  }
+  return {
+    origin: address.origin,
+    displayName: capabilities.displayName,
+  };
+});
+
+/** What every relay instance shares: the server's services and the layer's scope. */
+interface RelayShared {
+  readonly options: EnrolmentOptions;
+  readonly fs: FileSystem.FileSystem;
+  readonly path: Path.Path;
+  readonly secrets: ServerSecretStore.ServerSecretStore["Service"];
+  readonly environmentId: string;
+  readonly facts: BanneretFacts["Service"];
+  readonly context: Context.Context<ServerConfig.ServerConfig | FileSystem.FileSystem | Path.Path>;
+  readonly clock: Clock.Clock;
+  readonly relaysDir: string;
+  /** The layer's scope: a relay added by a `start` call must outlive that call. */
+  readonly scope: Scope.Scope;
+  /** Tells the manager that this relay changed. */
+  readonly changed: Effect.Effect<void>;
+}
+
+/**
+ * One relay's enrolment. `loaded` is its state file's contents, or undefined for a relay this
+ * environment has not tried before (no file yet; `start` writes one before any secret).
+ */
+const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
+  shared: RelayShared,
+  origin: string,
+  loaded: Persisted | undefined,
 ) {
-  const options = { ...DEFAULT_OPTIONS, ...overrides };
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const config = yield* ServerConfig.ServerConfig;
-  const secrets = yield* ServerSecretStore.ServerSecretStore;
-  const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
-  const facts = yield* BanneretFacts;
-  const context = yield* Effect.context<
-    ServerConfig.ServerConfig | FileSystem.FileSystem | Path.Path
-  >();
-  const stateFile = path.join(config.stateDir, "banneret", "enrolment.json");
-  const clock = yield* Clock.Clock;
+  const { options, fs, path, secrets, environmentId, facts, context, clock } = shared;
+  const stateFile = path.join(shared.relaysDir, `${relayHash(origin)}.json`);
+  const KEY_SECRET = keySecret(origin);
+  const TOKEN_SECRET = tokenSecret(origin);
+  const NEXT_KEY_SECRET = nextKeySecret(origin);
   const lock = yield* Semaphore.make(1);
   const locked = lock.withPermits(1);
   const nowMs = () => Clock.currentTimeMillis;
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
-  let current: Persisted = { state: "none" };
+  let current: Persisted = { state: "none", relayOrigin: origin };
+  let onDisk = loaded !== undefined;
   let health: BanneretRelayHealth | undefined;
   let unreachableSince: string | undefined;
   let etag: string | undefined;
@@ -412,7 +518,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const signal = changeSignal;
     changeSignal = Deferred.makeUnsafe<void>();
     Deferred.doneUnsafe(signal, Effect.void);
-  });
+  }).pipe(Effect.andThen(shared.changed));
 
   const beforeWrite = (step: string) => options.beforeWrite?.(step) ?? Effect.void;
 
@@ -425,6 +531,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     yield* fs.writeFileString(staging, contents).pipe(Effect.orDie);
     yield* fs.rename(staging, stateFile).pipe(Effect.orDie);
     current = next;
+    onDisk = true;
     yield* notify;
   });
   const setSecret = (name: string, value: Uint8Array) =>
@@ -483,7 +590,12 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     reason: string,
     message?: string,
   ) {
-    yield* persist({ state: "none", reason, ...(message === undefined ? {} : { message }) });
+    yield* persist({
+      state: "none",
+      relayOrigin: origin,
+      reason,
+      ...(message === undefined ? {} : { message }),
+    });
     health = undefined;
     unreachableSince = undefined;
     yield* removeSecrets;
@@ -546,11 +658,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       : Math.min(options.maxBackoffMs, Math.max(options.pollFloorMs, ms));
 
   // Start-up makes the files agree with one state of the table.
-  const loaded = yield* fs.readFileString(stateFile).pipe(
-    Effect.flatMap(decodePersisted),
-    Effect.orElseSucceed((): Persisted => ({ state: "none" })),
-  );
-  current = loaded;
+  if (loaded !== undefined) current = loaded;
   yield* locked(
     Effect.gen(function* () {
       let hasKey = Option.isSome(yield* readSecret(KEY_SECRET));
@@ -985,7 +1093,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   );
 
   // The wake signal is taken before the step, so a wake during the step is not lost.
-  yield* Effect.forkScoped(
+  yield* Effect.forkIn(
     Effect.forever(
       Effect.suspend(() => {
         const signal = wakeSignal;
@@ -1001,6 +1109,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         );
       }),
     ),
+    shared.scope,
   );
 
   const view = (): BanneretEnrolmentView => {
@@ -1008,7 +1117,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     switch (state.state) {
       case "none":
         return {
-          state: "none",
+          ...noneView(origin),
           ...(state.reason === undefined ? {} : { reason: state.reason }),
           ...(state.message === undefined ? {} : { message: state.message }),
         };
@@ -1061,35 +1170,6 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     }
   };
 
-  const probeRelay = Effect.fn("BanneretEnrolment.probe")(function* (input: string) {
-    const address = parseBanneretRelayAddress(input);
-    if (!address.ok) return yield* fail(address.message);
-    const reply = yield* Effect.flatMap(nowMs(), (now) =>
-      relayFetch({
-        origin: address.origin,
-        method: "GET",
-        target: "/relay/v1/capabilities",
-        nowMs: now,
-      }),
-    ).pipe(Effect.mapError((error) => plainFailure(error, address.origin)));
-    const capabilities = yield* decodePublicCapabilities(reply.body).pipe(
-      Effect.mapError(
-        () => new BanneretRelayError({ message: "That address is not a Banneret relay." }),
-      ),
-    );
-    if (
-      capabilities.enrolment.start !== "/relay/v1/enroll/start" ||
-      capabilities.displayName.length === 0 ||
-      capabilities.displayName.length > 80
-    ) {
-      return yield* fail("That address is not a relay this version of Banneret Hub can join.");
-    }
-    return {
-      origin: address.origin,
-      displayName: capabilities.displayName,
-    };
-  });
-
   const start = Effect.fn("BanneretEnrolment.start")(function* (input: {
     readonly origin: string;
     readonly label: string;
@@ -1109,16 +1189,18 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
           before.state === "revoked" ||
           (before.state === "configured" && (health === "refused" || health === "unknown_machine"));
         if (!joinAgain) {
-          return yield* fail("This machine is already joining or joined to a company.");
+          return yield* fail("This machine is already joining or has joined this company.");
         }
         // A new attempt drops the previous one's last result, so it never shows during this one.
+        // A relay tried for the first time gets its state file here, before any secret exists.
         if (
-          before.state === "none" &&
-          (before.reason !== undefined || before.message !== undefined)
+          !onDisk ||
+          (before.state === "none" && (before.reason !== undefined || before.message !== undefined))
         ) {
-          yield* persist({ state: "none" });
+          yield* persist({ state: "none", relayOrigin: origin });
         }
         const relay = yield* probeRelay(input.origin);
+        if (relay.origin !== origin) return yield* fail("That is another relay's address.");
         // Beyond that cleared result, nothing is written until the relay has answered: a failed
         // join again keeps the old key, token and state.
         const seed = NodeCrypto.randomBytes(32);
@@ -1333,8 +1415,8 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     };
   });
 
-  const service: EnrolmentService = {
-    probe: probeRelay,
+  const service: RelayEnrolment = {
+    origin,
     status: Effect.sync(view),
     start,
     cancel,
@@ -1353,6 +1435,118 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
         boardTasks = tasks;
       }),
     signStream,
+  };
+  return service;
+});
+
+const make = Effect.fn("BanneretEnrolment.make")(function* (
+  overrides: Partial<EnrolmentOptions> = {},
+) {
+  const options = { ...DEFAULT_OPTIONS, ...overrides };
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const config = yield* ServerConfig.ServerConfig;
+  const relaysDir = path.join(config.stateDir, "banneret", "relays");
+
+  let changeSignal = Deferred.makeUnsafe<void>();
+  const changed = Effect.sync(() => {
+    const signal = changeSignal;
+    changeSignal = Deferred.makeUnsafe<void>();
+    Deferred.doneUnsafe(signal, Effect.void);
+  });
+
+  const shared: RelayShared = {
+    options,
+    fs,
+    path,
+    secrets: yield* ServerSecretStore.ServerSecretStore,
+    environmentId: yield* (yield* ServerEnvironmentIdentity).getEnvironmentId,
+    facts: yield* BanneretFacts,
+    context: yield* Effect.context<ServerConfig.ServerConfig | FileSystem.FileSystem | Path.Path>(),
+    clock: yield* Clock.Clock,
+    relaysDir,
+    scope: yield* Effect.scope,
+    changed,
+  };
+
+  // Instances are added, never removed: a relay left or refused idles in `none` and calls nobody.
+  const relays = new Map<string, RelayEnrolment>();
+  const addLock = yield* Semaphore.make(1);
+
+  // Start-up: one instance per state file whose name matches the origin inside it. Anything else
+  // in the directory (and the single-relay `enrolment.json` of earlier versions) is ignored.
+  const names = yield* fs.readDirectory(relaysDir).pipe(Effect.orElseSucceed(() => []));
+  for (const name of [...names].toSorted()) {
+    const match = /^([0-9a-f]{16})\.json$/.exec(name);
+    if (match === null) continue;
+    const loaded = yield* fs.readFileString(path.join(relaysDir, name)).pipe(
+      Effect.flatMap(decodePersisted),
+      Effect.option,
+    );
+    if (Option.isNone(loaded)) continue;
+    const relayOrigin = normalizeOrigin(loaded.value.relayOrigin);
+    if (relayOrigin === null || relayHash(relayOrigin) !== match[1]) continue;
+    relays.set(relayOrigin, yield* makeRelay(shared, relayOrigin, loaded.value));
+  }
+
+  const lookup = (input: string) =>
+    Effect.sync(() => {
+      const relayOrigin = normalizeOrigin(input);
+      return relayOrigin === null ? undefined : relays.get(relayOrigin);
+    });
+  const joined = (input: string) =>
+    lookup(input).pipe(
+      Effect.filterOrFail(
+        (relay): relay is RelayEnrolment => relay !== undefined,
+        () => new BanneretRelayError({ message: "This machine has not joined that company." }),
+      ),
+    );
+
+  const start = Effect.fn("BanneretEnrolment.start")(function* (input: {
+    readonly origin: string;
+    readonly label: string;
+    readonly kind: MachineKind;
+  }) {
+    const address = parseBanneretRelayAddress(input.origin);
+    if (!address.ok) return yield* fail(address.message);
+    const relay = yield* addLock.withPermits(1)(
+      Effect.gen(function* () {
+        const existing = relays.get(address.origin);
+        if (existing !== undefined) return existing;
+        const added = yield* makeRelay(shared, address.origin, undefined);
+        relays.set(address.origin, added);
+        yield* changed;
+        return added;
+      }),
+    );
+    return yield* relay.start({ ...input, origin: address.origin });
+  });
+
+  const service: EnrolmentService = {
+    probe: probeRelay,
+    list: Effect.suspend(() =>
+      Effect.forEach(
+        [...relays.values()].toSorted((a, b) => a.origin.localeCompare(b.origin)),
+        (relay) => relay.status,
+      ),
+    ),
+    status: (relayOrigin) =>
+      Effect.flatMap(lookup(relayOrigin), (relay) =>
+        relay === undefined
+          ? Effect.succeed(noneView(normalizeOrigin(relayOrigin) ?? relayOrigin))
+          : relay.status,
+      ),
+    relay: lookup,
+    start,
+    cancel: (relayOrigin) => Effect.flatMap(joined(relayOrigin), (relay) => relay.cancel),
+    leave: (relayOrigin, mode) => Effect.flatMap(joined(relayOrigin), (relay) => relay.leave(mode)),
+    machines: (relayOrigin, cursor) =>
+      Effect.flatMap(joined(relayOrigin), (relay) => relay.machines(cursor)),
+    revokeMachine: (relayOrigin, machineId) =>
+      Effect.flatMap(joined(relayOrigin), (relay) => relay.revokeMachine(machineId)),
+    matchProjects: (relayOrigin, remoteUrls) =>
+      Effect.flatMap(joined(relayOrigin), (relay) => relay.matchProjects(remoteUrls)),
+    nextChange: Effect.sync(() => Deferred.await(changeSignal)),
   };
   return service;
 });
@@ -1399,26 +1593,41 @@ export const rpcHandlers = {
   [BANNERET_RELAY_WS_METHODS.probe]: (input: { readonly origin: string }) =>
     Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.probe(input.origin)),
   [BANNERET_RELAY_WS_METHODS.status]: () =>
-    Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.status),
+    Effect.flatMap(BanneretEnrolment, (enrolment) =>
+      Effect.map(enrolment.list, (enrolments) => ({ enrolments })),
+    ),
   [BANNERET_RELAY_WS_METHODS.start]: (input: {
     readonly origin: string;
     readonly label: string;
     readonly kind: MachineKind;
   }) => Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.start(input)),
-  [BANNERET_RELAY_WS_METHODS.cancel]: () =>
-    Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.cancel),
-  [BANNERET_RELAY_WS_METHODS.leave]: (input: { readonly mode: "revoke" | "forget" }) =>
-    Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.leave(input.mode)),
-  [BANNERET_RELAY_WS_METHODS.machines]: (input: { readonly cursor?: string | undefined }) =>
-    Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.machines(input.cursor)),
-  [BANNERET_RELAY_WS_METHODS.revokeMachine]: (input: { readonly machineId: string }) =>
+  [BANNERET_RELAY_WS_METHODS.cancel]: (input: { readonly relayOrigin: string }) =>
+    Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.cancel(input.relayOrigin)),
+  [BANNERET_RELAY_WS_METHODS.leave]: (input: {
+    readonly relayOrigin: string;
+    readonly mode: "revoke" | "forget";
+  }) => Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.leave(input.relayOrigin, input.mode)),
+  [BANNERET_RELAY_WS_METHODS.machines]: (input: {
+    readonly relayOrigin: string;
+    readonly cursor?: string | undefined;
+  }) =>
     Effect.flatMap(BanneretEnrolment, (enrolment) =>
-      Effect.as(enrolment.revokeMachine(input.machineId), {}),
+      enrolment.machines(input.relayOrigin, input.cursor),
+    ),
+  [BANNERET_RELAY_WS_METHODS.revokeMachine]: (input: {
+    readonly relayOrigin: string;
+    readonly machineId: string;
+  }) =>
+    Effect.flatMap(BanneretEnrolment, (enrolment) =>
+      Effect.as(enrolment.revokeMachine(input.relayOrigin, input.machineId), {}),
     ),
   [BANNERET_RELAY_WS_METHODS.matchProjects]: (input: {
+    readonly relayOrigin: string;
     readonly remoteUrls: ReadonlyArray<string>;
   }) =>
     Effect.flatMap(BanneretEnrolment, (enrolment) =>
-      Effect.map(enrolment.matchProjects(input.remoteUrls), (matched) => ({ matched })),
+      Effect.map(enrolment.matchProjects(input.relayOrigin, input.remoteUrls), (matched) => ({
+        matched,
+      })),
     ),
 };

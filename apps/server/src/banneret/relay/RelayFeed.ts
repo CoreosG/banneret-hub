@@ -1,7 +1,8 @@
 // @effect-diagnostics globalFetch:off globalFetchInEffect:off - the relay's event stream is one long-lived fetch; redirects, connect and idle time are capped here.
 // Banneret Hub: Today, Needs you, the board and the relay's event stream for an enrolled environment.
-// One event stream per environment, open only while the enrolment is `configured`; an environment
-// that has not joined makes no relay call. Relay answers are reshaped field by field (relay strings
+// One feed per relay this environment has an enrolment with, each with its own event stream and
+// snapshot cache, open only while that relay's enrolment is `configured`; an environment that has
+// not joined makes no relay call. Relay answers are reshaped field by field (relay strings
 // stay plain data), and the last good answer is kept so a screen is never blank while the relay is
 // away. The board, the map, the feed and the graveyard come from the snapshot (Snapshot.ts), each read only
 // when capabilities advertise the snapshot and its section; older feed and graveyard pages, and one
@@ -36,11 +37,12 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
+import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
-import { BanneretEnrolment } from "./Enrolment.ts";
+import { BanneretEnrolment, type RelayEnrolment } from "./Enrolment.ts";
 import { RelayCallError, type RelayReply } from "./RelayClient.ts";
 import {
   boardTaskIndex,
@@ -77,7 +79,8 @@ const DEFAULT_OPTIONS: RelayFeedOptions = {
   snapshotPollMs: 60_000,
 };
 
-interface FeedService {
+/** One relay's feed. */
+interface RelayFeedInstance {
   readonly today: (visit: boolean) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (cursor: string | undefined) => Effect.Effect<BanneretFeedNeedsRead>;
   /** An older feed page, from a `nextCursor`. */
@@ -87,6 +90,25 @@ interface FeedService {
   /** One task with its preview and sign-off; `notFound` when the relay does not know it. */
   readonly task: (taskId: string) => Effect.Effect<BanneretTaskRead>;
   readonly events: Stream.Stream<BanneretFeedState>;
+}
+
+/** Every call names its relay; a relay this environment has no enrolment with answers as not joined. */
+interface FeedService {
+  readonly today: (relayOrigin: string, visit: boolean) => Effect.Effect<BanneretFeedTodayRead>;
+  readonly needs: (
+    relayOrigin: string,
+    cursor: string | undefined,
+  ) => Effect.Effect<BanneretFeedNeedsRead>;
+  readonly feedPage: (
+    relayOrigin: string,
+    cursor: string,
+  ) => Effect.Effect<BanneretFeedEntryPageRead>;
+  readonly graveyardPage: (
+    relayOrigin: string,
+    cursor: string,
+  ) => Effect.Effect<BanneretGraveyardPageRead>;
+  readonly task: (relayOrigin: string, taskId: string) => Effect.Effect<BanneretTaskRead>;
+  readonly events: (relayOrigin: string) => Stream.Stream<BanneretFeedState>;
 }
 
 const NOT_JOINED = { joined: false, value: null, fetchedAt: null } as const;
@@ -114,7 +136,7 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
       feedPage: () => Effect.succeed(NOT_JOINED),
       graveyardPage: () => Effect.succeed(NOT_JOINED),
       task: () => Effect.succeed(NOT_JOINED),
-      events: Stream.concat(Stream.make(NOT_JOINED_SNAPSHOT), Stream.never),
+      events: () => Stream.concat(Stream.make(NOT_JOINED_SNAPSHOT), Stream.never),
     }),
   },
 ) {}
@@ -427,12 +449,13 @@ const parseData = (data: string): Fields | undefined => {
   }
 };
 
-const make = Effect.fn("BanneretRelayFeed.make")(function* (
-  overrides: Partial<RelayFeedOptions> = {},
+const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
+  enrolment: RelayEnrolment,
+  environmentId: string,
+  options: RelayFeedOptions,
+  /** The layer's scope: a feed added while a request runs must outlive that request. */
+  layerScope: Scope.Scope,
 ) {
-  const options = { ...DEFAULT_OPTIONS, ...overrides };
-  const enrolment = yield* BanneretEnrolment;
-  const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
   const changes = yield* PubSub.unbounded<BanneretFeedState>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -1070,7 +1093,6 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   });
 
   // Adopting a joined key (or none) resets everything that belonged to the previous one.
-  const layerScope = yield* Effect.scope;
   const adoptLock = yield* Semaphore.make(1);
   let follower: Fiber.Fiber<never, never> | undefined;
   let snapshotFiber: Fiber.Fiber<never, never> | undefined;
@@ -1125,7 +1147,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     );
 
   // One supervisor: follows the enrolment, so the stream runs only while configured.
-  yield* Effect.forkScoped(
+  yield* Effect.forkIn(
     Effect.forever(
       Effect.gen(function* () {
         const changed = yield* enrolment.nextChange;
@@ -1134,6 +1156,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
         yield* changed;
       }),
     ),
+    layerScope,
   );
 
   const events = Stream.callback<BanneretFeedState>(
@@ -1149,13 +1172,91 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     { bufferSize: 64, strategy: "sliding" },
   );
 
-  const service: FeedService = {
+  const service: RelayFeedInstance = {
     today: readToday,
     needs: readNeeds,
     feedPage: readFeedPage,
     graveyardPage: readGraveyardPage,
     task: readTask,
     events,
+  };
+  return service;
+});
+
+const make = Effect.fn("BanneretRelayFeed.make")(function* (
+  overrides: Partial<RelayFeedOptions> = {},
+) {
+  const options = { ...DEFAULT_OPTIONS, ...overrides };
+  const enrolment = yield* BanneretEnrolment;
+  const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
+  const layerScope = yield* Effect.scope;
+  // One feed per relay instance of the enrolment, added when the enrolment adds the relay.
+  const feeds = new Map<string, RelayFeedInstance>();
+  const addLock = yield* Semaphore.make(1);
+
+  const feedFor = (relayOrigin: string) =>
+    addLock.withPermits(1)(
+      Effect.gen(function* () {
+        const relay = yield* enrolment.relay(relayOrigin);
+        if (relay === undefined) return undefined;
+        const existing = feeds.get(relay.origin);
+        if (existing !== undefined) return existing;
+        const added = yield* makeRelayFeed(relay, environmentId, options, layerScope);
+        feeds.set(relay.origin, added);
+        return added;
+      }),
+    );
+
+  // Feeds for the relays found at start-up, so their streams open without waiting for a client.
+  const addAll = Effect.gen(function* () {
+    for (const view of yield* enrolment.list) yield* feedFor(view.relayOrigin);
+  });
+  yield* addAll;
+  yield* Effect.forkIn(
+    Effect.forever(
+      Effect.gen(function* () {
+        const changed = yield* enrolment.nextChange;
+        yield* addAll;
+        yield* changed;
+      }),
+    ),
+    layerScope,
+  );
+
+  const notJoined = <A>(relayOrigin: string, run: (feed: RelayFeedInstance) => Effect.Effect<A>) =>
+    Effect.flatMap(feedFor(relayOrigin), (feed): Effect.Effect<A | typeof NOT_JOINED> =>
+      feed === undefined ? Effect.succeed(NOT_JOINED) : run(feed),
+    );
+
+  /** A relay not joined yet answers as not joined, then follows its feed once it is added. */
+  const waitForFeed = (relayOrigin: string): Effect.Effect<RelayFeedInstance> =>
+    Effect.gen(function* () {
+      for (;;) {
+        const changed = yield* enrolment.nextChange;
+        const feed = yield* feedFor(relayOrigin);
+        if (feed !== undefined) return feed;
+        yield* changed;
+      }
+    });
+
+  const service: FeedService = {
+    today: (relayOrigin, visit) => notJoined(relayOrigin, (feed) => feed.today(visit)),
+    needs: (relayOrigin, cursor) => notJoined(relayOrigin, (feed) => feed.needs(cursor)),
+    feedPage: (relayOrigin, cursor) => notJoined(relayOrigin, (feed) => feed.feedPage(cursor)),
+    graveyardPage: (relayOrigin, cursor) =>
+      notJoined(relayOrigin, (feed) => feed.graveyardPage(cursor)),
+    task: (relayOrigin, taskId) => notJoined(relayOrigin, (feed) => feed.task(taskId)),
+    events: (relayOrigin) =>
+      Stream.unwrap(
+        Effect.map(feedFor(relayOrigin), (feed) =>
+          feed !== undefined
+            ? feed.events
+            : Stream.concat(
+                Stream.make(NOT_JOINED_SNAPSHOT),
+                Stream.unwrap(Effect.map(waitForFeed(relayOrigin), (added) => added.events)),
+              ),
+        ),
+      ),
   };
   return service;
 });
@@ -1167,16 +1268,30 @@ export const layer = layerWith({});
 
 /** Handlers for the feed RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
-  [BANNERET_RELAY_FEED_WS_METHODS.today]: (input: { readonly visit?: boolean | undefined }) =>
-    Effect.flatMap(BanneretRelayFeed, (feed) => feed.today(input.visit === true)),
-  [BANNERET_RELAY_FEED_WS_METHODS.needs]: (input: { readonly cursor?: string | undefined }) =>
-    Effect.flatMap(BanneretRelayFeed, (feed) => feed.needs(input.cursor)),
-  [BANNERET_RELAY_FEED_WS_METHODS.feed]: () =>
-    Stream.unwrap(Effect.map(BanneretRelayFeed, (feed) => feed.events)),
-  [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: (input: { readonly cursor: string }) =>
-    Effect.flatMap(BanneretRelayFeed, (feed) => feed.feedPage(input.cursor)),
-  [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: (input: { readonly cursor: string }) =>
-    Effect.flatMap(BanneretRelayFeed, (feed) => feed.graveyardPage(input.cursor)),
-  [BANNERET_RELAY_FEED_WS_METHODS.task]: (input: { readonly taskId: string }) =>
-    Effect.flatMap(BanneretRelayFeed, (feed) => feed.task(input.taskId)),
+  [BANNERET_RELAY_FEED_WS_METHODS.today]: (input: {
+    readonly relayOrigin: string;
+    readonly visit?: boolean | undefined;
+  }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) => feed.today(input.relayOrigin, input.visit === true)),
+  [BANNERET_RELAY_FEED_WS_METHODS.needs]: (input: {
+    readonly relayOrigin: string;
+    readonly cursor?: string | undefined;
+  }) => Effect.flatMap(BanneretRelayFeed, (feed) => feed.needs(input.relayOrigin, input.cursor)),
+  [BANNERET_RELAY_FEED_WS_METHODS.feed]: (input: { readonly relayOrigin: string }) =>
+    Stream.unwrap(Effect.map(BanneretRelayFeed, (feed) => feed.events(input.relayOrigin))),
+  [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: (input: {
+    readonly relayOrigin: string;
+    readonly cursor: string;
+  }) => Effect.flatMap(BanneretRelayFeed, (feed) => feed.feedPage(input.relayOrigin, input.cursor)),
+  [BANNERET_RELAY_FEED_WS_METHODS.graveyardPage]: (input: {
+    readonly relayOrigin: string;
+    readonly cursor: string;
+  }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) =>
+      feed.graveyardPage(input.relayOrigin, input.cursor),
+    ),
+  [BANNERET_RELAY_FEED_WS_METHODS.task]: (input: {
+    readonly relayOrigin: string;
+    readonly taskId: string;
+  }) => Effect.flatMap(BanneretRelayFeed, (feed) => feed.task(input.relayOrigin, input.taskId)),
 };

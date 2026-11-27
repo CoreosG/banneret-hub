@@ -107,15 +107,25 @@ export class TaskLeaseError extends Schema.TaggedError<TaskLeaseError>()("TaskLe
 
 const LeaseRpcError = Schema.Union([EnvironmentAuthorizationError, TaskLeaseError]);
 
-export const TaskLeaseTakeInput = Schema.Struct({
+/**
+ * A task's issue, and the relay whose person acts on it: that relay's `me` decides the account and
+ * founder checks. Without one (a Personal workspace) those checks are skipped.
+ */
+export const TaskLeaseRef = Schema.Struct({
   ...IssueRef.fields,
+  relayOrigin: Schema.optional(Schema.String),
+});
+export type TaskLeaseRef = typeof TaskLeaseRef.Type;
+
+export const TaskLeaseTakeInput = Schema.Struct({
+  ...TaskLeaseRef.fields,
   /** The tool taking it, written into the claim: `hub` from the UI. */
   agent: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,64}$/))),
 });
 export type TaskLeaseTakeInput = typeof TaskLeaseTakeInput.Type;
 
 export const TaskLeaseReleaseInput = Schema.Struct({
-  ...IssueRef.fields,
+  ...TaskLeaseRef.fields,
   reason: Schema.Literals(LEASE_RELEASE_REASONS),
   /** Required for `other`. One line, at most 200 characters. */
   reasonText: Schema.optional(Schema.String),
@@ -128,7 +138,7 @@ export const TaskLeaseReleaseInput = Schema.Struct({
 export type TaskLeaseReleaseInput = typeof TaskLeaseReleaseInput.Type;
 
 const WsTaskLeaseCheckRpc = Rpc.make(TASK_LEASE_WS_METHODS.check, {
-  payload: IssueRef,
+  payload: TaskLeaseRef,
   success: TaskLeaseStatus,
   error: LeaseRpcError,
 });
@@ -143,12 +153,12 @@ const WsTaskLeaseReleaseRpc = Rpc.make(TASK_LEASE_WS_METHODS.release, {
   error: LeaseRpcError,
 });
 const WsTaskLeaseFinishRpc = Rpc.make(TASK_LEASE_WS_METHODS.finish, {
-  payload: IssueRef,
+  payload: TaskLeaseRef,
   success: TaskLeaseResult,
   error: LeaseRpcError,
 });
 const WsTaskLeaseWithdrawRpc = Rpc.make(TASK_LEASE_WS_METHODS.withdraw, {
-  payload: IssueRef,
+  payload: TaskLeaseRef,
   success: TaskLeaseResult,
   error: LeaseRpcError,
 });
