@@ -22,7 +22,9 @@ import { useRightPanelStore } from "../rightPanelStore";
 import { type RelayTarget, useEnrolmentView } from "./enrolmentStore";
 import { taskRef } from "./board.logic";
 import { lastReleaseView, releaseReasonLine, type LastReleaseView } from "./lease.logic";
-import { LeaseButtons, LeaseNoticeLine, useLeaseCheck } from "./LeaseControls";
+import { LeaseButtons, LeaseNoticeLine, routeMachine, useLeaseCheck } from "./LeaseControls";
+import { useLeaseRoute } from "./leaseMachineStore";
+import { routeProblem, type LeaseRoute } from "./leaseRoute.logic";
 import type { LeaseEntry } from "./leaseStore";
 import { blockedByName } from "./map.logic";
 import { useEnvironmentFeed, watchFeed } from "./relayFeedStore";
@@ -332,7 +334,8 @@ function TaskHeader(props: {
   readonly target: RelayTarget;
   readonly view: TaskView;
   readonly atWork: boolean;
-  readonly issueRef: IssueRef | null;
+  readonly route: LeaseRoute;
+  readonly hasIssueRef: boolean;
   readonly leases: boolean;
   readonly lease: LeaseEntry | undefined;
   readonly note: string | null;
@@ -382,12 +385,12 @@ function TaskHeader(props: {
           {ref.number}
         </span>
         <span className="flex-1" />
-        {props.leases && props.issueRef !== null ? (
+        {props.leases && props.route.kind === "ready" ? (
           <LeaseButtons
             target={props.target}
             taskId={view.task.id}
             title={card?.task.title ?? view.task.title}
-            issueRef={props.issueRef}
+            route={props.route}
             entry={props.lease}
             continues={release?.freeToContinue === true}
           />
@@ -399,6 +402,14 @@ function TaskHeader(props: {
         </p>
       )}
       {props.leases ? <LeaseNoticeLine entry={props.lease} /> : null}
+      {/* Without any project here the link row below already says so. */}
+      {props.leases &&
+      routeProblem(props.route) !== null &&
+      (props.route.kind !== "none" || props.hasIssueRef) ? (
+        <p className={TYPE.meta} role="status" data-testid="lease-route-problem">
+          {routeProblem(props.route)}
+        </p>
+      ) : null}
       {props.note === null ? null : (
         <p className={TYPE.meta} role="status">
           {props.note}
@@ -521,7 +532,8 @@ function TaskPanelBody(props: {
   const enrolment = useEnrolmentView(environmentId, relayOrigin);
   const issueRef = useTaskIssueRef(environmentId, surface.task);
   const leases = feed.board?.leases === true;
-  const lease = useLeaseCheck(target, taskId, issueRef, leases);
+  const route = useLeaseRoute(target, surface.task, issueRef);
+  const lease = useLeaseCheck(target, taskId, routeMachine(route), leases);
 
   // A thread's panel has no page following the feed, so the tab follows it while shown.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's relay feed while the Task tab is shown
@@ -574,7 +586,8 @@ function TaskPanelBody(props: {
         target={target}
         view={view}
         atWork={feed.board?.atWork.includes(taskId) === true}
-        issueRef={issueRef}
+        route={route}
+        hasIssueRef={issueRef !== null}
         leases={leases}
         lease={lease}
         note={note}

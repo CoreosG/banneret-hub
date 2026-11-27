@@ -83,10 +83,27 @@ the review.
 
 ### Take and release
 
-You can take and release a task from the Hub when the relay parses leases and a project here is on the task's
-repository. Use **Take** in the Task tab, or the menu on a board card. The Hub writes a `claim:` comment, assigns
-you and adds the `claimed` label, all on your own tracker login. It then waits about 10 seconds and reads the
-issue again: if someone claimed first, they keep it and your claim is withdrawn.
+You can take and release a task from the Hub when the relay parses leases and one of your machines has a project
+on the task's repository. Use **Take** in the Task tab, or the menu on a board card. The Hub writes a `claim:`
+comment, assigns you and adds the `claimed` label, all on your own tracker login. It then waits about 10 seconds
+and reads the issue again: if someone claimed first, they keep it and your claim is withdrawn.
+
+The machine does not have to be the one in front of you. A desktop is often only the cockpit, and the code lives on
+a server it is linked to. Any connected machine counts when all of these hold:
+
+- it has a project on the task's repository (a project on another repository does not count);
+- it is yours: the relay knows it as the same person as this one. Another person's machine is never used, the
+  same rule that keeps your agents off other people's machines;
+- it has joined the same company. If the only machine with the repository has not, the Hub says
+  "<machine> has the repository but has not joined <company>" and writes nothing.
+
+The call runs on that machine's server, so it writes with that machine's tracker login, and its own checks apply:
+the right account, triage access, and the relay's person. The claim names the machine: `claim: <login>/<machine>`.
+
+With one such machine the button says **Take on <machine>**. With several, Take asks which one, starting from the
+one you used last for that repository, and the Task tab has a small **On <machine>** switch for the check. The
+Hub remembers the choice per repository in this browser. Release, Finish and Withdraw go to the machine you took
+the task on when this window knows it; otherwise they ask the same way.
 
 **Release** asks for a reason and an optional note (Goal, Done, Next). Turn on **Free to continue** to leave the
 task for someone else. It is on by default for Blocked, Handing over and Out of usage. Such tasks sit at the top

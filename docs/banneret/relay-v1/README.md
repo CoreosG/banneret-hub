@@ -428,7 +428,7 @@ and for the holder).
 
 | Line 1 | Meaning |
 |---|---|
-| `claim: <login>/<agent>` | A take. `<login>` must be the comment's author, or the line is ignored. `<agent>` is a tool name such as `hub`. It must match `[A-Za-z0-9._-]{1,64}`, so it may not contain `#` or a space. An old `persona#n` claim has a `#` in it and does not count: the line is ignored. `claim: <login>` alone is also read. |
+| `claim: <login>/<agent>` | A take. `<login>` must be the comment's author, or the line is ignored. `<agent>` names what took it: a tool such as `hub`, or the Hub machine it was taken on, such as `dev-server`. The relay does not interpret it. It must match `[A-Za-z0-9._-]{1,64}`, so it may not contain `#` or a space. An old `persona#n` claim has a `#` in it and does not count: the line is ignored. `claim: <login>` alone is also read. |
 | `release: <reason>[ · <text>][ · free to continue]` | A release. The rest of the comment is the note. |
 | `release: lost_claim[ · <text>]`, `release: take_failed[ · <text>]` | A withdrawal by the Hub. Never a release. |
 
@@ -556,6 +556,27 @@ per task in memory and nothing on disk; every step reads the issue again before 
 | taken | a step after the release comment fails, or the Hub stops | incomplete after 60 s |
 | incomplete | Finish | taken or free |
 | incomplete | Withdraw | free |
+
+### Which machine writes
+
+Also not part of the relay contract. The Hub client may be connected to several of the person's machines (a
+desktop and the servers it is linked to). A lease call runs on one of them, and that machine's server writes
+with its own tracker login. The client picks the machine per task, on every render, and stores nothing but
+the person's last choice per repository, in the browser:
+
+| Route | When | The Hub shows |
+|---|---|---|
+| none | no connected machine of the person has a project on the task's repository | "Take needs a project on <repo> on one of your machines." |
+| not-joined | only machines that have not joined this relay have one | "<machine> has the repository but has not joined <company>." Nothing is written. |
+| ready | one or more joined machines of the person have one | the lease buttons; a picker when there are several |
+
+- **The person's machine:** the relay knows it as the same login as the machine the page reads the task through.
+  A machine is left out only when that is provably someone else: its enrolment, on this relay or on another
+  relay both have joined, names another login.
+- **Default machine:** the one this window took the task on, then the last choice for the repository, then the
+  last machine used, then the page's own machine, then the first by name.
+- **The server refuses** a lease call that names a relay it has not joined, before reading the tracker.
+- **The claim** names the machine: `claim: <login>/<machine label>`, with the label made to fit `<agent>`.
 
 A second operation on a task while one runs is refused as busy. After a restart nothing is remembered: every task
 is what the tracker says, folded as above.

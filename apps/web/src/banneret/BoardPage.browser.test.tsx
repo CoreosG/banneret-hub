@@ -680,8 +680,14 @@ describe("Enterprise board", () => {
           }),
         },
       });
-      await userEvent.click(dialog.getByRole("button", { name: "Continue", exact: true }));
-      expect(rpc.take).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "8" }));
+      await userEvent.click(
+        dialog.getByRole("button", { name: "Continue on Ada laptop", exact: true }),
+      );
+      expect(rpc.take).toHaveBeenCalledWith(
+        RELAY,
+        expect.objectContaining({ key: "8" }),
+        "Ada-laptop",
+      );
     });
 
     it("takes from the card menu, showing the read-back on the card until the board agrees", async () => {
@@ -698,7 +704,7 @@ describe("Enterprise board", () => {
       await using _screen = screen;
       await emit(state(["board"], boardRead(boardOf(cards()))));
       await userEvent.click(page.getByRole("button", { name: "Actions for Rate limits" }));
-      await userEvent.click(page.getByRole("menuitem", { name: "Take" }));
+      await userEvent.click(page.getByRole("menuitem", { name: "Take on Ada laptop" }));
       await vi.waitFor(() =>
         expect(cardOf("1").querySelector("[data-local-lease]")?.textContent).toBe(
           "Taking… confirming",

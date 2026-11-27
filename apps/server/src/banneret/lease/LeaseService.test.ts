@@ -362,6 +362,24 @@ describe("LeaseService take", () => {
     }),
   );
 
+  it.effect(
+    "refuses a call for a company this machine has not joined, before reading anything",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(EPOCH);
+        const tracker = newTracker();
+        // The default enrolment answers as a machine that never joined any relay.
+        const service = yield* leases(tracker);
+        const forCompany = { ...ref, relayOrigin: "https://relay.example" };
+        expect(yield* failureOf(service.take(forCompany))).toEqual({
+          reason: "unavailable",
+          detail: "This machine has not joined the company at https://relay.example.",
+        });
+        expect((yield* failureOf(service.check(forCompany))).reason).toBe("unavailable");
+        expect(tracker.writes).toEqual([]);
+      }),
+  );
+
   it.effect("loses a race to an earlier claim and withdraws without touching claimed", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(EPOCH);

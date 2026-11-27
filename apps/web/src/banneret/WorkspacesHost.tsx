@@ -73,13 +73,17 @@ function useWorkspaceAutoSwitch() {
 }
 
 /**
- * Reads this machine's enrolment: every 2 s while the wizard is open, every 30 s otherwise, and
- * only while a workspace belongs to a relay. `status` is local; it never reaches the relay.
+ * Reads the enrolments of every connected environment: every 2 s while the wizard is open (this
+ * machine only), every 30 s otherwise, and only while a workspace belongs to a relay. Take and release
+ * may run on any of them, so each one's relay person is needed. `status` is local; it never reaches
+ * the relay.
  */
 function useEnrolmentPolling() {
   const environmentId = usePrimaryEnvironmentId();
+  const connected = useConnectedEnvironmentIds();
   const wizardOpen = useWorkspacesStore((state) => state.dialog?.kind === "enterprise");
   const hasEnterprise = useWorkspaces().some((workspace) => workspace.relay !== undefined);
+  const others = connected.filter((id) => id !== environmentId).join("\u0000");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's enrolment, which changes on the relay's schedule
   useEffect(() => {
     if (environmentId === null || (!wizardOpen && !hasEnterprise)) return;
@@ -90,6 +94,17 @@ function useEnrolmentPolling() {
     );
     return () => clearInterval(timer);
   }, [environmentId, wizardOpen, hasEnterprise]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- linked environments join and leave relays on their own schedule
+  useEffect(() => {
+    if (!hasEnterprise || others === "") return;
+    const ids = others.split("\u0000") as EnvironmentId[];
+    const refresh = () => {
+      for (const id of ids) void refreshEnrolment(id);
+    };
+    refresh();
+    const timer = setInterval(refresh, ENROLMENT_POLL_MS.idle);
+    return () => clearInterval(timer);
+  }, [others, hasEnterprise]);
 }
 
 export function WorkspacesHost() {

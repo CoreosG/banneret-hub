@@ -15,8 +15,15 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { act, render } from "../../test/render";
 import { useProjects, useServerConfigs } from "../state/entities";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
-import { ReleaseDialogHost } from "./LeaseControls";
-import { leaseRpc, openReleaseDialog, useLeaseStore, type LeaseCall } from "./leaseStore";
+import { LeaseConfirmHost, ReleaseDialogHost } from "./LeaseControls";
+import { useLeaseMachineStore } from "./leaseMachineStore";
+import {
+  leaseRpc,
+  openLeaseConfirm,
+  openReleaseDialog,
+  useLeaseStore,
+  type LeaseCall,
+} from "./leaseStore";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
 import { TaskPanel } from "./TaskPanel";
 import { taskRpc } from "./taskStore";
@@ -144,25 +151,63 @@ function deferred<A>() {
   return { promise, resolve };
 }
 
-function setup(options: { issues?: boolean } = {}) {
+/** A linked server: its relay person (null: not joined) and whether it has the task's repository. */
+interface LinkedServer {
+  readonly me: string | null;
+  readonly hasRepo: boolean;
+}
+
+const SERVER = EnvironmentId.make("dev-server-env");
+const serverProject = {
+  ...project,
+  id: ProjectId.make("example-app-on-server"),
+  environmentId: SERVER,
+} as unknown as EnvironmentProject;
+
+function setup(options: { issues?: boolean; localRepo?: boolean; server?: LinkedServer } = {}) {
   useRelayFeedStore.setState({ feeds: {} });
   useEnrolmentStore.setState({ views: {} });
   useLeaseStore.setState({ entries: {} });
+  useLeaseMachineStore.setState({ byRepo: {}, last: null });
   openReleaseDialog(null);
+  openLeaseConfirm(null);
   storeEnrolmentView(LOCAL, {
     state: "configured",
     workspaceId: "ent-0123456789abcdef",
     relayOrigin: "https://relay.example.com",
     displayName: "Example Company",
+    label: "desk",
     me: { login: ME, role: "staff" },
   });
   const issues = options.issues !== false;
+  const server = options.server;
+  if (server?.me != null) {
+    storeEnrolmentView(SERVER, {
+      state: "configured",
+      workspaceId: "ent-0123456789abcdef",
+      relayOrigin: "https://relay.example.com",
+      displayName: "Example Company",
+      label: "dev-server",
+      me: { login: server.me, role: "staff" },
+    });
+  }
   vi.mocked(useServerConfigs).mockReturnValue(
-    new Map([[LOCAL, { environment: { capabilities: { issues } } }]]) as unknown as ReturnType<
-      typeof useServerConfigs
-    >,
+    new Map<EnvironmentId, unknown>([
+      [LOCAL, { environment: { label: "Desktop", capabilities: { issues } } }],
+      ...(server === undefined
+        ? []
+        : [
+            [
+              SERVER,
+              { environment: { label: "dev-server", capabilities: { issues: true } } },
+            ] as const,
+          ]),
+    ]) as unknown as ReturnType<typeof useServerConfigs>,
   );
-  vi.mocked(useProjects).mockReturnValue(issues ? [project] : []);
+  vi.mocked(useProjects).mockReturnValue([
+    ...(issues && options.localRepo !== false ? [project] : []),
+    ...(server?.hasRepo === true ? [serverProject] : []),
+  ]);
   const listeners = new Set<(event: BanneretFeedState) => void>();
   const nothing = { joined: true, value: null, fetchedAt: null };
   vi.spyOn(feedRpc, "today").mockResolvedValue(nothing);
@@ -195,6 +240,7 @@ async function openTask(shown: BanneretBoardCard) {
     <>
       <TaskPanel surface={taskSurface(RELAY, shown.task)} threadRef={null} />
       <ReleaseDialogHost />
+      <LeaseConfirmHost />
     </>,
   );
   return {
@@ -222,9 +268,10 @@ describe("Take", () => {
     await using _task = await openTask(card());
     await emit(feed([card()]));
 
-    await userEvent.click(button("Take"));
+    await userEvent.click(button("Take on desk"));
     expect(rpc.check).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
-    expect(rpc.take).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }));
+    // The claim names the machine it was taken on.
+    expect(rpc.take).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "2" }), "desk");
     await expect
       .element(page.getByTestId("lease-progress"))
       .toHaveTextContent("Taking… confirming who claimed first.");
@@ -260,7 +307,7 @@ describe("Take", () => {
     );
     await using _task = await openTask(card());
     await emit(feed([card()]));
-    await userEvent.click(button("Take"));
+    await userEvent.click(button("Take on desk"));
     await expect.element(page.getByText("bo-example took it first.")).toBeVisible();
     expect(document.querySelector('[data-testid="lease-buttons"] button')).toBeNull();
     expect(rpc.withdraw).not.toHaveBeenCalled();
@@ -288,7 +335,7 @@ describe("Take", () => {
     rpc.withdraw.mockResolvedValue(result("withdrawn", leaseStatus({ actions: NO_ACTIONS })));
     await using _task = await openTask(card());
     await emit(feed([card()]));
-    await userEvent.click(button("Take"));
+    await userEvent.click(button("Take on desk"));
 
     await expect
       .element(page.getByText("bo-example took it first. Withdraw your claim."))
@@ -326,12 +373,12 @@ describe("Take", () => {
     });
     await using _task = await openTask(card());
     await emit(feed([card()]));
-    await userEvent.click(button("Take"));
+    await userEvent.click(button("Take on desk"));
     await expect
       .element(page.getByRole("alert"))
       .toHaveTextContent("The tracker's rate limit is used up. Try again in a few minutes.");
     await vi.waitFor(() => expect(rpc.check).toHaveBeenCalledTimes(2));
-    await expect.element(button("Take")).toBeEnabled();
+    await expect.element(button("Take on desk")).toBeEnabled();
   });
 
   it("does not show an old failure again when the task is opened later", async () => {
@@ -344,13 +391,13 @@ describe("Take", () => {
     {
       await using _task = await openTask(card());
       await emit(feed([card()]));
-      await userEvent.click(button("Take"));
+      await userEvent.click(button("Take on desk"));
       await expect.element(page.getByRole("alert")).toBeVisible();
     }
     await using _again = await openTask(card());
     await emit(feed([card()]));
     await vi.waitFor(() => expect(rpc.check).toHaveBeenCalledTimes(3));
-    await expect.element(button("Take")).toBeEnabled();
+    await expect.element(button("Take on desk")).toBeEnabled();
     expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -614,6 +661,96 @@ describe("Task dialog facts", () => {
       "Goal: Limit invites.\nNext: Return 429.",
     );
     // The last holder left it free to continue, so Take reads Continue.
-    await expect.element(button("Continue")).toBeVisible();
+    await expect.element(button("Continue on desk")).toBeVisible();
+  });
+});
+
+describe("Machines", () => {
+  const ON_SERVER = { environmentId: SERVER, relayOrigin: RELAY.relayOrigin };
+
+  it("offers Take when only a linked server has the repository, and runs it there", async () => {
+    const { emit, rpc } = setup({ localRepo: false, server: { me: ME, hasRepo: true } });
+    rpc.check.mockResolvedValue(ok(leaseStatus()));
+    rpc.take.mockResolvedValue(result("taken", heldByMe));
+    await using _task = await openTask(card());
+    await emit(feed([card()]));
+
+    await userEvent.click(button("Take on dev-server"));
+    // One machine: no picker.
+    expect(document.querySelector('[data-testid="lease-confirm-dialog"]')).toBeNull();
+    const serverRef = expect.objectContaining({ projectId: serverProject.id, key: "2" });
+    expect(rpc.check).toHaveBeenCalledWith(ON_SERVER, serverRef);
+    expect(rpc.take).toHaveBeenCalledWith(ON_SERVER, serverRef, "dev-server");
+    await expect.element(page.getByText("Taken by you.")).toBeVisible();
+
+    // Release goes to the machine that took it, and says so.
+    rpc.release.mockResolvedValue(result("released", leaseStatus()));
+    await userEvent.click(button("Release…"));
+    await expect
+      .element(page.getByTestId("release-machine"))
+      .toHaveTextContent("Releases on dev-server.");
+    await userEvent.click(page.getByRole("radio", { name: "Done" }));
+    await userEvent.click(button("Release"));
+    expect(rpc.release).toHaveBeenCalledWith(
+      ON_SERVER,
+      expect.objectContaining({ reason: "done" }),
+    );
+  });
+
+  it("asks which machine when two have the repository, and routes the take to the one picked", async () => {
+    const { emit, rpc } = setup({ server: { me: ME, hasRepo: true } });
+    rpc.check.mockResolvedValue(ok(leaseStatus()));
+    rpc.take.mockResolvedValue(result("taken", heldByMe));
+    await using _task = await openTask(card());
+    await emit(feed([card()]));
+
+    // The page's own machine is the default; the check runs there only.
+    await vi.waitFor(() => expect(rpc.check).toHaveBeenCalledTimes(1));
+    expect(rpc.check).toHaveBeenCalledWith(
+      RELAY,
+      expect.objectContaining({ projectId: project.id }),
+    );
+    await userEvent.click(button("Take…"));
+    const dialog = page.getByTestId("lease-confirm-dialog");
+    await expect.element(dialog).toBeVisible();
+    await expect.element(page.getByRole("radio", { name: "desk" })).toBeChecked();
+    expect(rpc.take).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole("radio", { name: "dev-server" }));
+    await userEvent.click(button("Take on dev-server"));
+    expect(rpc.take).toHaveBeenCalledWith(
+      ON_SERVER,
+      expect.objectContaining({ projectId: serverProject.id }),
+      "dev-server",
+    );
+    // The choice is remembered for the repository.
+    expect(useLeaseMachineStore.getState().last).toBe(SERVER);
+  });
+
+  it("ignores a linked server that belongs to someone else", async () => {
+    const { emit, rpc } = setup({
+      localRepo: false,
+      server: { me: "bo-example", hasRepo: true },
+    });
+    rpc.check.mockResolvedValue(ok(leaseStatus()));
+    await using _task = await openTask(card());
+    await emit(feed([card()]));
+    // The link row says no project here has it; the other person's server adds nothing.
+    await expect
+      .element(page.getByTestId("task-link-out"))
+      .toHaveTextContent("No local project for example-appOpen on GitHub");
+    expect(rpc.check).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="lease-buttons"]')).toBeNull();
+  });
+
+  it("says a server with the repository has not joined the company, and writes nothing", async () => {
+    const { emit, rpc } = setup({ localRepo: false, server: { me: null, hasRepo: true } });
+    rpc.check.mockResolvedValue(ok(leaseStatus()));
+    await using _task = await openTask(card());
+    await emit(feed([card()]));
+    await expect
+      .element(page.getByTestId("lease-route-problem"))
+      .toHaveTextContent("dev-server has the repository but has not joined Example Company.");
+    expect(document.querySelector('[data-testid="lease-buttons"]')).toBeNull();
+    for (const call of Object.values(rpc)) expect(call).not.toHaveBeenCalled();
   });
 });
