@@ -1,0 +1,109 @@
+import { describe, expect, it } from "vite-plus/test";
+
+import { healthLabel, leaseLabel, reasonLabel } from "./labels";
+import { agoLabel, exactTimeLabel, spanLabel } from "./relativeTime";
+import { legendStatuses, statusView } from "./status";
+
+const NOW = Date.parse("2026-11-27T12:00:00.000Z");
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+describe("statusView", () => {
+  it.each([
+    ["checked", "Checked", "ok", "check", false, false],
+    ["built", "Built, needs a check", "info", "half", false, false],
+    ["needs_you", "Needs you", "warn", "diamond", true, false],
+    ["blocked", "Blocked", "warn", "octagon", false, false],
+    ["sent_back", "Sent back", "error", "return", true, false],
+    ["planned", "Not built yet", "muted", "dashed", false, false],
+    ["ruled_dead", "Dropped", null, "slash", false, true],
+    ["waiting_on_vendor", "Waiting on vendor", "muted", "dot", false, false],
+    ["", "Unknown", "muted", "dot", false, false],
+  ] as const)("%s reads %s", (status, label, tone, icon, accent, struck) => {
+    expect(statusView(status)).toEqual({ status, label, tone, icon, accent, struck });
+  });
+
+  it("names what a blocked item waits on, and only for blocked", () => {
+    expect(statusView("blocked", { blockedBy: "Sign-in page" }).label).toBe(
+      "Blocked by Sign-in page",
+    );
+    expect(statusView("blocked", { blockedBy: "  " }).label).toBe("Blocked");
+    expect(statusView("planned", { blockedBy: "Sign-in page" }).label).toBe("Not built yet");
+  });
+});
+
+describe("legendStatuses", () => {
+  it("lists known statuses, adds blocked only when counted, and keeps extra statuses", () => {
+    expect(legendStatuses(undefined)).not.toContain("blocked");
+    expect(legendStatuses({ blocked: 2, odd_one: 1 })).toEqual([
+      "needs_you",
+      "blocked",
+      "sent_back",
+      "built",
+      "checked",
+      "planned",
+      "ruled_dead",
+      "odd_one",
+    ]);
+    expect(legendStatuses({ blocked: 2 }, ["built"])).toEqual(["built"]);
+  });
+});
+
+describe("relative time", () => {
+  it.each([
+    [ago(10_000), "just now", "0 min"],
+    [ago(-5 * MIN), "just now", "0 min"],
+    [ago(12 * MIN), "12 min ago", "12 min"],
+    [ago(3 * HOUR + 5 * MIN), "3 h ago", "3 h"],
+    [ago(2 * DAY + HOUR), "2 d ago", "2 d"],
+    ["not a date", "", ""],
+  ])("%s", (at, agoText, spanText) => {
+    expect(agoLabel(at, NOW)).toBe(agoText);
+    expect(spanLabel(at, NOW)).toBe(spanText);
+  });
+
+  it("formats the exact time in English whatever the system locale", () => {
+    expect(exactTimeLabel("2026-11-27T12:00:00.000Z")).toMatch(
+      /^Nov 2[67], 2026, \d{1,2}:\d{2}\s[AP]M$/,
+    );
+    expect(exactTimeLabel("garbage")).toBe("");
+  });
+});
+
+describe("labels", () => {
+  it.each([
+    ["active", ago(12 * MIN), "active 12 min ago", "muted"],
+    ["stale", ago(7 * HOUR), "quiet 7 h", "warn"],
+    ["expired", ago(DAY), "expired, should be released", "error"],
+    ["paused", ago(DAY), "paused", "muted"],
+    ["conflict", ago(DAY), "conflict, two people claim this", "error"],
+    ["handed_over", ago(DAY), "handed over", "muted"],
+  ])("lease %s", (state, lastSignalAt, label, tone) => {
+    expect(leaseLabel({ state, lastSignalAt }, NOW)).toEqual({ label, tone });
+  });
+
+  it.each([
+    ["dev_red", "Dev branch red", "error"],
+    ["check_failed", "Checks failing", "error"],
+    ["deploy_failed", "Deploy failed", "error"],
+    ["watched_job_down", "Server job down", "error"],
+    ["unreviewed", "Not reviewed", "warn"],
+    ["claim_quiet", "Quiet claim", "warn"],
+    ["checks_queued", "Checks queued", "muted"],
+    ["cosmic_rays", "Cosmic rays", "muted"],
+  ])("reason %s", (reason, label, tone) => {
+    expect(reasonLabel(reason)).toEqual({ label, tone });
+  });
+
+  it.each([
+    ["good", "Healthy", "ok"],
+    ["warning", "Warning", "warn"],
+    ["bad", "Failing", "error"],
+    ["not_measured", "Not measured", "muted"],
+    ["degraded", "Degraded", "muted"],
+  ])("health %s", (state, label, tone) => {
+    expect(healthLabel(state)).toEqual({ label, tone });
+  });
+});
