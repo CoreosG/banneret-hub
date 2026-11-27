@@ -1,38 +1,60 @@
-// Banneret Hub: the Task tab. The header comes from the relay: the board card, one task read for the
-// preview and sign-off, or the map item's status for a task only the map holds. The body is upstream's
-// issue thread on the person's own tracker login when a project here is on that tracker, else a note.
+// Banneret Hub: the Task tab. The header and facts come from the board card, the relay's task read, or
+// the map item; take and release sit in the header when the board flags `leases`. The body is
+// upstream's issue thread when a project here is on the task's tracker, else one row that links out.
 // Relay strings stay text.
-import {
-  resolveIssueLinkTarget,
-  mayContainStandaloneIssueLink,
-} from "@t3tools/client-runtime/issue-links";
 import {
   EnvironmentId,
   type BanneretBoardCard,
-  type BanneretBoardTask,
+  type BanneretBoardPr,
   type BanneretMap,
   type BanneretMapItem,
   type BanneretTask,
+  type IssueRef,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 
 import { IssueDetailPanel } from "../components/issue/IssueDetailPanel";
+import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
+import { Button } from "../components/ui/button";
 import { useRightPanelStore } from "../rightPanelStore";
-import { useProjects, useServerConfigs } from "../state/entities";
-import { issueTrackerEnvironment } from "../state/issueTrackers";
-import { useEnvironmentQuery } from "../state/query";
 import { useEnrolmentView } from "./enrolmentStore";
-import { LeaseChipView, useNowMs, When } from "./FeedParts";
-import { prLine } from "./board.logic";
-import { blockedByLabel } from "./map.logic";
+import { taskRef } from "./board.logic";
+import { lastReleaseView, releaseReasonLine, type LastReleaseView } from "./lease.logic";
+import { LeaseButtons, LeaseNoticeLine, useLeaseCheck } from "./LeaseControls";
+import type { LeaseEntry } from "./leaseStore";
+import { blockedByName } from "./map.logic";
 import { useEnvironmentFeed, watchFeed } from "./relayFeedStore";
 import { safeLinkOut } from "./relayFeed.logic";
-import { StatusMark } from "./StatusLegend";
 import { checkedView, previewStateLabel, restsOnItems, trackerName } from "./task.logic";
 import { useTaskRead } from "./taskStore";
 import { decodeTaskSurface, type TaskIdentity, type TaskSurface } from "./taskSurface";
+import { LeaseChip } from "./ui/Chips";
+import { FactsGrid, type Fact } from "./ui/FactsGrid";
+import { RelativeTime } from "./ui/RelativeTime";
+import { StatusPill } from "./ui/StatusPill";
+import { TEXT_DIALOG_TITLE, TYPE, toneProps, type Tone } from "./ui/tokens";
+import { useTaskIssueRef } from "./useTaskIssueRef";
+
+const CHECK_TONES: Readonly<Record<string, Tone>> = {
+  passing: "ok",
+  failing: "error",
+  pending: "muted",
+};
+const CHECK_WORDS: Readonly<Record<string, string>> = {
+  passing: "Checks passing",
+  failing: "Checks failing",
+  pending: "Checks pending",
+};
+const PR_WORDS: Readonly<Record<string, string>> = {
+  open: "open",
+  merged: "merged",
+  closed: "closed",
+};
+
+const CHIP =
+  "inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 font-medium text-2xs";
 
 function LinkOut(props: { readonly url: string | undefined; readonly children: ReactNode }) {
   const href = safeLinkOut(props.url);
@@ -44,156 +66,322 @@ function LinkOut(props: { readonly url: string | undefined; readonly children: R
       rel="noopener noreferrer"
       className="inline-flex items-center gap-1 text-primary text-xs hover:underline"
     >
-      <ExternalLinkIcon className="size-3 shrink-0" aria-hidden />
       {props.children}
+      <ExternalLinkIcon className="size-3 shrink-0" aria-hidden />
     </a>
   );
 }
 
-function Row(props: { readonly label: string; readonly children: ReactNode }) {
+/** One linked pull request: number and state, linked, with its checks when the relay read them. */
+function PrRow(props: { readonly pr: BanneretBoardPr }) {
+  const { pr } = props;
+  const Icon = pr.state === "merged" ? PullRequestGlyph.merged : PullRequestGlyph.pullRequest;
+  const href = safeLinkOut(pr.url);
+  const label = `#${pr.number} ${PR_WORDS[pr.state] ?? pr.state.replaceAll("_", " ")}`;
+  const checks = pr.checks?.state;
   return (
-    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
-      <span className="text-muted-foreground">{props.label}</span>
-      <span className="flex min-w-0 flex-wrap items-center gap-x-2 break-words">
-        {props.children}
-      </span>
-    </div>
+    <span
+      className="flex flex-wrap items-center gap-2"
+      data-pr={pr.number}
+      data-pr-state={pr.state}
+    >
+      {href === null ? (
+        <span className="inline-flex items-center gap-1">
+          <Icon aria-hidden className="size-3.5 shrink-0" />
+          {label}
+        </span>
+      ) : (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 hover:underline"
+        >
+          <Icon aria-hidden className="size-3.5 shrink-0" />
+          {label}
+        </a>
+      )}
+      {checks === undefined ? null : (
+        <span
+          data-checks={checks}
+          className={CHIP}
+          {...toneProps(CHECK_TONES[checks] ?? "muted", "tint", "edge", "fg")}
+        >
+          {CHECK_WORDS[checks] ?? `Checks ${checks.replaceAll("_", " ")}`}
+        </span>
+      )}
+    </span>
   );
 }
 
-function CheckedSection(props: {
+/** The sign-off fact; null (left out) when there is nothing to say and no sign-off link to offer. */
+function checkedValue(props: {
   readonly checked: BanneretTask["checked"];
   readonly signOff: boolean;
   readonly task: TaskIdentity;
-}) {
+}): ReactNode {
   const view = checkedView(props.checked);
+  if (view.kind === "none" && !props.signOff) return null;
   return (
-    <div className="flex flex-col gap-1" data-testid="task-checked">
+    <span className="flex flex-col gap-1" data-testid="task-checked">
       {view.kind === "valid" ? (
-        <p className="text-xs" data-checked="valid">
-          <StatusMark status="checked" />
-          <span className="ms-1.5">
-            {view.by === "" ? "Checked " : `Checked by ${view.by} `}
-            <When at={view.at} />
-          </span>
-        </p>
+        <span data-checked="valid">
+          {view.by === "" ? "Checked " : `Checked by ${view.by} `}
+          <RelativeTime at={view.at} />
+        </span>
       ) : null}
       {view.kind === "ignored" ? (
-        <div
-          role="note"
-          data-checked="ignored"
-          className="rounded-md bg-muted px-2.5 py-1.5 text-muted-foreground text-xs"
-        >
-          <p>
+        <span role="note" data-checked="ignored" className="text-muted-foreground text-xs">
+          <span className="block">
             {view.by === ""
               ? "A checked label is on this task, but it does not count."
               : `${view.by} added the checked label, but it does not count.`}
-          </p>
-          <p>{view.reason}</p>
-        </div>
+          </span>
+          <span className="block">{view.reason}</span>
+        </span>
       ) : null}
+      {view.kind === "none" ? <span className={TYPE.meta}>Not checked yet</span> : null}
       {props.signOff && view.kind !== "valid" ? (
         <LinkOut url={props.task.ref.url}>
           Sign off on {trackerName(props.task.ref.tracker)}
         </LinkOut>
       ) : null}
-    </div>
+    </span>
   );
 }
 
-function TaskHeader(props: {
+function LastReleaseValue(props: { readonly release: LastReleaseView }) {
+  const { release } = props;
+  return (
+    <span className="flex min-w-0 flex-col gap-1.5" data-testid="task-last-release">
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="font-medium">{release.by}</span>
+        <span>{releaseReasonLine(release)}</span>
+        <RelativeTime at={release.at} className={TYPE.meta} />
+        {release.freeToContinue ? (
+          <span className={CHIP} {...toneProps("ok", "tint", "edge", "fg")}>
+            Free to continue
+          </span>
+        ) : null}
+      </span>
+      {release.note === undefined ? null : (
+        <span
+          data-testid="task-last-release-note"
+          className="block max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2.5 py-1.5 text-xs"
+        >
+          {release.note}
+        </span>
+      )}
+    </span>
+  );
+}
+
+interface TaskView {
   readonly task: TaskIdentity;
   readonly card: BanneretBoardCard | BanneretTask | null;
-  /** The map's item for the task; its status shows when neither the board nor the relay has a card. */
   readonly mapItem: BanneretMapItem | null;
   readonly map: BanneretMap | null;
   readonly relayTask: BanneretTask | null;
   readonly cards: ReadonlyArray<BanneretBoardCard>;
+  /** The relay answered 404 and no board card holds the task. */
+  readonly notFound: boolean;
+}
+
+function taskFacts(
+  view: TaskView,
+  options: {
+    readonly leases: boolean;
+    readonly signOff: boolean;
+    readonly lease: LeaseEntry | undefined;
+  },
+): ReadonlyArray<Fact> {
+  const { card, mapItem, map, relayTask } = view;
+  const dated = card?.task ?? mapItem?.task ?? null;
+  const stage =
+    mapItem === null ? null : (map?.stages.find((entry) => entry.id === mapItem.stageId) ?? null);
+  const restsOn = card === null ? [] : restsOnItems(card.restsOn, view.cards);
+  const preview = relayTask?.preview;
+  const held = card?.lease;
+  const release = options.leases
+    ? lastReleaseView(options.lease?.status ?? null, card?.lastRelease)
+    : null;
+  const dates: ReadonlyArray<Fact> = [
+    {
+      label: "Opened",
+      value:
+        dated === null ? undefined : (
+          <span data-testid="task-opened">
+            <RelativeTime at={dated.openedAt} />
+          </span>
+        ),
+    },
+    {
+      label: "Closed",
+      value:
+        dated?.closedAt == null ? undefined : (
+          <span data-testid="task-closed">
+            <RelativeTime at={dated.closedAt} />
+          </span>
+        ),
+    },
+  ];
+  if (view.notFound) {
+    return [
+      { label: "Stage", value: stage?.title },
+      ...dates,
+      {
+        label: "Status",
+        value:
+          mapItem === null ? undefined : (
+            <span className={TYPE.meta} data-testid="task-status-why">
+              From the build map. {mapItem.statusWhy}
+            </span>
+          ),
+      },
+    ];
+  }
+  return [
+    {
+      label: "Owner",
+      value:
+        !options.leases || card === null ? undefined : held === undefined ? (
+          <span className={TYPE.meta}>Nobody holds it</span>
+        ) : (
+          <span className="flex flex-wrap items-center gap-2">
+            <LeaseChip
+              holder={held.holder.login}
+              state={held.state}
+              lastSignalAt={held.lastSignalAt}
+            />
+            <RelativeTime at={held.since} prefix="claimed" className={TYPE.meta} />
+          </span>
+        ),
+    },
+    ...dates,
+    {
+      label: card !== null && card.prs.length > 1 ? "Pull requests" : "Pull request",
+      value:
+        card === null || card.prs.length === 0 ? undefined : (
+          <span className="flex flex-col gap-1">
+            {card.prs.map((pr) => (
+              <PrRow key={pr.number} pr={pr} />
+            ))}
+          </span>
+        ),
+    },
+    { label: "Stage", value: stage?.title },
+    {
+      label: "Preview",
+      value:
+        preview === undefined ? undefined : (
+          <span className="flex flex-wrap items-center gap-2">
+            <span data-preview={preview.state}>{previewStateLabel(preview.state)}</span>
+            <LinkOut url={preview.url}>Open preview</LinkOut>
+          </span>
+        ),
+    },
+    {
+      label: "Rests on",
+      value:
+        restsOn.length === 0 ? undefined : (
+          <span className="flex flex-col">
+            {restsOn.map((item) => (
+              <span key={item.id} data-rests-on={item.id} className="break-words">
+                {item.title ?? item.id}
+              </span>
+            ))}
+          </span>
+        ),
+    },
+    {
+      label: "Check",
+      value: checkedValue({
+        checked: relayTask?.checked,
+        signOff: options.signOff,
+        task: view.task,
+      }),
+    },
+    {
+      label: "Last release",
+      wide: release?.note !== undefined,
+      value: release === null ? undefined : <LastReleaseValue release={release} />,
+    },
+  ];
+}
+
+function TaskHeader(props: {
+  readonly environmentId: EnvironmentId;
+  readonly view: TaskView;
+  readonly atWork: boolean;
+  readonly issueRef: IssueRef | null;
   readonly leases: boolean;
-  readonly signOff: boolean;
+  readonly lease: LeaseEntry | undefined;
   readonly note: string | null;
 }) {
-  const nowMs = useNowMs();
-  const { card, mapItem, relayTask } = props;
-  const preview = relayTask?.preview;
-  // The relay's own task carries the dates; a saved tab's copy does not.
-  const dated: BanneretBoardTask | null = card?.task ?? mapItem?.task ?? null;
+  const { view } = props;
+  const { card, mapItem } = view;
+  const status = card?.status ?? mapItem?.status ?? null;
+  const why = card?.statusWhy ?? (view.notFound ? undefined : mapItem?.statusWhy);
   const blockedBy =
-    card !== null || mapItem === null || props.map === null
+    card !== null || mapItem === null || view.map === null
       ? null
-      : blockedByLabel(props.map, mapItem);
-  const restsOn = card === null ? [] : restsOnItems(card.restsOn, props.cards);
+      : blockedByName(view.map, mapItem);
+  const ref = taskRef({ ...view.task, openedAt: "", closedAt: null });
+  const href = safeLinkOut(view.task.ref.url);
+  const tracker = trackerName(view.task.ref.tracker);
+  const release = lastReleaseView(props.lease?.status ?? null, card?.lastRelease);
   return (
-    <header className="flex shrink-0 flex-col gap-2 border-b p-3" data-testid="task-header">
-      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="min-w-0 break-words font-medium text-sm">
-          {card?.task.title ?? props.task.title}
+    <header className="flex shrink-0 flex-col gap-2 px-4 pt-4 pb-3" data-testid="task-header">
+      <div className="flex min-w-0 items-start gap-2">
+        <h2 className="min-w-0 flex-1 break-words" {...TEXT_DIALOG_TITLE}>
+          {card?.task.title ?? view.task.title}
         </h2>
-        <LinkOut url={props.task.ref.url}>Open on {trackerName(props.task.ref.tracker)}</LinkOut>
+        {href === null ? null : (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={`Open on ${tracker}`}
+            title={`Open on ${tracker}`}
+            data-testid="task-link-out-icon"
+            render={<a href={href} target="_blank" rel="noopener noreferrer" />}
+          >
+            <SquareArrowOutUpRightIcon aria-hidden />
+          </Button>
+        )}
       </div>
-      {card !== null || mapItem === null ? null : (
-        <>
-          <StatusMark status={mapItem.status} />
-          {blockedBy === null ? null : (
-            <p className="break-words text-xs" data-testid="task-blocked-by">
-              {blockedBy}
-            </p>
-          )}
-          <p className="break-words text-muted-foreground text-xs" data-testid="task-status-why">
-            {mapItem.statusWhy}
-          </p>
-        </>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {status === null ? null : (
+          <StatusPill
+            status={status}
+            why={why}
+            atWork={props.atWork}
+            blockedBy={blockedBy ?? undefined}
+          />
+        )}
+        <span className={TYPE.ref} data-testid="task-ref">
+          {ref.repo}
+          {ref.number}
+        </span>
+        <span className="flex-1" />
+        {props.leases && props.issueRef !== null ? (
+          <LeaseButtons
+            environmentId={props.environmentId}
+            taskId={view.task.id}
+            title={card?.task.title ?? view.task.title}
+            issueRef={props.issueRef}
+            entry={props.lease}
+            continues={release?.freeToContinue === true}
+          />
+        ) : null}
+      </div>
+      {why === undefined || why === "" ? null : (
+        <p className={TYPE.meta} data-testid="task-status-why">
+          {why}
+        </p>
       )}
-      {dated === null ? null : (
-        <Row label="Opened">
-          <span data-testid="task-opened">
-            <When at={dated.openedAt} />
-          </span>
-        </Row>
-      )}
-      {dated?.closedAt == null ? null : (
-        <Row label="Closed">
-          <span data-testid="task-closed">
-            <When at={dated.closedAt} />
-          </span>
-        </Row>
-      )}
-      {card === null ? null : (
-        <>
-          <StatusMark status={card.status} />
-          <p className="break-words text-muted-foreground text-xs" data-testid="task-status-why">
-            {card.statusWhy}
-          </p>
-          {props.leases ? <LeaseChipView lease={card.lease} nowMs={nowMs} /> : null}
-          {card.prs.map((pr) => (
-            <Row key={pr.number} label="Pull request">
-              <span data-pr={pr.number} data-pr-state={pr.state}>
-                {prLine(pr)}
-              </span>
-              <LinkOut url={pr.url}>Open</LinkOut>
-            </Row>
-          ))}
-          {preview === undefined ? null : (
-            <Row label="Preview">
-              <span data-preview={preview.state}>{previewStateLabel(preview.state)}</span>
-              <LinkOut url={preview.url}>Open preview</LinkOut>
-            </Row>
-          )}
-          {restsOn.length === 0 ? null : (
-            <Row label="Rests on">
-              {restsOn.map((item, index) => (
-                <span key={item.id} data-rests-on={item.id}>
-                  {item.title ?? item.id}
-                  {index < restsOn.length - 1 ? "," : ""}
-                </span>
-              ))}
-            </Row>
-          )}
-        </>
-      )}
-      <CheckedSection checked={relayTask?.checked} signOff={props.signOff} task={props.task} />
+      {props.leases ? <LeaseNoticeLine entry={props.lease} /> : null}
       {props.note === null ? null : (
-        <p className="text-muted-foreground text-xs" role="status">
+        <p className={TYPE.meta} role="status">
           {props.note}
         </p>
       )}
@@ -201,51 +389,61 @@ function TaskHeader(props: {
   );
 }
 
+/** The row in place of the thread: no project here is on the tracker, or the relay has no details. */
+function LinkRow(props: { readonly task: TaskIdentity; readonly notFound: boolean }) {
+  const href = safeLinkOut(props.task.ref.url);
+  const repo = taskRef({ ...props.task, openedAt: "", closedAt: null }).repo;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 border-t px-4 py-3 text-sm"
+      data-testid="task-link-out"
+    >
+      <SquareArrowOutUpRightIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+      {props.notFound ? (
+        <span className="text-muted-foreground">Details from the relay aren't available.</span>
+      ) : (
+        <span>
+          No local project for <span className="font-medium">{repo}</span>
+        </span>
+      )}
+      <span className="flex-1" />
+      {href === null ? null : (
+        <Button
+          size="sm"
+          variant="outline"
+          render={<a href={href} target="_blank" rel="noopener noreferrer" />}
+        >
+          Open on {trackerName(props.task.ref.tracker)}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 /**
- * Upstream's issue thread and composer for the task, when this environment can read issues and one of
- * its projects is on the task's tracker and scope. Comments post on the person's own login.
+ * Upstream's issue thread and composer for the task, through the project here that is on the task's
+ * tracker and scope. Comments post on the person's own login.
  */
 function TaskThread(props: {
   readonly environmentId: EnvironmentId;
   readonly task: TaskIdentity;
+  readonly issueRef: IssueRef;
   readonly threadRef: ScopedThreadRef | null;
 }) {
-  const { environmentId, task } = props;
-  const issuesSupported =
-    useServerConfigs().get(environmentId)?.environment.capabilities.issues === true;
-  const projects = useProjects().filter((project) => project.environmentId === environmentId);
-  // Only a standalone tracker's link asks for its bindings, whose read probes the tracker.
-  const trackers =
-    useEnvironmentQuery(
-      issuesSupported && mayContainStandaloneIssueLink(task.ref.url)
-        ? issueTrackerEnvironment.connections({ environmentId, input: {} })
-        : null,
-    ).data ?? undefined;
-  const target = issuesSupported
-    ? resolveIssueLinkTarget({ url: task.ref.url, projects, trackers })
-    : null;
-  const matches =
-    target !== null &&
-    target.ref.tracker === task.ref.tracker &&
-    target.ref.key.toLowerCase() === task.ref.key.toLowerCase();
-  if (!matches) {
-    const name = trackerName(task.ref.tracker);
-    return (
-      <p className="p-3 text-muted-foreground text-xs" data-testid="task-link-out">
-        The thread shows here when a project on this machine uses {name} for {task.ref.scope}.
-      </p>
-    );
-  }
-  const { threadRef } = props;
+  const { environmentId, task, threadRef } = props;
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="task-thread" data-task-thread>
-      <p className="px-3 pt-2 text-muted-foreground text-xs" data-testid="task-thread-help">
+    <div
+      className="flex min-h-0 flex-1 flex-col border-t"
+      data-testid="task-thread"
+      data-task-thread
+    >
+      <p className="px-4 pt-2 text-muted-foreground text-xs" data-testid="task-thread-help">
         Edits here are made on {trackerName(task.ref.tracker)} as you; the board's rules for claims
         and sign-off still apply.
       </p>
       <IssueDetailPanel
         environmentId={environmentId}
-        reference={target.ref}
+        reference={props.issueRef}
         threadRef={threadRef}
         onSelectPullRequest={
           threadRef === null
@@ -299,6 +497,9 @@ function TaskPanelBody(props: {
   const taskId = surface.task.id;
   const feed = useEnvironmentFeed(environmentId);
   const enrolment = useEnrolmentView(environmentId);
+  const issueRef = useTaskIssueRef(environmentId, surface.task);
+  const leases = feed.board?.leases === true;
+  const lease = useLeaseCheck(environmentId, taskId, issueRef, leases);
 
   // A thread's panel has no page following the feed, so the tab follows it while shown.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's relay feed while the Task tab is shown
@@ -316,30 +517,57 @@ function TaskPanelBody(props: {
   const relayTask = answer?.value ?? null;
   const shown = card ?? relayTask;
   const known = shown !== null || mapItem !== null;
+  const notFound = answer?.notFound === true && shown === null;
+  const view: TaskView = {
+    task: surface.task,
+    card: shown,
+    mapItem,
+    map: feed.map?.value ?? null,
+    relayTask,
+    cards: feed.board?.value?.cards ?? [],
+    notFound,
+  };
   const note =
     read.kind === "loading" && !known
       ? "Loading…"
-      : answer?.notFound === true && card === null
-        ? "Details from the relay aren't available for this task."
+      : notFound && issueRef !== null
+        ? "Details from the relay aren't available."
         : answer?.problem !== undefined && !known
           ? answer.problem.message
           : read.kind === "done" && answer === null && !known
             ? "The task could not be read."
             : null;
+  const facts = taskFacts(view, {
+    leases,
+    signOff: enrolment?.me?.role === "founder",
+    lease,
+  });
   return (
-    <div className="flex h-full min-h-0 flex-col" data-task-panel={surface.task.id}>
+    <div
+      className="flex h-full min-h-0 flex-col"
+      data-task-panel={surface.task.id}
+      data-task-narrow={notFound ? "" : undefined}
+    >
       <TaskHeader
-        task={surface.task}
-        card={shown}
-        mapItem={mapItem}
-        map={feed.map?.value ?? null}
-        relayTask={relayTask}
-        cards={feed.board?.value?.cards ?? []}
-        leases={card === null || feed.board?.leases === true}
-        signOff={enrolment?.me?.role === "founder"}
+        environmentId={environmentId}
+        view={view}
+        atWork={feed.board?.atWork.includes(taskId) === true}
+        issueRef={issueRef}
+        leases={leases}
+        lease={lease}
         note={note}
       />
-      <TaskThread environmentId={environmentId} task={surface.task} threadRef={props.threadRef} />
+      <FactsGrid facts={facts} className="shrink-0 px-4 pb-3" />
+      {issueRef === null ? (
+        <LinkRow task={surface.task} notFound={notFound} />
+      ) : (
+        <TaskThread
+          environmentId={environmentId}
+          task={surface.task}
+          issueRef={issueRef}
+          threadRef={props.threadRef}
+        />
+      )}
     </div>
   );
 }

@@ -194,6 +194,21 @@ export const BanneretBoardPr = Schema.Struct({
 });
 export type BanneretBoardPr = typeof BanneretBoardPr.Type;
 
+/**
+ * The latest counted release of a task (relay-v1 "Lease protocol"), present while no claim stands.
+ * `reason` is an open string; `reasonText` and `note` are plain text, never rendered as markup.
+ */
+export const BanneretLastRelease = Schema.Struct({
+  by: BanneretFeedPerson,
+  at: Schema.String,
+  reason: Schema.String,
+  /** Written as free to continue, and nobody is assigned now. */
+  freeToContinue: Schema.Boolean,
+  reasonText: Schema.optional(Schema.String),
+  note: Schema.optional(Schema.String),
+});
+export type BanneretLastRelease = typeof BanneretLastRelease.Type;
+
 /** One task on the board. `column` and `status` are open strings the relay computed. */
 export const BanneretBoardCard = Schema.Struct({
   task: BanneretBoardTask,
@@ -201,6 +216,7 @@ export const BanneretBoardCard = Schema.Struct({
   status: Schema.String,
   statusWhy: Schema.String,
   lease: Schema.optional(BanneretBoardLease),
+  lastRelease: Schema.optional(BanneretLastRelease),
   /** Every linked pull request, oldest first; empty when none is linked. */
   prs: Schema.Array(BanneretBoardPr),
   restsOn: Schema.Array(Schema.String),

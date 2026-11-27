@@ -20,18 +20,18 @@ export type LeaseReleaseReason = (typeof LEASE_RELEASE_REASONS)[number];
  * Written only by the Hub itself, never offered to a person. In a comment they withdraw the author's own claim;
  * they are never a release reason, so they never reach `lastRelease` or the feed.
  */
-export const LEASE_SYSTEM_REASONS = ["lost_claim", "take_failed"] as const;
+const LEASE_SYSTEM_REASONS = ["lost_claim", "take_failed"] as const;
 export type LeaseSystemReason = (typeof LEASE_SYSTEM_REASONS)[number];
 
 export const LEASE_LABEL_CLAIMED = "claimed";
 export const LEASE_LABEL_PAUSED = "paused";
 /** How long tracker state may disagree with the comments before the lease reads as `incomplete`. */
-export const LEASE_SETTLE_MS = 60_000;
+const LEASE_SETTLE_MS = 60_000;
 /** The note after line 1 of a release, in UTF-8 bytes. */
 export const LEASE_NOTE_MAX_BYTES = 2_048;
 /** `reasonText`, in characters (Unicode code points). */
 export const LEASE_REASON_TEXT_MAX = 200;
-export const LEASE_FREE_TO_CONTINUE = "free to continue";
+const LEASE_FREE_TO_CONTINUE = "free to continue";
 const SEPARATOR = " · ";
 
 export interface LeaseComment {
@@ -254,7 +254,7 @@ const compareIds = (a: string, b: string) => {
 };
 
 /** Comment order: `createdAt`, then the comment id. */
-export const compareLeaseComments = (a: LeaseComment, b: LeaseComment): number =>
+const compareLeaseComments = (a: LeaseComment, b: LeaseComment): number =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || compareIds(a.id, b.id);
 
 interface Claim {

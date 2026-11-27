@@ -1,7 +1,7 @@
 // Banneret Hub: the board for an Enterprise workspace, drawn from the relay's snapshot `board` file.
-// The relay computes columns, statuses and leases; this page only draws them. Read-only: a lease is
-// taken or released on the tracker. A card opens its Task tab.
-import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
+// The relay computes columns, statuses and leases; this page only draws them. A card opens its Task
+// tab; its menu takes and releases through the server's LeaseService when the board flags `leases`.
+import type { BanneretBoardCard, BanneretBoardTask, EnvironmentId } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
@@ -20,13 +20,17 @@ import {
   taskRef,
   type BoardColumnView,
 } from "./board.logic";
+import { BoardCardMenu } from "./BoardCardMenu";
 import { useEnrolmentView } from "./enrolmentStore";
 import { FeedStatus, When } from "./FeedParts";
+import { freeToContinueFirst, freeToContinueLine, isFreeToContinue } from "./lease.logic";
+import { useLeaseEntry } from "./leaseStore";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { LeaseChip } from "./ui/Chips";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
 import { legendStatuses } from "./ui/status";
+import { useNowMs } from "./ui/RelativeTime";
 import { StatusLegend } from "./ui/StatusLegend";
 import { TaskCard } from "./ui/TaskCard";
 import {
@@ -68,18 +72,62 @@ function PrLine(props: { readonly card: BanneretBoardCard }) {
   );
 }
 
+/** How long "Taken by you" shows before the snapshot must agree. */
+const TAKEN_OVERLAY_MS = 5 * 60_000;
+
+const CHIP =
+  "inline-flex min-h-5 max-w-full items-center gap-1 self-start rounded-md border px-1.5 py-0.5 font-medium text-2xs leading-4";
+
+/**
+ * A take running from this window, or one it just finished, until the relay's snapshot shows it. The
+ * snapshot wins once it agrees or after five minutes.
+ */
+function useLocalLease(
+  environmentId: EnvironmentId,
+  card: BanneretBoardCard,
+  me: string,
+): "taking" | "taken" | null {
+  const entry = useLeaseEntry(environmentId, card.task.id);
+  const nowMs = useNowMs();
+  if (entry?.phase.kind === "running" && entry.phase.operation === "take") return "taking";
+  const notice = entry?.notice;
+  return notice?.outcome === "taken" && nowMs - notice.at < TAKEN_OVERLAY_MS && !heldBy(card, me)
+    ? "taken"
+    : null;
+}
+
 function BoardCard(props: {
+  readonly environmentId: EnvironmentId;
   readonly card: BanneretBoardCard;
   readonly atWork: boolean;
   readonly leases: boolean;
+  readonly me: string;
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { card } = props;
   const lease = props.leases ? card.lease : undefined;
   const ref = taskRef(card.task);
+  const localLease = useLocalLease(props.environmentId, card, props.me);
+  const local =
+    !props.leases || localLease === null ? null : (
+      <span
+        data-local-lease={localLease}
+        className={CHIP}
+        {...toneProps(localLease === "taking" ? "info" : "ok", "tint", "edge", "fg")}
+      >
+        {localLease === "taking" ? "Taking… confirming" : "Taken by you"}
+      </span>
+    );
+  const continues = props.leases && isFreeToContinue(card) ? card.lastRelease : undefined;
   return (
-    <li data-task-id={card.task.id} data-at-work={props.atWork ? "" : undefined}>
+    <li
+      data-task-id={card.task.id}
+      data-at-work={props.atWork ? "" : undefined}
+      data-free-to-continue={continues === undefined ? undefined : ""}
+      className="relative"
+    >
       <TaskCard
+        {...(props.leases ? { className: "pe-9" } : {})}
         title={card.task.title}
         status={card.status}
         why={card.statusWhy}
@@ -87,25 +135,41 @@ function BoardCard(props: {
         refNumber={ref.number}
         atWork={props.atWork}
         lease={
-          lease === undefined ? undefined : (
+          local ??
+          (lease === undefined ? (
+            continues === undefined ? undefined : (
+              <span
+                data-testid="free-to-continue"
+                className={CHIP}
+                {...toneProps("ok", "tint", "edge", "fg")}
+              >
+                {freeToContinueLine(continues)}
+              </span>
+            )
+          ) : (
             <LeaseChip
               holder={lease.holder.login}
               state={lease.state}
               lastSignalAt={lease.lastSignalAt}
             />
-          )
+          ))
         }
         footer={card.prs.length === 0 ? undefined : <PrLine card={card} />}
         onOpen={() => props.onOpen(card.task)}
       />
+      {props.leases ? (
+        <BoardCardMenu environmentId={props.environmentId} card={card} onOpen={props.onOpen} />
+      ) : null}
     </li>
   );
 }
 
 function BoardColumn(props: {
+  readonly environmentId: EnvironmentId;
   readonly column: BoardColumnView;
   readonly atWork: ReadonlySet<string>;
   readonly leases: boolean;
+  readonly me: string;
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { column } = props;
@@ -138,12 +202,17 @@ function BoardColumn(props: {
         </div>
       ) : (
         <ul className="flex min-h-0 flex-col gap-2 overflow-y-auto px-2 pb-2">
-          {column.cards.map((card) => (
+          {(props.leases && column.id === "free"
+            ? freeToContinueFirst(column.cards)
+            : column.cards
+          ).map((card) => (
             <BoardCard
               key={card.task.id}
+              environmentId={props.environmentId}
               card={card}
               atWork={props.atWork.has(card.task.id)}
               leases={props.leases}
+              me={props.me}
               onOpen={props.onOpen}
             />
           ))}
@@ -294,9 +363,11 @@ export function BoardPage() {
                 {columns.map((column) => (
                   <BoardColumn
                     key={column.id}
+                    environmentId={enterprise.environmentId}
                     column={column}
                     atWork={atWork}
                     leases={leases}
+                    me={me}
                     onOpen={openTask}
                   />
                 ))}

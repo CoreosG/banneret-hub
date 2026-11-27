@@ -16,9 +16,16 @@ import type {
   BanneretFeedNotMeasured,
   BanneretGraveyardEntry,
   BanneretGraveyardPage,
+  BanneretLastRelease,
   BanneretMap,
   BanneretMapItem,
   BanneretTask,
+} from "@t3tools/contracts";
+import {
+  capCodePoints,
+  capUtf8,
+  LEASE_NOTE_MAX_BYTES,
+  LEASE_REASON_TEXT_MAX,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
@@ -167,6 +174,31 @@ const lease = (value: unknown): BanneretBoardLease | undefined => {
   return { holder: { login }, state, since, lastSignalAt, staleAt, expiresAt };
 };
 
+/** The card's last release; undefined when a required field is missing. Text keeps the protocol's caps. */
+const lastRelease = (value: unknown): BanneretLastRelease | undefined => {
+  const source = fields(value);
+  const by = text(fields(source?.by)?.login, 64);
+  const at = text(source?.at, 64);
+  const reason = text(source?.reason, 64);
+  const freeToContinue = source?.freeToContinue;
+  if (by === undefined || at === undefined || reason === undefined) return undefined;
+  if (typeof freeToContinue !== "boolean") return undefined;
+  const reasonText =
+    typeof source?.reasonText === "string"
+      ? capCodePoints(source.reasonText, LEASE_REASON_TEXT_MAX)
+      : undefined;
+  const note =
+    typeof source?.note === "string" ? capUtf8(source.note, LEASE_NOTE_MAX_BYTES) : undefined;
+  return {
+    by: { login: by },
+    at,
+    reason,
+    freeToContinue,
+    ...(reasonText === undefined || reasonText === "" ? {} : { reasonText }),
+    ...(note === undefined || note === "" ? {} : { note }),
+  };
+};
+
 /** A relay tracker ref `{tracker, host?, scope, key, url}`; undefined when a required field is missing. */
 export const boardTaskRef = (value: unknown): BanneretBoardTask["ref"] | undefined => {
   const ref = fields(value);
@@ -232,12 +264,14 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
     return undefined;
   }
   const held = lease(source?.lease);
+  const released = lastRelease(source?.lastRelease);
   return {
     task,
     column,
     status,
     statusWhy,
     ...(held === undefined ? {} : { lease: held }),
+    ...(released === undefined ? {} : { lastRelease: released }),
     prs: defined(list(source?.prs, 20).map(linkedPr)),
     restsOn: defined(list(source?.restsOn, 100).map((entry) => text(entry, 64))),
   };
