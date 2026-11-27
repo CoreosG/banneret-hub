@@ -1,3 +1,4 @@
+import { MemoryRepo } from "./MemoryRepo";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { ScopedThreadRef, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
@@ -39,12 +40,12 @@ export function MemoryImportSetting({ environmentId }: { environmentId: Environm
             } else setError("Could not load orchestrators.");
           }}
         >
-          Import existing memory
+          Import or sync memory
         </button>
       ) : targets.length ? (
         <>
           <label>
-            Import into chat{" "}
+            Memory for chat{" "}
             <select
               value={selected ?? ""}
               onChange={(e) => setSelected(targets.find((id) => id === e.target.value))}
@@ -64,7 +65,7 @@ export function MemoryImportSetting({ environmentId }: { environmentId: Environm
           )}
         </>
       ) : (
-        <p>Designate an orchestrator chat to import notes.</p>
+        <p>designate an orchestrator chat to manage notes.</p>
       )}
       {error && <p role="alert">{error}</p>}
     </div>
@@ -154,7 +155,8 @@ export function MemoryTransfer({
   environmentId,
   threadId,
   refresh,
-}: ScopedThreadRef & { refresh?: () => void }) {
+  revision,
+}: ScopedThreadRef & { refresh?: () => void; revision?: number }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   async function transfer(files?: File[]) {
@@ -183,6 +185,12 @@ export function MemoryTransfer({
   );
   return (
     <fieldset disabled={busy} className="flex flex-wrap gap-2 px-2 py-1 text-xs">
+      <MemoryRepo
+        environmentId={environmentId}
+        threadId={threadId}
+        refresh={refresh}
+        revision={revision}
+      />
       {choose(true)}
       {choose(false)}
       {refresh && (

@@ -2,6 +2,7 @@ import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { ProjectService } from "../../project/ProjectService.ts";
+import { projectKeyFromRemote } from "../relay/projectKey.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { readForMemory } from "../Workspaces.ts";
 import { ownerOf, ownersByKey } from "../relay/Facts.ts";
@@ -22,6 +23,9 @@ export const threadWorkspace = Effect.fn("Banneret.threadWorkspace")(function* (
   const roles = owner && designations[owner.id];
   return {
     owner,
+    projectKey: project.value.repositoryIdentity
+      ? projectKeyFromRemote(project.value.repositoryIdentity.locator.remoteUrl)
+      : null,
     orchestrator: roles?.main === threadId || roles?.projects[projectId] === threadId,
   };
 });

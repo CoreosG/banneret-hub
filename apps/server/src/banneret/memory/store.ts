@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 
 import type { MemoryReviewAction } from "@t3tools/contracts";
 
+import { syncTables, syncState } from "./syncState.ts";
 import { formatNote, isMemoryFileError, parseImport, scanMemory } from "./files.ts";
 
 export const indexHeader =
@@ -35,6 +36,7 @@ export function withNotes<T>(
   project: string,
   now: number,
   run: (store: NoteStore) => T,
+  changed?: () => void,
 ) {
   const db = new NodeSqlite.DatabaseSync(file);
   try {
@@ -42,6 +44,7 @@ export function withNotes<T>(
       create table if not exists notes(key text primary key, text text not null, kind text not null,
       projectId text, source text not null, createdAt integer not null, confirmedAt integer, lastUsedAt integer,
       useCount integer not null default 0, disputedAt integer, disputeReason text, pinned integer not null default 0);
+      ${syncTables}
       create table if not exists imports(key text primary key, batch text not null);
       create trigger if not exists delete_import after delete on notes begin
         delete from imports where key=old.key; end;
@@ -58,7 +61,9 @@ export function withNotes<T>(
         delete from uses where key=old.key; delete from review where key=old.key; end;`);
     db.exec("begin immediate");
     const result = run(notes(db, project, now));
+    const wrote = changed && Number(db.prepare("select total_changes() as n").get()?.n) > 0;
     db.exec("commit");
+    if (wrote) changed();
     return result;
   } finally {
     db.close();
@@ -77,6 +82,7 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
   };
   return {
     read,
+    repo: syncState(db),
     exportFiles() {
       return db
         .prepare(`select ${fields} from notes where ${visible} order by key`)
@@ -130,13 +136,14 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
     },
     list(pendingOnly: boolean) {
       return db
-        .prepare(`select notes.key,batch,text,kind,case when projectId is null then 'personal' else 'project' end as scope,
+        .prepare(`select notes.key,alternative,batch,text,kind,case when projectId is null then 'personal' else 'project' end as scope,
         ${trust} as trust,source,coalesce(why,'') as why,coalesce(flaggedBy,'') as flaggedBy,
-        coalesce(disputeReason,'') as reason,coalesce(version,'') as version from notes left join review using(key) left join imports using(key)
+        coalesce(disputeReason,'') as reason,coalesce(version,'') as version from notes left join review using(key) left join imports using(key) left join repo_conflicts using(key)
         where ${visible} and ($pending=0 or confirmedAt is null or disputeReason is not null) order by createdAt desc,notes.key`)
         .all({ ...params, pending: Number(pendingOnly) })
         .map((row) => ({
           key: String(row.key),
+          alternative: row.alternative ? String(row.alternative) : undefined,
           batch: row.batch ? String(row.batch) : undefined,
           text: String(row.text),
           kind: String(row.kind),

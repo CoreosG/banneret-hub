@@ -59,7 +59,7 @@ export function formatNote(row: Record<string, unknown>) {
   return `---\n${header}---\n${text}\n`;
 }
 
-function parseNote(filename: string, content: string): Proposal {
+export function parseNote(filename: string, content: string) {
   if (!/^[^/\\\x00-\x1f]+\.md$/i.test(filename))
     throw new MemoryFileError({ message: "Choose a Markdown file." });
   scanMemory(filename + "\n" + content);
@@ -100,7 +100,7 @@ function parseNote(filename: string, content: string): Proposal {
     });
   if (kind !== "project" && kind !== "reference" && kind !== "feedback" && kind !== "user")
     throw new MemoryFileError({ message: "Unknown note type." });
-  return {
+  const note: Proposal = {
     key,
     text,
     kind,
@@ -108,11 +108,12 @@ function parseNote(filename: string, content: string): Proposal {
     source: typeof meta.source === "string" ? meta.source.slice(0, 512) : filename,
     why: "Imported from " + filename,
   };
+  return { note, meta };
 }
 
 export function parseImport(name: string, content: string) {
   if (!/^(?:AGENTS|CLAUDE)\.md$/i.test(name) || content.length <= 4096)
-    return [parseNote(name, content)];
+    return [parseNote(name, content).note];
   scanMemory(content);
   const parts: Proposal[] = [];
   let rest = content.replaceAll("\r\n", "\n");

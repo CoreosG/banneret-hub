@@ -13,6 +13,8 @@ import { workspacesFilePath } from "../Workspaces.ts";
 import { threadWorkspace } from "../plugins/workspace.ts";
 
 import { BanneretEnrolment } from "../relay/Enrolment.ts";
+import { repoCommands } from "./repoSync.ts";
+import { allowsPersonalRepo } from "./gitCopy.ts";
 import { isMemoryFileError } from "./files.ts";
 import { withNotes } from "./store.ts";
 
@@ -62,12 +64,40 @@ export const memoryAccess = Effect.fn("BanneretMemory.access")(
     const dir = path.join(path.dirname(yield* workspacesFilePath), "memory");
     const hash = storeName(owner?.id ?? null, login);
     const fs = yield* FileSystem.FileSystem;
+    const file = path.join(dir, hash + ".sqlite");
+    const enrolment = yield* BanneretEnrolment;
+    const origin = owner?.relay?.origin;
+    const clock = yield* Clock.Clock;
+    const run = Effect.runPromiseWith(yield* Effect.context<never>());
+    const repo = repoCommands({
+      file,
+      now: () => clock.currentTimeMillisUnsafe(),
+      delay: (signal) => run(Effect.sleep("1200 millis"), { signal }),
+      project: thread.projectId,
+      workspace: hash,
+      projectFolder: storeName(workspace.projectKey ?? thread.projectId, null),
+      enterprise: owner?.kind === "enterprise",
+      allowed: async () => {
+        if (owner?.kind !== "enterprise") return true;
+        if (!origin || !login) return false;
+        return run(
+          Effect.gen(function* () {
+            const relay = yield* enrolment.relay(origin);
+            if (!relay) return false;
+            const status = yield* relay.status;
+            if (status.state !== "configured" || status.me?.login !== login) return false;
+            const reply = yield* relay.signedGet("/relay/v1/capabilities");
+            return reply.status === 200 && allowsPersonalRepo(reply.body);
+          }).pipe(Effect.orElseSucceed(() => false)),
+        );
+      },
+    });
     const open = Effect.fn("BanneretMemory.open")(
       function* <T>(run: Parameters<typeof withNotes<T>>[3]) {
         yield* fs.makeDirectory(dir, { recursive: true, mode: 0o700 });
         const now = yield* Clock.currentTimeMillis;
         return yield* Effect.try({
-          try: () => withNotes(path.join(dir, hash + ".sqlite"), thread.projectId, now, run),
+          try: () => withNotes(file, thread.projectId, now, run, repo.schedule),
           catch: (error) =>
             new OrchestratorMcpFailure({
               code: "orchestration_error",
@@ -79,7 +109,7 @@ export const memoryAccess = Effect.fn("BanneretMemory.access")(
       },
       Effect.mapError((e) => (e._tag === "OrchestratorMcpFailure" ? e : unavailable())),
     );
-    return { open, orchestrator };
+    return { open, orchestrator, repo, enterprise: owner?.kind === "enterprise" };
   },
   Effect.mapError(() => unavailable()),
 );

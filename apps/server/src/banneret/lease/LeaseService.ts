@@ -752,6 +752,44 @@ export const rpcHandlers = {
     },
   ),
   ...memorySettingsHandlers,
+  "memory.repoSetting": Effect.fn("BanneretMemory.repoSetting")(
+    function* ({ threadId }: { threadId: ThreadId }) {
+      const access = yield* reviewAccess(threadId);
+      return { ...(yield* access.open((s) => s.repo.setting())), enterprise: access.enterprise };
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
+  "memory.setRepo": Effect.fn("BanneretMemory.setRepo")(
+    function* ({
+      threadId,
+      url,
+      projects,
+    }: {
+      threadId: ThreadId;
+      url: string;
+      projects: boolean;
+    }) {
+      const access = yield* reviewAccess(threadId);
+      yield* access.open((s) => s.repo.setting());
+      return yield* Effect.promise(async () => {
+        try {
+          await access.repo.configure(url, projects);
+          return url ? "Git copy enabled." : "Git copy disabled.";
+        } catch (e) {
+          return e instanceof Error ? e.message : "Could not configure Git copy.";
+        }
+      });
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
+  "memory.sync": Effect.fn("BanneretMemory.sync")(
+    function* ({ threadId }: { threadId: ThreadId }) {
+      const access = yield* reviewAccess(threadId);
+      yield* access.open((s) => s.repo.setting());
+      return yield* Effect.promise(access.repo.sync);
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
   "memory.targets": Effect.fn("BanneretMemory.targets")(
     function* () {
       const roles = Object.values(yield* readDesignations);

@@ -47,6 +47,9 @@ function MemoryReview({
           Why: {note.why || "No reason supplied."}
         </p>
       )}
+      {note.alternative && (
+        <p className="whitespace-pre-wrap">Repository text: {note.alternative}</p>
+      )}
       {disputed && (
         <p>
           Flagged by {note.flaggedBy || "Unknown"}: {note.reason}. Treated as unconfirmed until you
@@ -89,7 +92,16 @@ function MemoryReview({
             </>
           ) : (
             <>
-              {proposed && button("Confirm", () => void save({ kind: "confirm" }))}
+              {proposed &&
+                button(
+                  note.alternative ? "Keep this machine’s text" : "Confirm",
+                  () => void save({ kind: "confirm" }),
+                )}
+              {note.alternative &&
+                button(
+                  "Use repository text",
+                  () => void save({ kind: "editConfirm", text: note.alternative! }),
+                )}
               {disputed && button("Keep", () => void save({ kind: "keep" }))}
               {button(proposed ? "Edit then confirm" : "Edit", () => {
                 setDraft(note.text);
