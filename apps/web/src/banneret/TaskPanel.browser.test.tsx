@@ -49,7 +49,7 @@ const RELAY = { environmentId: LOCAL, relayOrigin: "https://relay.example.com" }
 const HOSTILE = '<img src=x onerror="window.__pwned=1">';
 const MINUTE = 60_000;
 
-/** The fixtures' clock. A test that reads relative times pins the page's clock here too. */
+/** The fixtures' clock, on a minute boundary. A test that reads relative times pins the page's clock here. */
 const NOW = Date.parse("2026-11-26T10:00:00.000Z");
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 /** Holds the page's clock at `NOW`, so "12 min ago" cannot turn into "13 min ago" mid-test. */
