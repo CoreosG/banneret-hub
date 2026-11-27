@@ -30,6 +30,7 @@ const reviewNote = Schema.Struct({
   scope: Schema.String,
   trust: Schema.String,
   source: Schema.String,
+  batch: Schema.optional(Schema.String),
   why: Schema.String,
   flaggedBy: Schema.String,
   reason: Schema.String,
@@ -43,6 +44,35 @@ export const memoryReviewInput = Schema.Struct({
   action: reviewAction,
 });
 export const MEMORY_RPCS = [
+  Rpc.make("memory.confirmImport", {
+    payload: Schema.Struct({
+      threadId: ThreadId,
+      batch: bounded(64),
+      notes: Schema.Array(Schema.Struct({ key: bounded(96), version: bounded(64) })),
+    }),
+    success: Schema.Void,
+    error,
+  }),
+  Rpc.make("memory.importFile", {
+    payload: Schema.Struct({
+      threadId: ThreadId,
+      name: bounded(255),
+      content: bounded(65536),
+      batch: bounded(64),
+    }),
+    success: Schema.Struct({ proposed: Schema.Int, skipped: Schema.Int, reason: Schema.String }),
+    error,
+  }),
+  Rpc.make("memory.exportFiles", {
+    payload: Schema.Struct({ threadId: ThreadId }),
+    success: Schema.Array(Schema.Struct({ name: Schema.String, content: Schema.String })),
+    error,
+  }),
+  Rpc.make("memory.targets", {
+    payload: Schema.Struct({}),
+    success: Schema.Array(ThreadId),
+    error,
+  }),
   Rpc.make("memory.summary", {
     payload: Schema.Struct({ threadId: ThreadId }),
     success: Schema.NullOr(
@@ -65,6 +95,10 @@ export const MEMORY_RPCS = [
 ] as const;
 
 export const MEMORY_RPC_SCOPES = {
+  "memory.confirmImport": AuthSettingsWriteScope,
+  "memory.importFile": AuthSettingsWriteScope,
+  "memory.exportFiles": AuthSettingsWriteScope,
+  "memory.targets": AuthSettingsWriteScope,
   "memory.review": AuthSettingsWriteScope,
   "memory.list": AuthOrchestrationOperateScope,
   "memory.summary": AuthOrchestrationOperateScope,
@@ -73,6 +107,10 @@ export const MEMORY_RPC_SCOPES = {
 } as const;
 
 export const MEMORY_RPC_AGGREGATES = {
+  "memory.confirmImport": "leases",
+  "memory.importFile": "leases",
+  "memory.exportFiles": "leases",
+  "memory.targets": "leases",
   "memory.review": "leases",
   "memory.list": "leases",
   "memory.summary": "leases",

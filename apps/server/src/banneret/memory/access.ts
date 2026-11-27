@@ -13,6 +13,7 @@ import { workspacesFilePath } from "../Workspaces.ts";
 import { threadWorkspace } from "../plugins/workspace.ts";
 
 import { BanneretEnrolment } from "../relay/Enrolment.ts";
+import { isMemoryFileError } from "./files.ts";
 import { withNotes } from "./store.ts";
 
 const storeName = (workspace: string | null, login: string | null) =>
@@ -67,10 +68,12 @@ export const memoryAccess = Effect.fn("BanneretMemory.access")(
         const now = yield* Clock.currentTimeMillis;
         return yield* Effect.try({
           try: () => withNotes(path.join(dir, hash + ".sqlite"), thread.projectId, now, run),
-          catch: () =>
+          catch: (error) =>
             new OrchestratorMcpFailure({
               code: "orchestration_error",
-              message: "Could not complete memory operation. Check the note key and workspace.",
+              message: isMemoryFileError(error)
+                ? error.message
+                : "Could not complete memory operation. Check the note key and workspace.",
             }),
         });
       },

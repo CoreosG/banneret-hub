@@ -40,3 +40,40 @@ it("shows counts and storage disclosure only for an orchestrator", async () => {
     )
     .toBeVisible();
 });
+
+it("opens a scoped inline command card, searches notes and closes it", async () => {
+  const { openMemoryCommand } = await import("./memoryCommand");
+  const ref = { environmentId: EnvironmentId.make("machine"), threadId: ThreadId.make("search") };
+  const note = {
+    key: "format",
+    text: "Two spaces",
+    kind: "reference",
+    scope: "project",
+    trust: "confirmed",
+    source: "guide",
+    why: "",
+    reason: "",
+    flaggedBy: "",
+    version: "1",
+  };
+  respond.mockImplementation(async (_registry, _command, { input }) => ({
+    _tag: "Success",
+    value: "pendingOnly" in input ? [note] : { total: 1, proposed: 0, disputed: 0 },
+  }));
+  await using screen = await render(<MemoryStrip {...ref} />);
+  const promptRef = { current: "/memory spaces" };
+  expect(
+    openMemoryCommand(
+      { routeThreadRef: ref, composerDraftTarget: ref, composerRef: { current: null }, promptRef },
+      promptRef.current,
+    ),
+  ).toBe(true);
+  expect(promptRef.current).toBe("");
+  const search = screen.getByRole("searchbox");
+  await expect.element(search).toBeVisible();
+  await expect.element(screen.getByText("Two spaces")).toBeVisible();
+  await search.fill("absent");
+  await expect.element(screen.getByText("No matching notes.")).toBeVisible();
+  await screen.getByRole("button", { name: "Close", exact: true }).click();
+  await expect.element(search).not.toBeInTheDocument();
+});

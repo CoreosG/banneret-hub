@@ -1,3 +1,4 @@
+import { MemoryImportSetting } from "./MemoryTransfer";
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -52,12 +53,15 @@ function MemoryRow({ environmentId, label }: { environmentId: EnvironmentId; lab
       description={`Enabling Banneret memory turns off Claude and Codex memory in Hub chats on ${label}.`}
       status={error}
       control={
-        <Switch
-          aria-label={`Use Banneret memory on ${label}`}
-          disabled={!writable || saving || enabled === undefined}
-          checked={enabled ?? false}
-          onCheckedChange={save}
-        />
+        <>
+          {writable && <MemoryImportSetting environmentId={environmentId} />}
+          <Switch
+            aria-label={`Use Banneret memory on ${label}`}
+            disabled={!writable || saving || enabled === undefined}
+            checked={enabled ?? false}
+            onCheckedChange={save}
+          />
+        </>
       }
     />
   );

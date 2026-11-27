@@ -124,17 +124,21 @@ function MemoryReview({
 
 export function MemoryNotes({
   notes,
+  confirmBatch,
   expanded,
   writable,
   apply,
 }: {
   notes: readonly MemoryReviewNote[];
   expanded: boolean;
+  confirmBatch?: (batch: string, notes: readonly MemoryReviewNote[]) => Promise<void>;
   writable: boolean;
   apply: (note: MemoryReviewNote, action: MemoryReviewAction) => Promise<void>;
 }) {
   const [kind, setKind] = useState("");
   const [scope, setScope] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [batchError, setBatchError] = useState("");
   const row = (note: MemoryReviewNote) => (
     <MemoryReview
       key={note.key + ":" + note.version}
@@ -167,23 +171,54 @@ export function MemoryNotes({
               </select>
             </label>
           </div>
-          {["pinned", "trusted", "confirmed", "stale", "archived"].map((trust) => {
-            const group = notes.filter(
-              (n) =>
-                n.trust === trust && (!kind || n.kind === kind) && (!scope || n.scope === scope),
-            );
-            return (
-              group.length > 0 && (
-                <Section
-                  key={trust}
-                  title={trust[0]!.toUpperCase() + trust.slice(1)}
-                  count={group.length}
+          {writable &&
+            confirmBatch &&
+            [
+              ...new Set(
+                notes.flatMap((n) => (n.trust === "proposed" && n.batch ? [n.batch] : [])),
+              ),
+            ].map((batch) => {
+              const pending = notes.filter((n) => n.trust === "proposed" && n.batch === batch);
+              return (
+                <button
+                  key={batch}
+                  disabled={confirming}
+                  onClick={async () => {
+                    setConfirming(true);
+                    setBatchError("");
+                    try {
+                      await confirmBatch(batch, pending);
+                    } catch {
+                      setBatchError("Confirmation interrupted. Review remaining proposals.");
+                    }
+                    setConfirming(false);
+                  }}
                 >
-                  {group.map(row)}
-                </Section>
-              )
-            );
-          })}
+                  Confirm {pending.length} imported notes from batch {batch?.slice(0, 8)}
+                </button>
+              );
+            })}
+          {batchError && <p role="alert">{batchError}</p>}
+          {!notes.length && <p>No matching notes.</p>}
+          {["proposed", "disputed", "pinned", "trusted", "confirmed", "stale", "archived"].map(
+            (trust) => {
+              const group = notes.filter(
+                (n) =>
+                  n.trust === trust && (!kind || n.kind === kind) && (!scope || n.scope === scope),
+              );
+              return (
+                group.length > 0 && (
+                  <Section
+                    key={trust}
+                    title={trust[0]!.toUpperCase() + trust.slice(1)}
+                    count={group.length}
+                  >
+                    {group.map(row)}
+                  </Section>
+                )
+              );
+            },
+          )}
         </div>
       )}
       {!expanded &&

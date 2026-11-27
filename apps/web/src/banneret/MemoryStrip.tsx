@@ -12,6 +12,14 @@ import { relayKey } from "./enrolmentStore";
 import { type ReactNode, useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 
+import { MemoryTransfer } from "./MemoryTransfer";
+import {
+  useMemoryAvailability,
+  memoryThreadKey,
+  useMemoryCard,
+  memoryCardQuery,
+  setMemoryCard,
+} from "./memoryCommand";
 import { MemoryNotes } from "./MemoryReview";
 const list = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:memory-list",
@@ -20,6 +28,10 @@ const list = createEnvironmentRpcCommand(connectionAtomRuntime, {
 const review = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:memory-review",
   tag: "memory.review",
+});
+const confirm = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "banneret:confirm-import",
+  tag: "memory.confirmImport",
 });
 const summary = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:memory-summary",
@@ -53,6 +65,7 @@ export function MemoryStrip({
     return result._tag === "Success" ? result.value : null;
   }, [environmentId, threadId, allowed, designated, revision, working].join(":"));
   const counts = state.value;
+  const resolved = counts !== undefined;
   const visible = allowed && counts != null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- other chats can change these server counts while this thread is idle
   useEffect(() => {
@@ -67,16 +80,36 @@ export function MemoryStrip({
       document.removeEventListener("visibilitychange", tick);
     };
   }, [visible]);
-  const loadNotes = visible && (expanded || counts.proposed + counts.disputed > 0);
-  const notes = useChatRead(async () => {
-    if (!loadNotes) return [];
-    const result = await runAtomCommand(appAtomRegistry, list, {
-      environmentId,
-      input: { threadId, pendingOnly: !expanded },
-    });
-    if (result._tag !== "Success") throw new Error("Could not load notes.");
-    return result.value;
-  }, [loadNotes, expanded, revision, environmentId, threadId, working].join(":"));
+  const ref = { environmentId, threadId };
+  const query = useMemoryCard(memoryCardQuery(ref));
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publish this mounted timeline's server authorization to its composer
+  useEffect(() => {
+    if (!resolved || !allowed) return;
+    const key = memoryThreadKey({ environmentId, threadId });
+    useMemoryAvailability.setState((state) => ({ threads: { ...state.threads, [key]: visible } }));
+    return () =>
+      useMemoryAvailability.setState((state) => {
+        const threads = { ...state.threads };
+        delete threads[key];
+        return { threads };
+      });
+  }, [allowed, resolved, visible, environmentId, threadId]);
+  const loadNotes =
+    visible && (query !== undefined || expanded || counts.proposed + counts.disputed > 0);
+  const notes = useChatRead(
+    async () => {
+      if (!loadNotes) return [];
+      const result = await runAtomCommand(appAtomRegistry, list, {
+        environmentId,
+        input: { threadId, pendingOnly: !expanded && query === undefined },
+      });
+      if (result._tag !== "Success") throw new Error("Could not load notes.");
+      return result.value;
+    },
+    [loadNotes, query !== undefined, expanded, revision, environmentId, threadId, working].join(
+      ":",
+    ),
+  );
   async function apply(note: MemoryReviewNote, action: MemoryReviewAction) {
     const result = await runAtomCommand(appAtomRegistry, review, {
       environmentId,
@@ -85,8 +118,40 @@ export function MemoryStrip({
     refresh((n) => n + 1);
     if (result._tag !== "Success") throw new Error("Could not save note.");
   }
+  const confirmBatch = async (batch: string, pending: readonly MemoryReviewNote[]) => {
+    const result = await runAtomCommand(appAtomRegistry, confirm, {
+      environmentId,
+      input: { threadId, batch, notes: pending.map(({ key, version }) => ({ key, version })) },
+    });
+    refresh((n) => n + 1);
+    if (result._tag !== "Success") throw new Error("Import batch changed.");
+  };
   const cards =
-    loadNotes && notes.value?.some((n) => n.trust === "disputed" || n.trust === "proposed") ? (
+    visible && query !== undefined ? (
+      <section aria-label="Memory command" className="chat-content-lane rounded border p-3">
+        <div className="flex justify-between">
+          <strong>Memory</strong>
+          <button onClick={() => setMemoryCard(ref)}>Close</button>
+        </div>
+        <label>
+          Search notes{" "}
+          <input type="search" value={query} onChange={(e) => setMemoryCard(ref, e.target.value)} />
+        </label>
+        {writable && <MemoryTransfer {...ref} refresh={() => refresh((n) => n + 1)} />}
+        {notes.error && <p role="alert">{notes.error}</p>}
+        {notes.value && (
+          <MemoryNotes
+            expanded
+            confirmBatch={confirmBatch}
+            notes={notes.value.filter((n) =>
+              (n.key + " " + n.text).toLowerCase().includes(query.toLowerCase()),
+            )}
+            writable={writable}
+            apply={apply}
+          />
+        )}
+      </section>
+    ) : loadNotes && notes.value?.some((n) => n.trust === "disputed" || n.trust === "proposed") ? (
       <div className="chat-content-lane">
         <MemoryNotes notes={notes.value} expanded={false} writable={writable} apply={apply} />
       </div>
