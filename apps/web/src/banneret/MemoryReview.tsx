@@ -5,10 +5,12 @@ import { Section } from "./ui/Section";
 type Apply = (action: MemoryReviewAction) => Promise<void>;
 function MemoryReview({
   note,
+  locked,
   apply,
   writable,
 }: {
   note: MemoryReviewNote;
+  locked: boolean;
   apply: Apply;
   writable: boolean;
 }) {
@@ -38,7 +40,14 @@ function MemoryReview({
   }
   return (
     <article className="grid gap-1.5 break-words border-b px-3 py-2 text-sm">
-      <strong>{note.key}</strong>
+      <strong>{note.kind === "skill" ? `Skill · ${note.scope} · ${note.source}` : note.key}</strong>
+      {locked && <p>Not used: locked by the company.</p>}
+      {note.previousSkill && (
+        <details>
+          <summary>Compare with current skill</summary>
+          <pre className="whitespace-pre-wrap">{note.previousSkill}</pre>
+        </details>
+      )}
       <p className="whitespace-pre-wrap">{note.text}</p>
       {proposed && (
         <p className="text-xs text-muted-foreground">
@@ -136,12 +145,14 @@ function MemoryReview({
 
 export function MemoryNotes({
   notes,
+  lockedSkills,
   confirmBatch,
   expanded,
   writable,
   apply,
 }: {
   notes: readonly MemoryReviewNote[];
+  lockedSkills?: readonly string[];
   expanded: boolean;
   confirmBatch?: (batch: string, notes: readonly MemoryReviewNote[]) => Promise<void>;
   writable: boolean;
@@ -155,6 +166,7 @@ export function MemoryNotes({
     <MemoryReview
       key={note.key + ":" + note.version}
       note={note}
+      locked={note.kind === "skill" && Boolean(lockedSkills?.includes(note.source))}
       writable={writable}
       apply={(action) => apply(note, action)}
     />
@@ -168,7 +180,7 @@ export function MemoryNotes({
               Kind{" "}
               <select aria-label="Kind" value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="">All kinds</option>
-                {["user", "feedback", "project", "reference"].map((k) => (
+                {["user", "feedback", "project", "reference", "skill"].map((k) => (
                   <option key={k}>{k}</option>
                 ))}
               </select>

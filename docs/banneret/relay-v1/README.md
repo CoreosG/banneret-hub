@@ -29,6 +29,7 @@ All under `/relay/v1`.
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
 | `GET /today` | Needs you, shipped, working, stuck and optionally health. `?since=...` filters shipped work (see below). |
 | `GET /needs` | Needs-you items, paged, most urgent first. |
+| `GET /skills` | Signed company skill catalog, available when the enrolled capabilities document includes `skills.registry: true`. Each entry has the plugin kit name, description, full SKILL.md text and a company lock. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
 | `GET /events` | Server-sent events: `needs.changed`, `mention`, `chat.changed`, `chat.delivery`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
 | `GET /snapshot/head` | The caller's current snapshot head: the SHA-256 of each snapshot file. |

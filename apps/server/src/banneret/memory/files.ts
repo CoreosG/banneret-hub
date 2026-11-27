@@ -98,7 +98,13 @@ export function parseNote(filename: string, content: string) {
     throw new MemoryFileError({
       message: "A note needs a valid key and 1 to 4096 characters of text.",
     });
-  if (kind !== "project" && kind !== "reference" && kind !== "feedback" && kind !== "user")
+  if (
+    kind !== "project" &&
+    kind !== "reference" &&
+    kind !== "feedback" &&
+    kind !== "user" &&
+    kind !== "skill"
+  )
     throw new MemoryFileError({ message: "Unknown note type." });
   const note: Proposal = {
     key,

@@ -73,9 +73,10 @@ import { saveDesignations } from "../OrchestratorState.ts";
 import * as Workspaces from "../Workspaces.ts";
 import * as AgentRelays from "./AgentRelays.ts";
 import * as AgentHandlers from "./handlers.ts";
+import { defaults } from "../skills/catalog.ts";
 import { JOIN_LINE, JOIN_URI, joinText } from "./join.ts";
 import * as AgentMcp from "./mcp.ts";
-import { AgentToolkit, memoryNames } from "./tools.ts";
+import { AgentToolkit, memoryNames, skillNames } from "./tools.ts";
 
 const ENVIRONMENT = "env-agents-1";
 const ORIGIN = "https://relay.example.test";
@@ -387,6 +388,26 @@ describe("agent toolkit listing", () => {
         disableLogger: true,
       }).pipe(Layer.build);
       return {
+        confirmSoloSkill: Effect.fn("Test.confirmSoloSkill")(
+          function* (key: string) {
+            const access = yield* memoryAccess(
+              ThreadId.make("thread-solo"),
+              EnvironmentId.make(ENVIRONMENT),
+            );
+            yield* access.open((store) => {
+              const pending = store.list(true).find((n) => n.key === key)!;
+              store.reviewInChat(
+                key,
+                pending.version,
+                { kind: "confirm" },
+                "solo-orchestrator",
+                true,
+                false,
+              );
+            });
+          },
+          Effect.provide(Layer.merge(local, enrolmentStub)),
+        ),
         configureKnowledge: Effect.gen(function* () {
           const folder = baseDir + "/knowledge";
           const fs = yield* FileSystem.FileSystem;
@@ -407,7 +428,7 @@ describe("agent toolkit listing", () => {
       Effect.scoped(
         Effect.gen(function* () {
           relayTools = ALL_TOOLS;
-          const { configureKnowledge } = yield* serveAgents({});
+          const { configureKnowledge, confirmSoloSkill } = yield* serveAgents({});
           const httpClient = yield* HttpClient.HttpClient;
           const session = (token: string) =>
             Effect.gen(function* () {
@@ -473,6 +494,7 @@ describe("agent toolkit listing", () => {
                     ),
                   ),
                 ),
+                readSkill: (name: string) => rpc("resources/read", { uri: `skill://${name}/` }),
                 read: rpc("resources/read", { uri: JOIN_URI }),
                 call: (name: string, args: object) => rpc("tools/call", { name, arguments: args }),
               };
@@ -482,6 +504,7 @@ describe("agent toolkit listing", () => {
           expect(yield* company.tools).toEqual(
             [
               ...memoryNames,
+              ...skillNames,
               ...BANNERET_AGENT_TOOLS.filter((name) => name !== "banneret_lease_withdraw"),
               "upstream_tool",
             ].sort(),
@@ -513,7 +536,9 @@ describe("agent toolkit listing", () => {
             const body = JSON.stringify((yield* company.prompt(name)).result);
             for (const word of words) expect(body).toContain(word);
           }
-          expect(yield* company.resources).toEqual([JOIN_URI]);
+          expect(yield* company.resources).toEqual(
+            expect.arrayContaining([JOIN_URI, ...defaults.map((s) => `skill://${s.name}/`)]),
+          );
           const join = (yield* company.read).result!.contents as ReadonlyArray<{ text: string }>;
           expect(join[0]!.text).toBe(joinText({ company: "Example Company", login: ME }));
           const board = (yield* company.call("banneret_board", { column: "free" })).result!
@@ -552,6 +577,58 @@ describe("agent toolkit listing", () => {
           const solo = yield* session("solo");
           expect((yield* solo.call("memory.review", {})).error).toBeDefined();
           expect((yield* solo.call("banneret_memory_resolve", {})).error).toBeDefined();
+          const author = "how-to-write-a-skill";
+          const skill = (yield* solo.call("banneret_skills_get", { name: author })).result
+            ?.structuredContent;
+          expect(skill).toMatchObject({ name: author, layer: "default" });
+          expect((yield* solo.readSkill(author)).result?.contents).toMatchObject([
+            { text: (skill as { text: string }).text, mimeType: "text/markdown" },
+          ]);
+          expect(
+            (yield* solo.call("banneret_skills_list", {})).result?.structuredContent,
+          ).toMatchObject({
+            skills: expect.arrayContaining([
+              expect.objectContaining({ name: author, layer: "default", locked: false }),
+            ]),
+          });
+          const text =
+            "---\nname: release-test\ndescription: Check a release.\n---\nCheck the tag.";
+          const proposedSkill = (yield* solo.call("banneret_skills_propose", {
+            text,
+            why: "Reuse the release check.",
+            scope: "personal",
+          })).result?.structuredContent as { key: string; status: string };
+          expect(proposedSkill.status).toBe("proposed");
+          expect((yield* solo.readSkill("release-test")).error).toBeDefined();
+          yield* confirmSoloSkill(proposedSkill.key);
+          expect(yield* solo.resources).toContain("skill://release-test/");
+          expect((yield* solo.readSkill("release-test")).result?.contents).toMatchObject([
+            { text },
+          ]);
+          // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- The public plugin checker drives the live test client through Promise callbacks.
+          const run = Effect.runPromiseWith(
+            yield* Effect.context<Effect.Services<typeof solo.resources>>(),
+          );
+          const checkerPath = "../../../../../packages/banneret-plugin-kit/checker/checks.mjs";
+          const report = yield* Effect.promise(async () => {
+            const { check } = await import(new URL(checkerPath, import.meta.url).href);
+            return check(
+              { capabilities: ["skills"], toolPrefix: "banneret_" },
+              {
+                listTools: async () => ({
+                  tools: (await run(solo.tools)).map((name) => ({ name })),
+                }),
+                listResources: async () => ({
+                  resources: (await run(solo.resources)).map((uri) => ({ uri })),
+                }),
+                readResource: async ({ uri }: { uri: string }) =>
+                  (await run(solo.readSkill(new URL(uri).hostname))).result,
+                callTool: async ({ name, arguments: args }: { name: string; arguments: object }) =>
+                  (await run(solo.call(name, args))).result,
+              },
+            );
+          });
+          expect(report.passed, JSON.stringify(report.checks)).toBe(true);
           const proposed = yield* solo.call("banneret_memory_propose", {
             key: "indent",
             why: "Keep formatting consistent.",
@@ -577,12 +654,25 @@ describe("agent toolkit listing", () => {
           asked.length = 0;
           for (const token of ["solo", "scratch-solo", "unjoined", "broken"]) {
             const other = yield* session(token);
-            expect(yield* other.tools).toEqual([...memoryNames, "upstream_tool"].sort());
+            const offered = ["broken", "unjoined"].includes(token) ? [] : skillNames;
+            expect(yield* other.tools).toEqual(
+              [...memoryNames, ...offered, "upstream_tool"].sort(),
+            );
             expect(yield* other.prompts).toEqual([]);
             expect((yield* other.prompt("banneret_start_task")).error).toBeDefined();
-            expect(yield* other.resources).toEqual([]);
+            expect((yield* other.resources).sort()).toEqual(
+              offered.length
+                ? [
+                    JOIN_URI,
+                    ...defaults.map((s) => `skill://${s.name}/`),
+                    ...(token === "solo" ? ["skill://release-test/"] : []),
+                  ].sort()
+                : [],
+            );
             expect((yield* other.call("banneret_board", {})).error).toBeDefined();
-            expect((yield* other.read).error).toBeDefined();
+            if (offered.length)
+              expect(JSON.stringify((yield* other.read).result)).toContain("how-to-write-a-skill");
+            else expect((yield* other.read).error).toBeDefined();
           }
           // Neither the Solo thread nor the thread of a relay this machine never joined asked any relay.
           expect(asked).toEqual([]);
@@ -643,7 +733,7 @@ describe("agent toolkit listing", () => {
           Effect.flatMap((response) => response.json),
         )) as { result: { capabilities: { tools?: { listChanged?: boolean } } } };
         expect(discover.result.capabilities.tools?.listChanged).toBe(true);
-        expect(yield* toolNames).toEqual([...memoryNames, "upstream_tool"].sort());
+        expect(yield* toolNames).toEqual([...memoryNames, ...skillNames, "upstream_tool"].sort());
 
         const notices = yield* post("subscriptions/listen", {
           notifications: { toolsListChanged: true },
@@ -669,6 +759,7 @@ describe("agent toolkit listing", () => {
         expect(yield* toolNames).toEqual(
           [
             ...memoryNames,
+            ...skillNames,
             ...BANNERET_AGENT_TOOLS.filter((name) => name !== "banneret_lease_withdraw"),
             "upstream_tool",
           ].sort(),
@@ -938,6 +1029,29 @@ describe("agent lease tools against the fake relay", () => {
         }),
       ),
   );
+
+  it.live("serves an advertised locked company skill through the enrolled machine", () => {
+    const company = {
+      name: "lease-rules",
+      description: "Company rules.",
+      text: "---\nname: lease-rules\ndescription: Company rules.\n---\nCheck the company board.",
+      locked: true,
+    };
+    return withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            yield* joinWithBoard(fake, relay);
+            expect(yield* call("banneret_skills_get", { name: company.name })).toMatchObject({
+              ...company,
+              layer: "company",
+            });
+          }),
+        ),
+      { skills: [company] },
+    );
+  });
 
   it.live(
     "replays a claimed chat delivery on restart and stops progress after the session ends",

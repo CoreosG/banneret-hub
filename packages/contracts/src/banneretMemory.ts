@@ -24,6 +24,7 @@ const reviewAction = Schema.Union([
 ]);
 export type MemoryReviewAction = typeof reviewAction.Type;
 const reviewNote = Schema.Struct({
+  previousSkill: Schema.optional(Schema.String),
   alternative: Schema.optional(Schema.String),
   key: Schema.String,
   text: Schema.String,
@@ -148,6 +149,19 @@ export const MEMORY_RPCS = [
     ),
     error,
   }),
+  Rpc.make("memory.skills", {
+    payload: Schema.Struct({ threadId: ThreadId }),
+    success: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        description: Schema.String,
+        layer: Schema.String,
+        locked: Schema.Boolean,
+        trust: Schema.String,
+      }),
+    ),
+    error,
+  }),
   Rpc.make("memory.list", {
     payload: Schema.Struct({ threadId: ThreadId, pendingOnly: Schema.Boolean }),
     success: Schema.Array(reviewNote),
@@ -173,6 +187,7 @@ export const MEMORY_RPC_SCOPES = {
   "memory.exportFiles": AuthSettingsWriteScope,
   "memory.targets": AuthSettingsWriteScope,
   "memory.review": AuthSettingsWriteScope,
+  "memory.skills": AuthOrchestrationOperateScope,
   "memory.list": AuthOrchestrationOperateScope,
   "memory.summary": AuthOrchestrationOperateScope,
   "memory.getSetting": AuthOrchestrationReadScope,
@@ -190,6 +205,7 @@ export const MEMORY_RPC_AGGREGATES = {
   "memory.exportFiles": "leases",
   "memory.targets": "leases",
   "memory.review": "leases",
+  "memory.skills": "leases",
   "memory.list": "leases",
   "memory.summary": "leases",
   "memory.getSetting": "leases",

@@ -249,6 +249,13 @@ export function banneretBrandPlugin({ vite = false, cli = false } = {}) {
       : {}),
     load(id) {
       const file = id.split("?")[0];
+      if (cli && file.endsWith("/banneret/skills/defaults.ts")) {
+        const dir = NodePath.join(NodePath.dirname(file), "defaults");
+        const texts = NodeFS.readdirSync(dir)
+          .sort()
+          .map((name) => NodeFS.readFileSync(NodePath.join(dir, name, "SKILL.md"), "utf8"));
+        return { code: "export const defaultText = " + JSON.stringify(texts), moduleType: "js" };
+      }
       if (!CATALOG_PATTERN.test(file) || file.includes("node_modules")) return null;
       const catalog = JSON.parse(NodeFS.readFileSync(file, "utf8"));
       const code = JSON.stringify(rebrandCatalog(catalog, renamesFor(NodePath.dirname(file))));
