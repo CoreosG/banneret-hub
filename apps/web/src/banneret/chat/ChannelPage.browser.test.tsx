@@ -17,7 +17,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { commands, page } from "vite-plus/test/browser";
 import { act, render } from "../../../test/render";
 import { SidebarProvider } from "../../components/ui/sidebar";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../../state/environments";
 import { storeEnrolmentView } from "../enrolmentStore";
 import { feedRpc } from "../relayFeedStore";
 import { useWorkspacesStore } from "../workspacesStore";
@@ -64,6 +64,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     me: { login: "ada", role: "founder" },
   });
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(env);
+  vi.mocked(useConnectedEnvironmentIds).mockReturnValue([]);
   vi.spyOn(feedRpc, "today").mockResolvedValue(null);
   vi.spyOn(feedRpc, "needs").mockResolvedValue(null);
   let publish: ((state: BanneretFeedState) => void) | undefined;
@@ -162,26 +163,26 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   const input = screen.getByRole("textbox", { name: "Channel message" });
   await input.fill("Upload flow checked.");
   await screen.getByRole("button", { name: "Send message" }).click();
-  await expect.element(screen.getByText("Upload flow checked.")).toBeVisible();
-  expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: true });
+  const messageRow = (text: string) => screen.getByRole("article").filter({ hasText: text });
+  await expect.element(messageRow("Upload flow checked.")).toBeVisible();
+  await vi.waitFor(() =>
+    expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: true }),
+  );
   await screen.getByRole("button", { name: /1 reply/ }).click();
-  expect(router.state.location.search).toMatchObject({ thread: message });
+  await vi.waitFor(() => expect(router.state.location.search).toMatchObject({ thread: message }));
   const reply = screen.getByRole("textbox", { name: "Thread reply" });
   await reply.fill("Test passed on Linux.");
   await screen.getByRole("button", { name: "Send message" }).last().click();
-  await expect.element(screen.getByText("Test passed on Linux.")).toBeVisible();
+  await expect.element(messageRow("Test passed on Linux.")).toBeVisible();
   expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
   await proof("thread");
-  const own = screen.getByText("Test passed on Linux.").element().closest("article")!;
-  await page
-    .elementLocator(own)
+  await messageRow("Test passed on Linux.")
     .getByRole("button", { name: "Edit", exact: true })
     .click({ force: true });
   await reply.fill("Checked on Linux.");
   await screen.getByRole("button", { name: "Send message" }).last().click();
-  await expect.element(screen.getByText("Checked on Linux.")).toBeVisible();
-  await page
-    .elementLocator(own)
+  await expect.element(messageRow("Checked on Linux.")).toBeVisible();
+  await messageRow("Checked on Linux.")
     .getByRole("button", { name: "Delete", exact: true })
     .click({ force: true });
   await expect.element(screen.getByText("Message deleted")).toBeVisible();
@@ -194,7 +195,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   const dm = screen.getByRole("textbox", { name: "Direct message" });
   await dm.fill("Can we review the release together?");
   await screen.getByRole("button", { name: "Send message" }).click();
-  await expect.element(screen.getByText("Can we review the release together?")).toBeVisible();
+  await expect.element(messageRow("Can we review the release together?")).toBeVisible();
   await proof("group-dm");
   await act(() => useWorkspacesStore.setState({ activeId: null }));
   await expect.element(screen.getByText("Channels", { exact: true })).not.toBeInTheDocument();
