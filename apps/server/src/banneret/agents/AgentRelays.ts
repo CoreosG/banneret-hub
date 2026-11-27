@@ -58,6 +58,9 @@ export const offeredTools = (
       .map((tool) => tool.name),
   );
 
+/** Offer inputs as one comparable string. */
+const inputsKey = (inputs: ReadonlyArray<unknown>) => JSON.stringify(inputs);
+
 const readFailed = () =>
   new OrchestratorMcpFailure({
     code: "orchestration_error",
@@ -73,6 +76,14 @@ export class BanneretAgentRelays extends Context.Service<
     ) => Effect.Effect<AgentRelay | null, OrchestratorMcpFailure>;
     /** The agent tools offered to the thread, kept briefly. Never fails: on any error nothing is offered. */
     readonly offered: (threadId: ThreadId) => Effect.Effect<ReadonlySet<string>>;
+    /**
+     * What every offer on this machine is computed from, read from local state only: each Enterprise
+     * workspace's relay and projects, its enrolment, and its `mcpTools` once joined. When it changes, an offer
+     * may have changed. Undefined when it could not be read.
+     */
+    readonly offerInputs: Effect.Effect<string | undefined>;
+    /** Drops every kept offer, so the next list reads the current one. */
+    readonly forgetOffers: Effect.Effect<void>;
   }
 >()("t3/banneret/agents/AgentRelays/BanneretAgentRelays") {}
 
@@ -125,9 +136,36 @@ export const layer = Layer.effect(
       Cache.get(offers, threadId),
     );
 
+    const offerInputs = Effect.gen(function* () {
+      const { workspaces } = yield* Workspaces.list().pipe(Effect.provideContext(context));
+      const inputs: Array<unknown> = [];
+      for (const workspace of workspaces) {
+        if (workspace.kind !== "enterprise" || workspace.relay === undefined || workspace.deleted)
+          continue;
+        const view = yield* enrolment.status(workspace.relay.origin);
+        // Only a joined relay's tools are read, as in forThread, so a machine that never joined asks none.
+        const joined = view.state === "configured" && view.me !== undefined;
+        inputs.push([
+          workspace.relay.origin,
+          workspace.projectKeys.toSorted(),
+          view.state,
+          view.me?.login ?? null,
+          view.me?.role ?? null,
+          joined ? yield* feed.mcpTools(view.relayOrigin) : null,
+        ]);
+      }
+      return inputsKey(inputs);
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Banneret agent offer inputs failed", cause).pipe(Effect.as(undefined)),
+      ),
+    );
+
     return BanneretAgentRelays.of({
       forThread,
       offered,
+      offerInputs,
+      forgetOffers: Cache.invalidateAll(offers),
     });
   }),
 );
