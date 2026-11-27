@@ -1,52 +1,18 @@
 {
-  "people": [
-    {
-      "id": "p_7Hq2xK",
-      "login": "ada-example",
-      "role": "founder",
-      "sessions": [
-        {
-          "id": "s_q8Lm2Vx",
-          "machineId": "m_4fT9wQ",
-          "provider": "claude",
-          "state": "working",
-          "taskId": "t_K9w3Ls",
-          "since": "2026-11-26T09:12:00Z"
-        },
-        {
-          "id": "s_h3Pw7Nc",
-          "parentId": "s_q8Lm2Vx",
-          "machineId": "m_4fT9wQ",
-          "provider": "claude",
-          "state": "waiting",
-          "waiting": "permission",
-          "taskId": "t_K9w3Ls",
-          "since": "2026-11-26T09:58:00Z"
-        },
-        {
-          "id": "s_n5Gk8Dw",
-          "machineId": "m_4fT9wQ",
-          "provider": "codex",
-          "state": "idle",
-          "since": "2026-11-26T09:20:00Z"
-        }
-      ]
-    },
-    {
-      "id": "p_3Nc8vR",
-      "login": "bo-example",
-      "role": "limited_staff",
-      "sessions": [
-        {
-          "id": "s_w2Jx6Tb",
-          "machineId": "m_8kD2pZ",
-          "provider": "codex",
-          "state": "not_heard_from",
-          "taskId": "t_P5n2Hd",
-          "since": "2026-11-26T08:41:10Z"
-        }
-      ]
-    },
-    { "id": "p_9Lk4mS", "login": "cy-example", "role": "limited_staff", "sessions": [] }
-  ]
+  "rooms": [],
+  "agents": [],
+  "hallway": {
+    "counts": {
+      "working": 0,
+      "waiting": 0,
+      "idle": 0,
+      "notHeardFrom": 0,
+      "stopped": 0
+    }
+  },
+  "office": {},
+  "people": {
+    "total": 1
+  },
+  "agentsNextCursor": null
 }

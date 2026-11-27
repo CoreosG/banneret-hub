@@ -1485,13 +1485,215 @@ paths:
         "413": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /team/me:
+    put:
+      operationId: editTeamPresence
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamEdit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamPresence'
+        default:
+          $ref: '#/components/responses/Error'
+  /team/rooms/{board}:
+    put:
+      operationId: setRoomMeeting
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - name: board
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamMeeting'
+      responses:
+        '204':
+          description: OK
+        default:
+          $ref: '#/components/responses/Error'
+  /team/office:
+    put:
+      operationId: setOfficeMeeting
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamMeeting'
+      responses:
+        '204':
+          description: OK
+        default:
+          $ref: '#/components/responses/Error'
+  /team/agents:
+    get:
+      operationId: listTeamAgents
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamAgentsPage'
+        default:
+          $ref: '#/components/responses/Error'
+  /team/people:
+    get:
+      operationId: listTeamPeople
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      - name: q
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotTeamPeople'
+        default:
+          $ref: '#/components/responses/Error'
+  /team/rooms/{board}/sessions:
+    get:
+      operationId: listRoomSessions
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - name: board
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - $ref: '#/components/parameters/Cursor'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotTeamRoom'
+        default:
+          $ref: '#/components/responses/Error'
+  /team/hallway/sessions:
+    get:
+      operationId: listHallwaySessions
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotTeamRoom'
+        default:
+          $ref: '#/components/responses/Error'
+  /team/heartbeats:
+    get:
+      operationId: readTeamHeartbeats
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - name: sessions
+        in: query
+        required: true
+        style: form
+        explode: false
+        schema:
+          type: array
+          items:
+            $ref: '#/components/schemas/Id'
+          maxItems: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamHeartbeats'
+        default:
+          $ref: '#/components/responses/Error'
   /machines:
     get:
       tags: [machines]
       operationId: listMachines
       summary: The Team machines list.
       description: |
-        Every enrolled person sees every live (not revoked) machine of the relay, whoever owns it. A revoked machine
+        Owners and founders see their machines. Founders see all machines. Colleagues see only machines shared with their name. A revoked machine
         is listed only to its owner and to founders, with `revokedAt` set; everyone else never sees it. Live machines
         come first, newest heartbeat first (machines never heard from last); revoked machines follow, most recently
         revoked first.
@@ -1766,7 +1968,7 @@ paths:
         the next event. With `Last-Event-ID` the relay replays the caller's events after that id, reaching back
         over the smaller of the last 1000 events and the last 24 hours. When the relay no longer holds every event
         after that id, or does not know the id, it sends one `reset` event instead of a replay, then continues live; on `reset` the client refetches
-        `GET /today`, `GET /needs` and `GET /capabilities`. A comment line (`:`) is sent every 25 seconds. Only `mention` and `chat.changed` may carry content. Chat events omit the id and bypass replay.
+        `GET /today`, `GET /needs` and `GET /capabilities`. A comment line (`:`) is sent every 25 seconds. Only `mention`, `team.changed` and `chat.changed` may carry content. Chat events omit the id and bypass replay.
         On reconnect read /chat/changes and /chat/deliveries. The stream is closed when the machine is
         revoked or its person is removed.
       parameters:
@@ -1785,6 +1987,8 @@ paths:
         mention: { $ref: "#/components/schemas/MentionEvent" }
         bundle.changed: { $ref: "#/components/schemas/BundleChangedEvent" }
         staff.removed: { $ref: "#/components/schemas/StaffRemovedEvent" }
+        team.changed: { $ref: "#/components/schemas/TeamChangedEvent" }
+        team.rooms_changed: { $ref: "#/components/schemas/TeamRoomsChangedEvent" }
         capabilities.changed: { $ref: "#/components/schemas/CapabilitiesChangedEvent" }
         reset: { $ref: "#/components/schemas/ResetEvent" }
       responses:
@@ -1843,6 +2047,7 @@ paths:
       operationId: getSnapshotFile
       summary: One immutable snapshot file.
       description: |
+        Serve gzip when the request accepts it. Hash the uncompressed JSON bytes.
         `sha256` is the lowercase hex of the file's SHA-256, which is the value in the head
         without its `sha256:` prefix. The body's SHA-256 always equals it, and a client may check this. A file is
         served only while one of the caller's retained heads names it (see README, Snapshot). A malformed, unknown,
@@ -3741,6 +3946,10 @@ components:
               type: object
               description: Optional machine-readable detail, such as the refused field name. Never secrets.
     Capabilities:
+      allOf:
+        - if: { required: [sections], properties: { sections: { contains: { properties: { kind: { const: team } } } } } }
+          then: { required: [team] }
+          else: { not: { required: [team] } }
       if:
         required: [sections]
         properties:
@@ -3775,6 +3984,7 @@ components:
           type: array
           maxItems: 64
           items: { $ref: "#/components/schemas/Section" }
+        team: { $ref: "#/components/schemas/TeamConfig" }
         chat: { $ref: "#/components/schemas/ChatLimits" }
         dashboards: { $ref: "#/components/schemas/Dashboards" }
         mcpTools:
@@ -3836,6 +4046,11 @@ components:
             properties:
               version: { const: 1 }
               flags: { type: array, uniqueItems: true, items: { enum: [channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, task_links, reactions, search, promote] } }
+        - if: { properties: { kind: { const: team } } }
+          then:
+            properties:
+              version: { const: 2 }
+              flags: { type: array, uniqueItems: true, items: { enum: [presence,status,sharing,meeting_links] } }
         - if: { properties: { kind: { const: board } } }
           then:
             required: [params]
@@ -3886,6 +4101,8 @@ components:
         environmentId: { $ref: "#/components/schemas/EnvironmentId" }
         label: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$" }
         kind: { type: string, enum: [laptop, desktop, server, cloud] }
+        share: { type: string, enum: [agents_only, agents_and_name, hidden] }
+        shareUsage: { type: boolean }
         poolHostId: { $ref: "#/components/schemas/Id" }
         hostname: { type: string, pattern: "^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$" }
         os: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,63}$" }
@@ -4438,9 +4655,12 @@ components:
               description: Present when the `feed` section carries the flag `graveyard`. The latest 100 entries.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
             team:
-              description: Present when the relay advertises the `team` section. Every person and their live agent sessions (SnapshotTeam).
+              description: Present when the relay advertises the `team` section. Summary of rooms and lead agent counts (SnapshotTeam).
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
+            team.people: { $ref: "#/components/schemas/FileRef" }
+            team.hallway: { $ref: "#/components/schemas/FileRef" }
           patternProperties:
+            '^team\.room\.[A-Za-z0-9_-]{1,64}$': { $ref: "#/components/schemas/FileRef" }
             "^board\\.[A-Za-z0-9_-]{1,64}$":
               description: |
                 One board (SnapshotBoard), named by the `id` it has in the `boards` index. One key per board in the
@@ -4619,6 +4839,7 @@ components:
       additionalProperties: false
       required: [holder, state, since, lastSignalAt, staleAt, expiresAt]
       properties:
+        claim: { type: string, description: "Holder login and shared machine label separated by /. A private machine uses private as the label." }
         holder: { $ref: "#/components/schemas/PersonRef" }
         state: { $ref: "#/components/schemas/OpenToken" }
         since: { description: "When the lease began: the holder's claim comment time. For an `incomplete` lease with no standing claim, the fold gives the released holder's claim time, or null when no claim comment backs it (README, \"Lease protocol\"); the fold does not choose a fallback.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
@@ -4913,8 +5134,8 @@ components:
         ignoredReason: { type: string, minLength: 1, maxLength: 240 }
     SnapshotMachines:
       description: |
-        The caller's full `GET /machines` list in the same order, with the same visibility and `revocable` for the
-        caller. `truncated` is true when the list was cut at `maxItems`; the client then pages `GET /machines`.
+        Live machines that share their name with colleagues. The administrative GET /machines list also includes
+        private machines visible to the caller. Truncated is true when the snapshot reaches its item cap and more remain.
       type: object
       required: [items, truncated]
       properties:
@@ -4927,35 +5148,319 @@ components:
       properties:
         items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Repository" } }
         truncated: { type: boolean }
-    SnapshotTeam:
-      description: |
-        Who is working on what (README, "Team"): every non-removed member of the staff directory, including people who
-        have never signed in, each with their live agent sessions. Relay-wide: every caller gets the same file. Machines come from the `machines` file and leases from
-        the board files, so neither is repeated here. No field changes on every heartbeat. Closed, and no title,
-        prompt, branch or path of any kind.
+    TeamCounts:
       type: object
       additionalProperties: false
-      required: [people]
+      required:
+      - working
+      - waiting
+      - notHeardFrom
+      - idle
+      - stopped
       properties:
-        people: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/TeamPerson" } }
+        working:
+          type: integer
+          minimum: 0
+        waiting:
+          type: integer
+          minimum: 0
+        notHeardFrom:
+          type: integer
+          minimum: 0
+        idle:
+          type: integer
+          minimum: 0
+        stopped:
+          type: integer
+          minimum: 0
+    TeamStatus:
+      type: object
+      additionalProperties: false
+      required:
+      - text
+      properties:
+        text:
+          type: string
+          maxLength: 80
+          x-maxBytes: 80
+    TeamConfig:
+      type: object
+      additionalProperties: false
+      required:
+      - preset
+      - stoppedKeptSeconds
+      properties:
+        preset:
+          type: string
+          enum:
+          - company
+          - community
+        stoppedKeptSeconds:
+          const: 3600
+    TeamMeeting:
+      type: object
+      additionalProperties: false
+      required:
+      - meetingUrl
+      properties:
+        meetingUrl:
+          anyOf:
+          - type: string
+            format: uri
+            pattern: ^https://[^/@?#\\\s]+(?:[/?#][^\s\\]*)?$
+            maxLength: 300
+            x-maxBytes: 300
+          - type: 'null'
+    TeamEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        presence:
+          type: string
+          enum:
+          - available
+          - focusing
+          - away
+          - 'off'
+        status:
+          anyOf:
+          - $ref: '#/components/schemas/TeamStatus'
+          - type: 'null'
+        seatBoard:
+          anyOf:
+          - $ref: '#/components/schemas/Id'
+          - type: 'null'
+    TeamPresence:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - presence
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        presence:
+          type: string
+          enum:
+          - available
+          - focusing
+          - away
+          - 'off'
+        status:
+          $ref: '#/components/schemas/TeamStatus'
+        seatBoard:
+          $ref: '#/components/schemas/Id'
+    TeamChangedEvent:
+      type: object
+      additionalProperties: false
+      required:
+      - person
+      properties:
+        person:
+          $ref: '#/components/schemas/TeamPresence'
+    TeamRoomsChangedEvent:
+      type: object
+      additionalProperties: false
     TeamPerson:
-      description: One person, in login order. A person with no live session has an empty `sessions`.
       type: object
       additionalProperties: false
-      required: [id, login, role, sessions]
+      required:
+      - id
+      - login
+      - role
+      - presence
       properties:
-        id: { $ref: "#/components/schemas/Id" }
-        login: { $ref: "#/components/schemas/Login" }
-        role: { $ref: "#/components/schemas/Role" }
-        sessions: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TeamSession" } }
+        id:
+          $ref: '#/components/schemas/Id'
+        login:
+          $ref: '#/components/schemas/Login'
+        role:
+          $ref: '#/components/schemas/Role'
+        displayName:
+          type: string
+          maxLength: 80
+        presence:
+          type: string
+          enum:
+          - available
+          - focusing
+          - away
+          - 'off'
+        status:
+          $ref: '#/components/schemas/TeamStatus'
+        seatBoard:
+          $ref: '#/components/schemas/Id'
+    SnapshotTeamPeople:
+      x-maxJsonBytes: 163840
+      type: object
+      additionalProperties: false
+      required:
+      - people
+      - nextCursor
+      properties:
+        people:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamPerson'
+          maxItems: 500
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    SnapshotTeamRoom:
+      x-maxJsonBytes: 98304
+      type: object
+      additionalProperties: false
+      required:
+      - sessions
+      - nextCursor
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamSession'
+          maxItems: 300
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    TeamHeartbeats:
+      type: object
+      additionalProperties: false
+      required:
+      - asOf
+      - sessions
+      properties:
+        asOf:
+          $ref: '#/components/schemas/Timestamp'
+        sessions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - id
+            - heardAt
+            properties:
+              id:
+                $ref: '#/components/schemas/Id'
+              heardAt:
+                $ref: '#/components/schemas/Timestamp'
+          maxItems: 50
+    TeamAgentsPage:
+      x-maxJsonBytes: 65536
+      type: object
+      additionalProperties: false
+      required: [agents,nextCursor]
+      properties:
+        agents: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/TeamAgentCounts" } }
+        nextCursor: { type: [string,"null"] }
+    TeamAgentCounts:
+      type: object
+      additionalProperties: false
+      required:
+      - personId
+      - counts
+      - rooms
+      properties:
+        personId:
+          $ref: '#/components/schemas/Id'
+        counts:
+          $ref: '#/components/schemas/TeamCounts'
+        rooms:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - board
+            - waiting
+            properties:
+              board:
+                $ref: '#/components/schemas/Id'
+              waiting:
+                type: integer
+                minimum: 0
+          maxItems: 50
+    SnapshotTeam:
+      x-maxJsonBytes: 65536
+      type: object
+      additionalProperties: false
+      required:
+      - rooms
+      - hallway
+      - agentsNextCursor
+      - agents
+      - office
+      - people
+      properties:
+        rooms:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - board
+            - active
+            - desks
+            - counts
+            properties:
+              board:
+                $ref: '#/components/schemas/Id'
+              meetingUrl:
+                type: string
+                format: uri
+                pattern: ^https://[^/@?#\\\s]+(?:[/?#][^\s\\]*)?$
+                maxLength: 300
+                x-maxBytes: 300
+              active:
+                type: integer
+                minimum: 0
+              desks:
+                type: integer
+                minimum: 0
+              counts:
+                $ref: '#/components/schemas/TeamCounts'
+          maxItems: 50
+        hallway:
+          type: object
+          additionalProperties: false
+          required:
+          - counts
+          properties:
+            counts:
+              $ref: '#/components/schemas/TeamCounts'
+        agents: { type: array, items: { $ref: "#/components/schemas/TeamAgentCounts" } }
+        agentsNextCursor: {type: [string, "null"]}
+        office:
+          type: object
+          additionalProperties: false
+          properties:
+            meetingUrl:
+              type: string
+              format: uri
+              pattern: ^https://[^/@?#\\\s]+(?:[/?#][^\s\\]*)?$
+              maxLength: 300
+              x-maxBytes: 300
+        people:
+          type: object
+          additionalProperties: false
+          required:
+          - total
+          properties:
+            total:
+              type: integer
+              minimum: 0
     TeamSession:
       description: |
-        One live agent session of the person, from their machines' latest heartbeats. Stopped sessions, sessions of
-        revoked machines and sessions of machines not heard from for 24 hours are left out.
+        A visible agent session. A stopped session is retained for stoppedKeptSeconds.
       type: object
       additionalProperties: false
-      required: [id, machineId, provider, state, since]
+      required: [id, personId, provider, state, since]
       properties:
+        personId: { $ref: "#/components/schemas/Id" }
+        handle: { type: string, maxLength: 160 }
+        stopReason: { $ref: "#/components/schemas/OpenToken" }
         id:
           description: The session's `sessionId` from the facts, opaque.
           allOf: [{ $ref: "#/components/schemas/Id" }]

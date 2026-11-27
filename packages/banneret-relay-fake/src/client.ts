@@ -107,7 +107,7 @@ export class RelayClient {
     });
   }
 
-  /** Opens the signed stream. Live chat events intentionally have no replay id. */
+  /** Opens the signed stream. Live Team and chat events intentionally have no replay id. */
   async events(key: MachineKey, token: string, device: string, lastEventId?: string) {
     const response = await this.raw(key, "GET", "/relay/v1/events", {
       token,

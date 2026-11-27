@@ -24,7 +24,7 @@ All under `/relay/v1`.
 | `GET /capabilities` | Display name, icon and enrolment entry point for anyone; sections, MCP tools, adapters and `me` for an enrolled caller. |
 | `POST /enroll/start` | Start enrolment with the machine's public key and facts; returns a pairing id, confirm code and browser URL. |
 | `POST /enroll/poll` | `pending`, `awaiting_approval`, `approved`, `refused` or `expired`; the device token once, on approval. |
-| `GET /machines` | The Team machines list, paged: every live machine for everyone, revoked ones for their owner and founders. |
+| `GET /machines` | The Team machines list, paged: named machines for colleagues, all machines for founders, revoked ones for their owner and founders. |
 | `DELETE /machines/{machineId}` | Revoke a machine (its owner or a founder). |
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
 | `GET /today` | Needs you, shipped, working, stuck and optionally health. `?since=...` filters shipped work (see below). |
@@ -261,7 +261,7 @@ page). Cursors are opaque. Today's needs-you block holds at most 20 items, and i
 
 ## Machines
 
-`GET /machines` shows every enrolled person every live (not revoked) machine of the relay, whoever owns it. A
+`GET /machines` lists named machines for colleagues, all own machines, and all machines for founders. A
 revoked machine is listed only to its owner and to founders, with `revokedAt` set, `connected` false and
 `revocable` false; nobody else sees it. Live machines come first, newest heartbeat first; revoked machines follow,
 most recently revoked first. `DELETE /machines/{machineId}` answers 404 `not_found` for a malformed or unknown
@@ -296,7 +296,7 @@ Error `code` is an open set too. A client treats an unknown error code by its HT
 `GET /snapshot/head` and `GET /snapshot/files/{sha256}` give the same facts as `GET /needs`,
 `GET /today` (working, stuck, health), `GET /machines` and `GET /repositories`, packed as files a client can cache
 forever. Those files carry nothing those calls do not already return to the same caller. The files the table below marks
-as snapshot only (the boards, the map and the team) have no live call.
+as snapshot only (the boards and the map) have no live call.
 
 - **Per person.** The head belongs to the caller's person. Every machine of one person gets the same head. Files are
   stored once by hash, so two people with identical bytes share one stored file. A file is readable only while one
@@ -306,7 +306,7 @@ as snapshot only (the boards, the map and the team) have no live call.
   The head key decides the schema of the file: `needs` is `SnapshotNeeds`, `health` is `HealthBlock`, `work` is
   `SnapshotWork` (working and stuck; shipped is left out, because it is relative to the last visit),
   `machines` is `SnapshotMachines`, `repositories` is `SnapshotRepositories`, `boards` is `SnapshotBoards`, each
-  `board.<id>` is `SnapshotBoard`, and `map`, `feed` and `graveyard` are `SnapshotMap`, `FeedPage` and `GraveyardPage`, and `team` is `SnapshotTeam`. A client ignores keys under `files` it does not know.
+  `board.<id>` is `SnapshotBoard`, and `map`, `feed` and `graveyard` are `SnapshotMap`, `FeedPage` and `GraveyardPage`, and the Team keys are `team`, `team.people`, `team.room.<board>` and `team.hallway` (see Team). A client ignores keys under `files` it does not know.
 - **Immutable.** A file never changes, and its body hashes to its name. A changed fact produces a new file and a new
   head. The relay stores a file before it publishes a head that names it, so a client that reads a head can always
   fetch its files.
@@ -338,14 +338,14 @@ What the files hold, and who sees what, is the same as the live calls:
 | needs | `Today.needsYou` for the caller | person |
 | health | `Today.health` for the caller | role |
 | work | `Today.working` and `Today.stuck` for the caller | role, in practice |
-| machines | `GET /machines` for the caller | person (revoked machines for owner and founders; `revocable`) |
+| machines | Live machines shared with their name | person (revocation permission) |
 | repositories | `GET /repositories` | nothing (relay-wide) |
 | boards | none (snapshot only) | nothing (relay-wide) |
 | `board.<id>` | none (snapshot only) | nothing (relay-wide) |
 | map | none (snapshot only) | nothing (relay-wide) |
 | feed | `GET /feed` | nothing (relay-wide) |
 | graveyard | `GET /graveyard` | nothing (relay-wide) |
-| team | none (snapshot only) | nothing (relay-wide) |
+| team files | Team paging calls | nothing (relay-wide) |
 
 "No titles" means no title, text or path that a Hub reported (a heartbeat never carries them). The tracker titles that
 `GET /needs` and `GET /today` already return to staff stay in the needs and work files.
@@ -717,52 +717,55 @@ unless capabilities carry the section.
 
 ## Team
 
-A relay that serves it advertises the section `{kind:"team", version:1, flags:[]}` and names the `team` file in the
-snapshot head. A Hub does not read the file unless capabilities carry the section. It answers "who is working on what
-right now": every person and their live agent sessions. The relay builds it from the heartbeats it already receives.
+The Team section has version 2 and flags `presence`, `status`, `sharing` and `meeting_links`.
+Capabilities also supplies `team {preset, stoppedKeptSeconds}`. The company and community presets share the same wire format.
+Read the sections and flags before displaying a feature. The summary keeps all room counts and as many
+agent rows as fit in 65,536 uncompressed bytes. Continue `agentsNextCursor` with `GET /team/agents?cursor=…`
+only when the view needs more rows. Pages return `{agents,nextCursor}` in person ID order, up to 100
+per call. Cursors are opaque and stable while the summary hash holds. Restart from the new summary when it changes.
 
-**The file.** `SnapshotTeam` is `{people[{id, login, role, sessions[{id, parentId?, machineId, provider, state,
-waiting?, taskId?, since}]}]}`. Objects are closed.
+| Snapshot head key | Contents | Maximum size before compression |
+|---|---|---|
+| `team` | Rooms in board order, hallway counts, agent counts per person and room, office link and directory size | 50 boards, 64 KiB |
+| `team.people` | Directory in login order, including staff who have never signed in | 500 people, 160 KiB |
+| `team.room.<board>` | Visible agent sessions on this board, including an empty page for an empty board | 300 sessions, 96 KiB |
+| `team.hallway` | Visible sessions without a board task | 300 sessions, 96 KiB |
 
-- `people` lists every non-removed member of the relay's staff directory, including people who have never signed in.
-  It lists up to 500 people in login order. A person with no live session has an empty `sessions`.
-- A session is one activity fact, reduced. `id` is the fact's `sessionId` and `parentId` its `parentSessionId`, present
-  only when that session is listed too. That makes the working tree: person, their orchestrator sessions, the helpers
-  under each.
-- `machineId` is the machine that reported it, as in the `machines` file. `provider` is an open token.
-- `taskId` is the board task the session works on: the fact's `taskId`, or the task the relay matched by branch and
-  `projectKey`, as for the working-now block. Absent when it knows none.
-- **No titles, prompts, branches or paths.** The Hub names the task from the board or the map it already holds.
-- **Not repeated here:** machines (owner, online, version, sandbox) are in the `machines` file, and leases and
-  assignees are in the board files.
-- **No churn.** No field changes on every heartbeat. `since` is when the session entered its current state, so the
-  file, and the head, change only when a state does.
+Each file is shared across heads and built once per change. Serve gzip when requested. Hash the uncompressed bytes.
+The first board in board order containing a session's task gets the session. Match by task ID, or by branch
+and project key. A room is a board. A desk belongs to a person with a claim or agent there.
+Count each lead (no listed parent) once, using the most urgent state in its subtree: waiting, not heard from,
+working, idle, stopped. A helper waiting on permission makes its working lead count as waiting. Room counts
+use the lead's room. Each person's room entry includes the number of waiting leads there.
 
-**State.** `state` is an open token. The relay sets it from the session's latest fact and its machine:
+`GET /team/people`, `GET /team/rooms/{board}/sessions` and `GET /team/hallway/sessions` take an opaque
+`cursor` and a `limit` from 1 to 100 (default 100). Continue with the returned `nextCursor` until null.
+For people, `q` matches the beginning of the login or display name, case-insensitively.
 
-| `state` | When |
+| Presence event | Stored values and live result |
 |---|---|
-| `working` | The fact says `working`. |
-| `waiting` | The fact says `waiting` on a `permission` or a `question`, and `processRunning` is true. `waiting` carries which. |
-| `idle` | The fact says `idle`, or any other `waiting` (such as a finished turn, `waiting` on `input` with `processRunning` false, that waits for the person's next message). |
-| `not_heard_from` | The session's machine has not been heard from for 90 seconds. `since` is when it was last heard. |
+| New staff member or store wipe | Off, empty status, no chosen room |
+| Signed `PUT /team/me` | Set only the supplied fields on the caller's row. Null clears status or chosen board. Broadcast the resulting person values in `team.changed`. |
+| Hub closes, machine sleeps, or relay restarts | Keep the stored values. The next directory snapshot restores missed live changes. |
+| Chosen room disappears or person has no desk there | Display the first desk in board order. Clear an obsolete choice on the next edit. |
+| Staff removed | Delete the row. |
 
-How each session moves:
+Presence is self-set: available, focusing, away or off. A status line holds up to 80 UTF-8 bytes.
+Person objects contain no timestamps. Machine heartbeats never change a person's state.
+Founders set or clear `meetingUrl` with `PUT /team/office` or `PUT /team/rooms/{board}`. Accept HTTPS URLs up
+to 300 UTF-8 bytes without credentials. Store the link without fetching it. The Hub opens it in the system browser.
+Both writes emit `team.rooms_changed`. Both Team events are live only, without a replay ID.
 
-| Event | The session |
-|---|---|
-| A heartbeat carries it | Takes the state above. `since` moves only when the state changed. |
-| A heartbeat no longer carries it | Ended: it leaves the file. |
-| The fact says `stopped` | Left out. |
-| Its machine is silent for more than 90 seconds | `not_heard_from`, with `since` the last-heard time. |
-| Its machine is silent for 24 hours, or is revoked | Left out. |
-| Its person is removed from staff | The person and their sessions leave the file. |
-| The relay restarts | It may keep `since` in memory only. After a restart, `since` starts again at the first heartbeat that carries the session. |
-
-**How a Hub groups it.** Not part of the contract. The Hub counts only sessions without a listed parent, and gives
-each the most urgent state in its own subtree, so a helper waiting on a permission under a working orchestrator shows
-as waiting. A waiting session of the viewer's own is **Needs you**, someone else's is **Waiting on someone else**,
-then **Not heard from** and **Working**. Idle sessions show only in the expanded tree.
+Each heartbeat carries the machine's sharing choice. The Hub defaults to `agents_only`. A missing choice
+means hidden. Hidden machines contribute no sessions. Only `agents_and_name` includes the session's
+`machineId` and lists the machine for colleagues. Owners and founders can manage machines.
+Claims stay visible. Use `<login>/private` when the machine name is private. Claim chips show live, paused or quiet.
+Status text and meeting links are UTF-8 byte limited. Schema validators must enforce `x-maxBytes` for strings and `x-maxJsonBytes` for serialized snapshot JSON.
+`shareUsage` controls disclosure of a stopped agent's reason. Keep stopped agents for 3,600 seconds.
+A waiting agent must be running and waiting for a permission or question. Other waits count as idle.
+After 90 seconds without a heartbeat a live agent becomes `not_heard_from`. Drop it after 24 hours or revocation.
+`since` changes when the agent changes state. `GET /team/heartbeats?sessions=a,b` returns the last heartbeat
+only for requested visible agents (at most 50 IDs). Read every 15 seconds only while their card and tab are visible.
 
 ## Task
 
@@ -1142,13 +1145,15 @@ On the existing `GET /events` stream:
 
 | Event | To | Payload |
 |---|---|---|
+| `team.changed` | enrolled staff, live only | `{person:{id,presence,status?,seatBoard?}}` |
+| `team.rooms_changed` | enrolled staff, live only | `{}` |
 | `chat.changed` | every person who may see the change, on all their machines | `{seq, change?}`. `change` is the full change (message with text) when it fits in 8 KiB, otherwise absent and the Hub reads `/chat/changes` |
 | `chat.delivery` | the handle's machine only | `{deliveryId, handleId}` |
 | `needs.changed` | the person | existing; raised for asks, mentions and DMs |
 | `mention` | the person | existing; carries the Needs-you item |
 | `reset` | as today | the Hub also re-reads `/chat/changes` from its last seq and `/chat/deliveries` |
 
-Only `mention` and `chat.changed` may include content. Live chat events omit the SSE event ID so reconnects retain the last replayable ID. `chat.changed` and `chat.delivery` are live only. They never enter the relay's 1000-event replay ring, so chat
+Only `mention`, `team.changed` and `chat.changed` may include content. Live Team and chat events omit the SSE event ID so reconnects retain the last replayable ID. `chat.changed` and `chat.delivery` are live only. They never enter the relay's 1000-event replay ring, so chat
 traffic cannot push other events out of it. After any reconnect the Hub reads `/chat/changes` from its last seq
 and `/chat/deliveries`, which are the truth.
 

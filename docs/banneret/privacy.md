@@ -13,8 +13,8 @@ Inc. T3 Tools' privacy policy does not apply to it.
   operating system and version; for threads in that workspace's projects only, each session's
   state, branch, provider, model, times and a hash of the repository name; and how much of each
   usage window your own Claude and Codex logins have used. Never prompts, replies, code, thread
-  titles or local paths. Everyone at that company can see each session's state, provider, machine
-  and task, never its content. Solo projects send nothing, and a machine that has not joined, or has
+  titles or local paths. Colleagues see a shared session's state, provider and task. They see the machine name only when you share it.
+  The Hub sends nothing about what you do. Your presence and status line are values you set yourself. Solo projects send nothing, and a machine that has not joined, or has
   left, contacts no relay.
 - **Third parties you choose.** Coding agents you connect (Codex, Claude Code, and others) send your
   prompts and code to their providers under those providers' terms.

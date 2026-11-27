@@ -84,6 +84,19 @@ export type SchemaName =
   | "SnapshotMap"
   | "FeedPage"
   | "GraveyardPage"
+  | "TeamCounts"
+  | "TeamStatus"
+  | "TeamConfig"
+  | "TeamMeeting"
+  | "TeamEdit"
+  | "TeamPresence"
+  | "TeamChangedEvent"
+  | "TeamRoomsChangedEvent"
+  | "TeamPerson"
+  | "SnapshotTeamPeople"
+  | "SnapshotTeamRoom"
+  | "TeamHeartbeats"
+  | "TeamAgentsPage"
   | "SnapshotTeam"
   | "TaskRead"
   | "PoolPolicy"
@@ -138,6 +151,16 @@ export const loadSpec = (): SpecValidator => {
   const schemas = components.schemas;
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   addFormats.default(ajv);
+  ajv.addKeyword({
+    keyword: "x-maxBytes",
+    type: "string",
+    validate: (max: number, value: string) => Buffer.byteLength(value) <= max,
+  });
+  ajv.addKeyword({
+    keyword: "x-maxJsonBytes",
+    type: "object",
+    validate: (cap: number, value: unknown) => Buffer.byteLength(JSON.stringify(value)) <= cap,
+  });
   ajv.addSchema({ $id: specUrl, components: { schemas } });
   const compiled = new Map<string, ValidateFunction>();
   for (const name of Object.keys(schemas)) {
@@ -245,6 +268,15 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "snapshot-map-not-measured.json": "SnapshotMap",
   "snapshot-feed.json": "FeedPage",
   "snapshot-graveyard.json": "GraveyardPage",
+  "snapshot-team-people.json": "SnapshotTeamPeople",
+  "snapshot-team-room.json": "SnapshotTeamRoom",
+  "team-edit.json": "TeamEdit",
+  "team-presence.json": "TeamPresence",
+  "team-meeting.json": "TeamMeeting",
+  "event-team-changed.json": "TeamChangedEvent",
+  "event-team-rooms-changed.json": "TeamRoomsChangedEvent",
+  "team-heartbeats.json": "TeamHeartbeats",
+  "team-agents-page.json": "TeamAgentsPage",
   "snapshot-team.json": "SnapshotTeam",
   "task.json": "TaskRead",
   "task-checked-ignored.json": "TaskRead",
@@ -290,6 +322,10 @@ const baseInvalidExampleSchema = (file: string): SchemaName =>
                                     : "FactsRequest");
 
 export const invalidExampleSchema = (file: string): SchemaName => {
+  if (file.startsWith("team-edit-")) return "TeamEdit";
+  if (file.startsWith("team-meeting-")) return "TeamMeeting";
+  if (file.startsWith("snapshot-team-room-")) return "SnapshotTeamRoom";
+  if (file.startsWith("snapshot-team-people-")) return "SnapshotTeamPeople";
   if (file.startsWith("pool-next-")) return "PoolNextResponse";
   if (file.startsWith("pool-state-")) return "PoolStateUpdate";
   if (file.startsWith("pool-facts-")) return "PoolHostFacts";

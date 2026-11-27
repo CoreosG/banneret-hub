@@ -448,7 +448,7 @@ export type BanneretTeamMachine = typeof BanneretTeamMachine.Type;
 export const BanneretTeamSession = Schema.Struct({
   id: Schema.String,
   parentId: Schema.optional(Schema.String),
-  machineId: Schema.String,
+  machineId: Schema.optional(Schema.String),
   provider: Schema.String,
   state: Schema.String,
   waiting: Schema.optional(Schema.String),
@@ -468,7 +468,7 @@ export const BanneretTeamPerson = Schema.Struct({
 });
 export type BanneretTeamPerson = typeof BanneretTeamPerson.Type;
 
-/** The relay's `team` file joined with its `machines` file, in the relay's (login) order. */
+/** The Team directory joined with room sessions and visible machines, in the relay's (login) order. */
 export const BanneretTeam = Schema.Struct({ people: Schema.Array(BanneretTeamPerson) });
 export type BanneretTeam = typeof BanneretTeam.Type;
 

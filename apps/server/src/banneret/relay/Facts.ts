@@ -423,7 +423,12 @@ export function factsRequestBody<Machine extends { readonly policyFingerprint: s
 ) {
   const usage = collected.usage.length === 0 ? {} : { usage: collected.usage };
   const withActivity = (activity: ReadonlyArray<ActivityFact>) => ({
-    machine: { ...machine, policyFingerprint: collected.policyFingerprint },
+    machine: {
+      share: "agents_only",
+      shareUsage: false,
+      ...machine,
+      policyFingerprint: collected.policyFingerprint,
+    },
     activity,
     ...usage,
   });

@@ -1,16 +1,20 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off extendsNativeError:off - a plain node:http test double with no Effect runtime.
+import { editPresence, emptyCounts, leadSessions } from "./team.ts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeHttp from "node:http";
+import * as NodeZlib from "node:zlib";
 import type * as NodeNet from "node:net";
 
 import {
   BANNERET_AGENT_TOOLS,
   BANNERET_POOL_TOOLS,
   foldLease,
+  parseLeaseLine,
   type LeaseComment,
   type LeaseFoldResult,
 } from "@t3tools/contracts/leaseProtocol";
 
+import type { TeamPresenceEdit, TeamPresenceValues } from "@t3tools/contracts";
 import type {
   ChatAnswer,
   ChatTask,
@@ -80,6 +84,7 @@ type ErrorCode =
 
 export interface PersonInput {
   readonly login: string;
+  readonly displayName?: string;
   readonly role?: Role;
   /** The person's registered network identity, checked only when `networkIdentityHeader` is set. */
   readonly networkIdentity?: string;
@@ -125,6 +130,7 @@ interface HealthSource {
 
 export interface FakeRelayOptions {
   readonly chat?: boolean;
+  readonly teamPreset?: "company" | "community";
   readonly promote?: boolean;
   readonly search?: boolean;
   readonly pool?: PoolConfig;
@@ -158,6 +164,7 @@ export interface FakeRelayOptions {
 }
 
 interface Person {
+  readonly displayName?: string;
   readonly id: string;
   readonly login: string;
   role: Role;
@@ -166,6 +173,8 @@ interface Person {
 }
 
 interface MachineFacts {
+  readonly share?: "hidden" | "agents_only" | "agents_and_name";
+  readonly shareUsage?: boolean;
   readonly environmentId: string;
   readonly label: string;
   readonly kind: string;
@@ -185,7 +194,7 @@ interface UsageFact {
 }
 
 /**
- * README, Team: the team state of each session a heartbeat carries. A stopped session is left out; a wait whose
+ * README, Team: the team state of each session a heartbeat carries. Stopped sessions are kept for one hour; a wait whose
  * process is not running is a finished turn, so it is idle. `since` stays while the state stays.
  */
 const nextTeamStates = (
@@ -200,15 +209,16 @@ const nextTeamStates = (
   const now = Date.now();
   const next = new Map<string, TeamState>();
   for (const fact of facts) {
-    if (fact.state === "stopped") continue;
     const state =
-      fact.state === "working"
-        ? "working"
-        : fact.state === "waiting" &&
-            fact.processRunning === true &&
-            (fact.waiting === "permission" || fact.waiting === "question")
-          ? "waiting"
-          : "idle";
+      fact.state === "stopped"
+        ? "stopped"
+        : fact.state === "working"
+          ? "working"
+          : fact.state === "waiting" &&
+              fact.processRunning === true &&
+              (fact.waiting === "permission" || fact.waiting === "question")
+            ? "waiting"
+            : "idle";
     const previous = before.get(fact.sessionId);
     next.set(fact.sessionId, {
       state,
@@ -219,6 +229,7 @@ const nextTeamStates = (
 };
 
 interface ActivityFact {
+  readonly stopReason?: string;
   readonly sessionId: string;
   readonly parentSessionId?: string;
   readonly threadId: string;
@@ -234,7 +245,7 @@ interface ActivityFact {
 
 /** A session's state in the team file (README, Team), and since when it has held it. */
 interface TeamState {
-  readonly state: "working" | "waiting" | "idle";
+  readonly state: "working" | "waiting" | "idle" | "stopped";
   readonly since: number;
 }
 
@@ -265,7 +276,7 @@ interface Machine {
   readonly enrolledAt: number;
   facts: MachineFacts;
   sessions: ReadonlyArray<ActivityFact>;
-  /** By session id: the team state of each session the latest heartbeat carried (stopped ones left out). */
+  /** By session id: the team state of each session the latest heartbeat carried or retained. */
   teamStates: ReadonlyMap<string, TeamState>;
   usage: ReadonlyArray<UsageFact>;
   lastHeardAt: number | null;
@@ -485,7 +496,7 @@ const NOT_HEARD_FROM_MS = 90 * 1000;
 /** README, Team: sessions of a machine silent this long leave the team file. */
 const TEAM_FORGET_MS = 24 * 60 * 60 * 1000;
 const TEAM_PEOPLE_MAX = 500;
-const TEAM_SESSIONS_MAX = 100;
+const TEAM_SESSIONS_MAX = 300;
 const HEARTBEAT_SECONDS = 30;
 const EVENT_LOG_SIZE = 1000;
 const EVENT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -556,6 +567,35 @@ const decodeCursor = (cursor: string): number => {
     field: "cursor",
   });
 };
+
+// Choose the longest prefix that fits, including the serialized cursor and enclosing object.
+function boundedPage<T>(
+  rows: readonly T[],
+  offset: number,
+  limit: number,
+  bytes: number,
+  envelope: (items: readonly T[], cursor: string | null) => unknown,
+) {
+  let low = 0,
+    high = Math.min(limit, Math.max(0, rows.length - offset));
+  const cursor = (length: number) =>
+    offset + length < rows.length ? encodeCursor(offset + length) : null;
+  if (
+    Buffer.byteLength(JSON.stringify(envelope(rows.slice(offset, offset + high), cursor(high)))) >
+    bytes
+  ) {
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (
+        Buffer.byteLength(JSON.stringify(envelope(rows.slice(offset, offset + mid), cursor(mid)))) >
+        bytes
+      )
+        high = mid - 1;
+      else low = mid;
+    }
+  }
+  return { items: rows.slice(offset, offset + high), nextCursor: cursor(high) };
+}
 
 const pageParams = (query: URLSearchParams) => {
   const cursor = query.get("cursor");
@@ -777,6 +817,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       // A lease seeded for this login before it enrolled already carries an id; keep it.
       id: holderIds.get(input.login) ?? randomId("p"),
       login: input.login,
+      ...(input.displayName && { displayName: input.displayName }),
       role: input.role ?? "limited_staff",
       networkIdentity: input.networkIdentity ?? null,
       removed: false,
@@ -1172,7 +1213,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
   // Every enrolled person sees every live machine; revoked ones only their owner and founders, after the live ones.
   const visibleMachines = (viewer: Person) => [
-    ...liveMachines(),
+    ...liveMachines().filter(
+      (m) =>
+        m.personId === viewer.id ||
+        viewer.role === "founder" ||
+        m.facts.share === "agents_and_name",
+    ),
     ...[...machines.values()]
       .filter(
         (machine) =>
@@ -1272,6 +1318,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const now = Date.now();
     const own = personalNeeds(person);
     const working = liveMachines().flatMap((machine) => {
+      if (!machine.facts.share || machine.facts.share === "hidden") return [];
       const owner = people.get(machine.personId);
       const live = machine.sessions.filter((session) => session.state !== "stopped");
       const first = live[0];
@@ -1429,6 +1476,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         ? undefined
         : {
             holder: task.holder,
+            claim: task.holder.login + "/private",
             state: leaseState(task, now),
             since: iso(task.since),
             lastSignalAt: iso(task.lastSignalAt),
@@ -1439,6 +1487,22 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const folded = foldTracker(task.tracker, now).lease;
     if (folded === null) return undefined;
     const holder = folded.holder;
+    const claim = task.tracker.comments.find(
+      (c) =>
+        c.author?.toLowerCase() === holder.toLowerCase() &&
+        c.createdAt === folded.since &&
+        c.updatedAt === c.createdAt,
+    );
+    const line = claim && parseLeaseLine(claim.body);
+    const suffix = line?.kind === "claim" ? line.agent : undefined;
+    const named =
+      suffix &&
+      liveMachines().some(
+        (m) =>
+          m.personId === peopleByLogin.get(holder)?.id &&
+          m.facts.share === "agents_and_name" &&
+          (m.id === suffix || m.facts.label.replace(/[^A-Za-z0-9._-]+/g, "-") === suffix),
+      );
     const latestComment = task.tracker.comments
       .filter(
         (comment) =>
@@ -1450,6 +1514,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const age = now - lastSignalAt;
     return {
       holder: personRefFor(holder),
+      claim: holder + "/" + (named ? suffix : "private"),
       state:
         folded.state !== "active"
           ? folded.state
@@ -1772,68 +1837,207 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             (task.projectKey === null || task.projectKey === fact.projectKey),
         );
 
-  // README, Team: every staff member and their live sessions. `since` moves only when a state changes.
-  const teamView = () => {
+  const presence = new Map<string, TeamPresenceValues>();
+  const meetings = new Map<string, string>();
+  const teamPeople = () =>
+    [...people.values()]
+      .filter((p) => !p.removed)
+      .sort((a, b) => a.login.localeCompare(b.login))
+      .map(({ id, login, role, displayName }) => ({
+        id,
+        login,
+        role,
+        ...(displayName && { displayName }),
+        ...(presence.get(id) ?? { presence: "off" as const }),
+      }));
+
+  const teamSessions = () => {
     const now = Date.now();
-    const staff = [...people.values()]
-      .filter((person) => !person.removed)
-      .toSorted((a, b) => a.login.localeCompare(b.login));
-    return {
-      people: staff.slice(0, TEAM_PEOPLE_MAX).map((person) => {
-        const sessions = liveMachines()
-          .filter(
-            (machine) =>
-              machine.personId === person.id &&
-              machine.lastHeardAt !== null &&
-              now - machine.lastHeardAt <= TEAM_FORGET_MS,
-          )
-          .flatMap((machine) => {
-            const heardAt = machine.lastHeardAt ?? now;
-            const heard = now - heardAt <= NOT_HEARD_FROM_MS;
-            return machine.sessions.flatMap((fact) => {
-              const team = machine.teamStates.get(fact.sessionId);
-              if (team === undefined) return [];
-              const taskId = fact.taskId ?? taskForBranch(fact)?.id;
-              return [
-                {
-                  fact,
-                  view: {
-                    id: fact.sessionId,
-                    machineId: machine.id,
-                    provider: fact.provider,
-                    state: heard ? team.state : "not_heard_from",
-                    ...(heard && team.state === "waiting" && fact.waiting !== undefined
-                      ? { waiting: fact.waiting as "permission" | "question" }
-                      : {}),
-                    ...(taskId === undefined ? {} : { taskId }),
-                    since: iso(heard ? team.since : heardAt),
-                  },
-                },
-              ];
-            });
-          })
-          .slice(0, TEAM_SESSIONS_MAX);
-        const listed = new Set(sessions.map(({ fact }) => fact.sessionId));
+    const rows = liveMachines()
+      .toSorted((a, b) => a.id.localeCompare(b.id))
+      .flatMap((machine) => {
+        const heardAt = machine.lastHeardAt;
+        if (
+          !machine.facts.share ||
+          machine.facts.share === "hidden" ||
+          heardAt === null ||
+          now - heardAt > TEAM_FORGET_MS
+        )
+          return [];
+        return machine.sessions.flatMap((fact) => {
+          const team = machine.teamStates.get(fact.sessionId);
+          if (!team || (team.state === "stopped" && now - team.since >= 3600000)) return [];
+          const stale = team.state !== "stopped" && now - heardAt > NOT_HEARD_FROM_MS;
+          const taskId = fact.taskId ?? taskForBranch(fact)?.id;
+          const board = boards.find((b) =>
+            boardTasks.some((t) => t.board === b.id && t.id === taskId),
+          )?.id;
+          const handle = [...handles.values()].find(
+            (h) => h.view.machine.id === machine.id && h.threadRef === fact.threadId,
+          );
+          return [
+            {
+              board,
+              heardAt,
+              session: {
+                id: fact.sessionId,
+                personId: machine.personId,
+                provider: fact.provider,
+                ...(handle && { handle: label(handle.view) }),
+                ...(board && taskId && { taskId }),
+                ...(fact.parentSessionId && { parentId: fact.parentSessionId }),
+                ...(machine.facts.share === "agents_and_name" && { machineId: machine.id }),
+                state: stale ? "not_heard_from" : team.state,
+                ...(team.state === "stopped" &&
+                  machine.facts.shareUsage &&
+                  fact.stopReason && {
+                    stopReason:
+                      fact.stopReason === "error"
+                        ? "failed"
+                        : fact.stopReason === "killed"
+                          ? "interrupted"
+                          : fact.stopReason,
+                  }),
+                ...(!stale && team.state === "waiting" && { waiting: fact.waiting }),
+                since: iso(stale ? heardAt : team.since),
+              },
+            },
+          ];
+        });
+      });
+    const visibleIds = new Map(
+      [...Map.groupBy(rows, (r) => r.session.personId)].map(([id, owned]) => [
+        id,
+        new Set(owned.map((r) => r.session.id)),
+      ]),
+    );
+    for (const { session } of rows) {
+      if (
+        session.parentId === session.id ||
+        !visibleIds.get(session.personId)?.has(session.parentId ?? "")
+      )
+        delete session.parentId;
+    }
+    return rows;
+  };
+
+  const teamPage = <K extends string, T>(
+    key: K,
+    rows: readonly T[],
+    offset: number,
+    limit: number,
+    bytes: number,
+  ) => {
+    const page = boundedPage(rows, offset, limit, bytes, (items, nextCursor) => ({
+      [key]: items,
+      nextCursor,
+    }));
+    return { [key]: page.items, nextCursor: page.nextCursor };
+  };
+
+  const teamSummary = (
+    staff: ReturnType<typeof teamPeople>,
+    rows: ReturnType<typeof teamSessions>,
+  ) => {
+    const owners = Map.groupBy(rows, (row) => row.session.personId);
+    const desks = new Map(boards.map((b) => [b.id, new Set<string>()]));
+    const active = new Map(boards.map((b) => [b.id, new Set<string>()]));
+    const counts = new Map(boards.map((b) => [b.id, emptyCounts()]));
+    const hallway = emptyCounts();
+    for (const task of boardTasks) {
+      const holder = leaseOf(task, Date.now())?.holder;
+      if (holder) desks.get(task.board)?.add(holder.id);
+    }
+    const agents = [...owners]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([personId, owned]) => {
+        const boardFor = new Map(owned.map((r) => [r.session.id, r.board]));
+        const waiting = new Map<string, number>();
+        for (const row of owned) {
+          if (!row.board) continue;
+          desks.get(row.board)?.add(personId);
+          if (row.session.state !== "stopped") active.get(row.board)?.add(personId);
+          waiting.set(row.board, 0);
+        }
+        const total = emptyCounts();
+        for (const { session, state } of leadSessions(owned.map((r) => r.session))) {
+          total[state]++;
+          const board = boardFor.get(session.id);
+          const roomCounts = board ? counts.get(board)! : hallway;
+          roomCounts[state]++;
+          if (board && state === "waiting") waiting.set(board, (waiting.get(board) ?? 0) + 1);
+        }
         return {
-          id: person.id,
-          login: person.login,
-          role: person.role,
-          sessions: sessions.map(({ fact, view }) => {
-            const parent = fact.parentSessionId;
-            return parent !== undefined && listed.has(parent) && parent !== fact.sessionId
-              ? { ...view, parentId: parent }
-              : view;
-          }),
+          personId,
+          counts: total,
+          rooms: boards
+            .filter((b) => waiting.has(b.id))
+            .map((b) => ({ board: b.id, waiting: waiting.get(b.id)! })),
         };
-      }),
+      });
+    for (const p of staff) {
+      if (p.presence !== "available" && p.presence !== "focusing") continue;
+      const seat =
+        p.seatBoard && desks.get(p.seatBoard)?.has(p.id)
+          ? p.seatBoard
+          : boards.find((b) => desks.get(b.id)?.has(p.id))?.id;
+      if (seat) active.get(seat)?.add(p.id);
+    }
+    const rooms = boards.map((b) => ({
+      board: b.id,
+      counts: counts.get(b.id)!,
+      desks: desks.get(b.id)!.size,
+      active: active.get(b.id)!.size,
+      ...(meetings.has(b.id) && { meetingUrl: meetings.get(b.id) }),
+    }));
+    return {
+      rooms,
+      hallway: { counts: hallway },
+      agents,
+      office: meetings.has("") ? { meetingUrl: meetings.get("") } : {},
+      people: { total: staff.length },
     };
+  };
+  const teamFiles = (): ReadonlyArray<readonly [string, SchemaName, unknown]> => {
+    const staff = teamPeople();
+    const rows = teamSessions();
+    const { agents, ...summary } = teamSummary(staff, rows);
+    const first = boundedPage(agents, 0, agents.length, 65536, (items, nextCursor) => ({
+      ...summary,
+      agents: items,
+      agentsNextCursor: nextCursor,
+    }));
+    const roomFile = (board?: string) =>
+      teamPage(
+        "sessions",
+        rows.filter((r) => r.board === board).map((r) => r.session),
+        0,
+        TEAM_SESSIONS_MAX,
+        96 * 1024,
+      );
+    return [
+      [
+        "team",
+        "SnapshotTeam",
+        { ...summary, agents: first.items, agentsNextCursor: first.nextCursor },
+      ],
+      [
+        "team.people",
+        "SnapshotTeamPeople",
+        teamPage("people", staff, 0, TEAM_PEOPLE_MAX, 160 * 1024),
+      ],
+      ["team.hallway", "SnapshotTeamRoom", roomFile()],
+      ...boards.map((b) => [`team.room.${b.id}`, "SnapshotTeamRoom", roomFile(b.id)] as const),
+    ];
   };
 
   // Snapshot (README, Snapshot). A head is rebuilt on every change and on every read, so a served head is always
   // current. Files are content-addressed and shared, but a read checks the caller's own retained heads.
-  const buildSnapshotFiles = (person: Person): Record<string, string> => {
+  const buildSnapshotFiles = (person: Person, sharedTeam = teamFiles()): Record<string, string> => {
     const blocks = todayBlocks(person);
-    const machineList = visibleMachines(person).map((machine) => machineView(machine, person));
+    const machineList = liveMachines()
+      .filter((machine) => machine.facts.share === "agents_and_name")
+      .map((machine) => machineView(machine, person));
     const entries: ReadonlyArray<readonly [string, SchemaName, unknown]> = [
       ["needs", "SnapshotNeeds", blocks.needsYou],
       ...(blocks.health ? [["health", "HealthBlock", blocks.health] as const] : []),
@@ -1868,7 +2072,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         : [["map", "SnapshotMap", mapView()] as readonly [string, SchemaName, unknown]]),
       ["feed", "FeedPage", feedFile()],
       ["graveyard", "GraveyardPage", graveyardFile()],
-      ["team", "SnapshotTeam", teamView()],
+      ...sharedTeam,
     ];
     const refs: Record<string, string> = {};
     for (const [kind, schema, value] of entries) {
@@ -1906,8 +2110,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     for (const hex of snapshotFiles.keys()) if (!named.has(hex)) snapshotFiles.delete(hex);
   };
 
-  const refreshHead = (person: Person): SnapshotHeadRecord => {
-    const refs = buildSnapshotFiles(person);
+  const refreshHead = (person: Person, sharedTeam = teamFiles()): SnapshotHeadRecord => {
+    const refs = buildSnapshotFiles(person, sharedTeam);
     const heads = snapshotHeads.get(person.id) ?? [];
     const current = heads.at(-1);
     if (
@@ -1941,9 +2145,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   // Rebuilds the head of every person who has one: any change to facts, needs, machines or repositories can move
   // a head, and the work and machines files are relay-wide.
   const refreshAllHeads = () => {
+    if (snapshotHeads.size === 0) return;
+    const sharedTeam = teamFiles();
     for (const personId of snapshotHeads.keys()) {
       const person = people.get(personId);
-      if (person && !person.removed) refreshHead(person);
+      if (person && !person.removed) refreshHead(person, sharedTeam);
     }
     pruneSnapshots();
   };
@@ -2303,6 +2509,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const removeStaff = (login: string) => {
     const person = peopleByLogin.get(login);
     if (!person || person.removed) throw new RelayError("not_found", "No such person.");
+    presence.delete(person.id);
     person.removed = true;
     ownersAllowingDmReads.delete(person.id);
     snapshotHeads.delete(person.id);
@@ -2528,8 +2735,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               : [{ id: "map", kind: "map", version: 1, flags: ["rests_on"] }]),
             { id: "feed", kind: "feed", version: 1, flags: ["graveyard"] },
             { id: "task", kind: "task", version: 1, flags: [] },
-            { id: "team", kind: "team", version: 1, flags: [] },
+            {
+              id: "team",
+              kind: "team",
+              version: 2,
+              flags: ["presence", "status", "sharing", "meeting_links"],
+            },
           ],
+          team: { preset: options.teamPreset ?? "company", stoppedKeptSeconds: 3600 },
           // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
           mcpTools: BANNERET_AGENT_TOOLS.filter(
             (name) =>
@@ -3664,6 +3877,93 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       throw new RelayError("not_found", "Unknown chat call.");
     }
 
+    if (route.startsWith("/team/")) {
+      const roomPath = /^\/team\/rooms\/([^/]+)(\/sessions)?$/.exec(route);
+      const board = roomPath?.[1];
+      if (board && !boards.some((b) => b.id === board))
+        throw new RelayError("not_found", "Unknown room.");
+      const broadcast = (event: string, data: unknown) => {
+        for (const stream of streams)
+          stream.response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+      if (method === "PUT" && route === "/team/me") {
+        const id = caller.person.id;
+        const edit = parseJson(body, "TeamEdit") as TeamPresenceEdit;
+        const current = presence.get(id) ?? { presence: "off" };
+        const needsClear =
+          current.seatBoard &&
+          edit.seatBoard === undefined &&
+          !teamSessions().some((r) => r.session.personId === id && r.board === current.seatBoard) &&
+          !boardTasks.some(
+            (t) => t.board === current.seatBoard && leaseOf(t, Date.now())?.holder.id === id,
+          );
+        const next = editPresence(current, needsClear ? { ...edit, seatBoard: null } : edit);
+        presence.set(id, next);
+        broadcast("team.changed", { person: { id, ...next } });
+        return sendJson(response, 200, "TeamPresence", { id, ...next });
+      }
+      if (method === "PUT" && (route === "/team/office" || (board && !roomPath?.[2]))) {
+        if (caller.person.role !== "founder")
+          throw new RelayError("forbidden", "Only founders can set meeting links.");
+        const { meetingUrl } = parseJson(body, "TeamMeeting") as { meetingUrl: string | null };
+        if (meetingUrl === null) meetings.delete(board ?? "");
+        else meetings.set(board ?? "", meetingUrl);
+        broadcast("team.rooms_changed", {});
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      if (method === "GET" && route === "/team/heartbeats") {
+        const ids = query.get("sessions")?.split(",") ?? [];
+        if (!ids.length || ids.length > 50 || ids.some((id) => !ID_PATTERN.test(id)))
+          throw new RelayError("malformed", "Choose 1 to 50 session ids.");
+        const visible = new Map(teamSessions().map((r) => [r.session.id, r.heardAt]));
+        const sessions = [...new Set(ids)].flatMap((id) => {
+          const heardAt = visible.get(id);
+          return heardAt === undefined ? [] : [{ id, heardAt: iso(heardAt) }];
+        });
+        return sendJson(response, 200, "TeamHeartbeats", { asOf: iso(Date.now()), sessions });
+      }
+      if (method === "GET") {
+        const { offset, limit } = pageParams(query);
+        const count = query.has("limit") ? limit : 100;
+        if (route === "/team/agents") {
+          const summary = teamSummary(teamPeople(), teamSessions());
+          return sendJson(
+            response,
+            200,
+            "TeamAgentsPage",
+            teamPage("agents", summary.agents, offset, count, 65536),
+          );
+        }
+        if (route === "/team/people") {
+          const q = (query.get("q") ?? "").toLowerCase();
+          const rows = teamPeople().filter(
+            (p) =>
+              p.login.toLowerCase().startsWith(q) || p.displayName?.toLowerCase().startsWith(q),
+          );
+          return sendJson(
+            response,
+            200,
+            "SnapshotTeamPeople",
+            teamPage("people", rows, offset, count, 160 * 1024),
+          );
+        }
+        if (route === "/team/hallway/sessions" || roomPath?.[2]) {
+          const rows = teamSessions()
+            .filter((r) => r.board === board)
+            .map((r) => r.session);
+          return sendJson(
+            response,
+            200,
+            "SnapshotTeamRoom",
+            teamPage("sessions", rows, offset, count, 96 * 1024),
+          );
+        }
+      }
+      throw new RelayError("not_found", "Unknown Team call.");
+    }
+
     if (method === "GET" && route === "/machines") {
       const { offset, limit } = pageParams(query);
       const all = visibleMachines(caller.person).map((machine) =>
@@ -3704,8 +4004,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         );
       }
       caller.machine.facts = facts.machine;
-      caller.machine.sessions = facts.activity;
-      caller.machine.teamStates = nextTeamStates(caller.machine.teamStates, facts.activity);
+      const reported = new Set(facts.activity.map((f) => f.sessionId));
+      const retained = caller.machine.sessions.filter(
+        (f) =>
+          f.state === "stopped" &&
+          !reported.has(f.sessionId) &&
+          Date.now() - (caller.machine.teamStates.get(f.sessionId)?.since ?? 0) < 3600000,
+      );
+      caller.machine.sessions = [...facts.activity, ...retained];
+      caller.machine.teamStates = nextTeamStates(
+        caller.machine.teamStates,
+        caller.machine.sessions,
+      );
       caller.machine.usage = facts.usage ?? [];
       caller.machine.lastHeardAt = Date.now();
       // An activity fact is a lease heartbeat only when the sending machine's owner holds the lease and the
@@ -3817,12 +4127,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         ? readableSnapshotFile(caller.person, hex)
         : undefined;
       if (bytes === undefined) throw new RelayError("not_found", "No such snapshot file.");
+      const gzip = (request.headers["accept-encoding"] ?? "").split(",").some((coding) => {
+        const [name, weight] = coding
+          .trim()
+          .split(";")
+          .map((token) => token.trim());
+        return name === "gzip" && (!weight || Number(weight.replace(/^q=/, "")) > 0);
+      });
       response.writeHead(200, {
+        vary: "Accept-Encoding",
+        ...(gzip && { "content-encoding": "gzip" }),
         "content-type": "application/json",
         etag: `"sha256:${hex}"`,
         "cache-control": "private, max-age=31536000, immutable",
       });
-      response.end(bytes);
+      response.end(gzip ? NodeZlib.gzipSync(bytes) : bytes);
       return;
     }
 
