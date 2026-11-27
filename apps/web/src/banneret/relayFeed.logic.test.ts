@@ -88,16 +88,12 @@ describe("relay feed words", () => {
 });
 
 describe("shipped and stuck subjects", () => {
-  it("names the repository and number of a pull request or issue link", () => {
-    expect(shippedRefLabel("https://github.com/example-org/example-app/pull/38")).toBe(
+  it("names a shipped item by its own pull request: the repository name and number", () => {
+    expect(shippedRefLabel({ number: 38, repo: "example-org/example-app" })).toBe(
       "example-app \u00b7 #38",
     );
-    expect(shippedRefLabel("https://gitlab.com/group/app/-/merge_requests/7")).toBe(
-      "app \u00b7 #7",
-    );
-    expect(shippedRefLabel(undefined)).toBeNull();
-    expect(shippedRefLabel("javascript:alert(1)")).toBeNull();
-    expect(shippedRefLabel("https://example.com/no-number")).toBeNull();
+    expect(shippedRefLabel({ number: 7, repo: "group/sub/app" })).toBe("app \u00b7 #7");
+    expect(shippedRefLabel({ number: 9, repo: " " })).toBe("#9");
   });
 
   it("uses the task title, then its number and repository, else says nothing is named", () => {

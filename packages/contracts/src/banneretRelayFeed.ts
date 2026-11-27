@@ -60,8 +60,28 @@ const block = <S extends Schema.Top>(item: S) =>
     notMeasured: Schema.Array(BanneretFeedNotMeasured),
   });
 
+/** Where a board task lives in its tracker (relay-v1 `BoardTaskRef`). */
+export const BanneretBoardTaskRef = Schema.Struct({
+  tracker: Schema.String,
+  host: Schema.optional(Schema.String),
+  scope: Schema.String,
+  key: Schema.String,
+  url: Schema.String,
+});
+
+/** The pull request that shipped: `repo` is the `owner/name` display string. */
+export const BanneretFeedShippedPr = Schema.Struct({
+  number: Schema.Number,
+  url: Schema.String,
+  repo: Schema.String,
+});
+export type BanneretFeedShippedPr = typeof BanneretFeedShippedPr.Type;
+
+/** One merged pull request. It names and links itself; `ref` is the task's tracker ref when known. */
 export const BanneretFeedShippedItem = Schema.Struct({
   task: BanneretFeedTask,
+  pr: BanneretFeedShippedPr,
+  ref: Schema.optional(BanneretBoardTaskRef),
   summary: Schema.String,
   mergedAt: Schema.String,
   live: Schema.String,
@@ -140,15 +160,6 @@ export type BanneretFeedTodayRead = typeof BanneretFeedTodayRead.Type;
 export const BanneretFeedNeedsRead = read(BanneretFeedNeedsPage);
 export type BanneretFeedNeedsRead = typeof BanneretFeedNeedsRead.Type;
 
-/** Where a board task lives in its tracker (relay-v1 `BoardTaskRef`). */
-export const BanneretBoardTaskRef = Schema.Struct({
-  tracker: Schema.String,
-  host: Schema.optional(Schema.String),
-  scope: Schema.String,
-  key: Schema.String,
-  url: Schema.String,
-});
-
 /** `state` is open: `active`, `stale`, `expired`, `paused`, `conflict` are known. */
 export const BanneretBoardLease = Schema.Struct({
   holder: BanneretFeedPerson,
@@ -160,17 +171,37 @@ export const BanneretBoardLease = Schema.Struct({
 });
 export type BanneretBoardLease = typeof BanneretBoardLease.Type;
 
+/**
+ * A task as the relay names it (relay-v1 `BoardTask`): when its issue was opened, and when it was
+ * closed (null while open).
+ */
+export const BanneretBoardTask = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  ref: BanneretBoardTaskRef,
+  openedAt: Schema.String,
+  closedAt: Schema.NullOr(Schema.String),
+});
+export type BanneretBoardTask = typeof BanneretBoardTask.Type;
+
+/** One linked pull request. `state` and `checks.state` are open strings. */
+export const BanneretBoardPr = Schema.Struct({
+  number: Schema.Number,
+  url: Schema.String,
+  state: Schema.String,
+  checks: Schema.optional(Schema.Struct({ state: Schema.String })),
+});
+export type BanneretBoardPr = typeof BanneretBoardPr.Type;
+
 /** One task on the board. `column` and `status` are open strings the relay computed. */
 export const BanneretBoardCard = Schema.Struct({
-  task: Schema.Struct({ id: Schema.String, title: Schema.String, ref: BanneretBoardTaskRef }),
+  task: BanneretBoardTask,
   column: Schema.String,
   status: Schema.String,
   statusWhy: Schema.String,
   lease: Schema.optional(BanneretBoardLease),
-  pr: Schema.optional(
-    Schema.Struct({ number: Schema.Number, url: Schema.String, state: Schema.String }),
-  ),
-  checks: Schema.optional(Schema.Struct({ state: Schema.String })),
+  /** Every linked pull request, oldest first; empty when none is linked. */
+  prs: Schema.Array(BanneretBoardPr),
   restsOn: Schema.Array(Schema.String),
 });
 export type BanneretBoardCard = typeof BanneretBoardCard.Type;
@@ -198,14 +229,6 @@ export const BanneretFeedBoardRead = Schema.Struct({
   problem: Schema.optional(Schema.Struct({ message: Schema.String, since: Schema.String })),
 });
 export type BanneretFeedBoardRead = typeof BanneretFeedBoardRead.Type;
-
-/** A task as the relay names it (relay-v1 `BoardTask`). */
-export const BanneretBoardTask = Schema.Struct({
-  id: Schema.String,
-  title: Schema.String,
-  ref: BanneretBoardTaskRef,
-});
-export type BanneretBoardTask = typeof BanneretBoardTask.Type;
 
 /**
  * One derived feed entry. `type`, `importance` and `status` are open strings; an unknown `type` is
@@ -258,7 +281,8 @@ export type BanneretMapStage = typeof BanneretMapStage.Type;
 
 /**
  * One item of the build plan. `status` is the board's open vocabulary; `task` is the board task the
- * item resolves to, absent when it has none. `restsOn` lists item ids.
+ * item resolves to, absent when it has none. `restsOn` lists item ids; `blockedBy` the ones among
+ * them that block it directly.
  */
 export const BanneretMapItem = Schema.Struct({
   id: Schema.String,
@@ -268,6 +292,7 @@ export const BanneretMapItem = Schema.Struct({
   statusWhy: Schema.String,
   task: Schema.optional(BanneretBoardTask),
   restsOn: Schema.Array(Schema.String),
+  blockedBy: Schema.Array(Schema.String),
 });
 export type BanneretMapItem = typeof BanneretMapItem.Type;
 

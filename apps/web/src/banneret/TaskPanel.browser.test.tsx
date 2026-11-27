@@ -68,7 +68,13 @@ const ref = (key: string, tracker = "github") => ({
 
 const card = (key: string, title: string, extra: Partial<BanneretBoardCard> = {}) =>
   ({
-    task: { id: `t_${key}`, title, ref: ref(key) },
+    task: {
+      id: `t_${key}`,
+      title,
+      ref: ref(key),
+      openedAt: "2026-11-20T09:00:00.000Z",
+      closedAt: null,
+    },
     column: "taken",
     status: "needs_you",
     statusWhy: "Required checks are failing.",
@@ -80,8 +86,14 @@ const card = (key: string, title: string, extra: Partial<BanneretBoardCard> = {}
       staleAt: ago(-6 * 60 * MINUTE),
       expiresAt: ago(-24 * 60 * MINUTE),
     },
-    pr: { number: 77, url: "https://github.com/example-org/example-app/pull/77", state: "open" },
-    checks: { state: "failing" },
+    prs: [
+      {
+        number: 77,
+        url: "https://github.com/example-org/example-app/pull/77",
+        state: "open",
+        checks: { state: "failing" },
+      },
+    ],
     restsOn: [],
     ...extra,
   }) satisfies BanneretBoardCard;
@@ -109,14 +121,18 @@ const state = (sections: string[], cards: BanneretBoardCard[] | null): BanneretF
   graveyard: null,
 });
 
-const withMap = (feed: BanneretFeedState, item: BanneretMapItem): BanneretFeedState => ({
+const withMap = (
+  feed: BanneretFeedState,
+  item: BanneretMapItem,
+  others: BanneretMapItem[] = [],
+): BanneretFeedState => ({
   ...feed,
   map: {
     value: {
       state: "ok",
       notMeasured: [],
       stages: [{ id: item.stageId, title: "Stage one", order: 1 }],
-      items: [item],
+      items: [item, ...others],
       counters: {
         byStatus: { [item.status]: 1 },
         byStage: { [item.stageId]: { [item.status]: 1 } },
@@ -196,7 +212,18 @@ const header = () => document.querySelector('[data-testid="task-header"]') as HT
 describe("Task tab", () => {
   it("draws the header from the board card, with the preview and sign-off from the task read", async () => {
     const { emit, read } = setup();
-    const shown = card("2", "Guild invites", { restsOn: ["t_1", "t_gone"] });
+    const shown = card("2", "Guild invites", {
+      restsOn: ["t_1", "t_gone"],
+      prs: [
+        { number: 70, url: "https://github.com/example-org/example-app/pull/70", state: "closed" },
+        {
+          number: 77,
+          url: "https://github.com/example-org/example-app/pull/77",
+          state: "open",
+          checks: { state: "failing" },
+        },
+      ],
+    });
     read.mockResolvedValue(
       found({
         ...shown,
@@ -211,8 +238,17 @@ describe("Task tab", () => {
     await vi.waitFor(() => expect(header().textContent).toContain("Preview"));
     expect(read).toHaveBeenCalledWith(LOCAL, "t_2");
     const text = header().textContent!;
-    expect(header().querySelector("[data-status]")?.textContent).toContain("needs you or blocked");
+    expect(header().querySelector("[data-status]")?.textContent).toContain("needs you");
     expect(text).toContain("Required checks are failing.");
+    // Every linked pull request with its checks, and the issue's dates.
+    expect([...header().querySelectorAll("[data-pr]")].map((pr) => pr.textContent)).toEqual([
+      "PR #70 closed",
+      "PR #77 open · checks failing",
+    ]);
+    expect(
+      header().querySelector('[data-testid="task-opened"] time')?.getAttribute("datetime"),
+    ).toBe("2026-11-20T09:00:00.000Z");
+    expect(header().querySelector('[data-testid="task-closed"]')).toBeNull();
     expect(header().querySelector('[data-testid="lease-chip"]')?.textContent).toBe(
       "bo-example · active 12 min ago",
     );
@@ -222,6 +258,7 @@ describe("Task tab", () => {
       link.getAttribute("href"),
     ]);
     expect(links).toContainEqual(["Open", "https://github.com/example-org/example-app/pull/77"]);
+    expect(links).toContainEqual(["Open", "https://github.com/example-org/example-app/pull/70"]);
     expect(links).toContainEqual(["Open preview", "https://preview.example.com/t_2"]);
     expect(header().querySelector("[data-preview]")?.textContent).toBe("ready");
     // Rests on: the board's title where it holds the task, else the id.
@@ -268,7 +305,7 @@ describe("Task tab", () => {
   it("shows the map item's status for a task the relay does not serve", async () => {
     const { emit, read } = setup({ issues: true });
     read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
-    const closed = card("12", "Closed delivery").task;
+    const closed = { ...card("12", "Closed delivery").task, closedAt: "2026-11-25T16:00:00.000Z" };
     await using _panel = await openPanel(taskSurface(LOCAL, closed));
     await emit(
       withMap(state(["map", "task"], null), {
@@ -279,6 +316,7 @@ describe("Task tab", () => {
         statusWhy: "The issue was closed as completed.",
         task: closed,
         restsOn: [],
+        blockedBy: [],
       }),
     );
     await expect
@@ -288,10 +326,51 @@ describe("Task tab", () => {
     expect(header().querySelector("[data-status]")?.textContent).toContain("built, unchecked");
     expect(header().textContent).toContain("The issue was closed as completed.");
     expect(header().textContent).not.toContain("does not know");
+    // The map's task carries the issue's dates, even with no board card.
+    expect(
+      header().querySelector('[data-testid="task-closed"] time')?.getAttribute("datetime"),
+    ).toBe("2026-11-25T16:00:00.000Z");
     // The issue's own state comes from upstream's embedded issue panel.
     await expect
       .element(page.getByTestId("issue-thread"))
       .toHaveTextContent("github example-org/example-app 12");
+  });
+
+  it("names the blocker of a blocked map item the board does not hold", async () => {
+    const { emit, read } = setup();
+    read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
+    const waiting = card("13", "Guild chat").task;
+    await using _panel = await openPanel(taskSurface(LOCAL, waiting));
+    await emit(
+      withMap(
+        state(["map", "task"], null),
+        {
+          id: "i_13",
+          stageId: "s_1",
+          title: "Guild chat",
+          status: "blocked",
+          statusWhy: 'Blocked by "Rate limits", which is blocked.',
+          task: waiting,
+          restsOn: ["i_rate"],
+          blockedBy: ["i_rate"],
+        },
+        [
+          {
+            id: "i_rate",
+            stageId: "s_1",
+            title: "Rate limits",
+            status: "blocked",
+            statusWhy: 'Blocked by "Profile blocks", which needs you.',
+            restsOn: ["i_profile"],
+            blockedBy: ["i_profile"],
+          },
+        ],
+      ),
+    );
+    await expect
+      .element(page.getByTestId("task-blocked-by"))
+      .toHaveTextContent("Blocked by Rate limits");
+    expect(header().querySelector("[data-status]")?.textContent).toContain("⊘");
   });
 
   it("does not read a relay that does not offer the task section", async () => {
@@ -411,7 +490,7 @@ describe("Task tab", () => {
       found({
         ...evil,
         task: evilTask,
-        pr: { number: 1, url: "javascript:window.__pwned=1", state: "open" },
+        prs: [{ number: 1, url: "javascript:window.__pwned=1", state: "open" }],
         preview: { state: HOSTILE, url: "javascript:window.__pwned=1" },
         checked: {
           by: { login: HOSTILE },

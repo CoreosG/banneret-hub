@@ -86,10 +86,13 @@ const card = (
       key: id,
       url: `https://github.com/example-org/example-app/issues/${id}`,
     },
+    openedAt: "2026-11-20T09:00:00.000Z",
+    closedAt: null,
   },
   column,
   status: "planned",
   statusWhy: "Open and nobody has taken it yet.",
+  prs: [],
   restsOn: [],
   ...extra,
 });
@@ -119,8 +122,15 @@ const CARDS = (): BanneretBoardCard[] => [
     lease: lease("bo-example", "active", 12 * MINUTE),
     status: "needs_you",
     statusWhy: "Required checks are failing.",
-    pr: { number: 77, url: "https://github.com/example-org/example-app/pull/77", state: "open" },
-    checks: { state: "failing" },
+    prs: [
+      { number: 76, url: "https://github.com/example-org/example-app/pull/76", state: "closed" },
+      {
+        number: 77,
+        url: "https://github.com/example-org/example-app/pull/77",
+        state: "open",
+        checks: { state: "failing" },
+      },
+    ],
   }),
   card("3", "Profile blocks", "stuck", { lease: lease("cy-example", "stale", 7 * HOUR) }),
   card("4", "Search", "stuck", { lease: lease("di-example", "expired", 25 * HOUR) }),
@@ -246,10 +256,12 @@ describe("Enterprise board", () => {
     const invites = document.querySelector('[data-task-id="2"]')!;
     const mark = invites.querySelector("[data-status]")!;
     expect(mark.textContent).toContain("◆");
-    expect(mark.textContent).toContain("needs you or blocked");
+    expect(mark.textContent).toContain("needs you");
     await userEvent.hover(mark);
     await expect.element(page.getByText("Required checks are failing.")).toBeVisible();
+    expect(invites.textContent).toContain("PR #76 closed");
     expect(invites.textContent).toContain("PR #77 open · checks failing");
+    expect(invites.querySelectorAll("[data-pr]")).toHaveLength(2);
     expect(invites.querySelector("a")).toBeNull();
 
     await expect.element(page.getByRole("list", { name: "Status legend" })).toBeVisible();
@@ -305,6 +317,8 @@ describe("Enterprise board", () => {
     expect(built.textContent).not.toContain("does not count");
     expect(legend()).toContain("●");
     expect(legend()).toContain("◐");
+    expect(legend()).toContain("⊘");
+    expect(legend()).toContain("blocked");
 
     await emit(state(["board"], boardRead(boardOf(cards()), { checked: false })));
     await vi.waitFor(() => expect(legend()).not.toContain("●"));

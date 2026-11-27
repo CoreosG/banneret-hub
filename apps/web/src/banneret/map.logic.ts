@@ -78,6 +78,18 @@ export function restsOnView(map: BanneretMap, itemId: string): RestsOnView {
   };
 }
 
+/**
+ * "Blocked by <title>" for a `blocked` item, naming its first direct blocker (its id when the map
+ * lacks that item) and how many more there are; null for any other status or an empty `blockedBy`.
+ */
+export function blockedByLabel(map: BanneretMap, item: BanneretMapItem): string | null {
+  if (item.status !== "blocked") return null;
+  const [first, ...rest] = item.blockedBy;
+  if (first === undefined) return null;
+  const title = map.items.find((candidate) => candidate.id === first)?.title ?? first;
+  return rest.length === 0 ? `Blocked by ${title}` : `Blocked by ${title} and ${rest.length} more`;
+}
+
 /** Whether the map holds nothing to draw because its plan could not be used. */
 export const mapNotMeasured = (map: BanneretMap) =>
   map.state !== "ok" || map.notMeasured.length > 0;

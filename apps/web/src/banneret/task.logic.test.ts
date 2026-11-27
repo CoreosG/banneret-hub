@@ -12,6 +12,8 @@ const task = {
     key: "1",
     url: "https://github.com/example-org/app/issues/1",
   },
+  openedAt: "2026-11-20T09:00:00.000Z",
+  closedAt: null,
 };
 
 describe("Task tab words", () => {
@@ -45,7 +47,14 @@ describe("Task tab words", () => {
   });
 
   it("titles what a task rests on from the board where it can", () => {
-    const card = { task, column: "free", status: "planned", statusWhy: "Open.", restsOn: [] };
+    const card = {
+      task,
+      column: "free",
+      status: "planned",
+      statusWhy: "Open.",
+      prs: [],
+      restsOn: [],
+    };
     expect(restsOnItems(["t_1", "t_9"], [card])).toEqual([
       { id: "t_1", title: "Rate limits" },
       { id: "t_9", title: null },
@@ -57,6 +66,8 @@ describe("Task surface", () => {
   it("round-trips a saved surface and refuses one that is not a task", () => {
     const surface = taskSurface("local", task);
     expect(surface.id).toBe("task:local:t_1");
+    // A saved tab keeps only what titles it and links out; the dates come from the relay.
+    expect(surface.task).not.toHaveProperty("openedAt");
     expect(decodeTaskSurface(JSON.parse(JSON.stringify(surface)))).toEqual(surface);
     expect(decodeTaskSurface({ ...surface, environmentId: "" })).toBeNull();
     expect(

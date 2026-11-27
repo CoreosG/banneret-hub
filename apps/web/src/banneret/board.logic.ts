@@ -1,6 +1,11 @@
 // Banneret Hub: plain words for the board (relay-v1 "Board and leases"). The relay computes every
 // status, column and lease state; these only name them. Every set is open, so each has a fallback.
-import type { BanneretBoard, BanneretBoardCard, BanneretBoardLease } from "@t3tools/contracts";
+import type {
+  BanneretBoard,
+  BanneretBoardCard,
+  BanneretBoardLease,
+  BanneretBoardPr,
+} from "@t3tools/contracts";
 
 import { cleanLogin } from "./enterprise.logic";
 
@@ -14,7 +19,8 @@ export const STATUS_VOCABULARY: ReadonlyArray<StatusWord & { readonly status: st
   { status: "ruled_dead", mark: "†", word: "ruled dead" },
   { status: "checked", mark: "●", word: "checked" },
   { status: "sent_back", mark: "✕", word: "sent back" },
-  { status: "needs_you", mark: "◆", word: "needs you or blocked" },
+  { status: "needs_you", mark: "◆", word: "needs you" },
+  { status: "blocked", mark: "⊘", word: "blocked" },
   { status: "built", mark: "◐", word: "built, unchecked" },
   { status: "planned", mark: "○", word: "planned" },
 ];
@@ -87,17 +93,16 @@ const CHECK_STATES: Readonly<Record<string, string>> = {
   pending: "checks pending",
 };
 
-/** "PR #12 open · checks passing", or null when the card has neither. */
-export function prLine(card: Pick<BanneretBoardCard, "pr" | "checks">): string | null {
-  const parts: string[] = [];
-  if (card.pr !== undefined) {
-    parts.push(`PR #${card.pr.number} ${PR_STATES[card.pr.state] ?? card.pr.state}`);
-  }
-  if (card.checks !== undefined) {
-    parts.push(CHECK_STATES[card.checks.state] ?? `checks ${card.checks.state}`);
-  }
-  return parts.length === 0 ? null : parts.join(" · ");
+/** "PR #12 open · checks passing"; the checks part only when the relay read them. */
+export function prLine(pr: BanneretBoardPr): string {
+  const head = `PR #${pr.number} ${PR_STATES[pr.state] ?? pr.state.replaceAll("_", " ")}`;
+  if (pr.checks === undefined) return head;
+  return `${head} \u00b7 ${CHECK_STATES[pr.checks.state] ?? `checks ${pr.checks.state.replaceAll("_", " ")}`}`;
 }
+
+/** One line per linked pull request, oldest first; empty when none is linked. */
+export const prLines = (card: Pick<BanneretBoardCard, "prs">): ReadonlyArray<string> =>
+  card.prs.map(prLine);
 
 export interface BoardColumnView {
   readonly id: string;

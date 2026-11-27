@@ -68,6 +68,8 @@ const task = (id: string, title: string) => ({
     key: id,
     url: `https://github.com/example-org/example-app/issues/${id}`,
   },
+  openedAt: "2026-11-20T09:00:00.000Z",
+  closedAt: null,
 });
 
 // The page tells time from the start of the current minute; entries count back from there.
@@ -267,7 +269,7 @@ describe("Enterprise feed", () => {
     const quiet = rowOf("e2")!;
     expect(quiet.textContent).toMatch(/^Built · /);
     expect(quiet.textContent).not.toContain("·  ·");
-    expect(quiet.querySelector("[data-status]")?.textContent).toContain("needs you or blocked");
+    expect(quiet.querySelector("[data-status]")?.textContent).toContain("needs you");
     expect(quiet.getAttribute("data-importance")).toBe("low");
     expect(rowOf("e3")!.querySelector("[data-status]")).toBeNull();
     expect(entryIds()).toEqual(["e1", "e2", "e3"]);

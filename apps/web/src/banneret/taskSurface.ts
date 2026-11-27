@@ -2,15 +2,18 @@
 // always show its title and link out, even before (or without) any relay read.
 import type { BanneretBoardTask } from "@t3tools/contracts";
 
+/** What a saved Task tab keeps of its task: enough to title it and link out. Dates come from the relay. */
+export type TaskIdentity = Pick<BanneretBoardTask, "id" | "title" | "ref">;
+
 export interface TaskSurface {
   readonly id: `task:${string}`;
   readonly kind: "task";
   /** The environment that joined the relay and reads the task. */
   readonly environmentId: string;
-  readonly task: BanneretBoardTask;
+  readonly task: TaskIdentity;
 }
 
-export function taskSurface(environmentId: string, task: BanneretBoardTask): TaskSurface {
+export function taskSurface(environmentId: string, task: TaskIdentity): TaskSurface {
   return {
     id: `task:${encodeURIComponent(environmentId)}:${encodeURIComponent(task.id)}`,
     kind: "task",

@@ -9,6 +9,7 @@ import type {
   BanneretBoard,
   BanneretBoardCard,
   BanneretBoardLease,
+  BanneretBoardPr,
   BanneretBoardTask,
   BanneretFeedEntry,
   BanneretFeedEntryPage,
@@ -166,28 +167,54 @@ const lease = (value: unknown): BanneretBoardLease | undefined => {
   return { holder: { login }, state, since, lastSignalAt, staleAt, expiresAt };
 };
 
-/** A relay task `{id, title, ref}`; undefined when a required field is missing. */
-const boardTask = (value: unknown): BanneretBoardTask | undefined => {
-  const task = fields(value);
-  const ref = fields(task?.ref);
-  const id = text(task?.id, 64);
-  const title = text(task?.title, 300);
+/** A relay tracker ref `{tracker, host?, scope, key, url}`; undefined when a required field is missing. */
+export const boardTaskRef = (value: unknown): BanneretBoardTask["ref"] | undefined => {
+  const ref = fields(value);
   const tracker = text(ref?.tracker, 32);
   const scope = text(ref?.scope, 200);
   const key = text(ref?.key, 100);
   const url = text(ref?.url, 2048);
-  if (
-    id === undefined ||
-    title === undefined ||
-    tracker === undefined ||
-    scope === undefined ||
-    key === undefined ||
-    url === undefined
-  ) {
+  if (tracker === undefined || scope === undefined || key === undefined || url === undefined) {
     return undefined;
   }
   const host = text(ref?.host, 255);
-  return { id, title, ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) } };
+  return { tracker, scope, key, url, ...(host === undefined ? {} : { host }) };
+};
+
+/**
+ * A relay task `{id, title, ref, openedAt, closedAt}`; undefined when a required field is missing.
+ * `closedAt` is null while the issue is open.
+ */
+const boardTask = (value: unknown): BanneretBoardTask | undefined => {
+  const task = fields(value);
+  const id = text(task?.id, 64);
+  const title = text(task?.title, 300);
+  const ref = boardTaskRef(task?.ref);
+  const openedAt = text(task?.openedAt, 64);
+  const closedAt = task?.closedAt === null ? null : text(task?.closedAt, 64);
+  if (
+    id === undefined ||
+    title === undefined ||
+    ref === undefined ||
+    openedAt === undefined ||
+    closedAt === undefined
+  ) {
+    return undefined;
+  }
+  return { id, title, ref, openedAt, closedAt };
+};
+
+/** One linked pull request `{number, url, state, checks?}`; undefined when a required field is missing. */
+const linkedPr = (value: unknown): BanneretBoardPr | undefined => {
+  const pr = fields(value);
+  const number = pr?.number;
+  const url = text(pr?.url, 2048);
+  const state = text(pr?.state, 32);
+  if (typeof number !== "number" || !Number.isInteger(number) || url === undefined)
+    return undefined;
+  if (state === undefined) return undefined;
+  const checks = text(fields(pr?.checks)?.state, 32);
+  return { number, url, state, ...(checks === undefined ? {} : { checks: { state: checks } }) };
 };
 
 const card = (value: unknown): BanneretBoardCard | undefined => {
@@ -205,24 +232,13 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
     return undefined;
   }
   const held = lease(source?.lease);
-  const pr = fields(source?.pr);
-  const prNumber = pr?.number;
-  const prUrl = text(pr?.url, 2048);
-  const prState = text(pr?.state, 32);
-  const checks = text(fields(source?.checks)?.state, 32);
   return {
     task,
     column,
     status,
     statusWhy,
     ...(held === undefined ? {} : { lease: held }),
-    ...(typeof prNumber === "number" &&
-    Number.isInteger(prNumber) &&
-    prUrl !== undefined &&
-    prState !== undefined
-      ? { pr: { number: prNumber, url: prUrl, state: prState } }
-      : {}),
-    ...(checks === undefined ? {} : { checks: { state: checks } }),
+    prs: defined(list(source?.prs, 20).map(linkedPr)),
     restsOn: defined(list(source?.restsOn, 100).map((entry) => text(entry, 64))),
   };
 };
@@ -273,6 +289,7 @@ const mapItem = (value: unknown): BanneretMapItem | undefined => {
     statusWhy,
     ...(task === undefined ? {} : { task }),
     restsOn: defined(list(source?.restsOn, 100).map((entry) => text(entry, 64))),
+    blockedBy: defined(list(source?.blockedBy, 100).map((entry) => text(entry, 64))),
   };
 };
 

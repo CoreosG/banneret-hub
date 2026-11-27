@@ -1,7 +1,7 @@
 import type { BanneretMap, BanneretMapItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { mapStages, orderedCounts, restsOnView } from "./map.logic";
+import { blockedByLabel, mapStages, orderedCounts, restsOnView } from "./map.logic";
 
 const item = (id: string, stageId: string, restsOn: string[] = []): BanneretMapItem => ({
   id,
@@ -10,6 +10,7 @@ const item = (id: string, stageId: string, restsOn: string[] = []): BanneretMapI
   status: "planned",
   statusWhy: "Open.",
   restsOn,
+  blockedBy: [],
 });
 
 const MAP: BanneretMap = {
@@ -52,10 +53,28 @@ describe("map shape", () => {
   });
 
   it("orders counts by the vocabulary and drops zeros", () => {
-    expect(orderedCounts({ planned: 2, mystery: 1, ruled_dead: 1, built: 0 })).toEqual([
+    expect(
+      orderedCounts({ planned: 2, mystery: 1, ruled_dead: 1, built: 0, blocked: 3, needs_you: 1 }),
+    ).toEqual([
       { status: "ruled_dead", count: 1 },
+      { status: "needs_you", count: 1 },
+      { status: "blocked", count: 3 },
       { status: "planned", count: 2 },
       { status: "mystery", count: 1 },
     ]);
+  });
+
+  it("names a blocked item's first direct blocker, by title, else by id", () => {
+    const blocked = (blockedBy: string[], status = "blocked") => ({
+      ...item("x", "first"),
+      status,
+      blockedBy,
+    });
+    expect(blockedByLabel(MAP, blocked(["a"]))).toBe("Blocked by a");
+    expect(blockedByLabel(MAP, blocked(["a", "b", "ghost"]))).toBe("Blocked by a and 2 more");
+    expect(blockedByLabel(MAP, blocked(["ghost"]))).toBe("Blocked by ghost");
+    expect(blockedByLabel(MAP, blocked([]))).toBeNull();
+    // Only a blocked item says so; a higher status keeps its own words.
+    expect(blockedByLabel(MAP, blocked(["a"], "checked"))).toBeNull();
   });
 });
