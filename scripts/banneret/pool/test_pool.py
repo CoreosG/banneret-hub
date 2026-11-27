@@ -80,13 +80,31 @@ class PoolKit(unittest.TestCase):
             if args[0] == "useradd":
                 accounts["alice"] = "alice:x:1234:1234::" + str(self.root / HOMES[1:] / "alice") + ":/bin/bash"
             return ""
+        def fail_service(*args, optional=False):
+            if args[:2] == ("systemctl", "enable"):
+                raise RuntimeError("service failed")
+            return fake(*args, optional=optional)
+        filesystem(self.root, "1G", fake)
+        with self.assertRaisesRegex(RuntimeError, "service failed"):
+            provision(self.root, self.state, "p_alice", "alice", 1234, 24101, self.config, fail_service)
+        self.assertFalse(json.loads((self.state/"seats.json").read_text())[0]["ready"])
         for _ in range(2):
             filesystem(self.root, "1G", fake)
-            provision(self.root, self.state, "p_alice", "alice", 1234, self.config, fake)
+            provision(self.root, self.state, "p_alice", "alice", 1234, 24101, self.config, fake)
+        unit = (self.root/"etc/systemd/system/banneret-seat-1234.service").read_text()
+        for setting in ("User=alice", "Slice=user-1234.slice", "BANNERET_POOL_HOST_ID=dev",
+                        "--host 127.0.0.1 --port 24101"):
+            self.assertIn(setting, unit)
+        self.assertIn(("systemctl", "enable", "--now", "banneret-seat-1234.service"), calls)
+        with self.assertRaises(ValueError):
+            provision(self.root, self.state, "p_bob", "bob", 1235, 24101, self.config, fake)
+        slice_settings = (self.root/"etc/systemd/system/user-1234.slice.d/60-banneret.conf").read_text()
+        self.assertIn("SocketBindAllow=tcp:24101", slice_settings)
+        self.assertIn("SocketBindDeny=tcp:20000-29999", slice_settings)
         for command in ("mkfs.xfs", "mount", "useradd"):
             self.assertEqual(sum(c[0] == command for c in calls), 1)
         with self.assertRaises(ValueError):
-            provision(self.root, self.state, "p_eve", "alice", 1234, self.config, fake)
+            provision(self.root, self.state, "p_eve", "alice", 1234, 24101, self.config, fake)
         self.assertIn("CPUQuota=400%", (self.root/"etc/systemd/system/user-1234.slice.d/60-banneret.conf").read_text())
 
     def test_founder_join_and_report(self):

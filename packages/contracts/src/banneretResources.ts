@@ -53,12 +53,25 @@ export const WarningPolicy = S.Struct({
   }),
 });
 export type WarningPolicy = PoolWarnings;
+export const WorkspaceReceipt = S.Struct({
+  hostId: S.String,
+  state: S.Literals(["asked", "approved", "ready_to_join", "active", "suspended", "removed"]),
+});
 export const PoolResources = S.Struct({
   hosts: S.Array(
     S.Struct({
       hostId: S.String,
       reporting: S.Boolean,
-      policy: S.NullOr(S.Struct({ warnings: WarningPolicy })),
+      level: S.Literals(["staff", "community"]),
+      policy: S.NullOr(
+        S.Struct({
+          warnings: WarningPolicy,
+          limits: S.Struct({
+            workspaces: S.Struct({ max: S.Number }),
+            sandbox_slots: S.Struct({ small: S.Number, large: S.Number }),
+          }),
+        }),
+      ),
       contention: S.NullOr(
         S.Struct({
           ...HostPressure.fields,
@@ -70,7 +83,7 @@ export const PoolResources = S.Struct({
   me: S.Struct({
     workspaces: S.Array(
       S.Struct({
-        hostId: S.String,
+        ...WorkspaceReceipt.fields,
         resources: S.NullOr(S.Struct({ disk: S.NullOr(meter), inodes: S.NullOr(meter) })),
       }),
     ),

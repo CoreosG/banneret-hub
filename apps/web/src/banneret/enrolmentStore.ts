@@ -31,6 +31,10 @@ const foldersCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:folders",
   tag: BANNERET_RELAY_WS_METHODS.folders,
 });
+const requestWorkspaceCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:request-workspace",
+  tag: BANNERET_RELAY_WS_METHODS.requestWorkspace,
+});
 const poolCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:pool",
   tag: BANNERET_RELAY_WS_METHODS.pool,
@@ -110,6 +114,13 @@ export const enrolmentRpc = {
     ),
   folders: (environmentId: EnvironmentId) =>
     outcome(runAtomCommand(appAtomRegistry, foldersCommand, { environmentId, input: {} })),
+  requestWorkspace: ({ environmentId, relayOrigin }: RelayTarget, hostId: string) =>
+    outcome(
+      runAtomCommand(appAtomRegistry, requestWorkspaceCommand, {
+        environmentId,
+        input: { relayOrigin, hostId },
+      }),
+    ),
   pool: ({ environmentId, relayOrigin }: RelayTarget) =>
     outcome(
       runAtomCommand(appAtomRegistry, poolCommand, { environmentId, input: { relayOrigin } }),

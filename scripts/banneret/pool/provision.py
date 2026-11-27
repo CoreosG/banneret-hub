@@ -54,7 +54,7 @@ def filesystem(root, size, call=run):
             raise ValueError("Mount verification failed")
 
 
-def provision(root, directory, person, name, uid, policy, call=run):
+def provision(root, directory, person, name, uid, port, policy, call=run):
     if not re.fullmatch(r"[a-z][a-z0-9_]{0,24}", name) or not 1000 <= uid < 60000:
         raise ValueError("Use a local login name and a dedicated UID between 1000 and 59999")
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", person):
@@ -62,6 +62,11 @@ def provision(root, directory, person, name, uid, policy, call=run):
     limits = policy["limits"]
     if limits["level"] != "staff":
         raise ValueError("Workspace seats require a staff host")
+    if not 20000 <= port <= 29999:
+        raise ValueError("Choose a dedicated seat port between 20000 and 29999")
+    host_id = limits["id"]
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", host_id):
+        raise ValueError("Invalid pool host ID")
     each = limits["workspaces"]["each"]
     homes = root / HOMES[1:]
     if not mounted(call, root / IMAGE[1:], homes):
@@ -69,13 +74,13 @@ def provision(root, directory, person, name, uid, policy, call=run):
     home = homes / name
     file = directory / "seats.json"
     seats = json.loads(file.read_text()) if file.exists() else []
-    record = dict(person=person, name=name, uid=uid, project=uid)
+    record = dict(person=person, name=name, uid=uid, project=uid, port=port)
     existing = next((s for s in seats if s["person"] == person), None)
     account = call("getent", "passwd", name, optional=True)
     if existing is None:
         if (len(seats) >= limits["workspaces"]["max"] or home.exists() or home.is_symlink()
             or account or call("getent", "passwd", str(uid), optional=True)
-            or any(s["uid"] == uid or s["name"] == name for s in seats)):
+            or any(s["uid"] == uid or s["name"] == name or s["port"] == port for s in seats)):
             raise ValueError("Seat capacity or identity conflict")
         existing = dict(record, ready=False)
         seats.append(existing)
@@ -93,11 +98,25 @@ def provision(root, directory, person, name, uid, policy, call=run):
     drop = root / f"etc/systemd/system/user-{uid}.slice.d"
     drop.mkdir(parents=True, exist_ok=True)
     settings = (f"[Slice]\nCPUQuota={each['cpu'] * 100}%\nMemoryLow={each['memory_floor']}\n"
-                f"MemoryMax={each['memory_max']}\nTasksMax={each['tasks']}\n")
+                f"MemoryMax={each['memory_max']}\nTasksMax={each['tasks']}\n"
+                f"SocketBindAllow=tcp:{port}\nSocketBindDeny=tcp:20000-29999\n")
     (drop / "60-banneret.conf").write_text(settings)
-    call("systemctl", "daemon-reload")
     if not account:
         call("useradd", "-M", "-u", str(uid), "-d", str(home), "-s", "/bin/bash", name)
     call("chown", f"{name}:", str(home))
+    unit = f"banneret-seat-{uid}.service"
+    settings = (f"[Unit]\nDescription=Banneret Hub for {name}\nRequiresMountsFor={HOMES}\n"
+                f"[Service]\nType=exec\nUser={name}\nSlice=user-{uid}.slice\nUMask=0077\n"
+                f"WorkingDirectory={HOMES}/{name}\nEnvironment=HOME={HOMES}/{name}\n"
+                f"Environment=BANNERET_POOL_HOST_ID={host_id}\n"
+                f"ExecStart=/usr/local/bin/banneret serve --host 127.0.0.1 --port {port}\n"
+                "StandardOutput=null\n"
+                "ExecStartPost=/usr/bin/curl --noproxy * --fail --silent --output /dev/null "
+                "--retry 30 --retry-delay 1 --retry-connrefused --max-time 2 "
+                f"http://127.0.0.1:{port}/.well-known/t3/environment\n"
+                "Restart=on-failure\n[Install]\nWantedBy=multi-user.target\n")
+    (drop.parent / unit).write_text(settings)
+    call("systemctl", "daemon-reload")
+    call("systemctl", "enable", "--now", unit)
     existing["ready"] = True
     save(file, seats)

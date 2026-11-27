@@ -16,6 +16,27 @@ have. Threads, drafts and the command palette follow the active workspace.
 - **Enterprise**: joined to a **relay** that your company runs. It adds the team screens below. A section
   appears only when the relay offers it. When the relay offers chat, open **Channels** to join a channel, write a message, or reply in its thread. Sending keeps the tab open. The unread line follows your own read position across machines.
 
+## Shared machines
+
+1. In your company workspace, open **Pool** and select **Request a workspace on a shared machine**
+   under a staff host. The page shows your request status, host pressure, capacity and free sandbox slots.
+2. A founder approves the request. The host administrator provisions your seat and gives you an SSH
+   login and port. Your workspace then shows **Ready to join**.
+3. From your desktop, forward that port and log into your seat. For example, for port 24101 use
+   `ssh -o ExitOnForwardFailure=yes -L 127.0.0.1:24101:127.0.0.1:24101 alice@host`.
+   Keep the session open while using the workspace.
+4. In the seat shell run `banneret pair`. Open the printed app link in Banneret Hub desktop.
+   In your company workspace open **Machines…**, choose **Join** beside the seat, sign in as
+   yourself and confirm the displayed code. Select the seat environment when opening a project.
+5. To let agents on your desktop use the seat, turn on **Linked environments** in the desktop
+   host's Labs settings. In **Settings → Environments**, link from the desktop using **Another
+   address**. Enter the forwarded address (for example, `http://127.0.0.1:24101`) and a fresh
+   code from `banneret pair` on the seat. Choose the access you want to grant.
+   Reconnect the SSH forward on future visits.
+
+The Pool page appears when the company relay advertises it. Host readings are shared. Storage
+and inode bars show only your own workspace. Administrators can follow the [host runbook](pool-host.md).
+
 ## Joining a relay
 
 1. Create a workspace and choose **Enterprise**.

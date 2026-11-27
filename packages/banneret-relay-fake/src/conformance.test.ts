@@ -3088,6 +3088,9 @@ describe("shared machines", () => {
       hostId,
       state: "asked",
     });
+    const requested = (await call(colleague, "GET", prefix)).body as PoolView;
+    expect(requested.me.workspaces).toEqual([{ hostId, state: "asked", resources: null }]);
+    expect((await hub("GET", "")).body).toEqual(mine.body);
     const founderNeeds = await call(owner, "GET", "/relay/v1/needs");
     expect(founderNeeds.body).toMatchObject({
       items: expect.arrayContaining([expect.objectContaining({ kind: "workspace_request" })]),

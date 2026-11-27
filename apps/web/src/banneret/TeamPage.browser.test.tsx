@@ -2,6 +2,7 @@ import appCss from "../index.css?inline";
 import { minuteTick } from "@t3tools/client-runtime/clock";
 import {
   EnvironmentId,
+  PoolResources,
   type BanneretBoardCard,
   type BanneretEnrolmentView,
   type BanneretFeedBoardRead,
@@ -23,8 +24,11 @@ import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
-import poolExample from "../../../../docs/banneret/relay-v1/examples/pool.json";
+import * as Schema from "effect/Schema";
+import { PoolPage } from "./PoolPage";
+import rawPool from "../../../../docs/banneret/relay-v1/examples/pool.json";
 import ownExample from "../../../../docs/banneret/relay-v1/examples/pool-resources-local.json";
+import { useEnvironmentScope } from "../state/session";
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
 import { CompanySearchHost } from "./CompanySearch";
 import { enrolmentRpc, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
@@ -35,6 +39,7 @@ import { openTaskDialog } from "./taskStore";
 import { TeamPage } from "./TeamPage";
 import { useWorkspacesStore } from "./workspacesStore";
 
+vi.mock("../state/session", { spy: true });
 vi.mock("../state/environments", { spy: true });
 
 const LOCAL = EnvironmentId.make("local");
@@ -285,6 +290,7 @@ async function openTeam(stack: DisposableStack, path = "/team") {
   const router = createRouter({
     routeTree: root.addChildren([
       createRoute({ getParentRoute: () => root, path: "/", component: () => <p>Home</p> }),
+      createRoute({ getParentRoute: () => root, path: "/pool", component: PoolPage }),
       createRoute({ getParentRoute: () => root, path: "/team", component: TeamPage }),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -295,6 +301,7 @@ async function openTeam(stack: DisposableStack, path = "/team") {
   return { ...harness, router, screen };
 }
 
+const poolExample = Schema.decodeUnknownSync(PoolResources)(rawPool);
 const ALL = ["today", "board", "team"];
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
 const personRow = (login: string) =>
@@ -309,12 +316,49 @@ const shownLogins = () =>
   [...document.querySelectorAll("li[data-person]")].map((row) => row.getAttribute("data-person"));
 
 describe("Team page", () => {
+  it("shows the pool and pairing guidance only when advertised", async () => {
+    using stack = new DisposableStack();
+    vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({ ok: true, value: poolExample });
+    const { emit, screen } = await openTeam(stack, "/pool");
+    await using _screen = screen;
+    await emit(state(["team"], null));
+    await expect
+      .element(sidebar().getByRole("button", { name: "Pool", exact: true }))
+      .not.toBeInTheDocument();
+    await emit(state(["pool"], null));
+    await expect.element(page.getByText("Your workspace: Active")).toBeVisible();
+    await expect.element(page.getByText("banneret pair", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("Storage quota", { exact: true })).toBeVisible();
+  });
+
+  it("requests a seat on the selected company host and shows the receipt", async () => {
+    using stack = new DisposableStack();
+    vi.mocked(useEnvironmentScope).mockReturnValue(true);
+    vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({
+      ok: true,
+      value: { ...poolExample, me: { workspaces: [] } },
+    });
+    const request = vi
+      .spyOn(enrolmentRpc, "requestWorkspace")
+      .mockResolvedValue({ ok: true, value: { hostId: "dev", state: "asked" } });
+    const { emit, screen } = await openTeam(stack, "/pool");
+    await using _screen = screen;
+    await emit(state(["pool"], null));
+    await userEvent.click(
+      page.getByRole("button", { name: "Request a workspace on a shared machine" }),
+    );
+    expect(request).toHaveBeenCalledWith(
+      { environmentId: LOCAL, relayOrigin: configured.relayOrigin },
+      "dev",
+    );
+    await expect.element(page.getByText("Your workspace: Requested")).toBeVisible();
+  });
+
   it("keeps quota bars on the owner's card and shares only host pressure with a colleague", async () => {
     using stack = new DisposableStack();
     vi.mocked(useConnectedEnvironmentIds).mockReturnValue([LOCAL]);
     const { emit, screen } = await openTeam(stack);
     await using _screen = screen;
-    const host = poolExample.hosts[0]!;
     vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({
       ok: true,
       value: {
@@ -323,6 +367,7 @@ describe("Team page", () => {
           workspaces: poolExample.me.workspaces.map((w) => ({
             ...w,
             resources: {
+              inodes: null,
               ...w.resources,
               disk: { used: 51 * 2 ** 30, limit: 60 * 2 ** 30, warn: true },
             },
@@ -343,7 +388,7 @@ describe("Team page", () => {
             warn: true,
           },
         },
-        host: host.contention,
+        host: rawPool.hosts[0]!.contention,
         recentOomKill: false,
         cpuCores: 1.25,
         coreLimit: 4,

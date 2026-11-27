@@ -11,6 +11,7 @@ import { useOrchestrators, selectOrchestrator } from "./orchestratorStore";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ActivityIcon,
+  ServerIcon,
   InboxIcon,
   MapIcon,
   SquareKanbanIcon,
@@ -70,7 +71,7 @@ export function EnterpriseSidebarRows() {
   const showFeed = offersSection(feed, "feed");
   const showTeam = offersSection(feed, "team");
 
-  const go = (to: "/today" | "/needs" | "/board" | "/map" | "/feed" | "/team") => {
+  const go = (to: "/today" | "/needs" | "/board" | "/map" | "/feed" | "/team" | "/pool") => {
     if (isMobile) setOpenMobile(false);
     void navigate({
       to,
@@ -155,6 +156,14 @@ export function EnterpriseSidebarRows() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         ) : null}
+        {feed.sections.includes("pool") && (
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={pathname === "/pool"} onClick={() => go("/pool")}>
+              <ServerIcon />
+              <span>Pool</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
         {showTeam ? (
           <SidebarMenuItem>
             <SidebarMenuButton isActive={pathname === "/team"} onClick={() => go("/team")}>

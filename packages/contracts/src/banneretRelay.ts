@@ -1,7 +1,13 @@
 // Banneret Hub: enrolment of this server environment in a company relay (docs/banneret/relay-v1).
 // The server holds the machine key and device token and makes every relay call; clients see only
 // the view below, which never carries either.
-import { FolderSizes, PoolResources, ResourceReport, WarningPolicy } from "./banneretResources.ts";
+import {
+  WorkspaceReceipt,
+  FolderSizes,
+  PoolResources,
+  ResourceReport,
+  WarningPolicy,
+} from "./banneretResources.ts";
 export * from "./banneretResources.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as Schema from "effect/Schema";
@@ -31,6 +37,7 @@ export * from "./leaseProtocol.ts";
 export const BANNERET_RELAY_WS_METHODS = {
   resources: "banneret.resources",
   folders: "banneret.resourceFolders",
+  requestWorkspace: "banneret.requestWorkspace",
   pool: "banneret.poolResources",
   probe: "banneretRelay.probe",
   status: "banneretRelay.status",
@@ -228,6 +235,11 @@ export const BANNERET_RELAY_RPCS = [
     success: FolderSizes,
     error: RelayRpcError,
   }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.requestWorkspace, {
+    payload: Schema.Struct({ ...RelayTarget, hostId: Schema.String }),
+    success: WorkspaceReceipt,
+    error: RelayRpcError,
+  }),
   Rpc.make(BANNERET_RELAY_WS_METHODS.pool, {
     payload: Schema.Struct(RelayTarget),
     success: PoolResources,
@@ -250,6 +262,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.resources]: AuthDiagnosticsReadScope,
   [BANNERET_RELAY_WS_METHODS.folders]: AuthFilesystemReadScope,
   [BANNERET_RELAY_WS_METHODS.pool]: AuthOrchestrationOperateScope,
+  [BANNERET_RELAY_WS_METHODS.requestWorkspace]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.probe]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.status]: AuthOrchestrationReadScope,
   [BANNERET_RELAY_WS_METHODS.start]: AuthEnvironmentMaintainScope,
@@ -267,6 +280,7 @@ export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.resources]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.folders]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.pool]: "banneret-relay",
+  [BANNERET_RELAY_WS_METHODS.requestWorkspace]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.probe]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.status]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.start]: "banneret-relay",
