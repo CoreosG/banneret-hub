@@ -6,7 +6,8 @@ import {
   needsKindLabel,
   safeLinkOut,
   shippedRefLabel,
-  stuckRulesLabel,
+  shippedLabel,
+  taskRefLabel,
   stuckSubject,
   workingStateLabel,
 } from "./relayFeed.logic";
@@ -21,12 +22,10 @@ describe("relay feed words", () => {
     expect(workingStateLabel("brand_new")).toBeNull();
   });
 
-  it("lists every stuck reason in the relay's order", () => {
-    expect(stuckRulesLabel(["check_failed", "unreviewed"])).toBe(
-      "Checks are failing \u00b7 Ready but not reviewed",
-    );
-    expect(stuckRulesLabel(["claim_quiet"])).toBe("No activity on a claimed task");
-    expect(stuckRulesLabel(["brand_new"])).toBe("Stuck");
+  it("says merged first for every shipped state", () => {
+    expect(shippedLabel("live")).toBe("merged, live");
+    expect(shippedLabel("deploy_failed")).toBe("merged, deploy failed");
+    expect(shippedLabel("brand_new")).toBe("merged");
   });
 
   it("renders only http(s) links out", () => {
@@ -133,6 +132,13 @@ describe("shipped and stuck subjects", () => {
       title: "nightly-backup",
       url: jobUrl,
     });
+    expect(
+      stuckSubject(undefined, { repo: "example-org/ops", job: { name: "nightly-backup" } }),
+    ).toEqual({ kind: "task", title: "example-org/ops \u00b7 nightly-backup", url: undefined });
+    expect(taskRefLabel("https://github.com/example-org/example-app/issues/12")).toBe(
+      "example-app#12",
+    );
+    expect(taskRefLabel("javascript:alert(1)")).toBeNull();
     expect(stuckSubject(undefined, { job: { name: "nightly-backup" } })).toEqual({
       kind: "task",
       title: "nightly-backup",

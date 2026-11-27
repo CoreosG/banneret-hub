@@ -323,13 +323,29 @@ describe("Enterprise Today and Needs you", () => {
     await expect.element(page.getByText("Should invites expire?")).toBeVisible();
     await expect.element(page.getByText("Recommended: After 7 days")).toBeVisible();
     await expect.element(page.getByText("on Bo desktop")).toBeVisible();
-    // One row per stuck item, with every reason in the relay's order.
+    // One row per stuck item, with every reason as a chip in the relay's order.
+    await expect.element(page.getByText("Profile blocks")).toBeVisible();
+    const stuckRow = page.getByText("Profile blocks").element().closest("li")!;
+    expect(
+      [...stuckRow.querySelectorAll<HTMLElement>("[data-slot=reason-chip]")].map(
+        (chip) => chip.textContent,
+      ),
+    ).toEqual(["Checks failing", "Not reviewed"]);
+    // A block with no rows but a source that is not measured says so, never "nothing here".
+    await expect.element(page.getByText("Shipped is not measured.")).toBeVisible();
     await expect
-      .element(page.getByText("Checks are failing \u00b7 Ready but not reviewed", { exact: false }))
+      .element(page.getByText("Work tracker: not set up on this relay, since", { exact: false }))
       .toBeVisible();
-    await expect
-      .element(page.getByText("work_tracker: not measured since", { exact: false }))
-      .toBeVisible();
+    // Empty blocks collapse into one quiet line each.
+    await expect.element(page.getByText("Nobody is working right now.")).toBeVisible();
+    expect(page.getByRole("region", { name: "Working now" }).elements()).toHaveLength(0);
+    // The header counts what needs you, what is stuck and what shipped.
+    await expect.element(page.getByText("4 need you", { exact: true })).toBeVisible();
+    // Dates are relative English with the exact time kept in the markup.
+    expect(stuckRow.querySelector("time")?.getAttribute("datetime")).toBe(
+      "2026-11-26T03:00:00.000Z",
+    );
+    expect(stuckRow.textContent).toMatch(/since (\d+ (min|h|d) ago|just now)/);
 
     await userEvent.click(page.getByRole("button", { name: "Open thread" }));
     await expect.element(page.getByText("Thread page")).toBeVisible();
@@ -414,9 +430,11 @@ describe("Enterprise Today and Needs you", () => {
     );
 
     // A stuck item with no task never renders without a subject.
-    await expect
-      .element(page.getByText("Checks are waiting to run: no task or pull request named"))
-      .toBeVisible();
+    const none = page.getByText("No task or pull request named");
+    await expect.element(none).toBeVisible();
+    expect(
+      none.element().closest("li")?.querySelector("[data-reason=checks_queued]"),
+    ).not.toBeNull();
     // A task-less item with a subject shows "repo · run name", linked to the run.
     await expect.element(page.getByText("example-org/example-app \u00b7 ci / test")).toBeVisible();
     expect(
@@ -432,9 +450,11 @@ describe("Enterprise Today and Needs you", () => {
       "https://jobs.example.com/nightly-backup",
     );
     // A task with a blank title falls back to its number and repository.
-    await expect
-      .element(page.getByText("No activity on a claimed task: #12 in example-app"))
-      .toBeVisible();
+    const blank = page.getByText("#12 in example-app", { exact: true });
+    await expect.element(blank).toBeVisible();
+    expect(
+      blank.element().closest("li")?.querySelector("[data-reason=claim_quiet]"),
+    ).not.toBeNull();
   });
 
   it("keeps showing the last-known data with its age when the relay is away", async () => {

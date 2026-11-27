@@ -19,7 +19,7 @@ const NEEDS_KINDS: Readonly<Record<string, string>> = {
 export const needsKindLabel = (kind: string) => NEEDS_KINDS[kind] ?? "Item";
 
 const SHIPPED_LIVE: Readonly<Record<string, string>> = {
-  live: "live",
+  live: "merged, live",
   not_live_yet: "merged, not live yet",
   deploy_failed: "merged, deploy failed",
   no_deploy: "merged",
@@ -36,20 +36,6 @@ const WORKING_STATES: Readonly<Record<string, string>> = {
 export const workingStateLabel = (state: string | undefined) =>
   state === undefined ? null : (WORKING_STATES[state] ?? null);
 
-const STUCK_RULES: Readonly<Record<string, string>> = {
-  claim_quiet: "No activity on a claimed task",
-  check_failed: "Checks are failing",
-  unreviewed: "Ready but not reviewed",
-  checks_queued: "Checks are waiting to run",
-  dev_red: "The development branch is failing",
-  deploy_failed: "The latest preview deploy failed",
-  watched_job_down: "A watched server job failed",
-};
-const stuckRuleLabel = (rule: string) => STUCK_RULES[rule] ?? "Stuck";
-/** All of an item's reasons in the relay's order (most important first), on one row. */
-export const stuckRulesLabel = (rules: ReadonlyArray<string>) =>
-  rules.length === 0 ? "Stuck" : rules.map(stuckRuleLabel).join(" \u00b7 ");
-
 /** The repository name and number in a tracker link (a pull request or an issue), or null. */
 function linkRef(url: string | undefined): { repo: string; number: string } | null {
   const href = safeLinkOut(url);
@@ -58,6 +44,12 @@ function linkRef(url: string | undefined): { repo: string; number: string } | nu
   const at = parts.findLastIndex((part) => /^\d+$/.test(part));
   const repo = at >= 2 ? parts[at - 2] : undefined;
   return repo === undefined ? null : { repo, number: parts[at]! };
+}
+
+/** "banneret-hub#55", a task's short tracker ref from its link, or null. */
+export function taskRefLabel(url: string | undefined): string | null {
+  const ref = linkRef(url);
+  return ref === null ? null : `${ref.repo}#${ref.number}`;
 }
 
 /**
@@ -85,8 +77,8 @@ export interface StuckSubjectRef {
 
 /**
  * What a stuck row is about: the task's title, else its number and repository from its link, else
- * the relay's `subject`: the job name (linked when it has a url), else "repo · run name" linked to
- * the run, else the repo. An item with none of these has no subject and the row says so (defensive: the
+ * the relay's `subject`: "repo · job name" (linked when the job has a url), else "repo · run name"
+ * linked to the run, else the repo. An item with none of these has no subject and the row says so (defensive: the
  * relay refuses such items).
  */
 export function stuckSubject(
@@ -96,7 +88,11 @@ export function stuckSubject(
   if (task === undefined) {
     if (subject === undefined) return { kind: "none" };
     if (subject.job !== undefined) {
-      return { kind: "task", title: subject.job.name, url: subject.job.url };
+      const title =
+        subject.repo === undefined
+          ? subject.job.name
+          : `${subject.repo} \u00b7 ${subject.job.name}`;
+      return { kind: "task", title, url: subject.job.url };
     }
     if (subject.repo === undefined) return { kind: "none" };
     return subject.run === undefined
@@ -113,18 +109,6 @@ export function stuckSubject(
     ? { kind: "none" }
     : { kind: "task", title: `#${ref.number} in ${ref.repo}`, url: task.url };
 }
-
-const HEALTH_STATES: Readonly<Record<string, string>> = {
-  good: "healthy",
-  warning: "warning",
-  bad: "failing",
-  not_measured: "not measured",
-};
-export const healthStateLabel = (state: string) => HEALTH_STATES[state] ?? "unknown";
-
-export type Tone = "ok" | "warn" | "error" | "muted";
-const HEALTH_TONES: Readonly<Record<string, Tone>> = { good: "ok", warning: "warn", bad: "error" };
-export const healthTone = (state: string): Tone => HEALTH_TONES[state] ?? "muted";
 
 const NOT_MEASURED: Readonly<Record<string, string>> = {
   never_read: "not read yet",

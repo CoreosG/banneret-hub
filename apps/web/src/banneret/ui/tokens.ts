@@ -40,6 +40,10 @@ export const LAYOUT_MAP_STAGES = { "data-layout": "map-stages" } as const;
 export const LAYOUT_MAP_STAGE = { "data-layout": "map-stage" } as const;
 /** A 56 x 4px progress bar; set `--progress` (0 to 1) in its style. */
 export const LAYOUT_PROGRESS_BAR = { "data-layout": "progress-bar" } as const;
+/** Today's two columns (Needs you and Stuck, Working now and Shipped); one column when narrow. */
+export const LAYOUT_TODAY_COLUMNS = { "data-layout": "today-columns" } as const;
+/** A grid of health tiles, each at least 168px wide. */
+export const LAYOUT_HEALTH_TILES = { "data-layout": "health-tiles" } as const;
 /** The Rests-on view's three columns with arrows between them. */
 export const LAYOUT_RESTS_ON = { "data-layout": "rests-on" } as const;
 
