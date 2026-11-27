@@ -25,14 +25,14 @@ it("keeps replay receipts and resolved occurrences after reopening", () => {
   }
   const reopened = openAlarmStore(file);
   try {
-    expect(reopened.active()).toEqual([alarm]);
+    expect(reopened.active(["service"])).toEqual([alarm]);
     expect(reopened.record(alarm, "signature1", 300000, 1)).toBe(false);
     reopened.record({ ...alarm, resolvedAt: "2026-11-27T00:02:00Z" }, "signature2", 301000, 1000);
     reopened.record(alarm, "signature3", 302000, 2000);
-    expect(reopened.active()).toEqual([]);
+    expect(reopened.active(["service"])).toEqual([]);
     const recurrence = { ...alarm, firedAt: "2026-11-27T00:03:00Z" };
     reopened.record(recurrence, "signature4", 303000, 3000);
-    expect(reopened.active()).toEqual([recurrence]);
+    expect(reopened.active(["service"])).toEqual([recurrence]);
   } finally {
     reopened.close();
   }

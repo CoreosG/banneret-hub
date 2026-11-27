@@ -233,7 +233,7 @@ function PersonLine(props: {
         </button>
         <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           {person.machines.length === 0 ? (
-            <span className={TYPE.meta}>No machines</span>
+            <span className={TYPE.meta}>Not joined yet · No machines</span>
           ) : (
             person.machines.map((machine) => <MachineDot key={machine.id} machine={machine} />)
           )}

@@ -22,9 +22,17 @@ export function openAlarmStore(path: string) {
       source TEXT, signature TEXT, expires INTEGER, PRIMARY KEY(source, signature)
     );
   `);
-  const active = db.prepare(
-    "SELECT payload FROM alarms WHERE resolved = 0 ORDER BY fired, source, id",
-  );
+  const active = db.prepare(`
+    WITH eligible AS (
+      SELECT *, CASE json_extract(payload, '$.severity')
+        WHEN 'critical' THEN 2 WHEN 'warning' THEN 1 ELSE 0 END AS priority
+      FROM alarms WHERE resolved = 0 AND source IN (SELECT value FROM json_each(?))
+    ), ranked AS (
+      SELECT *, row_number() OVER (PARTITION BY source ORDER BY priority DESC, fired DESC, id) AS position
+      FROM eligible
+    )
+    SELECT payload FROM ranked WHERE position <= 20 ORDER BY priority DESC, fired DESC, source, id LIMIT 100
+  `);
   const save = db.prepare(`
     INSERT INTO alarms VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(source,id) DO UPDATE SET fired=excluded.fired, resolved=excluded.resolved, payload=excluded.payload
@@ -33,7 +41,8 @@ export function openAlarmStore(path: string) {
   const receipt = db.prepare("INSERT OR IGNORE INTO hook_receipts VALUES (?, ?, ?)");
   const prune = db.prepare("DELETE FROM hook_receipts WHERE expires < ?");
   return {
-    active: () => active.all().map((row) => JSON.parse(String(row.payload)) as Alarm),
+    active: (sources: readonly string[]) =>
+      active.all(JSON.stringify(sources)).map((row) => JSON.parse(String(row.payload)) as Alarm),
     record(alarm: Alarm, signature: string, expires: number, now: number) {
       db.exec("BEGIN IMMEDIATE");
       try {

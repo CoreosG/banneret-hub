@@ -362,7 +362,7 @@ export const reshapeToday = (body: unknown, labelFor: LabelFor): BanneretFeedTod
         ? undefined
         : {
             alarms: defined(
-              list(fields(source?.health)?.alarms, Number.POSITIVE_INFINITY).map((value) => {
+              list(fields(source?.health)?.alarms, 100).map((value) => {
                 const a = fields(value);
                 const id = text(a?.id, 64),
                   sourceId = text(a?.sourceId, 64),

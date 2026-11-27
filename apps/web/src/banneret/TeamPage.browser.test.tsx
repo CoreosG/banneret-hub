@@ -344,6 +344,7 @@ describe("Team page", () => {
       not_heard_from: "1 not heard from",
     });
     expect(personRow("cy-example")!.textContent).toContain("No live agents");
+    expect(personRow("cy-example")!.textContent).toContain("Not joined yet");
     expect(personRow("cy-example")!.textContent).toContain("No machines");
 
     const totals = document.querySelector('[aria-label="Live agents by state"]')!;

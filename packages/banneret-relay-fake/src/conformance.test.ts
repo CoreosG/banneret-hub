@@ -149,6 +149,7 @@ const firstBoardRef = async (machine: Enrolled, files: Readonly<Record<string, s
 };
 
 interface ListedMachine {
+  readonly ownerId: string;
   readonly id: string;
   readonly connected: boolean;
   readonly lastHeardAt?: string | null;
@@ -2582,6 +2583,15 @@ describe("team", () => {
     expect(me?.sessions).toEqual([]);
   });
 
+  it("includes a directory member before their first sign-in", async () => {
+    const reader = await enrol();
+    const person = (await readTeam(reader)).people.find((entry) => entry.login === "cy-example");
+    expect(person).toMatchObject({ role: "limited_staff", sessions: [] });
+    expect((await listMachines(reader)).map((machine) => machine.ownerId)).not.toContain(
+      person?.id,
+    );
+  });
+
   it("lists every live session with its parent, leaves stopped ones out, and carries no titles or branches", async () => {
     const machine = await enrol();
     const other = await enrol({ role: "limited_staff" });
@@ -2880,6 +2890,71 @@ describe("opt-in health", () => {
       expect(await read("needs")).toMatchObject({ items: [] });
       for (let i = 0; i < 54; i++) await post(body);
       expect(await post(body)).toBe(429);
+    } finally {
+      await relay?.close();
+    }
+  });
+
+  it("caps active alarms per source and overall, by severity and then recency", async () => {
+    const configuredOrigin = process.env.BANNERET_RELAY_HEALTH_URL;
+    const secret = configuredOrigin ? process.env.BANNERET_RELAY_HOOK_SECRET : randomText(32);
+    if (!secret) throw new Error("Set BANNERET_RELAY_HOOK_SECRET for the configured relay.");
+    const sources = Array.from({ length: 6 }, (_, i) => ({
+      id: `cap_${i}`,
+      kind: "webhook",
+      secret,
+    }));
+    const relay = configuredOrigin ? undefined : await startFakeRelay({ healthSources: sources });
+    const local = new RelayClient(configuredOrigin ?? relay!.url);
+    try {
+      const key = generateMachineKey();
+      const start = await local.send(key, "POST", "/relay/v1/enroll/start", {
+        body: { publicKey: key.publicKey, machine: machineFacts("env_" + randomText(12)) },
+      });
+      const approved = await local.send(key, "POST", "/relay/v1/enroll/poll", {
+        body: { pairingId: (start.body as { pairingId: string }).pairingId },
+      });
+      const { token, machineId } = approved.body as { token: string; machineId: string };
+      const read = async (path: string) =>
+        (await local.send(key, "GET", "/relay/v1/" + path, { token, device: machineId })).body;
+      const timestamp = String(Math.floor(Date.parse(local.now()) / 1000));
+      for (const [index, source] of sources.entries()) {
+        // The last source adds one older critical and one newer info alarm.
+        const count = index === 5 ? 2 : 21;
+        for (let i = 0; i < count; i++) {
+          const severity = i === 0 && index >= 4 ? "critical" : index === 5 ? "info" : "warning";
+          const body = JSON.stringify({
+            id: `a_${index}_${i}`,
+            sourceId: source.id,
+            severity,
+            title: "Test alarm",
+            firedAt: rfc3339(Date.UTC(2026, 0, 1, 0, index, i)),
+          });
+          const signature = NodeCrypto.createHmac("sha256", secret)
+            .update(timestamp + "." + body)
+            .digest("hex");
+          const reply = await local.send(key, "POST", "/relay/v1/hooks/" + source.id, {
+            unsigned: true,
+            rawBody: Buffer.from(body),
+            headers: { "X-Alarm-Signature": signature, "X-Alarm-Timestamp": timestamp },
+          });
+          expect(reply.status).toBe(204);
+        }
+      }
+      const { files } = (await read("snapshot/head")) as { files: { health: string } };
+      const health = (await read("snapshot/files/" + files.health.slice(7))) as {
+        alarms: { id: string }[];
+      };
+      expectSchema("HealthBlock", health);
+      const ids = health.alarms.map((alarm) => alarm.id);
+      expect(ids).toHaveLength(100);
+      expect(ids).toContain("a_5_0");
+      expect(ids).not.toContain("a_5_1");
+      expect(ids).not.toContain("a_0_1");
+      expect(ids).toContain("a_4_0");
+      expect(ids).not.toContain("a_4_1");
+      for (let index = 0; index < 4; index++) expect(ids).not.toContain(`a_${index}_0`);
+      expect(await read("today")).toMatchObject({ health: { alarms: health.alarms } });
     } finally {
       await relay?.close();
     }

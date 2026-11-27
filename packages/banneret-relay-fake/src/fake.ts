@@ -669,8 +669,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     throw new Error("Invalid health measurement.");
   const alarms = sources.size ? openAlarmStore(options.alarmDatabase ?? ":memory:") : undefined;
   const rates = new Map<string, { until: number; count: number }>();
-  const activeAlarms = () =>
-    (alarms?.active() ?? []).filter((alarm) => sources.has(alarm.sourceId));
+  const sourceIds = [...sources.keys()];
+  const activeAlarms = () => alarms?.active(sourceIds) ?? [];
   const startedAt = Date.now();
   const log = options.log ?? (() => undefined);
   const autoApprove = options.autoApprove ?? true;
@@ -732,6 +732,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     peopleByLogin.set(person.login, person);
     return person;
   };
+
+  personFor({ login: "cy-example", role: "limited_staff" });
 
   const writeEvent = (stream: Stream, event: RelayEvent) => {
     stream.response.write(

@@ -742,8 +742,8 @@ right now": every person and their live agent sessions. The relay builds it from
 **The file.** `SnapshotTeam` is `{people[{id, login, role, sessions[{id, parentId?, machineId, provider, state,
 waiting?, taskId?, since}]}]}`. Objects are closed.
 
-- `people` lists every staff member the relay knows (everyone who has signed in and is not removed), in login order,
-  at most 500. A person with no live session has an empty `sessions`.
+- `people` lists every non-removed member of the relay's staff directory, including people who have never signed in.
+  It lists up to 500 people in login order. A person with no live session has an empty `sessions`.
 - A session is one activity fact, reduced. `id` is the fact's `sessionId` and `parentId` its `parentSessionId`, present
   only when that session is listed too. That makes the working tree: person, their orchestrator sessions, the helpers
   under each.
@@ -894,14 +894,18 @@ Configure `healthSources` with a stable `id` and an open `kind` per source, such
 `relay`, `http_check` or `webhook`. The default is an empty list. With zero sources omit the
 health section, `Today.health` and the snapshot head's `health` key. Otherwise advertise the section
 and include `source` and `kind` on every measurement. Health blocks carry an `alarms` array of
-active alarms alongside `items` and `notMeasured`. Enrolled people can read active alarms.
+active alarms alongside `items` and `notMeasured`. The relay keeps up to 20 active alarms per source and 100 in total.
+Keep the most severe first (critical, warning, info), then the newest by `firedAt` within each severity.
+Enrolled people can read active alarms.
 
 The optional `dashboards` list defaults to empty. Return it only in authenticated capabilities.
 Each entry has `id`, `title`, an HTTPS `url` and an optional `group`. Today opens it locally.
 The authenticated board section's `params` contains the configured `board.staleSeconds` and
 `board.expirySeconds`. Both are whole seconds and expiry must exceed stale.
 
-A source with a private `secret` accepts `POST /relay/v1/hooks/{sourceId}`. Send the generic
+A source with a private `secret` accepts `POST /relay/v1/hooks/{sourceId}`. External senders can reach this endpoint
+outside the network identity gate. Only the HMAC signature authenticates the sender. Apply the body
+size cap and per-source rate limit before verifying the signature. Send the generic
 [alarm JSON](examples/alarm.json). Supply a Unix timestamp in seconds in `X-Alarm-Timestamp`.
 Set `X-Alarm-Signature` to lowercase hex HMAC-SHA256 with the UTF-8 source secret over the ASCII
 timestamp, a literal period and the exact request bytes. The body sourceId must equal the path id.

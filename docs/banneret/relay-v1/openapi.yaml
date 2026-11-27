@@ -1289,7 +1289,7 @@ components:
       required: [state, items, alarms, notMeasured]
       properties:
         state: { $ref: "#/components/schemas/BlockState" }
-        alarms: { type: array, items: { $ref: "#/components/schemas/Alarm" } }
+        alarms: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/Alarm" } }
         items:
           type: array
           maxItems: 20
@@ -1845,8 +1845,8 @@ components:
         truncated: { type: boolean }
     SnapshotTeam:
       description: |
-        Who is working on what (README, "Team"): every staff member the relay knows, each with their live agent
-        sessions. Relay-wide: every caller gets the same file. Machines come from the `machines` file and leases from
+        Who is working on what (README, "Team"): every non-removed member of the staff directory, including people who
+        have never signed in, each with their live agent sessions. Relay-wide: every caller gets the same file. Machines come from the `machines` file and leases from
         the board files, so neither is repeated here. No field changes on every heartbeat. Closed, and no title,
         prompt, branch or path of any kind.
       type: object
