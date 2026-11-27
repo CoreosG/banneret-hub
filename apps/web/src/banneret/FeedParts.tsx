@@ -2,7 +2,6 @@
 import { CloudOffIcon, PauseIcon } from "lucide-react";
 
 import { useNowMinute } from "../hooks/useNowMinute";
-import { cn } from "../lib/utils";
 import { formatDateTimeTimestamp, formatRelativeTimeLabel } from "../timestampFormat";
 import type { EnvironmentFeed } from "./relayFeedStore";
 import { RelativeTime } from "./ui/RelativeTime";
