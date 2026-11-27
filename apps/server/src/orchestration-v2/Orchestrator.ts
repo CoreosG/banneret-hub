@@ -1,3 +1,4 @@
+import { reminderDelivery } from "../banneret/memory/promptHook.ts";
 import type {
   OrchestrationV2ThreadLinkMetadata,
   GuestShareId,
@@ -7778,6 +7779,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     if (
       command.notification !== undefined &&
+      (yield* reminderDelivery) !== command.messageId &&
       (command.createdBy !== "agent" ||
         (command.creationSource !== "server" && command.creationSource !== "provider") ||
         (dispatchMode.type !== "queue_after_active" &&

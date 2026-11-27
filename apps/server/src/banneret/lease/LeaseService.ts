@@ -797,6 +797,13 @@ export const rpcHandlers = {
       return yield* (yield* reviewAccess(threadId)).open((s) => ({
         folders: s.folders(),
         nudges: s.nudges(threadId),
+        watcher: {
+          enabled: !!s.reminders(threadId).setting(),
+          generator: "",
+          model: "",
+          ...s.reminders(threadId).setting(),
+          muted: s.reminders(threadId).muted(),
+        },
       }));
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
@@ -805,9 +812,11 @@ export const rpcHandlers = {
     function* ({
       threadId,
       folders,
+      watcher,
       nudges,
     }: {
       threadId: ThreadId;
+      watcher?: import("@t3tools/contracts").MemoryPreferencesInput["watcher"];
       folders: readonly string[];
       nudges: boolean;
     }) {
@@ -817,7 +826,17 @@ export const rpcHandlers = {
           reason: "failed",
           detail: "Choose absolute knowledge folder paths.",
         });
-      yield* (yield* reviewAccess(threadId)).open((s) => s.configure(threadId, folders, nudges));
+      yield* (yield* reviewAccess(threadId)).open((s) => {
+        s.configure(threadId, folders, nudges);
+        if (watcher) {
+          const r = s.reminders(threadId);
+          if (watcher.enabled && (!watcher.generator || !watcher.model.trim()))
+            throw new Error("Choose a generator and model.");
+          r.configure(watcher.generator, watcher.model, watcher.enabled);
+          for (const k of r.muted()) if (!watcher.muted.includes(k)) r.mute(k, false);
+          for (const k of watcher.muted) r.mute(k, true);
+        }
+      });
       knowledgeConfigured();
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
@@ -906,7 +925,15 @@ export const rpcHandlers = {
       const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;
       const access = yield* memoryAccess(threadId, environmentId);
       return yield* access.open((store) => {
-        if (access.orchestrator) return store.counts(access.main);
+        if (access.orchestrator) {
+          const watcher = store.reminders(threadId);
+          return {
+            ...store.counts(access.main),
+            ...(watcher.setting()
+              ? { reminders: { ...watcher.status(), latest: watcher.latest() } }
+              : {}),
+          };
+        }
         const proposed = store.correctionKeys(threadId).size;
         return proposed ? { cardsOnly: true, total: proposed, proposed, disputed: 0 } : null;
       });

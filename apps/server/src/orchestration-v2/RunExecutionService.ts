@@ -1,3 +1,4 @@
+import { promptReminders } from "../banneret/memory/promptHook.ts";
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -2276,6 +2277,10 @@ export const layer: Layer.Layer<
           mcpAppModelContext,
           input.run.threadId,
         );
+        if (!input.resume)
+          appContext.push(
+            ...(yield* promptReminders(input.run.threadId, input.run.id, input.message.messageId)),
+          );
         const turnInput = {
           appThread: input.appThread,
           threadId: input.run.threadId,

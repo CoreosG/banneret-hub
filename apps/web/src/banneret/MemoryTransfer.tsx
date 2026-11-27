@@ -1,3 +1,4 @@
+import { MemoryPreferences } from "./MemoryPreferences";
 import { MemoryRepo } from "./MemoryRepo";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { ScopedThreadRef, EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -60,6 +61,13 @@ export function MemoryImportSetting({ environmentId }: { environmentId: Environm
               ))}
             </select>
           </label>
+          {selected && (
+            <MemoryPreferences
+              key={"preferences-" + selected}
+              environmentId={environmentId}
+              threadId={selected}
+            />
+          )}
           {selected && (
             <MemoryTransfer key={selected} environmentId={environmentId} threadId={selected} />
           )}

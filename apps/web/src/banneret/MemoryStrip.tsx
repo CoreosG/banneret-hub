@@ -177,6 +177,19 @@ export function MemoryStrip({
             </span>
             <span>Stored unencrypted on this machine</span>
           </button>
+          {counts.reminders && (
+            <div className="px-4 text-xs">
+              Rule reminders: {counts.reminders.fired} fired · {counts.reminders.acknowledged}{" "}
+              acknowledged · {counts.reminders.contested} contested
+              {counts.reminders.latest.map((note) => (
+                <aside key={note.key} className="my-2 rounded border-l-2 bg-muted p-2">
+                  <strong>Rule reminder · {note.key}</strong>
+                  <blockquote className="whitespace-pre-wrap">{note.text}</blockquote>
+                  <span>Source: {note.source}</span>
+                </aside>
+              ))}
+            </div>
+          )}
           {loadNotes && notes.error && <p role="alert">{notes.error}</p>}
           {expanded && writable && <MemoryPreferences key={memoryThreadKey(ref)} {...ref} />}
           {expanded && notes.value && (

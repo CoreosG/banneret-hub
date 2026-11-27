@@ -47,7 +47,16 @@ export const memoryReviewInput = Schema.Struct({
 const preferences = Schema.Struct({
   folders: Schema.Array(bounded(4096)).check(Schema.isMaxLength(8)),
   nudges: Schema.Boolean,
+  watcher: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.Boolean,
+      generator: Schema.String.check(Schema.isMaxLength(128)),
+      model: Schema.String.check(Schema.isMaxLength(128)),
+      muted: Schema.Array(bounded(96)).check(Schema.isMaxLength(256)),
+    }),
+  ),
 });
+export type MemoryPreferencesInput = typeof preferences.Type;
 export const MEMORY_RPCS = [
   Rpc.make("memory.repoSetting", {
     payload: Schema.Struct({ threadId: ThreadId }),
@@ -116,6 +125,21 @@ export const MEMORY_RPCS = [
     payload: Schema.Struct({ threadId: ThreadId }),
     success: Schema.NullOr(
       Schema.Struct({
+        reminders: Schema.optional(
+          Schema.Struct({
+            fired: Schema.Int,
+            acknowledged: Schema.Int,
+            contested: Schema.Int,
+            latest: Schema.Array(
+              Schema.Struct({
+                key: Schema.String,
+                text: Schema.String,
+                source: Schema.String,
+                trust: Schema.String,
+              }),
+            ),
+          }),
+        ),
         cardsOnly: Schema.optional(Schema.Boolean),
         total: Schema.Int,
         proposed: Schema.Int,

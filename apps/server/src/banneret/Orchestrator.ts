@@ -1,3 +1,4 @@
+import { setupWatcher } from "./memory/watcher.ts";
 import { nudge } from "./memory/nudge.ts";
 import * as Schema from "effect/Schema";
 import {
@@ -54,6 +55,12 @@ export const clearThreadDesignations = (threadId: ThreadId) =>
 export const lifecycle = Layer.effectDiscard(
   Effect.gen(function* () {
     const orchestrator = yield* OrchestratorV2;
+    const afterTool = yield* setupWatcher;
+    yield* orchestrator.streamDomainEvents.pipe(
+      Stream.mapEffect(afterTool, { concurrency: 4 }),
+      Stream.runDrain,
+      Effect.forkScoped,
+    );
     yield* orchestrator.streamDomainEvents.pipe(
       Stream.runForEach((event) =>
         Effect.andThen(
