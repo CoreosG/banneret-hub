@@ -14,6 +14,8 @@ export function TaskCard(props: {
   readonly title: string;
   readonly status: string;
   readonly refLabel?: string | undefined;
+  /** The ref's number; it never truncates, only `refLabel` before it does. */
+  readonly refNumber?: string | undefined;
   readonly why?: string | undefined;
   readonly atWork?: boolean;
   readonly blockedBy?: string | undefined;
@@ -40,7 +42,12 @@ export function TaskCard(props: {
         />
       ) : null}
       {props.refLabel === undefined ? null : (
-        <span className={cn(TYPE.ref, "truncate")}>{props.refLabel}</span>
+        <span className={cn(TYPE.ref, "flex min-w-0 whitespace-nowrap")} data-slot="task-ref">
+          <span className="min-w-0 truncate">{props.refLabel}</span>
+          {props.refNumber === undefined ? null : (
+            <span className="shrink-0">{props.refNumber}</span>
+          )}
+        </span>
       )}
       <span className={cn(TYPE.cardTitle, "line-clamp-2", view.struck && "line-through")}>
         {props.title}

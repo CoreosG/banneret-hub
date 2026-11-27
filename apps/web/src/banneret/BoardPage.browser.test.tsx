@@ -266,7 +266,7 @@ describe("Enterprise board", () => {
     const invites = cardOf("2");
     expect(invites.querySelector('[data-slot="status-pill"]')?.textContent).toBe("Needs you");
     expect(invites.textContent).not.toContain("Required checks are failing.");
-    expect(invites.textContent).toContain("example-app#2");
+    expect(invites.querySelector('[data-slot="task-ref"]')?.textContent).toBe("example-app#2");
     await userEvent.hover(invites.querySelector('[data-slot="status-pill"]')!);
     await expect.element(page.getByText("Required checks are failing.")).toBeVisible();
     // Linked PRs sum to one line with the worst check state of the open ones.
@@ -304,6 +304,19 @@ describe("Enterprise board", () => {
     expect(widths).toHaveLength(5);
     for (const width of widths) expect(width).toBeGreaterThanOrEqual(180);
     expect(grid.scrollWidth).toBeLessThanOrEqual(grid.clientWidth);
+
+    // A long column scrolls on its own; the grid and the other columns stay put.
+    const many = Array.from({ length: 20 }, (_, index) =>
+      card(`s${index}`, `Stuck task ${index}`, "stuck"),
+    );
+    await emit(state(["board"], boardRead(boardOf([...CARDS(), ...many]))));
+    await expect.element(page.getByText("Stuck task 19")).toBeInTheDocument();
+    const list = column("Stuck").element().querySelector("ul")!;
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(grid.scrollHeight).toBeLessThanOrEqual(grid.clientHeight);
+    expect(column("Free").element().getBoundingClientRect().height).toBe(
+      column("Stuck").element().getBoundingClientRect().height,
+    );
   });
 
   it("shows each lease state on its chip", async () => {
@@ -405,7 +418,7 @@ describe("Enterprise board", () => {
     await userEvent.click(page.getByRole("button", { name: "Mine" }));
     await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(1));
     expect(cardOf("8")).not.toBeNull();
-    expect(summaryText()).toBe("1 task. Yours. 0 free to take, 1 taken, 0 stuck, 0 shipped");
+    expect(summaryText()).toBe("You hold 1 task. 0 free to take, 1 taken, 0 stuck, 0 shipped");
     expect(legend().querySelector('[data-status="planned"] [data-count]')?.textContent).toBe("1");
 
     // Without leases there is nothing to filter by, so the toggle goes and everyone shows.
@@ -415,7 +428,8 @@ describe("Enterprise board", () => {
 
     await emit(state(["board"], boardRead(boardOf(CARDS()))));
     await userEvent.click(page.getByRole("button", { name: "Mine" }));
-    await expect.element(page.getByText("You hold no tasks.")).toBeVisible();
+    await expect.element(page.getByText("Nothing of yours here.")).toBeVisible();
+    expect(summaryText()).toBe("You hold no tasks.");
     await userEvent.click(page.getByRole("button", { name: "Everyone" }));
     await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(7));
   });

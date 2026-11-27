@@ -17,7 +17,7 @@ import {
   heldBy,
   prSummary,
   statusCounts,
-  taskRefLabel,
+  taskRef,
   type BoardColumnView,
 } from "./board.logic";
 import { useEnrolmentView } from "./enrolmentStore";
@@ -54,7 +54,7 @@ function PrLine(props: { readonly card: BanneretBoardCard }) {
       <Icon aria-hidden className="size-3 shrink-0" />
       <span>{summary.label}</span>
       {summary.checks === null ? null : (
-        <>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
           <span aria-hidden>·</span>
           <span
             data-checks={summary.checks.state}
@@ -62,7 +62,7 @@ function PrLine(props: { readonly card: BanneretBoardCard }) {
           >
             {summary.checks.label}
           </span>
-        </>
+        </span>
       )}
     </span>
   );
@@ -76,13 +76,15 @@ function BoardCard(props: {
 }) {
   const { card } = props;
   const lease = props.leases ? card.lease : undefined;
+  const ref = taskRef(card.task);
   return (
     <li data-task-id={card.task.id} data-at-work={props.atWork ? "" : undefined}>
       <TaskCard
         title={card.task.title}
         status={card.status}
         why={card.statusWhy}
-        refLabel={taskRefLabel(card.task)}
+        refLabel={ref.repo}
+        refNumber={ref.number}
         atWork={props.atWork}
         lease={
           lease === undefined ? undefined : (
@@ -176,6 +178,8 @@ function BoardFrame(props: { readonly company?: string; readonly children: React
 }
 
 const tasksLabel = (count: number) => (count === 1 ? "1 task." : `${count} tasks.`);
+const yoursLabel = (count: number) =>
+  count === 1 ? "You hold 1 task." : `You hold ${count} tasks.`;
 
 export function BoardPage() {
   const enterprise = useEnterpriseFeed();
@@ -218,11 +222,11 @@ export function BoardPage() {
     (status) => read?.checked === true || status !== "checked",
   );
   const summary =
-    board === null || board.cards.length === 0 ? undefined : (
+    board === null || board.cards.length === 0 ? undefined : mine && cards.length === 0 ? (
+      <SummaryFigure>You hold no tasks.</SummaryFigure>
+    ) : (
       <>
-        <SummaryFigure>
-          {mine ? `${tasksLabel(cards.length)} Yours.` : tasksLabel(cards.length)}
-        </SummaryFigure>{" "}
+        <SummaryFigure>{mine ? yoursLabel(cards.length) : tasksLabel(cards.length)}</SummaryFigure>{" "}
         {columnCountsLine(columns)}
       </>
     );
@@ -284,7 +288,7 @@ export function BoardPage() {
                 atWorkCount={cards.filter((card) => atWork.has(card.task.id)).length}
               />
               {mine && cards.length === 0 ? (
-                <QuietLine fact="You hold no tasks." hint="Tasks you take appear here." />
+                <QuietLine fact="Nothing of yours here." hint="Tasks you take appear here." />
               ) : null}
               <div className="min-h-0 flex-1" {...LAYOUT_BOARD_COLUMNS}>
                 {columns.map((column) => (

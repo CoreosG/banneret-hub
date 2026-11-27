@@ -145,14 +145,17 @@ export function prSummary(prs: ReadonlyArray<BanneretBoardPr>): PrSummary | null
   };
 }
 
-/** "banneret-hub#58": the last part of the tracker scope and the task's key. */
-export function taskRefLabel(task: BanneretBoardTask): string {
+/** "banneret-hub" and "#58": the last part of the tracker scope and the task's key. */
+export function taskRef(task: BanneretBoardTask): {
+  readonly repo: string;
+  readonly number: string;
+} {
   const repo =
     task.ref.scope
       .split("/")
       .filter((part) => part.trim() !== "")
       .at(-1) ?? "";
-  return `${repo}#${task.ref.key}`;
+  return { repo, number: `#${task.ref.key}` };
 }
 
 /** Whether `login` holds the card's lease. Logins compare case-insensitively. */

@@ -11,7 +11,7 @@ import {
   prSummary,
   statusCounts,
   statusWord,
-  taskRefLabel,
+  taskRef,
 } from "./board.logic";
 
 const NOW = Date.parse("2026-11-26T12:00:00.000Z");
@@ -114,7 +114,7 @@ describe("board words", () => {
       openedAt: "2026-11-20T09:00:00.000Z",
       closedAt: null,
     };
-    expect(taskRefLabel(task)).toBe("banneret-hub#58");
+    expect(taskRef(task)).toEqual({ repo: "banneret-hub", number: "#58" });
     expect(heldBy({ lease: lease("active", 0, " Ada ") }, "ada")).toBe(true);
     expect(heldBy({ lease: lease("active", 0, "bo") }, "ada")).toBe(false);
     expect(heldBy({ lease: lease("active", 0, "") }, "")).toBe(false);

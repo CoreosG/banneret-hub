@@ -133,6 +133,27 @@ describe("TaskCard", () => {
     );
     expect(screen.getByRole("button").elements()).toHaveLength(1);
   });
+
+  it("truncates a long ref's repo but keeps its number visible", async () => {
+    await using screen = await render(
+      <div className="flex w-44 flex-col">
+        <TaskCard
+          title="Second runner"
+          status="planned"
+          refLabel="banneret-operations-and-more"
+          refNumber="#209"
+        />
+      </div>,
+    );
+    const ref = screen.container.querySelector<HTMLElement>("[data-slot=task-ref]")!;
+    const [repo, number] = [...ref.children] as HTMLElement[];
+    expect(repo!.scrollWidth).toBeGreaterThan(repo!.clientWidth);
+    expect(number!.textContent).toBe("#209");
+    expect(number!.getBoundingClientRect().right).toBeLessThanOrEqual(
+      ref.getBoundingClientRect().right + 0.5,
+    );
+    expect(number!.scrollWidth).toBeLessThanOrEqual(number!.clientWidth);
+  });
 });
 
 describe("LeaseChip", () => {
