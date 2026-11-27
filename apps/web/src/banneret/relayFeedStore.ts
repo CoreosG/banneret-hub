@@ -248,10 +248,7 @@ export async function loadMoreNeeds(target: RelayTarget) {
   if (cursor === null) return;
   const read = await feedRpc.needs(target, cursor);
   if (read === null || read.value === null) {
-    update(
-      target,
-      read === null ? { unreachable: true } : { needsProblem: read.problem ?? null },
-    );
+    update(target, read === null ? { unreachable: true } : { needsProblem: read.problem ?? null });
     return;
   }
   const latest = useRelayFeedStore.getState().feeds[relayKey(target)];

@@ -82,7 +82,8 @@ export interface RelayTarget {
   readonly relayOrigin: string;
 }
 
-export const relayKey = (target: RelayTarget) => `${target.environmentId}\u0000${target.relayOrigin}`;
+export const relayKey = (target: RelayTarget) =>
+  `${target.environmentId}\u0000${target.relayOrigin}`;
 
 /** Every relay call a screen makes; tests replace these. */
 export const enrolmentRpc = {
@@ -98,7 +99,10 @@ export const enrolmentRpc = {
     input: { readonly origin: string; readonly label: string; readonly kind: BanneretMachineKind },
   ): Promise<RelayOutcome<BanneretEnrolmentView>> =>
     outcome(runAtomCommand(appAtomRegistry, startCommand, { environmentId, input })),
-  cancel: ({ environmentId, relayOrigin }: RelayTarget): Promise<RelayOutcome<BanneretEnrolmentView>> =>
+  cancel: ({
+    environmentId,
+    relayOrigin,
+  }: RelayTarget): Promise<RelayOutcome<BanneretEnrolmentView>> =>
     outcome(
       runAtomCommand(appAtomRegistry, cancelCommand, { environmentId, input: { relayOrigin } }),
     ),

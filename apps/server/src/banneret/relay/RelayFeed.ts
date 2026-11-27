@@ -1229,15 +1229,14 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     );
 
   /** A relay not joined yet answers as not joined, then follows its feed once it is added. */
-  const waitForFeed = (relayOrigin: string): Effect.Effect<RelayFeedInstance> =>
-    Effect.gen(function* () {
-      for (;;) {
-        const changed = yield* enrolment.nextChange;
-        const feed = yield* feedFor(relayOrigin);
-        if (feed !== undefined) return feed;
-        yield* changed;
-      }
-    });
+  const waitForFeed = Effect.fn("BanneretRelayFeed.waitForFeed")(function* (relayOrigin: string) {
+    for (;;) {
+      const changed = yield* enrolment.nextChange;
+      const feed = yield* feedFor(relayOrigin);
+      if (feed !== undefined) return feed;
+      yield* changed;
+    }
+  });
 
   const service: FeedService = {
     today: (relayOrigin, visit) => notJoined(relayOrigin, (feed) => feed.today(visit)),
@@ -1272,7 +1271,9 @@ export const rpcHandlers = {
     readonly relayOrigin: string;
     readonly visit?: boolean | undefined;
   }) =>
-    Effect.flatMap(BanneretRelayFeed, (feed) => feed.today(input.relayOrigin, input.visit === true)),
+    Effect.flatMap(BanneretRelayFeed, (feed) =>
+      feed.today(input.relayOrigin, input.visit === true),
+    ),
   [BANNERET_RELAY_FEED_WS_METHODS.needs]: (input: {
     readonly relayOrigin: string;
     readonly cursor?: string | undefined;

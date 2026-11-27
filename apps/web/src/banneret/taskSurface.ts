@@ -56,11 +56,14 @@ export function decodeTaskSurface(surface: unknown): TaskSurface | null {
   const { tracker, host, scope, key, url } = ref as Record<string, unknown>;
   if (!isText(tracker) || !isText(scope) || !isText(key) || !isText(url)) return null;
   if (host !== undefined && !isText(host)) return null;
-  return taskSurface({ environmentId, relayOrigin }, {
-    id,
-    title,
-    ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) },
-  });
+  return taskSurface(
+    { environmentId, relayOrigin },
+    {
+      id,
+      title,
+      ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) },
+    },
+  );
 }
 
 /** The tab's title: the task's own, or "Task" for a saved copy that is not one. */

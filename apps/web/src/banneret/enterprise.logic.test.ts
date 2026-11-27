@@ -93,14 +93,18 @@ describe("lastResultMessage", () => {
   it("says the company no longer knows the machine after a relay reset, not that you left", () => {
     const message =
       "Example Company no longer knows this machine (the relay may have been reset). Join again.";
-    expect(lastResultMessage(at({ state: "none", reason: "unknown_machine", message }))).toBe(message);
+    expect(lastResultMessage(at({ state: "none", reason: "unknown_machine", message }))).toBe(
+      message,
+    );
     expect(lastResultMessage(at({ state: "none", reason: "unknown_machine" }))).toBe(
       "The company no longer knows this machine (the relay may have been reset). Join again.",
     );
   });
 
   it("falls back to the relay's words, then a generic line, for an unknown reason", () => {
-    expect(lastResultMessage(at({ state: "none", reason: "refused", message: "Nope." }))).toBe("Nope.");
+    expect(lastResultMessage(at({ state: "none", reason: "refused", message: "Nope." }))).toBe(
+      "Nope.",
+    );
     expect(lastResultMessage(at({ state: "none", reason: "something_new" }))).toBe(
       "Joining did not finish. Try again.",
     );

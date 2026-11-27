@@ -349,7 +349,10 @@ describe("BanneretEnrolment", () => {
         const failed = yield* Effect.exit(start(relay.origin));
         expect(JSON.stringify(failed)).toContain("unavailable");
         expect(yield* status).toEqual(noneOf());
-        expect(JSON.parse(yield* stateFileText)).toEqual({ state: "none", relayOrigin: relay.origin });
+        expect(JSON.parse(yield* stateFileText)).toEqual({
+          state: "none",
+          relayOrigin: relay.origin,
+        });
 
         relay.intercept = undefined;
         const requested = yield* start(relay.origin);
@@ -516,7 +519,9 @@ describe("BanneretEnrolment", () => {
         yield* join(fake, relay);
         yield* Effect.promise(() => relay.close());
         yield* waitFor(status, (view) => view.health === "unreachable");
-        expect(yield* enrolment.leave(focus.origin, "forget")).toEqual(noneOf({ reason: "forgotten" }));
+        expect(yield* enrolment.leave(focus.origin, "forget")).toEqual(
+          noneOf({ reason: "forgotten" }),
+        );
         yield* Effect.promise(() => relay.reopen());
         expect(yield* requestsDuring(relay)).toEqual([]);
       }).pipe(onFreshHub()),
@@ -1112,83 +1117,92 @@ describe("BanneretEnrolment", () => {
         return yield* waitFor(statusOf(relay.origin), (current) => current.state === "configured");
       });
 
-    it.live("joins both, each with its own state, secrets and workspace; Leave on one keeps the other", () =>
-      withFake((fakeA, relayA) =>
-        withFake((fakeB, relayB) =>
-          Effect.gen(function* () {
-            const baseDir = yield* makeBaseDir;
-            const [a, b] = yield* Effect.gen(function* () {
-              const enrolment = yield* Enrolment.BanneretEnrolment;
-              const a = yield* joinRelay(fakeA, relayA);
-              // The first relay is joined, and a second one still starts at its own address.
-              const b = yield* joinRelay(fakeB, relayB);
-              expect(a.workspaceId).not.toBe(b.workspaceId);
-              expect((yield* enrolment.list).map((view) => [view.relayOrigin, view.state])).toEqual(
-                [
-                  [relayA.origin, "configured"],
-                  [relayB.origin, "configured"],
-                ].toSorted(([x], [y]) => x!.localeCompare(y!)),
-              );
-              // The same relay again is refused: one enrolment per relay.
-              const again = yield* Effect.exit(start(relayA.origin));
-              expect(JSON.stringify(again)).toContain("already joining or has joined");
+    it.live(
+      "joins both, each with its own state, secrets and workspace; Leave on one keeps the other",
+      () =>
+        withFake((fakeA, relayA) =>
+          withFake((fakeB, relayB) =>
+            Effect.gen(function* () {
+              const baseDir = yield* makeBaseDir;
+              const [a, b] = yield* Effect.gen(function* () {
+                const enrolment = yield* Enrolment.BanneretEnrolment;
+                const a = yield* joinRelay(fakeA, relayA);
+                // The first relay is joined, and a second one still starts at its own address.
+                const b = yield* joinRelay(fakeB, relayB);
+                expect(a.workspaceId).not.toBe(b.workspaceId);
+                expect(
+                  (yield* enrolment.list).map((view) => [view.relayOrigin, view.state]),
+                ).toEqual(
+                  [
+                    [relayA.origin, "configured"],
+                    [relayB.origin, "configured"],
+                  ].toSorted(([x], [y]) => x!.localeCompare(y!)),
+                );
+                // The same relay again is refused: one enrolment per relay.
+                const again = yield* Effect.exit(start(relayA.origin));
+                expect(JSON.stringify(again)).toContain("already joining or has joined");
 
-              const secretsA = yield* secretsOf(relayA.origin);
-              const secretsB = yield* secretsOf(relayB.origin);
-              expect(secretsA.token).toBeDefined();
-              expect(secretsB.token).toBeDefined();
-              expect(secretsA.token).not.toBe(secretsB.token);
-              expect(Buffer.from(secretsA.key!).equals(Buffer.from(secretsB.key!))).toBe(false);
-              const ids = (yield* Workspaces.list()).workspaces.map((workspace) => workspace.id);
-              expect(ids.toSorted()).toEqual([a.workspaceId, b.workspaceId].toSorted());
+                const secretsA = yield* secretsOf(relayA.origin);
+                const secretsB = yield* secretsOf(relayB.origin);
+                expect(secretsA.token).toBeDefined();
+                expect(secretsB.token).toBeDefined();
+                expect(secretsA.token).not.toBe(secretsB.token);
+                expect(Buffer.from(secretsA.key!).equals(Buffer.from(secretsB.key!))).toBe(false);
+                const ids = (yield* Workspaces.list()).workspaces.map((workspace) => workspace.id);
+                expect(ids.toSorted()).toEqual([a.workspaceId, b.workspaceId].toSorted());
 
-              // Per-relay calls reach only their relay.
-              relayA.requests.length = 0;
-              relayB.requests.length = 0;
-              const machinesB = yield* enrolment.machines(relayB.origin, undefined);
-              expect(machinesB.items.find((machine) => machine.thisMachine)?.id).toBe(b.machineId);
-              expect(relayB.requests.some((request) => request.url.startsWith("/relay/v1/machines"))).toBe(
-                true,
-              );
-              expect(relayA.requests.some((request) => request.url.startsWith("/relay/v1/machines"))).toBe(
-                false,
-              );
+                // Per-relay calls reach only their relay.
+                relayA.requests.length = 0;
+                relayB.requests.length = 0;
+                const machinesB = yield* enrolment.machines(relayB.origin, undefined);
+                expect(machinesB.items.find((machine) => machine.thisMachine)?.id).toBe(
+                  b.machineId,
+                );
+                expect(
+                  relayB.requests.some((request) => request.url.startsWith("/relay/v1/machines")),
+                ).toBe(true);
+                expect(
+                  relayA.requests.some((request) => request.url.startsWith("/relay/v1/machines")),
+                ).toBe(false);
 
-              expect(yield* enrolment.leave(relayA.origin, "revoke")).toEqual(
-                noneOf({ reason: "left" }, relayA.origin),
-              );
-              expect(yield* secretsOf(relayA.origin)).toEqual({ key: undefined, token: undefined });
-              expect((yield* secretsOf(relayB.origin)).token).toBe(secretsB.token);
-              expect((yield* statusOf(relayB.origin)).state).toBe("configured");
-              const workspaces = (yield* Workspaces.list()).workspaces;
-              expect(workspaces.find((workspace) => workspace.id === a.workspaceId)?.deleted).toBe(
-                true,
-              );
-              expect(
-                workspaces.find((workspace) => workspace.id === b.workspaceId)?.deleted,
-              ).toBeUndefined();
-              // The relay left hears nothing more; the other keeps its heartbeat.
-              const quietA = yield* requestsDuring(relayA);
-              expect(quietA).toEqual([]);
-              expect(
-                relayB.requests.some((request) => request.url === "/relay/v1/facts"),
-              ).toBe(true);
-              return [a, b] as const;
-            }).pipe(Effect.provide(hubLayer(baseDir)));
+                expect(yield* enrolment.leave(relayA.origin, "revoke")).toEqual(
+                  noneOf({ reason: "left" }, relayA.origin),
+                );
+                expect(yield* secretsOf(relayA.origin)).toEqual({
+                  key: undefined,
+                  token: undefined,
+                });
+                expect((yield* secretsOf(relayB.origin)).token).toBe(secretsB.token);
+                expect((yield* statusOf(relayB.origin)).state).toBe("configured");
+                const workspaces = (yield* Workspaces.list()).workspaces;
+                expect(
+                  workspaces.find((workspace) => workspace.id === a.workspaceId)?.deleted,
+                ).toBe(true);
+                expect(
+                  workspaces.find((workspace) => workspace.id === b.workspaceId)?.deleted,
+                ).toBeUndefined();
+                // The relay left hears nothing more; the other keeps its heartbeat.
+                const quietA = yield* requestsDuring(relayA);
+                expect(quietA).toEqual([]);
+                expect(relayB.requests.some((request) => request.url === "/relay/v1/facts")).toBe(
+                  true,
+                );
+                return [a, b] as const;
+              }).pipe(Effect.provide(hubLayer(baseDir)));
 
-            // A restart loads both relays from their own files.
-            yield* Effect.gen(function* () {
-              expect((yield* statusOf(relayA.origin)).state).toBe("none");
-              const resumed = yield* waitFor(
-                statusOf(relayB.origin),
-                (view) => view.health === "healthy",
-              );
-              expect(resumed.machineId).toBe(b.machineId);
-              expect(a.machineId).not.toBe(b.machineId);
-            }).pipe(Effect.provide(hubLayer(baseDir)));
-          }),
+              // A restart loads both relays from their own files.
+              yield* Effect.gen(function* () {
+                expect((yield* statusOf(relayA.origin)).state).toBe("none");
+                const resumed = yield* waitFor(
+                  statusOf(relayB.origin),
+                  (view) => view.health === "healthy",
+                );
+                expect(resumed.machineId).toBe(b.machineId);
+                expect(a.machineId).not.toBe(b.machineId);
+              }).pipe(Effect.provide(hubLayer(baseDir)));
+            }),
+          ),
         ),
-      ),
     );
 
     it.live("a crash at any write of one relay leaves the other relay untouched", () =>

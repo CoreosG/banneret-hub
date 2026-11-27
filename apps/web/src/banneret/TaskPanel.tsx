@@ -525,10 +525,7 @@ function TaskPanelBody(props: {
 
   // A thread's panel has no page following the feed, so the tab follows it while shown.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's relay feed while the Task tab is shown
-  useEffect(
-    () => watchFeed({ environmentId, relayOrigin }),
-    [environmentId, relayOrigin],
-  );
+  useEffect(() => watchFeed({ environmentId, relayOrigin }), [environmentId, relayOrigin]);
 
   const card = feed.board?.value?.cards.find((candidate) => candidate.task.id === taskId) ?? null;
   // The map carries every planned task, closed issues included, that the relay may not serve.

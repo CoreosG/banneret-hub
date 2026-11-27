@@ -87,7 +87,6 @@ const control = (fake: FakeRelay, path: string, body: unknown) =>
     return (await response.json()) as Record<string, unknown>;
   });
 
-
 const waitForState = (state: string, origin = focus.origin) =>
   Effect.gen(function* () {
     const enrolment = yield* Enrolment.BanneretEnrolment;
@@ -459,9 +458,9 @@ describe("reshapeToday shipped", () => {
             ]);
             relayA.requests.length = 0;
             yield* service.needs(relayB.origin, undefined);
-            expect(relayA.requests.some((request) => request.url.startsWith("/relay/v1/needs"))).toBe(
-              false,
-            );
+            expect(
+              relayA.requests.some((request) => request.url.startsWith("/relay/v1/needs")),
+            ).toBe(false);
 
             // Leaving one company stops only its feed.
             const enrolment = yield* Enrolment.BanneretEnrolment;

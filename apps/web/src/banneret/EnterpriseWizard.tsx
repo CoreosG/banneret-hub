@@ -1,8 +1,6 @@
-// Banneret Hub: join this machine to a company relay. Address, then "Join <company>", then the code
-// the person types on the relay's sign-in page, then the projects that belong to the company. A
-// machine can join several companies, one per relay, so a new join always starts at the address; a
-// relay this machine already joined opens its workspace instead. The server holds the keys and
-// tokens; this screen only shows what `banneretRelay.status` says about the relay it is joining.
+// Banneret Hub: join this machine to a company relay: address, "Join <company>", the sign-in code,
+// then the company's projects. One enrolment per relay, so a new join always starts at the address
+// and a relay already joined opens its workspace. Shows only what `status` says about that relay.
 import type { BanneretEnrolmentView, BanneretMachineKind, EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useId, useState } from "react";
 
@@ -377,24 +375,21 @@ function ProjectStep(props: {
   const [picked, setPicked] = useState<ReadonlySet<string> | null>(null);
   const remoteUrls = remoteUrlsOf(groups.flatMap((group) => group.memberProjects));
   const remoteKey = remoteUrls.join("\n");
+  const { environmentId, relayOrigin } = props.target;
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the workspace the server just wrote and the company's repository list once joined
   useEffect(() => {
-    const { environmentId, relayOrigin } = props.target;
     void loadEnvironmentWorkspaces(environmentId);
     let current = true;
     void enrolmentRpc
-      .matchProjects(
-        { environmentId, relayOrigin },
-        remoteKey === "" ? [] : remoteKey.split("\n"),
-      )
+      .matchProjects({ environmentId, relayOrigin }, remoteKey === "" ? [] : remoteKey.split("\n"))
       .then((result) => {
         if (current) setMatched(new Set(result.ok ? result.value.matched : []));
       });
     return () => {
       current = false;
     };
-  }, [props.target.environmentId, props.target.relayOrigin, remoteKey]);
+  }, [environmentId, relayOrigin, remoteKey]);
 
   const preselected = new Set(
     groups
@@ -523,7 +518,8 @@ export function EnterpriseWizard(props: {
       : wizardStep(view);
   const notice =
     view !== null && canJoinAgain(view) ? joinAgainNotice(view) : lastResultMessage(view);
-  const target = environmentId === null || origin === undefined ? null : { environmentId, relayOrigin: origin };
+  const target =
+    environmentId === null || origin === undefined ? null : { environmentId, relayOrigin: origin };
 
   return (
     <>

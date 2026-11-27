@@ -292,7 +292,11 @@ describe("Enterprise Today and Needs you", () => {
     });
     const otherToday: BanneretFeedToday = {
       ...TODAY,
-      needsYou: { ...block, items: [item("o1", "mention", "Review the OSS release")], nextCursor: null },
+      needsYou: {
+        ...block,
+        items: [item("o1", "mention", "Review the OSS release")],
+        nextCursor: null,
+      },
       stuck: block,
     };
     spies.today.mockImplementation(async (target) =>
@@ -308,7 +312,10 @@ describe("Enterprise Today and Needs you", () => {
 
     await act(() => useWorkspacesStore.setState({ activeId: other.id }));
     await vi.waitFor(() =>
-      expect(spies.today).toHaveBeenCalledWith({ environmentId: LOCAL, relayOrigin: OTHER_ORIGIN }, true),
+      expect(spies.today).toHaveBeenCalledWith(
+        { environmentId: LOCAL, relayOrigin: OTHER_ORIGIN },
+        true,
+      ),
     );
     await emit(snapshot(["today", "needs"], 1), OTHER_ORIGIN);
     await expect.element(page.getByText("Review the OSS release")).toBeVisible();

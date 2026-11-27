@@ -2,10 +2,7 @@
 // for the preview and the sign-off; the header draws from the board card when the board holds the
 // task. With no thread or draft open to hold a right panel, the Task tab opens in a dialog instead.
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import {
-  BANNERET_RELAY_FEED_WS_METHODS,
-  type BanneretTaskRead,
-} from "@t3tools/contracts";
+import { BANNERET_RELAY_FEED_WS_METHODS, type BanneretTaskRead } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 

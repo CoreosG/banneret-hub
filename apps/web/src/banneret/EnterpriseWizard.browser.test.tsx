@@ -116,17 +116,15 @@ function setup(displayName = "Example Company") {
     expiresAt: "2099-01-01T00:10:00.000Z",
   };
   const spies = {
-    status: vi
-      .spyOn(enrolmentRpc, "status")
-      .mockImplementation(async () => ({
-        ok: true,
-        value: {
-          enrolments: [...views.values()]
-            .filter((entry) => entry.relayOrigin !== ORIGIN)
-            .concat(view.state === "none" && view.reason === undefined ? [] : [view])
-            .toSorted((a, b) => a.relayOrigin.localeCompare(b.relayOrigin)),
-        },
-      })),
+    status: vi.spyOn(enrolmentRpc, "status").mockImplementation(async () => ({
+      ok: true,
+      value: {
+        enrolments: [...views.values()]
+          .filter((entry) => entry.relayOrigin !== ORIGIN)
+          .concat(view.state === "none" && view.reason === undefined ? [] : [view])
+          .toSorted((a, b) => a.relayOrigin.localeCompare(b.relayOrigin)),
+      },
+    })),
     probe: vi.spyOn(enrolmentRpc, "probe").mockImplementation(async () => ({
       ok: true,
       value: { origin: ORIGIN, displayName },
@@ -605,7 +603,9 @@ describe("EnterpriseWizard", () => {
     await userEvent.click(page.getByRole("button", { name: "Continue" }));
     await expect
       .element(page.getByRole("status"))
-      .toHaveTextContent("This machine has already joined Example Company. Its workspace is now open.");
+      .toHaveTextContent(
+        "This machine has already joined Example Company. Its workspace is now open.",
+      );
     expect(useWorkspacesStore.getState().activeId).toBe(WORKSPACE_ID);
     expect(page.getByRole("button", { name: "Join Example Company" }).query()).toBeNull();
     expect(server.spies.start).not.toHaveBeenCalled();

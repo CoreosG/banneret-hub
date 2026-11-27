@@ -222,7 +222,7 @@ const decodeReply = <S extends Schema.Top>(schema: S, reply: RelayReply) =>
   );
 
 /** `ent-` + the first 16 hex of sha256(origin): one Enterprise workspace per relay, on every environment. */
-export const enterpriseWorkspaceId = (origin: string) => `ent-${relayHash(origin)}`;
+const enterpriseWorkspaceId = (origin: string) => `ent-${relayHash(origin)}`;
 
 const sanitize = (
   value: string,
@@ -400,7 +400,8 @@ export class BanneretEnrolment extends Context.Reference<EnrolmentService>(
     defaultValue: () => ({
       probe: () => notRunning,
       list: Effect.succeed([]),
-      status: (relayOrigin) => Effect.succeed(noneView(normalizeOrigin(relayOrigin) ?? relayOrigin)),
+      status: (relayOrigin) =>
+        Effect.succeed(noneView(normalizeOrigin(relayOrigin) ?? relayOrigin)),
       relay: () => Effect.undefined,
       start: () => notRunning,
       cancel: () => notRunning,
@@ -1192,10 +1193,10 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           return yield* fail("This machine is already joining or has joined this company.");
         }
         // A new attempt drops the previous one's last result, so it never shows during this one.
-        // A relay tried for the first time gets its state file here, before any secret exists.
         if (
-          !onDisk ||
-          (before.state === "none" && (before.reason !== undefined || before.message !== undefined))
+          onDisk &&
+          before.state === "none" &&
+          (before.reason !== undefined || before.message !== undefined)
         ) {
           yield* persist({ state: "none", relayOrigin: origin });
         }
@@ -1225,6 +1226,9 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           return yield* fail("The relay put the code in its sign-in link, so joining stopped.");
         }
         const replacing = before.state === "configured";
+        // A relay that answered for the first time gets its state file before any secret exists,
+        // so start-up always finds a state to match the secrets against.
+        if (!onDisk) yield* persist({ state: "none", relayOrigin: origin });
         yield* setSecret(replacing ? NEXT_KEY_SECRET : KEY_SECRET, seed);
         yield* persist({
           state: "requested",
@@ -1479,10 +1483,9 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   for (const name of [...names].toSorted()) {
     const match = /^([0-9a-f]{16})\.json$/.exec(name);
     if (match === null) continue;
-    const loaded = yield* fs.readFileString(path.join(relaysDir, name)).pipe(
-      Effect.flatMap(decodePersisted),
-      Effect.option,
-    );
+    const loaded = yield* fs
+      .readFileString(path.join(relaysDir, name))
+      .pipe(Effect.flatMap(decodePersisted), Effect.option);
     if (Option.isNone(loaded)) continue;
     const relayOrigin = normalizeOrigin(loaded.value.relayOrigin);
     if (relayOrigin === null || relayHash(relayOrigin) !== match[1]) continue;
@@ -1606,7 +1609,10 @@ export const rpcHandlers = {
   [BANNERET_RELAY_WS_METHODS.leave]: (input: {
     readonly relayOrigin: string;
     readonly mode: "revoke" | "forget";
-  }) => Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.leave(input.relayOrigin, input.mode)),
+  }) =>
+    Effect.flatMap(BanneretEnrolment, (enrolment) =>
+      enrolment.leave(input.relayOrigin, input.mode),
+    ),
   [BANNERET_RELAY_WS_METHODS.machines]: (input: {
     readonly relayOrigin: string;
     readonly cursor?: string | undefined;

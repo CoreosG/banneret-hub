@@ -65,7 +65,10 @@ describe("Task tab words", () => {
 
 describe("Task surface", () => {
   it("round-trips a saved surface and refuses one that is not a task", () => {
-    const surface = taskSurface({ environmentId: "local", relayOrigin: "https://relay.example" }, task);
+    const surface = taskSurface(
+      { environmentId: "local", relayOrigin: "https://relay.example" },
+      task,
+    );
     expect(surface.id).toBe("task:local:https%3A%2F%2Frelay.example:t_1");
     // A saved tab keeps only what titles it and links out; the dates come from the relay.
     expect(surface.task).not.toHaveProperty("openedAt");
@@ -80,7 +83,11 @@ describe("Task surface", () => {
   });
 
   it("titles the tab with the task, or Task for a broken copy", () => {
-    expect(taskTabTitle(taskSurface({ environmentId: "local", relayOrigin: "https://relay.example" }, task))).toBe("Rate limits");
+    expect(
+      taskTabTitle(
+        taskSurface({ environmentId: "local", relayOrigin: "https://relay.example" }, task),
+      ),
+    ).toBe("Rate limits");
     expect(taskTabTitle({ kind: "task" })).toBe("Task");
   });
 });

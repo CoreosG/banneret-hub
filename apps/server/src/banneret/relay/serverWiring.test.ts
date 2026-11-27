@@ -182,7 +182,8 @@ it.live(
           Effect.repeat({
             until: (list) =>
               list.enrolments.some(
-                (view) => view.relayOrigin === new URL(fake.url).origin && view.state === "configured",
+                (view) =>
+                  view.relayOrigin === new URL(fake.url).origin && view.state === "configured",
               ),
             // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- the server is a subprocess and /ws has no enrolment change stream; status is a local read.
             schedule: Schedule.spaced("100 millis"),
