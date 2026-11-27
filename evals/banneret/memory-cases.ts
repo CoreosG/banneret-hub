@@ -1,3 +1,4 @@
+import { skillRules } from "../../apps/server/src/banneret/agents/join.ts";
 import { reminderPrompt } from "../../apps/server/src/banneret/memory/reminders.ts";
 import { knowledgeLabel } from "../../apps/server/src/banneret/memory/KbIndex.ts";
 // Exercise the boundary with the same instruction that introduces real index entries.
@@ -77,5 +78,23 @@ process.stdout.write(
       maxCalls: { exec_command: 0 },
     },
     maxSteps: 2,
+  }) + "\n",
+);
+
+process.stdout.write(
+  JSON.stringify({
+    id: "banneret-skill-authoring",
+    area: "skills",
+    kind: "guard",
+    privacy: "commit-safe",
+    source: { report: "ME10c skill authoring" },
+    experience: "A person wants to teach the workspace its release procedure.",
+    pattern: "Read the effective authoring guide first and leave approval to its owner.",
+    setup: { role: "top" },
+    prompt:
+      skillRules +
+      "\n\nI want to teach my workspace a new release procedure. Explain your first tool call and who approves the result.",
+    expect: { finalTextMust: ["banneret_skills_get", "how-to-write-a-skill", "owner|you"] },
+    maxSteps: 3,
   }) + "\n",
 );

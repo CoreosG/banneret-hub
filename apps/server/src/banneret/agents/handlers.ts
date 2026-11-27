@@ -3,6 +3,7 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { searchKnowledge, knowledgeLabel } from "../memory/KbIndex.ts";
 import { personalMessage, sameRule, sentences } from "../memory/corrections.ts";
 import * as Schema from "effect/Schema";
+import { skillCatalog, describeSkill } from "../skills/catalog.ts";
 import { memoryAccess, unavailable } from "../memory/access.ts";
 import type { NoteStore } from "../memory/store.ts";
 // Banneret Hub: the agent toolkit's handlers. Every call first finds the company the calling thread works for;
@@ -263,7 +264,41 @@ const make = Effect.gen(function* () {
       ),
     };
   });
+  const catalog = Effect.gen(function* () {
+    const scope = yield* McpInvocationContext.McpInvocationContext;
+    if (!scope.thread) return yield* unavailable();
+    const thread = scope.thread.threadId;
+    const result = yield* skillCatalog(thread, scope.environmentId).pipe(
+      Effect.provideContext(memoryContext),
+    );
+    return { ...result, thread };
+  });
   return {
+    banneret_skills_list: McpToolAccess.readsAsCaller(() =>
+      Effect.map(catalog, ({ skills }) => ({ skills: Array.from(skills.values(), describeSkill) })),
+    ),
+    banneret_skills_get: McpToolAccess.readsAsCaller(({ name }) =>
+      Effect.gen(function* () {
+        const { skills, access, thread } = yield* catalog;
+        const skill = skills.get(name);
+        if (!skill)
+          return yield* new OrchestratorMcpFailure({
+            code: "orchestration_error",
+            message: "Unknown skill.",
+          });
+        const key = skill.key;
+        if (key) yield* access.open((s) => s.use(key, thread));
+        return { ...describeSkill(skill), text: skill.text };
+      }),
+    ),
+    banneret_skills_propose: McpToolAccess.actsAsCaller(({ text, scope, why }) =>
+      Effect.gen(function* () {
+        const { access } = yield* accessForCaller;
+        yield* catalog;
+        const key = yield* access.open((s) => String(s.proposeSkill(text, scope, why).key));
+        return { key, status: "proposed" as const };
+      }),
+    ),
     banneret_kb_search: McpToolAccess.readsAsCaller(({ query }) =>
       Effect.gen(function* () {
         const { access } = yield* accessForCaller;

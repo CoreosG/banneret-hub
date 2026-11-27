@@ -1,3 +1,5 @@
+import { defaults, skillCatalog } from "../skills/catalog.ts";
+import * as Schema from "effect/Schema";
 import { knowledgeRevision } from "../memory/KbIndex.ts";
 import { memoryAccess, offersHubMemory } from "../memory/access.ts";
 import * as SandboxHandoff from "./SandboxHandoff.ts";
@@ -12,9 +14,9 @@ import type * as McpHttpServer from "../../mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import * as AgentRelays from "./AgentRelays.ts";
 import * as AgentHandlers from "./handlers.ts";
-import { JOIN_URI, joinText } from "./join.ts";
+import { JOIN_URI, joinText, skillRules } from "./join.ts";
 import { taskPrompts } from "./startTask.ts";
-import { AgentToolkit, memoryNames } from "./tools.ts";
+import { AgentToolkit, memoryNames, skillNames } from "./tools.ts";
 
 /**
  * Visible when the calling thread is offered the tool, or, for the join resource, any tool. A check that
@@ -30,6 +32,18 @@ const offeredOnly = McpServer.visibility(
         const caller = Option.getOrUndefined(scope);
         const thread = caller?.thread;
         if (!caller || !thread) return false;
+        if (
+          target === "banneret_skills_propose" &&
+          !(yield* offersHubMemory(thread.threadId, caller.environmentId).pipe(
+            Effect.provideContext(memoryContext),
+          ))
+        )
+          return false;
+        if (skillNames.includes(target) || target.startsWith("skill://"))
+          return yield* memoryAccess(thread.threadId, caller.environmentId, "skills").pipe(
+            Effect.as(true),
+            Effect.provideContext(memoryContext),
+          );
         if (target === "banneret_kb_search")
           return yield* memoryAccess(thread.threadId, caller.environmentId).pipe(
             Effect.flatMap((a) => a.open((s) => s.folders().length > 0)),
@@ -41,9 +55,15 @@ const offeredOnly = McpServer.visibility(
           );
         const offered = yield* relays.offered(thread.threadId);
         if (target === JOIN_URI && offered.size === 0)
-          return (yield* memoryAccess(thread.threadId, caller.environmentId).pipe(
+          return yield* memoryAccess(thread.threadId, caller.environmentId, "skills").pipe(
+            Effect.as(true),
+            Effect.catch(() =>
+              memoryAccess(thread.threadId, caller.environmentId).pipe(
+                Effect.map((a) => a.orchestrator),
+              ),
+            ),
             Effect.provideContext(memoryContext),
-          )).orchestrator;
+          );
         return taskPrompts.some((p) => p.name === target)
           ? offered.has("banneret_lease_take")
           : target === JOIN_URI
@@ -57,6 +77,36 @@ const joinResource = Layer.effectDiscard(
   Effect.gen(function* () {
     const relays = yield* AgentRelays.BanneretAgentRelays;
     const memoryContext = yield* Effect.context<Effect.Services<ReturnType<typeof memoryAccess>>>();
+    const skillResource = Effect.fn("BanneretSkills.resource")(function* (name: string) {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      if (!scope.thread)
+        return yield* new McpSchema.InvalidParams({ message: "A Hub thread is required." });
+      const { skills } = yield* skillCatalog(scope.thread.threadId, scope.environmentId).pipe(
+        Effect.provideContext(memoryContext),
+      );
+      const skill = skills.get(name);
+      if (!skill) return yield* new McpSchema.InvalidParams({ message: "Unknown skill." });
+      return skill.text;
+    });
+    const skillOptions = {
+      mimeType: "text/markdown",
+      annotations: Context.make(
+        McpSchema.EnabledWhen,
+        McpInvocationContext.hiddenFromOutsideClients,
+      ),
+    };
+    for (const skill of defaults)
+      yield* McpServer.registerResource({
+        ...skillOptions,
+        name: skill.name,
+        uri: `skill://${skill.name}/`,
+        content: skillResource(skill.name),
+      });
+    yield* McpServer.registerResource`skill://${Schema.String}/`({
+      ...skillOptions,
+      name: "workspace-skill",
+      content: (_uri, name) => skillResource(name),
+    });
     for (const prompt of taskPrompts)
       yield* McpServer.registerPrompt({
         name: prompt.name,
@@ -91,11 +141,20 @@ const joinResource = Layer.effectDiscard(
           ),
           Effect.orElseSucceed(() => ""),
         );
-        if (!relay && !index)
+        const skillsOffered = yield* memoryAccess(id, scope.environmentId, "skills").pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+          Effect.provideContext(memoryContext),
+        );
+        if (!relay && !index && !skillsOffered)
           return yield* new McpSchema.InvalidParams({
             message: "No join resource for this thread.",
           });
-        return [relay && joinText({ company: relay.company, login: relay.me.login }), index]
+        return [
+          relay && joinText({ company: relay.company, login: relay.me.login }),
+          !relay && skillsOffered && skillRules,
+          index,
+        ]
           .filter(Boolean)
           .join("\n\n");
       }).pipe(
@@ -157,3 +216,4 @@ export const layer = (
     relistOnOfferChange(options.relistEvery ?? "5 seconds"),
   ).pipe(Layer.provide(offeredOnly.layer), Layer.provide(AgentRelays.layer));
 export { pluginRoute } from "../plugins/proxy.ts";
+export { withSkillResources } from "../skills/resources.ts";

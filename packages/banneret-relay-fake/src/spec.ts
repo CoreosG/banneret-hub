@@ -118,6 +118,7 @@ export type SchemaName =
   | "PoolWorkspace"
   | "PoolFounderView"
   | "PoolFounderAction"
+  | "SkillsCatalog"
   | "PoolView"
   | "PoolWorkspaceRequest"
   | "PoolSandboxRequest"

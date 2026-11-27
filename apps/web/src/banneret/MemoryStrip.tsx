@@ -22,6 +22,10 @@ import {
   setMemoryCard,
 } from "./memoryCommand";
 import { MemoryNotes } from "./MemoryReview";
+const skills = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "banneret:memory-skills",
+  tag: "memory.skills",
+});
 const list = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:memory-list",
   tag: "memory.list",
@@ -83,6 +87,18 @@ export function MemoryStrip({
   }, [visible]);
   const ref = { environmentId, threadId };
   const query = useMemoryCard(memoryCardQuery(ref));
+  const catalog = useChatRead(
+    async () => {
+      if (!visible || query !== "skills") return [];
+      const result = await runAtomCommand(appAtomRegistry, skills, {
+        environmentId,
+        input: { threadId },
+      });
+      if (result._tag !== "Success") throw new Error("Could not load skills.");
+      return result.value;
+    },
+    [visible, query === "skills", revision, environmentId, threadId].join(":"),
+  );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publish this mounted timeline's server authorization to its composer
   useEffect(() => {
     if (!resolved || !allowed) return;
@@ -139,6 +155,20 @@ export function MemoryStrip({
           Search notes{" "}
           <input type="search" value={query} onChange={(e) => setMemoryCard(ref, e.target.value)} />
         </label>
+        {query === "skills" && (
+          <>
+            <strong>Effective skills</strong>
+            {catalog.error && <p role="alert">{catalog.error}</p>}
+            {catalog.value?.map((skill) => (
+              <p key={skill.name}>
+                {skill.name} · {skill.layer} · {skill.trust}
+                {skill.locked && " · Locked by the company"}
+                <br />
+                {skill.description}
+              </p>
+            ))}
+          </>
+        )}
         {writable && (
           <MemoryTransfer {...ref} revision={revision} refresh={() => refresh((n) => n + 1)} />
         )}
@@ -147,8 +177,11 @@ export function MemoryStrip({
           <MemoryNotes
             expanded
             confirmBatch={confirmBatch}
+            lockedSkills={(catalog.value ?? []).filter((s) => s.locked).map((s) => s.name)}
             notes={notes.value.filter((n) =>
-              (n.key + " " + n.text).toLowerCase().includes(query.toLowerCase()),
+              query === "skills"
+                ? n.kind === "skill"
+                : (n.key + " " + n.text).toLowerCase().includes(query.toLowerCase()),
             )}
             writable={writable}
             apply={apply}

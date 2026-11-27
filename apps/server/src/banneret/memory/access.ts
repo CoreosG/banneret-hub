@@ -28,10 +28,13 @@ export const unavailable = () =>
     code: "capability_denied",
     message: "Private memory is unavailable for this thread.",
   });
-const hasPluginMemory = (owner: { kind: string; id: string } | undefined) =>
+const hasPluginCapability = (
+  owner: { kind: string; id: string } | undefined,
+  capability: "memory" | "skills" = "memory",
+) =>
   owner?.kind === "solo"
     ? readPlugins(owner.id).pipe(
-        Effect.map((plugins) => plugins.some((p) => p.manifest.capabilities.includes("memory"))),
+        Effect.map((plugins) => plugins.some((p) => p.manifest.capabilities.includes(capability))),
       )
     : Effect.succeed(false);
 
@@ -45,21 +48,28 @@ export const offersHubMemory = Effect.fn("BanneretMemory.offered")(function* (
     ),
     Effect.catchCause(() => Effect.succeed(null)),
   );
-  return !(yield* hasPluginMemory(workspace?.owner));
+  return !(yield* hasPluginCapability(workspace?.owner));
 });
 export const memoryAccess = Effect.fn("BanneretMemory.access")(
-  function* (threadId: ThreadId, environment: EnvironmentId) {
+  function* (
+    threadId: ThreadId,
+    environment: EnvironmentId,
+    capability: "memory" | "skills" = "memory",
+  ) {
     const { thread } = yield* (yield* ThreadManagementService).getThreadRecords(threadId, []);
     if (thread.linkOrigin || thread.guestShare || thread.deletedAt || thread.archivedAt)
       return yield* unavailable();
     const workspace = yield* threadWorkspace(threadId, thread.projectId, environment);
-    if (!workspace || (yield* hasPluginMemory(workspace.owner))) return yield* unavailable();
+    if (!workspace || (yield* hasPluginCapability(workspace.owner, capability)))
+      return yield* unavailable();
     const { owner, orchestrator } = workspace;
     let login: string | null = null;
     if (owner?.relay) {
       const status = yield* (yield* BanneretEnrolment).status(owner.relay.origin);
       if (status.state === "configured") login = status.me?.login ?? null;
     }
+    if (capability === "skills" && owner?.kind === "enterprise" && !login)
+      return yield* unavailable();
     const path = yield* Path.Path;
     const dir = path.join(path.dirname(yield* workspacesFilePath), "memory");
     const hash = storeName(owner?.id ?? null, login);
@@ -119,6 +129,8 @@ export const memoryAccess = Effect.fn("BanneretMemory.access")(
     );
     return {
       open,
+      root: thread.worktreePath ?? workspace.root,
+      origin: login ? origin : undefined,
       orchestrator,
       main: workspace.main,
       repo,

@@ -43,6 +43,14 @@ beforeAll(async () => {
     autoApprove: false,
     retryAfterMs: 0,
     chat: true,
+    skills: [
+      {
+        name: "publish",
+        description: "Publish a release.",
+        text: "---\nname: publish\ndescription: Publish a release.\n---\nVerify the release.",
+        locked: true,
+      },
+    ],
     pool: readExample("pool-config.json") as PoolConfig,
   });
   client = new RelayClient(fake.url);
@@ -270,6 +278,12 @@ describe("capabilities", () => {
     expect(body.me.login).toBe(machine.login);
     expect(body.me.machineId).toBe(machine.machineId);
     expect(Array.isArray(body.sections)).toBe(true);
+    if ("skills" in body) {
+      expect(body.skills).toEqual({ registry: true });
+      const catalog = await call(machine, "GET", "/relay/v1/skills");
+      expect(catalog.status).toBe(200);
+      expectSchema("SkillsCatalog", catalog.body);
+    } else expect(external).toBeTruthy();
   });
 });
 

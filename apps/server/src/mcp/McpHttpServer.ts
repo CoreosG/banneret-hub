@@ -1539,7 +1539,7 @@ export const layerMcpTransport = <RA, RE, RR>(registrations: Layer.Layer<RA, RE,
     name: "T3 Code",
     version: packageJson.version,
     path: MCP_HTTP_PATH,
-    protocols: mcpProtocols,
+    protocols: BanneretAgentMcp.withSkillResources(mcpProtocols),
     allowSessionTermination: true,
     registrations,
   }).pipe(Layer.provide(layerMcpAuthMiddleware));

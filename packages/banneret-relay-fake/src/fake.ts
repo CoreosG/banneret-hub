@@ -129,6 +129,12 @@ interface HealthSource {
 }
 
 export interface FakeRelayOptions {
+  readonly skills?: ReadonlyArray<{
+    name: string;
+    description: string;
+    text: string;
+    locked: boolean;
+  }>;
   readonly chat?:
     | boolean
     | {
@@ -2698,6 +2704,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         "Capabilities",
         {
           ...publicCapabilities(),
+          ...(options.skills && { skills: { registry: true } }),
           me: {
             id: caller.person.id,
             login: caller.person.login,
@@ -2799,6 +2806,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       return;
     }
 
+    if (method === "GET" && route === "/skills" && options.skills) {
+      authenticate(request, body);
+      sendJson(response, 200, "SkillsCatalog", { skills: options.skills });
+      return;
+    }
     const isPool = route === "/pool" || route.startsWith("/pool/");
     if (isPool && !options.pool?.enabled) throw new RelayError("not_found", "Pool is disabled.");
     if (isPool && query.size)

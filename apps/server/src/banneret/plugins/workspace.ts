@@ -23,6 +23,7 @@ export const threadWorkspace = Effect.fn("Banneret.threadWorkspace")(function* (
   const roles = owner && designations[owner.id];
   return {
     owner,
+    root: project.value.workspaceRoot,
     projectKey: project.value.repositoryIdentity
       ? projectKeyFromRemote(project.value.repositoryIdentity.locator.remoteUrl)
       : null,

@@ -72,6 +72,25 @@ paths:
                 $ref: '#/components/schemas/PoolFounderView'
         default:
           $ref: '#/components/responses/Error'
+  /skills:
+    get:
+      tags:
+      - skills
+      operationId: skills_list
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillsCatalog'
+        default:
+          $ref: '#/components/responses/Error'
   /pool:
     get:
       tags:
@@ -3963,6 +3982,20 @@ components:
             details:
               type: object
               description: Optional machine-readable detail, such as the refused field name. Never secrets.
+    SkillsCatalog:
+      type: object
+      required: [skills]
+      properties:
+        skills:
+          type: array
+          items:
+            type: object
+            required: [name, description, text, locked]
+            properties:
+              name: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'}
+              description: {type: string, minLength: 1}
+              text: {type: string, description: "Complete SKILL.md with matching name and description."}
+              locked: {type: boolean}
     Capabilities:
       allOf:
         - if: { required: [sections], properties: { sections: { contains: { properties: { kind: { const: team } } } } } }
@@ -3977,6 +4010,12 @@ components:
       type: object
       required: [displayName, iconUrl, enrolment]
       properties:
+        skills:
+          description: Present for enrolled callers when the company registry is enabled.
+          type: object
+          required: [registry]
+          properties:
+            registry: {const: true}
         displayName: { type: string, minLength: 1, maxLength: 80, description: "The company's name, for \"Join <name>\"." }
         iconUrl: { type: [string, "null"], format: uri, maxLength: 2048 }
         enrolment:

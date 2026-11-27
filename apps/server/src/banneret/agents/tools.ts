@@ -418,6 +418,18 @@ const key = Schema.String.check(
   Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   Schema.isMaxLength(96),
 );
+export const skillNames = [
+  "banneret_skills_list",
+  "banneret_skills_get",
+  "banneret_skills_propose",
+];
+const skillInfo = {
+  name: Schema.String,
+  description: Schema.String,
+  layer: Schema.String,
+  trust: Schema.String,
+  locked: Schema.Boolean,
+};
 export const memoryNames = [
   "banneret_memory_search",
   "banneret_memory_read",
@@ -426,6 +438,36 @@ export const memoryNames = [
   "banneret_memory_flag",
 ];
 export const AgentToolkit = Toolkit.make(
+  reads(
+    Tool.make("banneret_skills_list", {
+      ...poolOptions,
+      description: "List effective procedures for this workspace, with their layer and trust.",
+      parameters: Schema.Record(Schema.String, Schema.Never),
+      success: Schema.Struct({ skills: Schema.Array(Schema.Struct(skillInfo)) }),
+    }),
+  ),
+  reads(
+    Tool.make("banneret_skills_get", {
+      ...poolOptions,
+      description:
+        "Read the effective SKILL.md by name. Before writing a skill, read how-to-write-a-skill.",
+      parameters: Schema.Struct({ name: bounded(96) }),
+      success: Schema.Struct({ ...skillInfo, text: Schema.String }),
+    }),
+  ),
+  writes(
+    Tool.make("banneret_skills_propose", {
+      ...poolOptions,
+      description:
+        "First read how-to-write-a-skill with banneret_skills_get. Propose a complete SKILL.md for its owner to approve in chat. Use project for private project procedures. Shared repository skills go through repository review.",
+      parameters: Schema.Struct({
+        text: bounded(4096),
+        why: bounded(512),
+        scope: Schema.Literals(["personal", "project"]),
+      }),
+      success: Schema.Struct({ key: Schema.String, status: Schema.Literal("proposed") }),
+    }),
+  ),
   reads(
     Tool.make("banneret_kb_search", {
       ...poolOptions,

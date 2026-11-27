@@ -5,6 +5,7 @@ import { readDesignations } from "../OrchestratorState.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { memorySettingsHandlers } from "../memory/providerMemoryPolicy.ts";
 import type { memoryReviewInput } from "@t3tools/contracts";
+import { skillCatalog, describeSkill } from "../skills/catalog.ts";
 import { memoryAccess, unavailable } from "../memory/access.ts";
 // The tracker holds claim and release state. One operation per task runs in memory.
 // See docs/banneret/relay-v1/README.md, "How the Hub writes".
@@ -890,6 +891,17 @@ export const rpcHandlers = {
     function* ({ threadId }: { threadId: ThreadId }) {
       const access = yield* reviewAccess(threadId);
       return yield* access.open((s) => s.exportFiles());
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
+  "memory.skills": Effect.fn("BanneretMemory.skills")(
+    function* ({ threadId }: { threadId: ThreadId }) {
+      const { skills, access } = yield* skillCatalog(
+        threadId,
+        yield* (yield* ServerEnvironment).getEnvironmentId,
+      );
+      if (!access.orchestrator) return yield* unavailable();
+      return Array.from(skills.values(), describeSkill);
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),

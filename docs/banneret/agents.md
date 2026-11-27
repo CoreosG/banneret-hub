@@ -167,3 +167,23 @@ over 1.5 seconds and delivers at most two reminders per turn. A rule can repeat
 within ten minutes if a later tool call violates it again. Mute individual keys
 in preferences or turn off reminders for the chat. Orchestrators acknowledge a
 rule with `banneret_memory_use` or contest it with `banneret_memory_flag`.
+
+## Workspace skills
+
+Call `banneret_skills_list` to see effective procedures. Call `banneret_skills_get` with the name or read
+`skill://<name>/` for the same SKILL.md. Before writing a skill, read `how-to-write-a-skill`.
+The Hub checks personal memory, private project skills, the checkout's `skills/<name>/SKILL.md`, the company
+registry and the bundled defaults, in that order. A company lock always wins.
+
+Use `banneret_skills_propose` for a personal or private project procedure. The person reviews it in their
+orchestrator chat. Use `/memory skills` there to see effective and private skills. Changes intended for
+everyone go through review in the project or company repository.
+
+| Stored state                  | Event                                | Result after restart                                                |
+| ----------------------------- | ------------------------------------ | ------------------------------------------------------------------- |
+| No skill or a confirmed skill | Agent proposes a full SKILL.md       | Proposal awaits owner review. The previous procedure still applies. |
+| Proposed                      | Owner dismisses it                   | Proposal is removed.                                                |
+| Proposed                      | Owner confirms or edits and confirms | The reviewed version replaces the previous version in that scope.   |
+| Confirmed                     | Owner removes it                     | The next eligible layer supplies the procedure.                     |
+
+The effective catalog is resolved for the calling thread. Reading the catalog in chat does not count as a use.

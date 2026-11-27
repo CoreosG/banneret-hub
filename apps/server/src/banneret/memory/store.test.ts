@@ -141,3 +141,22 @@ it("refuses secrets on import and propose without storing or echoing them", () =
     expect(s.counts().total).toBe(0);
   });
 });
+
+it("keeps the confirmed skill active across restart until its owner accepts the revision", () => {
+  const file = fixture();
+  const text = "---\nname: publish\ndescription: Publish a release.\n---\n";
+  withNotes(file, "app", 1, (s) => {
+    s.proposeSkill(text + "Check the tag.", "personal", "First procedure.");
+    const [first] = s.list(true);
+    s.review(first!.key, first!.version, { kind: "confirm" });
+    s.proposeSkill(text + "Verify the tag and checksum.", "personal", "Include the checksum.");
+  });
+  withNotes(file, "app", 2, (s) => {
+    const [pending] = s.list(true);
+    expect(s.list(false).find((n) => n.trust === "confirmed")?.text).toBe(text + "Check the tag.");
+    s.review(pending!.key, pending!.version, { kind: "confirm" });
+    expect(s.list(false)).toMatchObject([
+      { text: text + "Verify the tag and checksum.", trust: "confirmed" },
+    ]);
+  });
+});
