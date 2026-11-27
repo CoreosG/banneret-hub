@@ -46,6 +46,7 @@ export type Refusal =
 type Expiry = "code_expired" | "too_many_attempts" | "approval_expired";
 type PairingState = "pending" | "awaiting_approval" | "approved" | "refused" | "expired";
 type ErrorCode =
+  | "stale_offer"
   | "pool_limit_reached"
   | "level_not_offered"
   | "malformed"
@@ -431,6 +432,7 @@ class RelayError extends Error {
 
 const STATUS: Record<ErrorCode, number> = {
   malformed: 400,
+  stale_offer: 409,
   pool_limit_reached: 409,
   level_not_offered: 403,
   rate_limited: 429,
@@ -3283,6 +3285,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       refreshAllHeads();
       notifyApprovalChanges(before);
       reply({ valid });
+      return;
+    }
+    if (request.method === "POST" && route === "/pool/offer/expire") {
+      pool.expireOffer(String(input.sandboxId));
+      reply({});
       return;
     }
     if (request.method === "POST" && route === "/lease/age") {

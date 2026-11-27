@@ -206,6 +206,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "pool-resources-local.json": "Resources",
   "pool.json": "PoolView",
   "pool-config.json": "PoolConfig",
+  "pool-state.json": "PoolStateUpdate",
   "pool-facts.json": "PoolHostFacts",
   "alarm.json": "Alarm",
   "today.json": "Today",
@@ -274,6 +275,7 @@ const baseInvalidExampleSchema = (file: string): SchemaName =>
                                     : "FactsRequest");
 
 export const invalidExampleSchema = (file: string): SchemaName => {
+  if (file.startsWith("pool-state-")) return "PoolStateUpdate";
   if (file.startsWith("pool-facts-")) return "PoolHostFacts";
   if (file.startsWith("pool-")) return "PoolView";
   return baseInvalidExampleSchema(file);
