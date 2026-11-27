@@ -749,6 +749,31 @@ describe("Machines", () => {
     );
   });
 
+  it("names each tracker account in Take and explains a linked machine's mismatch", async () => {
+    const { emit, rpc } = setup({ server: { me: ME, hasRepo: true } });
+    rpc.check.mockImplementation(async (target) =>
+      ok(
+        target.environmentId === SERVER
+          ? leaseStatus({
+              viewer: "other",
+              availability: "wrong-account",
+              detail: "The tracker is signed in as other, but the relay knows you as ada-example.",
+            })
+          : leaseStatus(),
+      ),
+    );
+    await using _task = await openTask(card());
+    await emit(feed([card()]));
+    await userEvent.click(button("Take…"));
+    const dialog = page.getByTestId("lease-confirm-dialog");
+    await vi.waitFor(() => {
+      const text = dialog.element().textContent;
+      expect(text).toContain("Claims as ada-example on desk");
+      expect(text).toContain("Claims as other on dev-server");
+      expect(text).toContain("the relay knows you as ada-example");
+    });
+  });
+
   it("asks which machine when two have the repository, and routes the take to the one picked", async () => {
     const { emit, rpc } = setup({ server: { me: ME, hasRepo: true } });
     rpc.check.mockResolvedValue(ok(leaseStatus()));
@@ -806,7 +831,7 @@ describe("Machines", () => {
     await emit(feed([card()]));
     await expect.element(page.getByRole("alert")).toBeVisible();
     await userEvent.click(page.getByTestId("lease-machine-switcher"));
-    await userEvent.click(page.getByRole("menuitem", { name: "dev-server" }));
+    await userEvent.click(page.getByRole("menuitem", { name: /dev-server/ }));
     await vi.waitFor(() =>
       expect(rpc.check).toHaveBeenLastCalledWith(
         ON_SERVER,

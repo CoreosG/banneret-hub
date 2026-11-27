@@ -2839,6 +2839,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         retryAfterMs:
           pairing.state === "pending" || pairing.state === "awaiting_approval" ? retryAfterMs : 0,
       };
+      if (pairing.state === "refused" && pairing.personId)
+        reply.login = people.get(pairing.personId)?.login;
       if (pairing.state === "approved") {
         reply.machineId = pairing.machineId;
         const machine =

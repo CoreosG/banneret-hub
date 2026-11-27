@@ -64,7 +64,7 @@ export function repositoryTracker(
           if (identity.viewer.toLowerCase() !== viewer.toLowerCase())
             return yield* new IssueOperationError({
               operation: "lease",
-              detail: "The pull request account differs from the lease holder.",
+              detail: `The pull request account is ${identity.viewer}. The lease holder is ${viewer}.`,
             });
           const current = yield* prs.getChangeRequest(pr);
           if (current.state !== "open" || (applied && !current.isDraft)) return;

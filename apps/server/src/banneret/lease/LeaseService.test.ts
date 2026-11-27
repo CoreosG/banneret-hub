@@ -92,11 +92,16 @@ describe("LeaseService take", () => {
       });
       const status = yield* (yield* leases(noTriage)).check(ref);
       expect(status.availability).toBe("no-permission");
-      expect(status.detail).toBe("Needs triage access to example-org/example-app.");
+      expect(status.detail).toBe(
+        `Signed in as ${ME}. You need triage access on example-org/example-app to take tasks there. Ask a founder.`,
+      );
       expect(status.actions.take).toBe(false);
       expect((yield* failureOf((yield* leases(noTriage)).take({ ...ref }))).reason).toBe(
         "unavailable",
       );
+
+      const signedOut = yield* (yield* leases(newTracker({ viewer: null }))).check(ref);
+      expect(signedOut.detail).toContain(`Sign in as ${ME}`);
 
       const wrongAccount = newTracker();
       const wrong = yield* leases(wrongAccount, enrolledAs(OTHER));

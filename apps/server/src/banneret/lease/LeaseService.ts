@@ -228,7 +228,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
       return {
         ...base,
         availability: "signed-out",
-        unavailableDetail: "Sign in to the tracker to take tasks.",
+        unavailableDetail: `No tracker account is signed in. Sign in as ${me.login} to take tasks.`,
       } satisfies Snapshot;
     }
     if (me !== undefined && !same(me.login, viewer)) {
@@ -242,7 +242,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
       return {
         ...base,
         availability: "no-permission",
-        unavailableDetail: `Needs triage access to ${detail.scope}.`,
+        unavailableDetail: `Signed in as ${viewer}. You need triage access on ${detail.scope} to take tasks there. Ask a founder.`,
       } satisfies Snapshot;
     }
     return { ...base, availability: "available" } satisfies Snapshot;
@@ -731,7 +731,7 @@ export const rpcHandlers = {
       )
         return yield* new TaskLeaseError({
           reason: "unavailable",
-          detail: "Sandbox tools are unavailable for this account.",
+          detail: `Sandbox tools are unavailable. Relay account: ${view.me?.login ?? "Not available"}.`,
         });
       const card = (yield* feed.task(input.relayOrigin, input.taskId)).value;
       if (!card)

@@ -26,6 +26,11 @@ import { create } from "zustand";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 
+const tailscaleLoginCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "banneret:tailscale-login",
+  tag: BANNERET_RELAY_WS_METHODS.tailscaleLogin,
+});
+
 const resourcesCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:resources",
   tag: BANNERET_RELAY_WS_METHODS.resources,
@@ -125,6 +130,8 @@ export const relayKey = (target: RelayTarget) =>
 
 /** Every relay call a screen makes; tests replace these. */
 export const enrolmentRpc = {
+  tailscaleLogin: (environmentId: EnvironmentId) =>
+    outcome(runAtomCommand(appAtomRegistry, tailscaleLoginCommand, { environmentId, input: {} })),
   resources: (environmentId: EnvironmentId, policy?: WarningPolicy) =>
     outcome(
       runAtomCommand(appAtomRegistry, resourcesCommand, {

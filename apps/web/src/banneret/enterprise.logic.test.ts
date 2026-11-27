@@ -79,14 +79,22 @@ describe("wizardStep", () => {
 });
 
 describe("lastResultMessage", () => {
+  it("names the login returned with a staff refusal", () => {
+    expect(
+      lastResultMessage(at({ state: "none", reason: "not_staff", refusedLogin: "other" })),
+    ).toBe("That account is not on the company's staff list. Relay sign-in: other.");
+  });
   it.each([
     ["cancelled", "Joining was cancelled."],
-    ["declined", "A founder declined this machine."],
-    ["not_staff", "That account is not on the company's staff list."],
-    ["network_identity_mismatch", "The sign-in did not come from your registered network."],
+    ["declined", "A founder declined this machine. Relay sign-in: Not available."],
+    ["not_staff", "That account is not on the company's staff list. Relay sign-in: Not available."],
+    [
+      "network_identity_mismatch",
+      "The sign-in did not come from your registered network. Relay sign-in: Not available.",
+    ],
     [
       "environment_enrolled",
-      "Another person has already joined this machine. They must remove it first.",
+      "Another person has already joined this machine. They must remove it first. Relay sign-in: Not available.",
     ],
     ["code_expired", "The code expired before it was confirmed. Join again."],
     ["too_many_attempts", "Too many wrong codes were typed. Join again."],
@@ -191,23 +199,27 @@ describe("enrolmentLine", () => {
     ],
     [{ state: "awaiting_approval" }, "warn", "Waiting for a founder to approve"],
     [{ state: "approved" }, "muted", "Finishing setup…"],
-    [{ health: "healthy" }, "ok", "Connected as ada-example \u00b7 Founder"],
+    [{ health: "healthy" }, "ok", "Signed in as ada-example \u00b7 Founder"],
     [{ health: "healthy", me: { login: " ", role: "founder" } }, "ok", "Connected \u00b7 Founder"],
     [
       { health: "healthy", me: { login: "ada-example", role: "" } },
       "ok",
-      "Connected as ada-example",
+      "Signed in as ada-example",
     ],
     [{ health: "healthy", me: undefined }, "ok", "Connected"],
     [{ health: "unreachable" }, "warn", "Cannot reach relay.example.com"],
     [{ health: "clock_wrong" }, "warn", "This machine's clock is wrong"],
-    [{ health: "refused" }, "error", "The relay refused this machine"],
+    [{ health: "refused" }, "error", "The relay refused this machine. Relay account: ada-example."],
     [
       { health: "unknown_machine" },
       "error",
       "Example Company no longer knows this machine (the relay may have been reset). Join again.",
     ],
-    [{ health: "forbidden" }, "error", "The relay does not allow this machine"],
+    [
+      { health: "forbidden" },
+      "error",
+      "The relay does not allow this machine. Relay account: ada-example.",
+    ],
     [{ health: "invalid_reply" }, "error", "The relay's answers do not match this version"],
     [{}, "muted", "Checking the connection…"],
     [{ state: "approved", health: "unreachable" }, "warn", "Cannot reach relay.example.com"],
@@ -263,7 +275,7 @@ describe("helpers", () => {
       "Example Company no longer knows this machine (the relay may have been reset). Join again.",
     );
     expect(joinAgainNotice(joined({ health: "refused" }))).toBe(
-      "The relay refused this machine. Join again to replace it.",
+      "The relay refused this machine. Join again to replace it. Relay account: ada-example.",
     );
   });
 
@@ -353,7 +365,7 @@ describe("helpers", () => {
 describe("login copy", () => {
   it("names the person and role", () => {
     expect(connectedLine({ login: "ada-example", role: "founder" })).toBe(
-      "Connected as ada-example \u00b7 Founder",
+      "Signed in as ada-example \u00b7 Founder",
     );
   });
 
@@ -363,7 +375,7 @@ describe("login copy", () => {
   });
 
   it("drops a missing role", () => {
-    expect(connectedLine({ login: "ada-example", role: "" })).toBe("Connected as ada-example");
+    expect(connectedLine({ login: "ada-example", role: "" })).toBe("Signed in as ada-example");
     expect(connectedLine({ login: "", role: "" })).toBe("Connected");
     expect(connectedLine(undefined)).toBe("Connected");
   });

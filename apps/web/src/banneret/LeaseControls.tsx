@@ -43,6 +43,7 @@ import { chooseLeaseMachine } from "./leaseMachineStore";
 import type { LeaseMachine, LeaseRoute } from "./leaseRoute.logic";
 import {
   checkLease,
+  leaseRpc,
   openLeaseConfirm,
   openReleaseDialog,
   runLease,
@@ -143,8 +144,53 @@ export function takeLabel(route: Extract<LeaseRoute, { kind: "ready" }>, continu
   return route.machines.length > 1 ? `${verb}…` : `${verb} on ${route.chosen.label}`;
 }
 
+function ClaimAccount({
+  machine,
+  relayOrigin,
+  entry,
+}: {
+  machine: LeaseMachine;
+  relayOrigin: string;
+  entry?: LeaseEntry | undefined;
+}) {
+  const { environmentId, ref } = machine;
+  const { tracker, host, scope, key } = ref;
+  const known = entry?.statusOn === environmentId ? entry.status : null;
+  const [answer, setAnswer] = useState<TaskLeaseStatus | null>(null);
+  const status = known ?? answer;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- read the viewer through this machine and this issue's credential
+  useEffect(() => {
+    if (known) return;
+    let current = true;
+    void leaseRpc
+      .check({ environmentId, relayOrigin }, { tracker, ...(host ? { host } : {}), scope, key })
+      .then((result) => {
+        if (current) setAnswer(result.ok ? result.value : null);
+      });
+    return () => {
+      current = false;
+    };
+  }, [environmentId, relayOrigin, tracker, host, scope, key, known]);
+  return (
+    <span className="block text-muted-foreground text-xs">
+      {status?.viewer ? (
+        <>
+          Claims as <strong>{status.viewer}</strong> on {machine.label}
+        </>
+      ) : (
+        `Tracker login on ${machine.label}: Not available`
+      )}
+      {status?.availability === "wrong-account" && (
+        <span className="block text-warning">{status.detail}</span>
+      )}
+    </span>
+  );
+}
+
 /** Switches the machine checks and operations run on, while several qualify and none holds the claim. */
 function MachineSwitcher(props: {
+  readonly entry: LeaseEntry | undefined;
+  readonly relayOrigin: string;
   readonly route: Extract<LeaseRoute, { kind: "ready" }>;
   readonly disabled?: boolean;
 }) {
@@ -172,7 +218,10 @@ function MachineSwitcher(props: {
             key={machine.environmentId}
             onClick={() => chooseLeaseMachine(machine.ref, machine.environmentId)}
           >
-            {machine.label}
+            <span>
+              {machine.label}
+              <ClaimAccount entry={props.entry} machine={machine} relayOrigin={props.relayOrigin} />
+            </span>
           </MenuItem>
         ))}
       </MenuPopup>
@@ -182,6 +231,7 @@ function MachineSwitcher(props: {
 
 /** The machines a take or release may run on, as radio buttons. */
 function MachinePicker(props: {
+  readonly entry?: LeaseEntry | undefined;
   readonly target?: RelayTarget | undefined;
   readonly machines: ReadonlyArray<LeaseMachine>;
   readonly value: EnvironmentId;
@@ -208,6 +258,13 @@ function MachinePicker(props: {
               <Radio value={machine.environmentId} />
               {machine.label}
             </label>
+            {props.target && (
+              <ClaimAccount
+                entry={props.entry}
+                machine={machine}
+                relayOrigin={props.target.relayOrigin}
+              />
+            )}
             {props.target && (
               <MachineResources
                 target={props.target}
@@ -247,6 +304,7 @@ export function LeaseConfirmHost() {
 
 function LeaseConfirmDialog() {
   const target = useLeaseConfirmStore((state) => state.target)!;
+  const entry = useLeaseEntry(target.relay, target.taskId);
   const [machine, setMachine] = useState<LeaseMachine>(target.chosen);
   const [justClaim, setJustClaim] = useState(false);
   const feed = useEnvironmentFeed(target.relay);
@@ -280,14 +338,13 @@ function LeaseConfirmDialog() {
         </DialogHeader>
         <DialogPanel>
           <MachinePicker
+            entry={entry}
             target={target.operation === "take" ? target.relay : undefined}
             machines={target.machines}
             value={machine.environmentId}
             onChange={setMachine}
           />
-          <p className="mt-3 text-muted-foreground text-xs">
-            Any of your joined machines can claim.
-          </p>
+
           {target.operation === "take" && (
             <label>
               <input
@@ -377,7 +434,12 @@ export function LeaseButtons(props: {
   if (entry?.status == null) {
     return switchable ? (
       <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="lease-buttons">
-        <MachineSwitcher route={props.route} disabled={running !== null} />
+        <MachineSwitcher
+          entry={entry}
+          relayOrigin={props.target.relayOrigin}
+          route={props.route}
+          disabled={running !== null}
+        />
       </div>
     ) : null;
   }
@@ -387,7 +449,12 @@ export function LeaseButtons(props: {
   const run = (operation: LeaseOperation) => startLease(props, operation);
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="lease-buttons">
-      <MachineSwitcher route={props.route} disabled={disabled} />
+      <MachineSwitcher
+        entry={entry}
+        relayOrigin={props.target.relayOrigin}
+        route={props.route}
+        disabled={disabled}
+      />
       {status.actions.take ? (
         <Button size="sm" disabled={disabled} onClick={() => run("take")}>
           {running === "take" ? "Taking…" : takeLabel(props.route, props.continues)}
