@@ -1,17 +1,14 @@
 // Banneret Hub: pieces the Enterprise pages share. Every relay string renders as plain text.
-import type { BanneretBoardLease } from "@t3tools/contracts";
 import { CloudOffIcon, PauseIcon } from "lucide-react";
 
 import { useNowMinute } from "../hooks/useNowMinute";
-import { cn } from "../lib/utils";
 import { formatDateTimeTimestamp, formatRelativeTimeLabel } from "../timestampFormat";
 import type { EnvironmentFeed } from "./relayFeedStore";
-import { leaseChip, type LeaseTone } from "./board.logic";
 import { RelativeTime } from "./ui/RelativeTime";
 import { toneProps } from "./ui/tokens";
 
 // Reads the minute tick because the compiler caches a render-time Date.now().
-export function useNowMs(): number {
+function useNowMs(): number {
   return Date.parse(`${useNowMinute()}:00.000Z`);
 }
 
@@ -75,34 +72,5 @@ export function FeedStatus(props: {
         )}
       </span>
     </p>
-  );
-}
-
-const CHIP_TONE: Record<LeaseTone, string> = {
-  ok: "border-success/40 text-success-foreground",
-  warn: "border-warning/50 bg-warning/10 text-warning-foreground",
-  error: "border-destructive/50 bg-destructive/10 text-destructive-foreground",
-  muted: "border-border text-muted-foreground",
-};
-
-/** A lease chip: holder and state, toned by how worried to be. Board cards and the Task tab share it. */
-export function LeaseChipView(props: {
-  readonly lease: BanneretBoardLease | undefined;
-  readonly nowMs: number;
-}) {
-  const lease = props.lease;
-  if (lease === undefined) return null;
-  const chip = leaseChip(lease, props.nowMs);
-  return (
-    <span
-      data-testid="lease-chip"
-      data-lease={lease.state}
-      className={cn(
-        "inline-flex max-w-full self-start truncate rounded-full border px-2 py-0.5 text-xs",
-        CHIP_TONE[chip.tone],
-      )}
-    >
-      {chip.label}
-    </span>
   );
 }

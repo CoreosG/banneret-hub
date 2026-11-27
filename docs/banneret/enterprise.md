@@ -65,6 +65,21 @@ The checked mark appears only when the board says it applies a sign-off rule. A 
 adds the check, and it counts only after the pull request merged, its checks passed and someone else approved
 the review.
 
+### Take and release
+
+You can take and release a task from the Hub when the relay parses leases and a project here is on the task's
+repository. Use **Take** in the Task tab, or the menu on a board card. The Hub writes a `claim:` comment, assigns
+you and adds the `claimed` label, all on your own tracker login. It then waits about 10 seconds and reads the
+issue again: if someone claimed first, they keep it and your claim is withdrawn.
+
+**Release** asks for a reason and an optional note (Goal, Done, Next). Turn on **Free to continue** to leave the
+task for someone else. It is on by default for Blocked, Handing over and Out of usage. Such tasks sit at the top
+of Free with your name and reason, and **Continue** shows your note before it takes the task.
+
+If a step fails half way, the task shows **Finish** and **Withdraw**. You need triage access to the repository,
+and the tracker login must be the one the relay knows. When either is missing, the Hub says so and writes
+nothing.
+
 ### Map and Rests-on
 
 The Map shows the build in stages. Each item has a status, and each item can rest on other items. If something
@@ -80,12 +95,13 @@ the reason. A task never sits there without one.
 
 ### The Task tab
 
-Opening a task shows its status, its lease, its pull request and checks, its preview when there is one, who
-checked it, and what it rests on. Below that is the work tracker's own issue thread and composer.
+Opening a task shows its status, who holds it, when it opened and closed, every linked pull request and its
+checks, its stage on the Map, its preview when there is one, who checked it, what it rests on, and the last
+release with its note. Below that is the work tracker's own issue thread and composer.
 
 **Edits there are made on GitHub as you.** (It says the tracker's name, which is GitHub by default.) They use
 your own login, and the board's rules for claims and sign-off still apply. If none of your projects here is on
-that tracker, the tab shows a note and a link instead.
+that tracker, the tab shows one row that links to the issue instead.
 
 ### The open tabs bar
 

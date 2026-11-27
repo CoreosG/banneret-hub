@@ -1,0 +1,22 @@
+/* Banneret Hub: the take's read-back bar fills once over the 10 s wait, then stops. */
+@layer components {
+  [data-lease-readback] {
+    animation: banneret-lease-readback 10s linear forwards;
+  }
+
+  @keyframes banneret-lease-readback {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-lease-readback] {
+      animation: none;
+      transform: scaleX(0.5);
+    }
+  }
+}

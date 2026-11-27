@@ -1,12 +1,16 @@
 import appCss from "../index.css?inline";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   EnvironmentId,
+  ProjectId,
   type BanneretBoard,
   type BanneretBoardCard,
   type BanneretEnrolmentView,
   type BanneretFeedBoardRead,
   type BanneretFeedState,
   type BanneretWorkspace,
+  type TaskLeaseResult,
+  type TaskLeaseStatus,
 } from "@t3tools/contracts";
 import { minuteTick } from "@t3tools/client-runtime/clock";
 import {
@@ -22,16 +26,19 @@ import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
+import { useProjects, useServerConfigs } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { BoardPage } from "./BoardPage";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
+import { leaseRpc, useLeaseStore, type LeaseCall } from "./leaseStore";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
 import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
 
 vi.mock("../state/environments", { spy: true });
+vi.mock("../state/entities", { spy: true });
 
 const LOCAL = EnvironmentId.make("local");
 const WORKSPACE_ID = "ent-0123456789abcdef";
@@ -502,5 +509,188 @@ describe("Enterprise board", () => {
     expect(row.querySelector("img")).toBeNull();
     expect(row.querySelector("a")).toBeNull();
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined();
+  });
+
+  describe("take and release", () => {
+    const project = {
+      id: ProjectId.make("example-app"),
+      workspaceRoot: "/workspace/example-app",
+      environmentId: LOCAL,
+      repositoryIdentity: {
+        provider: "github",
+        displayName: "example-org/example-app",
+        canonicalKey: "github.com/example-org/example-app",
+        locator: {
+          source: "git-remote",
+          remoteName: "origin",
+          remoteUrl: "https://github.com/example-org/example-app.git",
+        },
+      },
+    } as unknown as EnvironmentProject;
+
+    const free = (extra: Partial<TaskLeaseStatus> = {}): TaskLeaseStatus => ({
+      availability: "available",
+      viewer: "ada-example",
+      lease: null,
+      lastRelease: null,
+      actions: { take: true, release: false, finish: false, withdraw: false },
+      busy: false,
+      ...extra,
+    });
+    const handedOver = {
+      by: { login: "bo-example" },
+      at: "2026-11-26T08:00:00.000Z",
+      reason: "out_of_usage",
+      freeToContinue: true,
+      note: "Goal: Limit invites.\nNext: Return 429.",
+    };
+    const cards = () => [
+      card("1", "Rate limits", "free"),
+      card("8", "Invite limits", "free", { lastRelease: handedOver }),
+      card("9", "Old idea", "free", {
+        lastRelease: { ...handedOver, reason: "done", freeToContinue: false },
+      }),
+    ];
+
+    function useLeases() {
+      useLeaseStore.setState({ entries: {} });
+      vi.mocked(useServerConfigs).mockReturnValue(
+        new Map([
+          [LOCAL, { environment: { capabilities: { issues: true } } }],
+        ]) as unknown as ReturnType<typeof useServerConfigs>,
+      );
+      vi.mocked(useProjects).mockReturnValue([project]);
+      return {
+        check: vi.spyOn(leaseRpc, "check"),
+        take: vi.spyOn(leaseRpc, "take"),
+      };
+    }
+
+    it("puts free to continue cards at the top of Free and continues them from the note", async () => {
+      using stack = new DisposableStack();
+      const rpc = useLeases();
+      rpc.check.mockResolvedValue({
+        ok: true,
+        value: free({ lastRelease: { ...handedOver, by: "bo-example" } }),
+      });
+      const { emit, screen } = await openBoard(stack);
+      await using _screen = screen;
+      await emit(state(["board"], boardRead(boardOf(cards()))));
+      await expect.element(page.getByText("Invite limits")).toBeVisible();
+
+      const order = [...column("Free").element().querySelectorAll("[data-task-id]")].map(
+        (row) => (row as HTMLElement).dataset.taskId,
+      );
+      expect(order).toEqual(["8", "1", "9"]);
+      expect(cardOf("8").querySelector('[data-testid="free-to-continue"]')?.textContent).toBe(
+        "Free to continue · from bo-example · Out of usage",
+      );
+      expect(cardOf("9").querySelector('[data-testid="free-to-continue"]')).toBeNull();
+      // The lease is read when a menu opens, never for every card.
+      expect(rpc.check).not.toHaveBeenCalled();
+
+      await userEvent.click(page.getByRole("button", { name: "Actions for Invite limits" }));
+      await userEvent.click(page.getByRole("menuitem", { name: "Continue…" }));
+      expect(rpc.check).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "8" }));
+      // Continue shows the note first, in the Task dialog, with Continue to take it.
+      const dialog = page.getByRole("dialog");
+      await expect
+        .element(dialog.getByTestId("task-last-release-note"))
+        .toHaveTextContent("Goal: Limit invites. Next: Return 429.");
+      rpc.take.mockResolvedValue({
+        ok: true,
+        value: {
+          outcome: "taken",
+          status: free({
+            lease: {
+              holder: "ada-example",
+              state: "active",
+              since: null,
+              claimants: ["ada-example"],
+            },
+            actions: { take: false, release: true, finish: false, withdraw: false },
+          }),
+        },
+      });
+      await userEvent.click(dialog.getByRole("button", { name: "Continue", exact: true }));
+      expect(rpc.take).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "8" }));
+    });
+
+    it("takes from the card menu, showing the read-back on the card until the board agrees", async () => {
+      using stack = new DisposableStack();
+      const rpc = useLeases();
+      rpc.check.mockResolvedValue({ ok: true, value: free() });
+      let answer: (value: LeaseCall<TaskLeaseResult>) => void = () => {};
+      rpc.take.mockReturnValue(
+        new Promise((done) => {
+          answer = done;
+        }),
+      );
+      const { emit, screen } = await openBoard(stack);
+      await using _screen = screen;
+      await emit(state(["board"], boardRead(boardOf(cards()))));
+      await userEvent.click(page.getByRole("button", { name: "Actions for Rate limits" }));
+      await userEvent.click(page.getByRole("menuitem", { name: "Take" }));
+      await vi.waitFor(() =>
+        expect(cardOf("1").querySelector("[data-local-lease]")?.textContent).toBe(
+          "Taking… confirming",
+        ),
+      );
+      await act(() =>
+        answer({
+          ok: true,
+          value: {
+            outcome: "taken",
+            status: free({
+              lease: {
+                holder: "ada-example",
+                state: "active",
+                since: null,
+                claimants: ["ada-example"],
+              },
+              actions: { take: false, release: true, finish: false, withdraw: false },
+            }),
+          },
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(cardOf("1").querySelector("[data-local-lease]")?.textContent).toBe("Taken by you"),
+      );
+      // Once the relay's snapshot shows the lease, the board's own chip takes over.
+      const taken = cards().map((entry) =>
+        entry.task.id === "1"
+          ? { ...entry, column: "taken", lease: lease("ada-example", "active", MINUTE) }
+          : entry,
+      );
+      await emit(state(["board"], boardRead(boardOf(taken))));
+      await vi.waitFor(() => expect(cardOf("1").querySelector("[data-local-lease]")).toBeNull());
+      expect(chipOf("1")?.textContent).toBe("ada-exampleactive 1 min ago");
+    });
+
+    it("names the reason in the menu when take is off, and has no menu without the flag", async () => {
+      using stack = new DisposableStack();
+      const rpc = useLeases();
+      rpc.check.mockResolvedValue({
+        ok: true,
+        value: free({
+          availability: "signed-out",
+          detail: "Sign in to the tracker to take tasks.",
+          actions: { take: false, release: false, finish: false, withdraw: false },
+        }),
+      });
+      const { emit, screen } = await openBoard(stack);
+      await using _screen = screen;
+      await emit(state(["board"], boardRead(boardOf(cards()))));
+      await userEvent.click(page.getByRole("button", { name: "Actions for Rate limits" }));
+      await expect
+        .element(page.getByRole("menuitem", { name: "Sign in to the tracker to take tasks." }))
+        .toBeVisible();
+      await userEvent.keyboard("{Escape}");
+      await emit(state(["board"], boardRead(boardOf(cards()), { leases: false })));
+      await vi.waitFor(() =>
+        expect(document.querySelector('[aria-label="Actions for Rate limits"]')).toBeNull(),
+      );
+      expect(document.querySelector('[data-testid="free-to-continue"]')).toBeNull();
+    });
   });
 });

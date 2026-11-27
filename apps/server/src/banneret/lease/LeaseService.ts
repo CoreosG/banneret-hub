@@ -11,7 +11,9 @@ import {
   LEASE_LABEL_PAUSED,
   type IssueComment,
   type IssueDetail,
+  IssueOperationError,
   type IssueRef,
+  IssueUnavailableError,
   type LeaseFoldResult,
   TASK_LEASE_WS_METHODS,
   TaskLeaseError,
@@ -25,6 +27,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 import * as IssueService from "../../issue/IssueService.ts";
 import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
@@ -86,7 +89,7 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
  * On GitHub the comment url ends in `#issuecomment-<databaseId>`: the numeric id every reader of the protocol
  * breaks a same-second tie with. Other trackers keep their own id.
  */
-export const protocolCommentId = (comment: IssueComment): string =>
+const protocolCommentId = (comment: IssueComment): string =>
   /#issuecomment-(\d+)$/.exec(comment.url ?? "")?.[1] ?? comment.id;
 
 interface Snapshot {
@@ -97,14 +100,28 @@ interface Snapshot {
   readonly unavailableDetail?: string;
 }
 
-const describeError = (error: unknown): string =>
-  typeof error === "object" && error !== null && "message" in error
+const isOperationError = Schema.is(IssueOperationError);
+const isUnavailableError = Schema.is(IssueUnavailableError);
+
+/** One plain sentence for a tracker failure; people and agent tools read it as the reason. */
+const describeError = (error: unknown): string => {
+  if (isOperationError(error)) {
+    if (error.reason === "rate-limited") {
+      return "The tracker's rate limit is used up. Try again in a few minutes.";
+    }
+    if (error.reason === "read-only") return "The tracker allows only reading this issue.";
+    if (error.reason === "not-found") return "The tracker could not find this issue.";
+    return `The tracker refused the change: ${error.detail.replace(/\.?$/, ".")}`;
+  }
+  if (isUnavailableError(error)) {
+    return `The tracker is unavailable. ${error.message}`;
+  }
+  return typeof error === "object" && error !== null && "message" in error
     ? String((error as { message: unknown }).message)
     : "The tracker refused the request.";
+};
 
-export const make = Effect.fn("LeaseService.make")(function* (
-  options: Partial<LeaseServiceOptions> = {},
-) {
+const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseServiceOptions> = {}) {
   const issues = yield* IssueService.IssueService;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const enrolment = yield* BanneretEnrolment.BanneretEnrolment;

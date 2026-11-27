@@ -48,6 +48,8 @@ interface FakeTracker {
   permissions: { comment: boolean; labels: boolean; assignees: boolean };
   /** Each write of that kind fails while the count is above zero. */
   failComments: number;
+  /** Every comment fails as the tracker's rate limit. */
+  rateLimited: boolean;
   failUpdates: number;
   failPrLabels: number;
   /** Comments whose line 1 matches are refused. */
@@ -69,6 +71,7 @@ const newTracker = (overrides: Partial<FakeTracker> = {}): FakeTracker => ({
   capabilities: { comment: true, labels: true, assignees: true },
   permissions: { comment: true, labels: true, assignees: true },
   failComments: 0,
+  rateLimited: false,
   failUpdates: 0,
   failPrLabels: 0,
   refuseComments: null,
@@ -135,6 +138,15 @@ const issueService = (tracker: FakeTracker) =>
       }),
     comment: (input: { body: string }) =>
       Effect.flatMap(Clock.currentTimeMillis, (now) => {
+        if (tracker.rateLimited) {
+          return Effect.fail(
+            new IssueOperationError({
+              operation: "comment",
+              detail: "API rate limit exceeded.",
+              reason: "rate-limited",
+            }),
+          );
+        }
         if (tracker.failComments > 0 || tracker.refuseComments?.test(input.body) === true) {
           tracker.failComments = Math.max(0, tracker.failComments - 1);
           return refused("comment");
@@ -419,6 +431,18 @@ describe("LeaseService take", () => {
       expect((yield* failureOf((yield* leases(tracker)).take({ ...ref }))).reason).toBe("failed");
       expect(tracker.writes).toEqual([]);
       expect(tracker.assignees).toEqual([]);
+    }),
+  );
+
+  it.effect("says plainly when the tracker's rate limit stops a take", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(EPOCH);
+      const tracker = newTracker({ rateLimited: true });
+      expect(yield* failureOf((yield* leases(tracker)).take({ ...ref }))).toEqual({
+        reason: "failed",
+        detail: "The tracker's rate limit is used up. Try again in a few minutes.",
+      });
+      expect(tracker.writes).toEqual([]);
     }),
   );
 

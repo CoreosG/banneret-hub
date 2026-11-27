@@ -31,7 +31,7 @@ import * as Enrolment from "./Enrolment.ts";
 import * as Facts from "./Facts.ts";
 import * as RelayFeed from "./RelayFeed.ts";
 import { type Forwarder, withFake } from "./relayHarness.testkit.ts";
-import { liveTaskIds, reshapeBoard, reshapeMap, taskIdForLinks } from "./Snapshot.ts";
+import { liveTaskIds, reshapeBoard, reshapeMap, reshapeTask, taskIdForLinks } from "./Snapshot.ts";
 
 const ENVIRONMENT = "env-board-1";
 const EPOCH = Date.parse("2026-11-26T10:00:00Z");
@@ -1174,5 +1174,67 @@ describe("reshapeMap", () => {
       byStage: { s1: { planned: 2 }, s2: {} },
     });
     expect(reshapeMap({ items: [] })).toBeUndefined();
+  });
+});
+
+describe("lastRelease", () => {
+  const task = {
+    id: "t_1",
+    title: "A",
+    ref: { tracker: "github", scope: "example-org/app", key: "7", url: "https://x" },
+    openedAt: "2026-11-20T09:00:00Z",
+    closedAt: null,
+  };
+  const card = (lastRelease: unknown) => ({
+    task,
+    column: "free",
+    status: "planned",
+    statusWhy: "Open.",
+    lastRelease,
+    prs: [],
+    restsOn: [],
+  });
+  const release = {
+    by: { id: "p_1", login: "ada-example" },
+    at: "2026-11-26T09:12:00Z",
+    reason: "out_of_usage",
+    freeToContinue: true,
+    reasonText: "limits",
+    note: "Goal: invites\nNext: the 429",
+  };
+  const expected = {
+    by: { login: "ada-example" },
+    at: "2026-11-26T09:12:00Z",
+    reason: "out_of_usage",
+    freeToContinue: true,
+    reasonText: "limits",
+    note: "Goal: invites\nNext: the 429",
+  };
+  const board = (cards: unknown[]) =>
+    reshapeBoard({ state: "ok", notMeasured: [], columns: [], cards })!;
+
+  it("passes a board card's last release through, with its note", () => {
+    expect(board([card(release)]).cards[0]?.lastRelease).toEqual(expected);
+  });
+
+  it("passes the task read's last release through", () => {
+    expect(reshapeTask(card(release))?.lastRelease).toEqual(expected);
+  });
+
+  it("drops a malformed last release but keeps the card, and caps its text", () => {
+    const cards = board([
+      card({ ...release, freeToContinue: "yes" }),
+      card({ ...release, by: {} }),
+      card({
+        ...release,
+        reasonText: "é".repeat(300),
+        note: "€".repeat(1000),
+      }),
+    ]).cards;
+    expect(cards).toHaveLength(3);
+    expect(cards[0]?.lastRelease).toBeUndefined();
+    expect(cards[1]?.lastRelease).toBeUndefined();
+    expect(Array.from(cards[2]?.lastRelease?.reasonText ?? "")).toHaveLength(200);
+    expect(new TextEncoder().encode(cards[2]?.lastRelease?.note ?? "").length).toBe(2046);
   });
 });

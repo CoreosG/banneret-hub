@@ -26,9 +26,11 @@ export const TYPE = {
   ref: "font-mono text-2xs text-muted-foreground",
 } as const;
 
-/** Type steps Tailwind's scale lacks (13/20), as attributes for tokens.css. */
+/** Type steps Tailwind's scale lacks (13/20, 16/22), as attributes for tokens.css. */
 export const TEXT_SECTION = { "data-text": "section" } as const;
 export const TEXT_SUMMARY = { "data-text": "summary" } as const;
+/** The dialog title step (16/22), for the Task dialog's heading. */
+export const TEXT_DIALOG_TITLE = { "data-text": "dialog-title" } as const;
 /** The 10px radius of sections and board columns. */
 export const RADIUS_PANEL = { "data-radius": "panel" } as const;
 /** The Board's column grid. */

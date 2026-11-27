@@ -207,7 +207,11 @@ async function openPanel(surface: unknown) {
   };
 }
 
-const header = () => document.querySelector('[data-testid="task-header"]') as HTMLElement;
+// The header and its facts: everything above the thread or the link row.
+const header = () => document.querySelector("[data-task-panel]") as HTMLElement;
+const linkOut = () => document.querySelector<HTMLAnchorElement>('[data-testid="task-link-out"] a');
+const headerLinkOut = () =>
+  document.querySelector<HTMLAnchorElement>('[data-testid="task-link-out-icon"]');
 
 describe("Task tab", () => {
   it("draws the header from the board card, with the preview and sign-off from the task read", async () => {
@@ -238,35 +242,40 @@ describe("Task tab", () => {
     await vi.waitFor(() => expect(header().textContent).toContain("Preview"));
     expect(read).toHaveBeenCalledWith(LOCAL, "t_2");
     const text = header().textContent!;
-    expect(header().querySelector("[data-status]")?.textContent).toContain("needs you");
+    expect(header().querySelector("[data-status]")?.textContent).toContain("Needs you");
+    expect(header().querySelector('[data-testid="task-ref"]')?.textContent).toBe("example-app#2");
     expect(text).toContain("Required checks are failing.");
     // Every linked pull request with its checks, and the issue's dates.
     expect([...header().querySelectorAll("[data-pr]")].map((pr) => pr.textContent)).toEqual([
-      "PR #70 closed",
-      "PR #77 open · checks failing",
+      "#70 closed",
+      "#77 openChecks failing",
     ]);
     expect(
       header().querySelector('[data-testid="task-opened"] time')?.getAttribute("datetime"),
     ).toBe("2026-11-20T09:00:00.000Z");
     expect(header().querySelector('[data-testid="task-closed"]')).toBeNull();
-    expect(header().querySelector('[data-testid="lease-chip"]')?.textContent).toBe(
-      "bo-example · active 12 min ago",
+    expect(header().querySelector('[data-slot="lease-chip"]')?.textContent).toBe(
+      "bo-exampleactive 12 min ago",
     );
-    expect(text).toContain("PR #77 open · checks failing");
     const links = [...header().querySelectorAll("a")].map((link) => [
       link.textContent,
       link.getAttribute("href"),
     ]);
-    expect(links).toContainEqual(["Open", "https://github.com/example-org/example-app/pull/77"]);
-    expect(links).toContainEqual(["Open", "https://github.com/example-org/example-app/pull/70"]);
+    expect(links).toContainEqual([
+      "#77 open",
+      "https://github.com/example-org/example-app/pull/77",
+    ]);
+    expect(links).toContainEqual([
+      "#70 closed",
+      "https://github.com/example-org/example-app/pull/70",
+    ]);
     expect(links).toContainEqual(["Open preview", "https://preview.example.com/t_2"]);
     expect(header().querySelector("[data-preview]")?.textContent).toBe("ready");
     // Rests on: the board's title where it holds the task, else the id.
     expect(header().querySelector('[data-rests-on="t_1"]')?.textContent).toContain("Rate limits");
     expect(header().querySelector('[data-rests-on="t_gone"]')?.textContent).toContain("t_gone");
-    // A valid sign-off shows the checked mark with who; a founder needs no sign-off link then.
+    // A valid sign-off shows who checked it; a founder needs no sign-off link then.
     const checked = header().querySelector('[data-checked="valid"]')!;
-    expect(checked.textContent).toContain("●");
     expect(checked.textContent).toContain("Checked by cy-example");
     expect(checked.querySelector("time")?.getAttribute("datetime")).toBe(
       "2026-11-26T09:30:00.000Z",
@@ -284,8 +293,8 @@ describe("Task tab", () => {
     await vi.waitFor(() =>
       expect(header().textContent).toContain("Open and nobody has taken it yet."),
     );
-    expect(header().querySelector("[data-status]")?.textContent).toContain("planned");
-    expect(header().textContent).toContain("PR #77 open · checks failing");
+    expect(header().querySelector("[data-status]")?.textContent).toContain("Not built yet");
+    expect(header().textContent).toContain("#77 open");
   });
 
   it("keeps its title and link out with a neutral line when the relay has no details", async () => {
@@ -293,13 +302,12 @@ describe("Task tab", () => {
     read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
     await using _panel = await openPanel(taskSurface(LOCAL, card("9", "Gone").task));
     await emit(state(["task"], null));
-    await expect
-      .element(page.getByText("Details from the relay aren't available for this task."))
-      .toBeVisible();
+    await expect.element(page.getByText("Details from the relay aren't available.")).toBeVisible();
     await expect.element(page.getByRole("heading", { name: "Gone" })).toBeVisible();
-    expect(header().querySelector("a")?.getAttribute("href")).toBe(
+    expect(headerLinkOut()?.getAttribute("href")).toBe(
       "https://github.com/example-org/example-app/issues/9",
     );
+    expect(linkOut()?.textContent).toBe("Open on GitHub");
   });
 
   it("shows the map item's status for a task the relay does not serve", async () => {
@@ -319,12 +327,12 @@ describe("Task tab", () => {
         blockedBy: [],
       }),
     );
-    await expect
-      .element(page.getByText("Details from the relay aren't available for this task."))
-      .toBeVisible();
-    expect(header().querySelector("[data-status]")?.textContent).toContain("◐");
-    expect(header().querySelector("[data-status]")?.textContent).toContain("built, unchecked");
-    expect(header().textContent).toContain("The issue was closed as completed.");
+    await expect.element(page.getByText("Details from the relay aren't available.")).toBeVisible();
+    expect(header().querySelector("[data-status]")?.textContent).toContain("Built, needs a check");
+    expect(header().querySelector('[data-testid="task-status-why"]')?.textContent).toBe(
+      "From the build map. The issue was closed as completed.",
+    );
+    expect(header().textContent).toContain("Stage one");
     expect(header().textContent).not.toContain("does not know");
     // The map's task carries the issue's dates, even with no board card.
     expect(
@@ -367,10 +375,11 @@ describe("Task tab", () => {
         ],
       ),
     );
-    await expect
-      .element(page.getByTestId("task-blocked-by"))
-      .toHaveTextContent("Blocked by Rate limits");
-    expect(header().querySelector("[data-status]")?.textContent).toContain("⊘");
+    await vi.waitFor(() =>
+      expect(header().querySelector("[data-status]")?.textContent).toContain(
+        "Blocked by Rate limits",
+      ),
+    );
   });
 
   it("does not read a relay that does not offer the task section", async () => {
@@ -409,7 +418,7 @@ describe("Task tab", () => {
     );
     expect(notice.textContent).toContain("di-example does not hold the sign-off role.");
     expect(header().querySelector('[data-checked="valid"]')).toBeNull();
-    expect(header().querySelector("[data-status]")?.textContent).toContain("built, unchecked");
+    expect(header().querySelector("[data-status]")?.textContent).toContain("Built, needs a check");
     const signOff = [...header().querySelectorAll("a")].find(
       (link) => link.textContent === "Sign off on GitHub",
     );
@@ -437,8 +446,10 @@ describe("Task tab", () => {
     const shown = card("2", "Guild invites");
     await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
     await emit(state(["board"], [shown]));
-    expect(document.querySelector('[data-testid="task-link-out"]')).not.toBeNull();
-    const link = header().querySelector("a")!;
+    expect(document.querySelector('[data-testid="task-link-out"]')?.textContent).toContain(
+      "No local project for example-app",
+    );
+    const link = linkOut()!;
     expect(link.textContent).toBe("Open on GitHub");
     expect(link.getAttribute("href")).toBe("https://github.com/example-org/example-app/issues/2");
     expect(link.getAttribute("target")).toBe("_blank");
@@ -460,7 +471,8 @@ describe("Task tab", () => {
     await using _panel = await openPanel(taskSurface(LOCAL, odd));
     await emit(state([], null));
     expect(document.querySelector('[data-testid="task-link-out"]')).not.toBeNull();
-    expect(header().querySelector("a")?.textContent).toBe("Open on youtrack");
+    expect(linkOut()?.textContent).toBe("Open on youtrack");
+    expect(headerLinkOut()?.getAttribute("aria-label")).toBe("Open on youtrack");
     expect(document.querySelector('[data-testid="task-thread-help"]')).toBeNull();
     expect(document.querySelector('[data-testid="issue-thread"]')).toBeNull();
   });
@@ -604,8 +616,8 @@ describe("Task dialog", () => {
 
   it("fits its content when no issue thread is embedded, with the link out in the header", async () => {
     await using dialog = await openDialog(false);
-    expect(document.querySelector('[data-testid="task-link-out"]')).not.toBeNull();
-    expect(header().querySelector("a")?.textContent).toBe("Open on GitHub");
+    expect(linkOut()?.textContent).toBe("Open on GitHub");
+    expect(headerLinkOut()?.getAttribute("aria-label")).toBe("Open on GitHub");
     expect(dialog.height()).toBeLessThan(800 * 0.5);
   });
 
