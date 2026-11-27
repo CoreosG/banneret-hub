@@ -47,10 +47,10 @@
           "login": "bo-example"
         },
         "subject": {
-          "repo": "banneret-app/banneret-hub",
+          "repo": "example-org/example-app",
           "run": {
             "name": "ci / test",
-            "url": "https://github.com/banneret-app/banneret-hub/actions/runs/1234567890"
+            "url": "https://github.com/example-org/example-app/actions/runs/1234567890"
           }
         }
       }

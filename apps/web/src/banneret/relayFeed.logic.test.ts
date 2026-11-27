@@ -127,6 +127,17 @@ describe("shipped and stuck subjects", () => {
       title: "example-org/example-app",
       url: undefined,
     });
+    const jobUrl = "https://jobs.example.com/nightly-backup";
+    expect(stuckSubject(undefined, { job: { name: "nightly-backup", url: jobUrl } })).toEqual({
+      kind: "task",
+      title: "nightly-backup",
+      url: jobUrl,
+    });
+    expect(stuckSubject(undefined, { job: { name: "nightly-backup" } })).toEqual({
+      kind: "task",
+      title: "nightly-backup",
+      url: undefined,
+    });
     expect(stuckSubject({ title: "Profile blocks" }, { repo: "example-org/example-app" })).toEqual({
       kind: "task",
       title: "Profile blocks",

@@ -37,7 +37,9 @@
       { "rules": ["check_failed", "claim_quiet"], "since": "2026-11-26T03:00:00Z", "task": { "id": "t_P5n2Hd", "title": "Profile blocks" },
         "owner": { "id": "p_3Nc8vR", "login": "bo-example" } },
       { "rules": ["dev_red"], "since": "2026-11-26T08:00:00Z",
-        "subject": { "repo": "banneret-app/banneret-hub", "run": { "name": "ci / test", "url": "https://github.com/banneret-app/banneret-hub/actions/runs/1234567890" } } }
+        "subject": { "repo": "example-org/example-app", "run": { "name": "ci / test", "url": "https://github.com/example-org/example-app/actions/runs/1234567890" } } },
+      { "rules": ["watched_job_down"], "since": "2026-11-26T09:00:00Z",
+        "subject": { "job": { "name": "nightly-backup", "url": "https://jobs.example.com/nightly-backup" } } }
     ],
     "notMeasured": []
   },

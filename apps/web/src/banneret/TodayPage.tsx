@@ -245,7 +245,7 @@ export function TodayPage() {
             <ul className="flex flex-col gap-1.5 text-sm">
               {today.stuck.items.map((item) => (
                 <li
-                  key={`${item.rules.join(",")}:${item.since}:${item.task?.title ?? item.subject?.repo ?? ""}:${item.subject?.run?.name ?? ""}`}
+                  key={`${item.rules.join(",")}:${item.since}:${item.task?.title ?? item.subject?.repo ?? ""}:${item.subject?.job?.name ?? ""}:${item.subject?.run?.name ?? ""}`}
                   className="flex items-start gap-3"
                 >
                   <div className="flex min-w-0 flex-1 flex-col">

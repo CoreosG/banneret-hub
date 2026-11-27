@@ -162,19 +162,26 @@ const shippedPr = (value: unknown) => {
     : undefined;
 };
 
-// A stuck item has a task or a subject, never both; the task wins if a relay sends both.
+// A stuck item has a task or a subject, never both; the task wins if a relay sends both. A subject
+// needs a repo or a job.
 const stuckSubject = (value: unknown) => {
   const source = fields(value);
   const repo = text(source?.repo, 200);
-  if (repo === undefined) return undefined;
+  const job = fields(source?.job);
+  const jobName = text(job?.name, 200);
+  if (repo === undefined && jobName === undefined) return undefined;
   const run = fields(source?.run);
   const runName = text(run?.name, 200);
   const runUrl = text(run?.url, 2048);
+  const jobUrl = text(job?.url, 2048);
   return {
-    repo,
+    ...optional("repo", repo),
     ...(runName === undefined || runUrl === undefined
       ? {}
       : { run: { name: runName, url: runUrl } }),
+    ...(jobName === undefined
+      ? {}
+      : { job: { name: jobName, ...(jobUrl === undefined ? {} : { url: jobUrl }) } }),
   };
 };
 

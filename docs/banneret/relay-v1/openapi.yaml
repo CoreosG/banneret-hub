@@ -1172,9 +1172,10 @@ components:
           items:
             type: object
             required: [rules, since]
-            not:
-              description: An item has either `task` or `subject`, never both.
-              required: [task, subject]
+            oneOf:
+              - required: [task]
+              - required: [subject]
+            description: Exactly one of `task` or `subject`.
             properties:
               rules:
                 description: |
@@ -1190,19 +1191,29 @@ components:
               task: { $ref: "#/components/schemas/TaskRef" }
               subject:
                 description: |
-                  What an item without a `task` is about: a repository and, when a CI run or job is the cause, that run.
-                  An item has either `task` or `subject`, never both. Items without a task are one per repository and
-                  rule, never merged across repositories.
+                  What an item without a `task` is about. It has a repository, a watched job, or both. A watched job that
+                  belongs to no repository has only `job`. An item has exactly one of `task` or `subject`. Items
+                  without a task are one per subject and rule, never merged across repositories.
                 type: object
                 additionalProperties: false
-                required: [repo]
+                anyOf:
+                  - required: [repo]
+                  - required: [job]
                 properties:
                   repo: { description: "The `owner/name` display string. No other ids.", type: string, maxLength: 200 }
                   run:
-                    description: The CI run or job, with its URL.
+                    description: The CI run, with its URL.
                     type: object
                     additionalProperties: false
                     required: [name, url]
+                    properties:
+                      name: { type: string, maxLength: 200 }
+                      url: { type: string, format: uri }
+                  job:
+                    description: The watched job. The URL is optional.
+                    type: object
+                    additionalProperties: false
+                    required: [name]
                     properties:
                       name: { type: string, maxLength: 200 }
                       url: { type: string, format: uri }

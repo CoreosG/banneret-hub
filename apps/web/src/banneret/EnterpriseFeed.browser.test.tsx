@@ -389,6 +389,13 @@ describe("Enterprise Today and Needs you", () => {
                 },
               },
             },
+            {
+              rules: ["watched_job_down"],
+              since: "2026-11-26T09:00:00.000Z",
+              subject: {
+                job: { name: "nightly-backup", url: "https://jobs.example.com/nightly-backup" },
+              },
+            },
           ],
         },
       },
@@ -419,6 +426,11 @@ describe("Enterprise Today and Needs you", () => {
         .closest("a")
         ?.getAttribute("href"),
     ).toBe("https://github.com/example-org/example-app/actions/runs/9");
+    // A watched job with no repository shows the job name, linked.
+    await expect.element(page.getByText("nightly-backup")).toBeVisible();
+    expect(page.getByText("nightly-backup").element().closest("a")?.getAttribute("href")).toBe(
+      "https://jobs.example.com/nightly-backup",
+    );
     // A task with a blank title falls back to its number and repository.
     await expect
       .element(page.getByText("No activity on a claimed task: #12 in example-app"))

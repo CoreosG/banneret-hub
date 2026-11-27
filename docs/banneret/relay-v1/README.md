@@ -219,10 +219,16 @@ and never repeats a rule. It is ordered most important first, in this fixed prio
 
 A client shows the reasons in the order it receives them.
 
-An item has either a `task` or a `subject`, never both. An item without a task may carry a `subject`:
-`{ repo, run? }`. `repo` is the `owner/name` display string and nothing else identifies the repository. `run`, when
-present, names the CI run or job (`name`) and gives its `url`. The object is closed. Items without a task are one
-per repository and rule, and are never merged across repositories.
+An item has exactly one of `task` or `subject`. Neither is refused, and so is both. A `subject` is
+`{ repo?, run?, job? }` and carries at least `repo` or `job`:
+
+- `repo` is the `owner/name` display string. Nothing else identifies the repository.
+- `run` names the CI run (`name`) and gives its `url`.
+- `job` names a watched job (`name`) and may give its `url`. A watched job that belongs to no repository has
+  only `job`.
+
+The object is closed. Items without a task are one per subject and rule, and are never merged across
+repositories.
 
 ## Errors
 
