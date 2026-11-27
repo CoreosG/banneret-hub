@@ -536,8 +536,11 @@ describe("agent toolkit listing", () => {
           ).toBeDefined();
 
           const solo = yield* session("solo");
+          expect((yield* solo.call("memory.review", {})).error).toBeDefined();
+          expect((yield* solo.call("banneret_memory_resolve", {})).error).toBeDefined();
           const proposed = yield* solo.call("banneret_memory_propose", {
             key: "indent",
+            why: "Keep formatting consistent.",
             text: "Use two spaces",
             scope: "personal",
             kind: "feedback",

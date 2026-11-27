@@ -265,7 +265,7 @@ const make = Effect.gen(function* () {
     ),
     banneret_memory_propose: McpToolAccess.actsAsCaller((input) => memory((s) => s.propose(input))),
     banneret_memory_flag: McpToolAccess.actsAsCaller(({ key, reason }) =>
-      memory((s) => s.flag(key, reason)),
+      memory((s, thread) => s.flag(key, reason, thread)),
     ),
     banneret_chat_read: McpToolAccess.readsAsCaller(({ conversation, thread, after, limit }) =>
       Effect.gen(function* () {

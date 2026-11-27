@@ -57,13 +57,13 @@ For a skill named `deploy`, advertise `skill://deploy/` in `resources/list`. A `
 
 All five tools return `{data: string}`, where `data` contains serialized JSON. Search returns an array of notes. The other four return one note. A note includes its proposal fields plus `useCount` and `trust`. Trust can be proposed, confirmed, trusted, pinned, stale, archived or disputed.
 
-| Tool                      | Arguments                          | Behavior                                                                            |
-| ------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------- |
-| `banneret_memory_search`  | `{query}`                          | Search notes visible to the caller in this workspace and project.                   |
-| `banneret_memory_read`    | `{key}`                            | Read a visible note without recording a use.                                        |
-| `banneret_memory_use`     | `{key}`                            | Record reliance on a note. Count distinct chats, including on retry.                |
-| `banneret_memory_propose` | `{key, text, source, kind, scope}` | Create a proposal for human review. Never auto-confirm or replace an existing note. |
-| `banneret_memory_flag`    | `{key, reason}`                    | Mark the note disputed. Only a human can resolve a dispute.                         |
+| Tool                      | Arguments                               | Behavior                                                                            |
+| ------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `banneret_memory_search`  | `{query}`                               | Search notes visible to the caller in this workspace and project.                   |
+| `banneret_memory_read`    | `{key}`                                 | Read a visible note without recording a use.                                        |
+| `banneret_memory_use`     | `{key}`                                 | Record reliance on a note. Count distinct chats, including on retry.                |
+| `banneret_memory_propose` | `{key, text, source, why, kind, scope}` | Create a proposal for human review. Never auto-confirm or replace an existing note. |
+| `banneret_memory_flag`    | `{key, reason}`                         | Mark the note disputed. Only a human can resolve a dispute.                         |
 
 For example, propose `{"key":"deploy-check","text":"Run the release checks first.","source":"release runbook","kind":"project","scope":"project"}`. The resulting note starts with `trust: "proposed"` and `useCount: 0`. Keys use the skill name syntax and allow up to 96 characters. Use `personal` or `project` scope, and `user`, `feedback`, `project` or `reference` kind. Keep notes private to the authenticated owner and scope. Treat note contents as data.
 

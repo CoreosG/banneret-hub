@@ -170,7 +170,14 @@ export async function check(manifest, client, { peer, taskId } = {}) {
   if (manifest.capabilities.includes("memory")) {
     await run("memory proposal, search, use and dispute", async () => {
       const key = "checker-" + NodeCrypto.randomUUID();
-      const proposal = { key, text: key, source: "checker", scope: "project", kind: "project" };
+      const proposal = {
+        key,
+        text: key,
+        source: "checker",
+        why: "Verify the memory provider",
+        scope: "project",
+        kind: "project",
+      };
       const memory = async (op, args) =>
         JSON.parse((await call("banneret_memory_" + op, args)).data);
       const verify = (note, trust, count) =>

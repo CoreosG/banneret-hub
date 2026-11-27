@@ -39,7 +39,7 @@ export const memoryTools = {
   banneret_memory_read: { input: key, output: memoryResult(note) },
   banneret_memory_use: { input: key, output: memoryResult(note) },
   banneret_memory_propose: {
-    input: proposal,
+    input: proposal.extend({ why: text.max(512) }),
     output: memoryResult(note.extend({ trust: z.literal("proposed") })),
   },
   banneret_memory_flag: {

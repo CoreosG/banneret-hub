@@ -460,6 +460,7 @@ export const AgentToolkit = Toolkit.make(
         key,
         text: bounded(4096),
         source: bounded(512),
+        why: bounded(512),
         kind: Schema.Literals(["user", "feedback", "project", "reference"]),
         scope: Schema.Literals(["personal", "project"]),
       }),

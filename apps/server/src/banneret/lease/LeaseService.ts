@@ -1,6 +1,7 @@
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { memorySettingsHandlers } from "../memory/providerMemoryPolicy.ts";
-import { memoryAccess } from "../memory/access.ts";
+import type { memoryReviewInput } from "@t3tools/contracts";
+import { memoryAccess, unavailable } from "../memory/access.ts";
 // The tracker holds claim and release state. One operation per task runs in memory.
 // See docs/banneret/relay-v1/README.md, "How the Hub writes".
 import { IssueTrackerError } from "@t3tools/source-control-core/server/IssueTracker";
@@ -743,6 +744,28 @@ export const rpcHandlers = {
     },
   ),
   ...memorySettingsHandlers,
+  "memory.list": Effect.fn("BanneretMemory.list")(
+    function* ({ threadId, pendingOnly }: { threadId: ThreadId; pendingOnly: boolean }) {
+      const access = yield* memoryAccess(
+        threadId,
+        yield* (yield* ServerEnvironment).getEnvironmentId,
+      );
+      if (!access.orchestrator) return yield* unavailable();
+      return yield* access.open((s) => s.list(pendingOnly));
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
+  "memory.review": Effect.fn("BanneretMemory.review")(
+    function* ({ threadId, key, version, action }: typeof memoryReviewInput.Type) {
+      const access = yield* memoryAccess(
+        threadId,
+        yield* (yield* ServerEnvironment).getEnvironmentId,
+      );
+      if (!access.orchestrator) return yield* unavailable();
+      return yield* access.open((s) => s.review(key, version, action));
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
   "memory.summary": Effect.fn("BanneretMemory.summary")(
     function* ({ threadId }: { threadId: ThreadId }) {
       const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;
