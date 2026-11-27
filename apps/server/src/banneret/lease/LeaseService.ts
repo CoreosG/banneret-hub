@@ -1,5 +1,6 @@
 import { knowledgeConfigured } from "../memory/KbIndex.ts";
 import * as Path from "effect/Path";
+import { levelHandlers } from "../plugins/levelHandlers.ts";
 import { pluginHandlers } from "../plugins/registry.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
@@ -931,6 +932,7 @@ export const rpcHandlers = {
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),
+  ...levelHandlers,
   ...pluginHandlers,
   "memory.summary": Effect.fn("BanneretMemory.summary")(
     function* ({ threadId }: { threadId: ThreadId }) {
