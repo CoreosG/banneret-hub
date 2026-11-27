@@ -201,6 +201,7 @@ describe("ForgejoIssueTracker", () => {
           author: { login: "julius", name: null, avatarUrl: null },
           body: "Repro attached.",
           createdAt: "2026-07-02T00:00:00.000Z",
+          updatedAt: "2026-07-02T00:00:00.000Z",
           url: "https://forgejo.test:3000/acme/web/issues/42#issuecomment-7",
           reactions: [{ content: "thumbs-up", count: 2, actors: ["theo"], viewerHasReacted: true }],
         },

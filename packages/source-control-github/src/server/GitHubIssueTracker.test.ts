@@ -44,6 +44,7 @@ const DETAIL_RESPONSE = JSON.stringify({
               author: { __typename: "User", login: "julius", avatarUrl: "https://avatars/julius" },
               body: "Repro attached.",
               createdAt: "2026-07-02T00:00:00Z",
+              updatedAt: "2026-07-02T00:00:00Z",
               url: "https://github.com/acme/web/issues/42#issuecomment-1",
               reactionGroups: [
                 {

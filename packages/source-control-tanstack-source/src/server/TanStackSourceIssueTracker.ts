@@ -216,6 +216,7 @@ export const make = Effect.gen(function* () {
         author: Json.toActor(entry.author ?? null, input.host),
         body: entry.comment ?? "",
         createdAt: Json.iso(entry.at),
+        updatedAt: Json.iso(entry.at),
         url: `${issueUrl(input.host, input.scope, input.key)}#comment-${entry.id}`,
       });
     }

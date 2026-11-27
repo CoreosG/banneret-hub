@@ -205,6 +205,7 @@ describe("GitLabIssueTracker", () => {
           author: { login: "julius", name: null, avatarUrl: null },
           body: "Repro attached.",
           createdAt: "2026-07-02T00:00:00Z",
+          updatedAt: "2026-07-02T00:00:00Z",
           url: null,
           reactions: [{ content: "thumbs-up", count: 2, actors: ["theo"], viewerHasReacted: true }],
         },

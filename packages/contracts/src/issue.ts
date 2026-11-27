@@ -136,6 +136,8 @@ export const IssueComment = Schema.Struct({
   author: Schema.NullOr(IssueActor),
   body: Schema.String,
   createdAt: IsoDateTime,
+  /** Later than `createdAt` when the comment was edited. The lease fold ignores an edited protocol comment. */
+  updatedAt: IsoDateTime,
   url: Schema.NullOr(Schema.String),
   /** Absent from a tracker with no reactions, which differs from none on this comment. */
   reactions: Schema.optional(Schema.Array(IssueReaction)),

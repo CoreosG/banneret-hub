@@ -212,6 +212,7 @@ function toComment(comment: LinearApi.LinearComment, viewerId: string | null): I
     author: actorOf(comment.user, comment.botActor),
     body: comment.body,
     createdAt: comment.createdAt,
+    updatedAt: comment.createdAt,
     url: comment.url,
     reactions: toReactions(comment.reactions, viewerId),
   };

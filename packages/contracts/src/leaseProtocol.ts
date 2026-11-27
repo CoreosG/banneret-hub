@@ -43,6 +43,11 @@ export interface LeaseComment {
   /** The author's login, or null for a deleted account. */
   readonly author: string | null;
   readonly createdAt: string;
+  /**
+   * When the comment was last edited (equal to `createdAt` when it never was). A `claim:` or `release:` comment
+   * edited after it was written is ignored: anyone with write access can edit another person's comment.
+   */
+  readonly updatedAt: string;
   readonly body: string;
 }
 
@@ -264,7 +269,7 @@ interface Claim {
 
 /**
  * The fold (README, "Lease protocol"): the holder is the earliest standing claim, ordered by `createdAt` then
- * comment id; a counted release or the author's withdrawal ends a claim; more than one standing claim is a conflict.
+ * comment id; an edited claim or release is ignored; a counted release or the author's withdrawal ends a claim; more than one standing claim is a conflict.
  */
 export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
   const comments = input.comments
@@ -284,6 +289,8 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
     const author = comment.author;
     const line = parseLeaseLine(comment.body);
     if (line === null) continue;
+    // An edited protocol comment may not say what its author wrote, so it counts for nothing.
+    if (Date.parse(comment.updatedAt) > Date.parse(comment.createdAt)) continue;
     if (line.kind === "claim") {
       if (!same(line.login, author) || indexOf(author) >= 0) continue;
       standing.push({ login: author, at: comment.createdAt });

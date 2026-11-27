@@ -19,12 +19,28 @@ const fixtures = NodeFS.readdirSync(fixtureDirectory)
   .filter((file) => file.endsWith(".json"))
   .toSorted();
 
+// A fixture comment may leave `updatedAt` out: it was never edited, so it equals `createdAt`.
+interface FixtureComment extends Omit<LeaseFoldInput["comments"][number], "updatedAt"> {
+  readonly updatedAt?: string;
+}
+
 interface Fixture {
   readonly name: string;
   readonly description: string;
-  readonly input: LeaseFoldInput;
+  readonly input: Omit<LeaseFoldInput, "comments"> & {
+    readonly comments: ReadonlyArray<FixtureComment>;
+  };
   readonly expected: LeaseFoldResult;
 }
+
+const foldFixture = (input: Fixture["input"]) =>
+  foldLease({
+    ...input,
+    comments: input.comments.map((comment) => ({
+      ...comment,
+      updatedAt: comment.updatedAt ?? comment.createdAt,
+    })),
+  });
 
 describe("lease fold fixtures", () => {
   it("has the cases the protocol names", () => {
@@ -37,7 +53,7 @@ describe("lease fold fixtures", () => {
     ) as Fixture;
     expect(fixture.name).toBe(file.replace(/\.json$/, ""));
     expect(fixture.description.length).toBeGreaterThan(0);
-    expect(foldLease(fixture.input)).toEqual(fixture.expected);
+    expect(foldFixture(fixture.input)).toEqual(fixture.expected);
   });
 
   it("does not depend on the order comments arrive in", () => {
@@ -46,7 +62,7 @@ describe("lease fold fixtures", () => {
         NodeFS.readFileSync(`${fixtureDirectory}${file}`, "utf8"),
       ) as Fixture;
       const reversed = { ...fixture.input, comments: fixture.input.comments.toReversed() };
-      expect(foldLease(reversed), file).toEqual(fixture.expected);
+      expect(foldFixture(reversed), file).toEqual(fixture.expected);
     }
   });
 });

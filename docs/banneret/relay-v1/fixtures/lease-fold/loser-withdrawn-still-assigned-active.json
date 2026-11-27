@@ -1,0 +1,40 @@
+{
+  "name": "loser-withdrawn-still-assigned-active",
+  "description": "Bob lost the conflict and withdrew with lost_claim but is still assigned next to Ada. Ada's claim stands and agrees with the tracker, so the lease is active; the extra assignee does not make it incomplete.",
+  "input": {
+    "comments": [
+      {
+        "id": "10",
+        "author": "ada-example",
+        "createdAt": "2026-11-20T10:01:00Z",
+        "body": "claim: ada-example/hub"
+      },
+      {
+        "id": "11",
+        "author": "bob-example",
+        "createdAt": "2026-11-20T10:01:01Z",
+        "body": "claim: bob-example/hub"
+      },
+      {
+        "id": "12",
+        "author": "bob-example",
+        "createdAt": "2026-11-20T10:01:12Z",
+        "body": "release: lost_claim \u00b7 @ada-example"
+      }
+    ],
+    "assignees": ["ada-example", "bob-example"],
+    "labels": ["claimed"],
+    "founders": [],
+    "now": "2026-11-20T10:30:00Z"
+  },
+  "expected": {
+    "lease": {
+      "holder": "ada-example",
+      "state": "active",
+      "since": "2026-11-20T10:01:00Z",
+      "claimants": ["ada-example"]
+    },
+    "lastRelease": null,
+    "releases": []
+  }
+}
