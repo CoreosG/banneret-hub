@@ -1,4 +1,4 @@
-import { memoryAccess } from "../memory/access.ts";
+import { memoryAccess, offersHubMemory } from "../memory/access.ts";
 import * as SandboxHandoff from "./SandboxHandoff.ts";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
@@ -29,7 +29,10 @@ const offeredOnly = McpServer.visibility(
         const caller = Option.getOrUndefined(scope);
         const thread = caller?.thread;
         if (!caller || !thread) return false;
-        if (memoryNames.includes(target)) return true;
+        if (memoryNames.includes(target))
+          return yield* offersHubMemory(thread.threadId, caller.environmentId).pipe(
+            Effect.provideContext(memoryContext),
+          );
         const offered = yield* relays.offered(thread.threadId);
         if (target === JOIN_URI && offered.size === 0)
           return (yield* memoryAccess(thread.threadId, caller.environmentId).pipe(
@@ -144,3 +147,4 @@ export const layer = (
     SandboxHandoff.lifecycle,
     relistOnOfferChange(options.relistEvery ?? "5 seconds"),
   ).pipe(Layer.provide(offeredOnly.layer), Layer.provide(AgentRelays.layer));
+export { pluginRoute } from "../plugins/proxy.ts";

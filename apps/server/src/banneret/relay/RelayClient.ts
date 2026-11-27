@@ -57,7 +57,7 @@ const jsonBytes = (value: unknown): Uint8Array => Buffer.from(JSON.stringify(val
 const network = (message: string) =>
   new RelayCallError({ status: 0, code: "network", message, retryable: true });
 
-async function readCapped(response: Response, max: number): Promise<Uint8Array | null> {
+export async function readCapped(response: Response, max: number): Promise<Uint8Array | null> {
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = [];

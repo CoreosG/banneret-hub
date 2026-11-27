@@ -1,3 +1,4 @@
+import { SoloPlugins } from "./SoloPlugins";
 // Banneret Hub: create, rename, delete a workspace and choose its projects; the same dialog hosts
 // the Enterprise wizard, the Machines list and Leave.
 import type { BanneretWorkspace } from "@t3tools/contracts";
@@ -140,6 +141,7 @@ function WorkspaceEditor(props: {
       <DialogPanel>
         <div className="flex flex-col gap-4">
           {editing === null ? <WorkspaceKindChoice kind="solo" /> : null}
+          {editing?.kind === "solo" && <SoloPlugins workspaceId={editing.id} />}
           {editing !== null && workspaces.length > 1 ? (
             <div className="flex flex-wrap gap-1.5" role="group" aria-label="Workspaces">
               {workspaces.map((workspace) => (

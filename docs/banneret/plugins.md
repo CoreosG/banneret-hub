@@ -4,6 +4,14 @@ Run your provider as its own MCP server and distribute a JSON manifest with it. 
 
 Start with the [Banneret plugin template](https://github.com/CoreosG/banneret-plugin-template) for a runnable TypeScript server with task, skills and memory providers and a conformance check.
 
+## Try a plugin in Solo
+
+Open **Manage workspaces**, select your Solo workspace and enter the MCP endpoint under **Solo plugins**. The Hub reads `plugin.json` next to the endpoint. For a manifest distributed separately, enter its raw URL in **Manifest URL**. To try the unmodified starter, run it locally, enter `http://127.0.0.1:8787/mcp`, use the [starter manifest](https://raw.githubusercontent.com/CoreosG/banneret-plugin-template/main/plugin.json) and enter `demo-alice` as the access token. Click **Add a plugin by URL**.
+
+Start a Claude or Codex chat in a project assigned to the workspace. Use task tools directly in chat. A memory plugin takes ownership of memory there. The plugin's skills tools also offer the provider's local skills, with the plugin's version taking precedence on duplicate names. Select **Remove** in the same workspace to restore the default for new chats.
+
+The Solo machine keeps credentials in its user's Hub secret store. The manifest request is anonymous. The Hub attaches the credential when contacting the configured MCP endpoint. Use HTTPS for network servers or HTTP on loopback for local development.
+
 ## Declare what you provide
 
 For example, a tracker behind a gateway could ship this manifest:
@@ -19,7 +27,7 @@ For example, a tracker behind a gateway could ship this manifest:
 }
 ```
 
-The relay configuration assigns each of `tasks`, `skills`, `memory`, `chat`, `search` and `health` exactly one owner: `banneret`, `external:<source>` or `off`. For this manifest the external owner is `external:acme`. The manifest advertises capabilities. The operator chooses which ones to route. This slice specifies external tools for tasks, skills and memory. Relay selection and Hub integration come later.
+The relay configuration assigns each of `tasks`, `skills`, `memory`, `chat`, `search` and `health` exactly one owner: `banneret`, `external:<source>` or `off`. For this manifest the external owner is `external:acme`. The manifest advertises capabilities. The operator chooses which ones to route. This slice specifies external tools for tasks, skills and memory. Solo installs assign the supported capabilities from the manifest.
 
 Use a stable source ID of 1 to 64 ASCII letters, digits, underscores or hyphens. Supply a description, at least one capability, and one auth model. With `per-user-token`, the transport authenticates each user's credential and the provider enforces their tracker permissions. With `service`, the transport authenticates the installation. Bind the acting user, workspace, project and chat from trusted session context when the operation depends on them. Refuse calls when the required context is unavailable. Keep credentials outside the manifest and tool arguments.
 

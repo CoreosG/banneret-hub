@@ -2928,6 +2928,7 @@ export function claudeMcpQueryOverrides(input: {
   return {
     allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
     mcpServers: {
+      ...session.soloPlugins?.pluginClaude,
       [CLAUDE_T3_MCP_SERVER]: {
         type: "http",
         url: session.endpoint,

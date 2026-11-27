@@ -1,3 +1,4 @@
+import { PLUGIN_RPCS, PLUGIN_SCOPES, PLUGIN_AGGREGATES } from "./banneretPlugins.ts";
 // Banneret Hub: enrolment of this server environment in a company relay (docs/banneret/relay-v1).
 // The server holds the machine key and device token and makes every relay call; clients see only
 // the view below, which never carries either.
@@ -272,6 +273,7 @@ export const BANNERET_RELAY_RPCS = [
   WsBanneretRelayMatchProjectsRpc,
   ...BANNERET_RELAY_FEED_RPCS,
   ...MEMORY_RPCS,
+  ...PLUGIN_RPCS,
   ...TASK_LEASE_RPCS,
 ] as const;
 
@@ -293,6 +295,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.matchProjects]: AuthOrchestrationOperateScope,
   ...BANNERET_RELAY_FEED_RPC_SCOPES,
   ...MEMORY_RPC_SCOPES,
+  ...PLUGIN_SCOPES,
   ...TASK_LEASE_RPC_SCOPES,
 } as const;
 
@@ -314,6 +317,7 @@ export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.matchProjects]: "banneret-relay",
   ...BANNERET_RELAY_FEED_RPC_AGGREGATES,
   ...MEMORY_RPC_AGGREGATES,
+  ...PLUGIN_AGGREGATES,
   ...TASK_LEASE_RPC_AGGREGATES,
 } as const;
 
