@@ -1,0 +1,99 @@
+{
+  "limits": {
+    "id": "dev",
+    "level": "staff",
+    "workspaces": {
+      "max": 4,
+      "each": {
+        "cpu": 4,
+        "memory_floor": "1G",
+        "memory_max": "16G",
+        "disk": "60G",
+        "tasks": 4096
+      }
+    },
+    "sandbox_slots": {
+      "small": 3,
+      "large": 1
+    }
+  },
+  "sizes": {
+    "small": {
+      "cpu": 2,
+      "memory": "4G",
+      "disk": "10G"
+    },
+    "large": {
+      "cpu": 4,
+      "memory": "8G",
+      "disk": "20G"
+    }
+  },
+  "contention": {
+    "measuredAt": "2026-11-27T12:00:00Z",
+    "notMeasured": null,
+    "pressure": {
+      "cpu": {
+        "some": {
+          "avg10": 1.1,
+          "avg60": 1.5
+        },
+        "full": {
+          "avg10": 0.1,
+          "avg60": 0.2
+        }
+      },
+      "io": {
+        "some": {
+          "avg10": 1.1,
+          "avg60": 1.5
+        },
+        "full": {
+          "avg10": 0.1,
+          "avg60": 0.2
+        }
+      },
+      "memory": {
+        "some": {
+          "avg10": 1.1,
+          "avg60": 1.5
+        },
+        "full": {
+          "avg10": 0.1,
+          "avg60": 0.2
+        }
+      }
+    },
+    "memAvailableBytes": 4294967296,
+    "poolMemoryUsedBytes": 1048576,
+    "poolMemoryLimitBytes": 17179869184,
+    "freeSlots": {
+      "small": 3,
+      "large": 1
+    },
+    "busy": false
+  },
+  "workspaces": [
+    {
+      "personId": "p_alice",
+      "state": "active",
+      "resources": {
+        "notMeasured": "missing_files",
+        "disk": {
+          "used": 1024,
+          "limit": 4096,
+          "warn": false
+        },
+        "inodes": null,
+        "warnings": {
+          "memory": false,
+          "cpu": false,
+          "pids": false,
+          "pressure": false
+        },
+        "lastActiveAt": "2026-11-27T12:00:00Z"
+      }
+    }
+  ],
+  "running": []
+}

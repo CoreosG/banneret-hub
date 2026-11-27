@@ -1,0 +1,66 @@
+{
+  "enabled": true,
+  "hosts": [
+    {
+      "id": "dev",
+      "level": "staff",
+      "workspaces": {
+        "max": 4,
+        "each": {
+          "cpu": 4,
+          "memory_floor": "1G",
+          "memory_max": "16G",
+          "disk": "60G",
+          "tasks": 4096
+        }
+      },
+      "sandbox_slots": {
+        "small": 3,
+        "large": 1
+      }
+    }
+  ],
+  "warnings": {
+    "quota_percent": 85,
+    "memory_percent": 80,
+    "cpu_throttled_percent": 20,
+    "pids_percent": 80,
+    "pressure": {
+      "cpu": 40,
+      "memory": 10,
+      "io": 10
+    },
+    "host_busy": {
+      "memory_full_avg60": 2,
+      "io_some_avg60": 20,
+      "cpu_some_avg60": 50
+    }
+  },
+  "sandboxes": {
+    "sizes": {
+      "small": {
+        "cpu": 2,
+        "memory": "4G",
+        "disk": "10G"
+      },
+      "large": {
+        "cpu": 4,
+        "memory": "8G",
+        "disk": "20G"
+      }
+    },
+    "time_limit": "2h",
+    "idle_limit": "20m",
+    "extend": "1h",
+    "per_person": {
+      "running": 1,
+      "waiting": 1
+    },
+    "images": [
+      {
+        "name": "default",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  }
+}

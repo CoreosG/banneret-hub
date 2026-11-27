@@ -1,11 +1,24 @@
 // @effect-diagnostics nodeBuiltinImport:off - the suite makes random ids with node:crypto.
 import * as NodeCrypto from "node:crypto";
 
+import type {
+  PoolConfig,
+  PoolHostFacts,
+  PoolSandbox,
+  PoolOffer,
+  PoolView,
+} from "@t3tools/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 
 import { RelayClient, rfc3339, SseReader, type Reply } from "./client.ts";
 import { type FakeRelay, startFakeRelay } from "./fake.ts";
-import { generateMachineKey, keyFromSeed, type MachineKey } from "./signing.ts";
+import {
+  generateMachineKey,
+  keyFromSeed,
+  publicKeyFromBase64,
+  verify,
+  type MachineKey,
+} from "./signing.ts";
 import { listExamples, loadSpec, readExample } from "./spec.ts";
 
 /**
@@ -25,7 +38,12 @@ beforeAll(async () => {
     client = new RelayClient(external);
     return;
   }
-  fake = await startFakeRelay({ autoApprove: false, retryAfterMs: 0, chat: true });
+  fake = await startFakeRelay({
+    autoApprove: false,
+    retryAfterMs: 0,
+    chat: true,
+    pool: readExample("pool-config.json") as PoolConfig,
+  });
   client = new RelayClient(fake.url);
 });
 
@@ -2954,5 +2972,122 @@ describe("chat contract", () => {
     expect(
       JSON.stringify((await call(outsider, "GET", path + "/changes?after=" + message.seq)).body),
     ).not.toContain(message.id);
+  });
+});
+
+describe("shared machines", () => {
+  it("binds host facts and sandbox offers to host credentials and serves quota only to its owner", async () => {
+    const owner = await enrol();
+    const colleague = await enrol();
+    const prefix = "/relay/v1/pool";
+    const hub = (method: string, path: string, body?: unknown) =>
+      call(owner, method, prefix + path, body);
+    const capabilities = (await call(owner, "GET", "/relay/v1/capabilities")).body as {
+      me: { id: string };
+      sections: { kind: string }[];
+    };
+    expect(capabilities.sections.some((s) => s.kind === "pool")).toBe(true);
+    const facts = readExample("pool-facts.json") as PoolHostFacts;
+    const hostId = facts.limits.id;
+    const key = generateMachineKey();
+    const hostEnroll = (action: string, body: unknown) =>
+      client.send(key, "POST", prefix + "/hosts/enroll/" + action, { body });
+    const started = await hostEnroll("start", {
+      machine: machineFacts(hostId),
+      publicKey: key.publicKey,
+    });
+    expectSchema("EnrolStartResponse", started.body);
+    const pairing = started.body as { pairingId: string; confirmCode: string };
+    const pollHost = () => hostEnroll("poll", { pairingId: pairing.pairingId });
+    expect((await pollHost()).body).toMatchObject({ state: "pending" });
+    await client.control("/pairings/" + pairing.pairingId + "/confirm", {
+      code: pairing.confirmCode,
+      person: { login: newLogin(), role: "founder" },
+    });
+    const approved = (await pollHost()).body as { token: string; machineId: string };
+    const hostCall = (path: string, body: unknown) =>
+      client.send(key, "POST", prefix + path, {
+        device: approved.machineId,
+        token: approved.token,
+        body,
+      });
+    const rows = facts.workspaces.map((w) => ({ ...w, personId: capabilities.me.id }));
+    expectError(await hub("POST", "/hosts/facts", facts), 403, "forbidden");
+    expectError(
+      await hostCall("/hosts/facts", readExample("invalid/pool-facts-memory.json")),
+      400,
+      "malformed",
+    );
+    const timestampedRows = rows.map((row) => ({
+      ...row,
+      resources: { ...row.resources, measuredAt: "2026-11-27T12:00:00Z" },
+    }));
+    expectError(
+      await hostCall("/hosts/facts", { ...facts, workspaces: timestampedRows }),
+      400,
+      "malformed",
+    );
+    const policy = await hostCall("/hosts/facts", {
+      ...facts,
+      workspaces: rows,
+      limits: { ...facts.limits, sandbox_slots: { small: 1, large: 8 } },
+    });
+    expect(policy.status).toBe(200);
+    expectSchema("PoolPolicy", policy.body);
+    expect(policy.body).toMatchObject({ limits: { sandbox_slots: { small: 1, large: 1 } } });
+    const mine = await hub("GET", "");
+    expectSchema("PoolView", mine.body);
+    expect((mine.body as PoolView).me.workspaces[0]?.resources).toEqual(rows[0]?.resources);
+    const theirs = (await call(colleague, "GET", prefix)).body as PoolView;
+    expect(theirs.hosts).toEqual((mine.body as PoolView).hosts);
+    expect(theirs.me.workspaces).toEqual([]);
+    expect((await call(colleague, "POST", prefix + "/workspaces", { hostId })).body).toEqual({
+      hostId,
+      state: "asked",
+    });
+    const founderNeeds = await call(owner, "GET", "/relay/v1/needs");
+    expect(founderNeeds.body).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ kind: "workspace_request" })]),
+    });
+    const request = { hostId, size: "small", image: "sha256:" + "a".repeat(64) };
+    const created = await hub("POST", "/sandboxes", request);
+    expectSchema("PoolSandbox", created.body);
+    const id = (created.body as PoolSandbox).id;
+    const path = "/sandboxes/" + id;
+    expectError(await call(colleague, "GET", prefix + path), 404, "not_found");
+    expect((await hub("GET", path)).body).toMatchObject({ place: 1, state: "waiting" });
+    const offered = await hostCall("/hosts/next", { size: "small" });
+    expectSchema("PoolOffer", offered.body);
+    const offer = offered.body as NonNullable<PoolOffer>;
+    expect(offer.id).toBe(id);
+    expect(Buffer.from(offer.bodyBase64, "base64").toString()).toBe(JSON.stringify(request));
+    const signer = publicKeyFromBase64(owner.key.publicKey);
+    expect(
+      signer &&
+        verify(
+          signer,
+          {
+            method: "POST",
+            target: prefix + "/sandboxes",
+            device: offer.machineId,
+            counter: offer.counter,
+            sentAt: offer.sentAt,
+            body: Buffer.from(offer.bodyBase64, "base64"),
+          },
+          offer.signature,
+        ),
+    ).toBe(true);
+    const report = (state: string) =>
+      hostCall(path + "/state", {
+        state,
+        machineId: state === "running" ? owner.machineId : null,
+        reason: null,
+      });
+    expect((await report("starting")).body).toMatchObject({ state: "starting" });
+    expect((await report("running")).body).toMatchObject({ state: "running" });
+    expect((await hub("POST", path + "/extend")).body).toMatchObject({ state: "running" });
+    expect((await hub("DELETE", path)).body).toMatchObject({ state: "ending" });
+    expect((await report("ended")).body).toMatchObject({ state: "ended" });
+    expect((await hostCall("/hosts/next", { size: "small" })).body).toBeNull();
   });
 });

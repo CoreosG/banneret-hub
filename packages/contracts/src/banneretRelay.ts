@@ -280,3 +280,5 @@ export function parseBanneretRelayAddress(input: string): BanneretRelayAddress {
   }
   return { ok: true, origin: url.origin };
 }
+
+export type * from "./banneretPool.ts";

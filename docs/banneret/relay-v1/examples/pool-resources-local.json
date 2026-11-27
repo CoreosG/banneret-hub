@@ -1,0 +1,76 @@
+{
+  "measuredAt": "2026-11-27T12:00:00Z",
+  "notMeasured": null,
+  "memory": {
+    "used": 4096,
+    "limit": 65536,
+    "floor": 2048,
+    "oomKills": 0,
+    "warn": false
+  },
+  "cpu": {
+    "throttledPercent": 1,
+    "quotaUsec": 400000,
+    "periodUsec": 100000,
+    "warn": false
+  },
+  "disk": {
+    "used": 1024,
+    "limit": 4096,
+    "warn": false
+  },
+  "inodes": {
+    "used": 256,
+    "limit": 4096,
+    "warn": false
+  },
+  "pids": {
+    "used": 48,
+    "limit": 4096,
+    "warn": false
+  },
+  "pressure": {
+    "cpu": {
+      "sample": {
+        "some": {
+          "avg10": 1.1,
+          "avg60": 1.5
+        },
+        "full": {
+          "avg10": 0.1,
+          "avg60": 0.2
+        }
+      },
+      "limit": 40,
+      "warn": false
+    },
+    "memory": {
+      "sample": {
+        "some": {
+          "avg10": 1.1,
+          "avg60": 1.5
+        },
+        "full": {
+          "avg10": 0.1,
+          "avg60": 0.2
+        }
+      },
+      "limit": 10,
+      "warn": false
+    },
+    "io": {
+      "sample": {
+        "some": {
+          "avg10": 1.1,
+          "avg60": 1.5
+        },
+        "full": {
+          "avg10": 0.1,
+          "avg60": 0.2
+        }
+      },
+      "limit": 10,
+      "warn": false
+    }
+  }
+}
