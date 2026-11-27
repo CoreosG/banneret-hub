@@ -1,6 +1,7 @@
 // Banneret Hub: what Today shows for each block. Pure, so the page only draws.
 import type { BanneretFeedToday } from "@t3tools/contracts";
 
+import { needsCountLabel } from "./relayFeed.logic";
 import type { Tone } from "./ui/tokens";
 
 /**
@@ -18,17 +19,40 @@ export function blockView(block: {
 }
 
 export interface TodayCounts {
-  readonly needs: number;
+  /** The same figure as the sidebar badge: "4", "4+" or "99+". */
+  readonly needs: string;
   readonly stuck: number;
   readonly shipped: number;
   /** "since your last visit" applies only when the relay knows that visit. */
   readonly sinceVisit: boolean;
 }
 
-/** The header's counts. Needs you uses the relay's own count when it sent one: the block may be cut short. */
-export function todayCounts(today: BanneretFeedToday, needsCount: number | null): TodayCounts {
+/** What the Needs you count is read from: the relay's own count, else the loaded list. */
+export interface NeedsSource {
+  readonly needsCount: number | null;
+  readonly needs: ReadonlyArray<unknown> | null;
+  readonly needsNextCursor: string | null;
+}
+
+/**
+ * The Needs you figure, matching the sidebar: the relay's count, else the loaded Needs you list,
+ * else Today's own block; "+" when more pages wait.
+ */
+export function needsFigure(feed: NeedsSource, today: BanneretFeedToday | null): string {
+  const fromList = feed.needs !== null;
+  return (
+    needsCountLabel({
+      needsCount: feed.needsCount,
+      loaded: fromList ? feed.needs!.length : (today?.needsYou.items.length ?? null),
+      more: fromList ? feed.needsNextCursor !== null : today?.needsYou.nextCursor != null,
+    }) ?? "0"
+  );
+}
+
+/** The header's counts. */
+export function todayCounts(today: BanneretFeedToday, feed: NeedsSource): TodayCounts {
   return {
-    needs: needsCount ?? today.needsYou.items.length,
+    needs: needsFigure(feed, today),
     stuck: today.stuck.items.length,
     shipped: today.shipped.items.length,
     sinceVisit: today.lastVisitAt !== null,

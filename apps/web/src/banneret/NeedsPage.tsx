@@ -7,6 +7,7 @@ import { Button } from "../components/ui/button";
 import { FeedStatus } from "./FeedParts";
 import { offersSection } from "./relayFeed.logic";
 import { loadMoreNeeds } from "./relayFeedStore";
+import { needsFigure } from "./today.logic";
 import { FeedFrame, NeedsRow } from "./TodayRows";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
@@ -37,16 +38,16 @@ export function NeedsPage() {
     );
   }
   const items = feed.needs;
-  const count = feed.needsCount ?? items?.length ?? null;
+  const count = items === null && feed.needsCount === null ? null : needsFigure(feed, null);
   return (
     <FeedFrame title="Needs you" company={workspace.name}>
       <PageHeader
         title="Needs you"
         summary={
-          count === null || count === 0 ? undefined : (
+          count === null || count === "0" ? undefined : (
             <>
               <SummaryFigure>
-                {count} {count === 1 ? "item" : "items"}
+                {count} {count === "1" ? "item" : "items"}
               </SummaryFigure>
               {" waiting on you, most urgent first"}
             </>

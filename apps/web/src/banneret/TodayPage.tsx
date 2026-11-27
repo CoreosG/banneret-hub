@@ -69,7 +69,7 @@ function Summary(props: { readonly counts: TodayCounts }) {
   return (
     <>
       <SummaryFigure>
-        {needs} {needs === 1 ? "needs" : "need"} you
+        {needs} {needs === "1" ? "needs" : "need"} you
       </SummaryFigure>
       {` · ${stuck} stuck · ${shipped} shipped`}
       {sinceVisit ? " since your last visit" : null}
@@ -324,9 +324,7 @@ export function TodayPage() {
     <FeedFrame title="Today" company={workspace.name}>
       <PageHeader
         title="Today"
-        summary={
-          today === null ? undefined : <Summary counts={todayCounts(today, feed.needsCount)} />
-        }
+        summary={today === null ? undefined : <Summary counts={todayCounts(today, feed)} />}
       >
         {environmentId === null ? null : <RefreshButton environmentId={environmentId} />}
       </PageHeader>
