@@ -1,12 +1,13 @@
 // Fork UI kit: an empty section collapsed to one dashed line.
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 
 /** "Nothing stuck. Stuck items appear here." with `fact` in bold. */
 export function QuietLine(props: {
   readonly fact: string;
-  readonly hint?: string;
+  readonly hint?: ReactNode;
   readonly icon?: LucideIcon;
   readonly className?: string;
 }) {
@@ -22,7 +23,7 @@ export function QuietLine(props: {
       {Icon === undefined ? null : <Icon aria-hidden className="size-3.5 shrink-0" />}
       <span className="min-w-0">
         <span className="font-semibold text-foreground">{props.fact}</span>
-        {props.hint === undefined ? null : ` ${props.hint}`}
+        {props.hint === undefined ? null : <> {props.hint}</>}
       </span>
     </p>
   );

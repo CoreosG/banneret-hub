@@ -258,6 +258,7 @@ describe("page pieces", () => {
           observedAt="2026-11-27T09:00:00.000Z"
           nowMs={NOW}
         />
+        <HealthTile label="Usage" state="not_measured" observedAt={null} />
         <FactsGrid
           facts={[
             { label: "Status", value: "Built" },
@@ -272,7 +273,8 @@ describe("page pieces", () => {
     const zero = screen.container.querySelector<HTMLElement>("li[data-status=planned]");
     expect(zero && getComputedStyle(zero).opacity).toBe("0.45");
     expect(screen.container.querySelector("[data-slot=attention-bar]")).not.toBeNull();
-    await expect.element(screen.getByText("Seen 3 h ago")).toBeVisible();
+    await expect.element(screen.getByText("As of 3 h ago")).toBeVisible();
+    await expect.element(screen.getByText("Not checked yet")).toBeVisible();
     expect(screen.container.querySelectorAll("dt")).toHaveLength(1);
   });
 });

@@ -4,12 +4,16 @@ import { healthLabel } from "./labels";
 import { RelativeTime } from "./RelativeTime";
 import { TYPE, toneProps } from "./tokens";
 
-/** `state` is open: `good`, `warning`, `bad` and `not_measured` are known. */
+/**
+ * `state` is open: `good`, `warning`, `bad` and `not_measured` are known. The time line reads
+ * "As of 4 min ago" (`timePrefix` changes the words), or "Not checked yet" when `observedAt` is null.
+ */
 export function HealthTile(props: {
   readonly label: string;
   readonly state: string;
   readonly summary?: string | undefined;
   readonly observedAt?: string | null | undefined;
+  readonly timePrefix?: string;
   readonly nowMs?: number;
   readonly className?: string;
 }) {
@@ -28,11 +32,13 @@ export function HealthTile(props: {
       {props.summary === undefined || props.summary === "" ? null : (
         <span className={cn(TYPE.meta, "line-clamp-2")}>{props.summary}</span>
       )}
-      {props.observedAt == null ? null : (
+      {props.observedAt === undefined ? null : props.observedAt === null ? (
+        <span className={TYPE.meta}>Not checked yet</span>
+      ) : (
         <RelativeTime
           at={props.observedAt}
-          prefix="Seen"
-          className={TYPE.meta}
+          prefix={props.timePrefix ?? "As of"}
+          className={cn(TYPE.meta, "mt-1 self-start")}
           {...(props.nowMs === undefined ? {} : { nowMs: props.nowMs })}
         />
       )}

@@ -1,90 +1,47 @@
-// Banneret Hub: Today for an Enterprise workspace, drawn from the relay's GET /today. The five blocks
-// come in the relay's order (J1): needs you, shipped since the last visit, working now, stuck, health.
-import type { BanneretFeedShippedPr } from "@t3tools/contracts";
+// Banneret Hub: Today for an Enterprise workspace, drawn from the relay's GET /today. Needs you and
+// Stuck on the left, Working now and Shipped on the right, Health tiles below. An empty block
+// collapses into one quiet line; a block that is not measured says why.
+import type { BanneretFeedNotMeasured } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { useEffect } from "react";
+import {
+  ActivityIcon,
+  HeartPulseIcon,
+  InboxIcon,
+  type LucideIcon,
+  RefreshCwIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
+import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { isElectron } from "../env";
-import { cn } from "../lib/utils";
+import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
-import { Age, FeedSection, FeedStatus, NeedsItemRow, OpenTarget, When } from "./FeedParts";
-import {
-  healthStateLabel,
-  healthTone,
-  offersSection,
-  safeLinkOut,
-  shippedLabel,
-  shippedRefLabel,
-  stuckRulesLabel,
-  stuckSubject,
-  type StuckSubjectRef,
-  type Tone,
-  workingStateLabel,
-} from "./relayFeed.logic";
+import { FeedStatus } from "./FeedParts";
+import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { refreshToday } from "./relayFeedStore";
-import { loginOrUnknown, loginSuffix } from "./enterprise.logic";
+import { blockView, healthSummary, todayCounts, type TodayCounts } from "./today.logic";
+import {
+  FeedFrame,
+  NeedsRow,
+  NotMeasuredLines,
+  ShippedRow,
+  StuckRow,
+  WorkingRow,
+} from "./TodayRows";
+import { HealthTile } from "./ui/HealthTile";
+import { PageHeader, SummaryFigure } from "./ui/PageHeader";
+import { QuietLine } from "./ui/QuietLine";
+import { RelativeTime } from "./ui/RelativeTime";
+import { Section } from "./ui/Section";
+import { humanizeWord } from "./ui/status";
+import { LAYOUT_HEALTH_TILES, LAYOUT_TODAY_COLUMNS, TYPE } from "./ui/tokens";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
-const TONE_DOT: Record<Tone, string> = {
-  ok: "bg-success",
-  warn: "bg-warning",
-  error: "bg-destructive",
-  muted: "bg-muted-foreground/50",
-};
-
-function TaskTitle(props: {
-  readonly task: { readonly title: string; readonly url?: string | undefined };
-}) {
-  const href = safeLinkOut(props.task.url);
-  return href === null ? (
-    <span className="break-words">{props.task.title}</span>
-  ) : (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="break-words hover:underline"
-    >
-      {props.task.title}
-    </a>
-  );
-}
-
-/** "repo · #41 · ", linked to the item's own pull request. */
-function ShippedRef(props: { readonly pr: BanneretFeedShippedPr }) {
-  const label = shippedRefLabel(props.pr);
-  const href = safeLinkOut(props.pr.url);
-  return (
-    <>
-      {href === null ? (
-        <span>{label}</span>
-      ) : (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="hover:underline">
-          {label}
-        </a>
-      )}
-      {" \u00b7 "}
-    </>
-  );
-}
-
-function StuckSubjectView(props: {
-  readonly task: { readonly title: string; readonly url?: string | undefined } | undefined;
-  readonly subject?: StuckSubjectRef | undefined;
-}) {
-  const subject = stuckSubject(props.task, props.subject);
-  return subject.kind === "task" ? (
-    <TaskTitle task={subject} />
-  ) : (
-    <span className="text-muted-foreground" data-stuck-subject="none">
-      no task or pull request named
-    </span>
-  );
-}
-
+/** The Feed page's frame. Today and Needs you use `FeedFrame`. */
 export function FeedPage(props: { readonly title: string; readonly children: React.ReactNode }) {
   return (
     <SidebarInset role="main" className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -106,6 +63,84 @@ export function NotJoinedNote() {
   );
 }
 
+/** "2 need you · 3 stuck · 4 shipped since your last visit". */
+function Summary(props: { readonly counts: TodayCounts }) {
+  const { needs, stuck, shipped, sinceVisit } = props.counts;
+  return (
+    <>
+      <SummaryFigure>
+        {needs} {needs === 1 ? "needs" : "need"} you
+      </SummaryFigure>
+      {` · ${stuck} stuck · ${shipped} shipped`}
+      {sinceVisit ? " since your last visit" : null}
+    </>
+  );
+}
+
+/**
+ * One Today block: its rows in a section, or a quiet line. Not measured is never shown as empty:
+ * the line names each source and why.
+ */
+function Block(props: {
+  readonly title: string;
+  readonly icon: LucideIcon;
+  readonly items: ReadonlyArray<unknown>;
+  readonly notMeasured: ReadonlyArray<BanneretFeedNotMeasured>;
+  readonly empty: { readonly fact: string; readonly hint: string };
+  readonly attention?: boolean;
+  readonly action?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  const view = blockView(props);
+  if (view === "empty") {
+    return <QuietLine icon={props.icon} fact={props.empty.fact} hint={props.empty.hint} />;
+  }
+  if (view === "not_measured") {
+    return (
+      <QuietLine
+        icon={props.icon}
+        fact={`${props.title} is not measured.`}
+        hint={<NotMeasuredLines lines={props.notMeasured} />}
+      />
+    );
+  }
+  return (
+    <Section
+      title={props.title}
+      icon={props.icon}
+      count={props.items.length}
+      attention={props.attention ?? false}
+      action={props.action}
+    >
+      {props.children}
+      {props.notMeasured.length === 0 ? null : (
+        <p className={`${TYPE.meta} px-2.5 pt-1 pb-2`}>
+          <NotMeasuredLines lines={props.notMeasured} />
+        </p>
+      )}
+    </Section>
+  );
+}
+
+function RefreshButton(props: { readonly environmentId: Parameters<typeof refreshToday>[0] }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true);
+        // Not a visit: only opening Today moves "since your last visit".
+        void refreshToday(props.environmentId, false).finally(() => setBusy(false));
+      }}
+    >
+      <RefreshCwIcon aria-hidden />
+      Refresh
+    </Button>
+  );
+}
+
 export function TodayPage() {
   const enterprise = useEnterpriseFeed();
   const environmentId = enterprise?.environmentId ?? null;
@@ -117,190 +152,191 @@ export function TodayPage() {
 
   if (enterprise === null) {
     return (
-      <FeedPage title="Today">
-        <NotJoinedNote />
-      </FeedPage>
+      <FeedFrame title="Today">
+        <PageHeader title="Today" />
+        <QuietLine
+          fact="No company here yet."
+          hint="Choose an Enterprise workspace that this machine has joined to see its company here."
+        />
+      </FeedFrame>
     );
   }
   const { feed, workspace } = enterprise;
   const today = feed.today;
   if (!offersSection(feed, "today")) {
     return (
-      <FeedPage title="Today">
-        <p className="text-muted-foreground text-sm">{workspace.name} does not offer Today.</p>
-      </FeedPage>
+      <FeedFrame title="Today" company={workspace.name}>
+        <PageHeader title="Today" />
+        <QuietLine fact={`${workspace.name} does not offer Today.`} />
+      </FeedFrame>
     );
   }
+
+  let body: ReactNode = null;
+  if (today === null) {
+    if (feed.todayProblem === null && !feed.unreachable) body = <QuietLine fact="Loading…" />;
+  } else {
+    const healthTiles = [
+      ...today.health.items.map((item) => (
+        <li key={`item:${item.id}`} className="min-w-0">
+          <HealthTile
+            label={item.label}
+            state={item.state}
+            summary={item.summary}
+            observedAt={item.observedAt}
+          />
+        </li>
+      )),
+      ...today.health.notMeasured.map((line) => (
+        <li key={`nm:${line.source}:${line.since}`} className="min-w-0" data-not-measured="">
+          <HealthTile
+            label={humanizeWord(line.source)}
+            state="not_measured"
+            summary={line.detail ?? `${humanizeWord(notMeasuredReason(line.reason))}.`}
+            observedAt={line.since}
+            timePrefix="Since"
+          />
+        </li>
+      )),
+    ];
+    body = (
+      <>
+        <div {...LAYOUT_TODAY_COLUMNS}>
+          <div>
+            <Block
+              title="Needs you"
+              icon={InboxIcon}
+              items={today.needsYou.items}
+              notMeasured={today.needsYou.notMeasured}
+              empty={{
+                fact: "Nobody needs you right now.",
+                hint: "Questions, reviews and approvals show here.",
+              }}
+              action={
+                offersSection(feed, "needs") ? (
+                  <Link to="/needs" className="text-muted-foreground text-xs hover:text-foreground">
+                    See all
+                  </Link>
+                ) : undefined
+              }
+            >
+              <ul aria-label="Needs you items">
+                {today.needsYou.items.map((item) => (
+                  <NeedsRow key={item.id} item={item} />
+                ))}
+              </ul>
+            </Block>
+            <Block
+              title="Stuck"
+              icon={TriangleAlertIcon}
+              attention
+              items={today.stuck.items}
+              notMeasured={today.stuck.notMeasured}
+              empty={{
+                fact: "Nothing is stuck.",
+                hint: "Failing checks, red branches and quiet claims show here.",
+              }}
+            >
+              <ul aria-label="Stuck items">
+                {today.stuck.items.map((item) => (
+                  <StuckRow
+                    key={`${item.rules.join(",")}:${item.since}:${item.task?.title ?? item.subject?.repo ?? ""}:${item.subject?.job?.name ?? ""}:${item.subject?.run?.name ?? ""}`}
+                    item={item}
+                  />
+                ))}
+              </ul>
+            </Block>
+          </div>
+          <div>
+            <Block
+              title="Working now"
+              icon={ActivityIcon}
+              items={today.working.items}
+              notMeasured={today.working.notMeasured}
+              empty={{
+                fact: "Nobody is working right now.",
+                hint: "People and their agents show here while they work.",
+              }}
+            >
+              <ul aria-label="Working now items">
+                {today.working.items.map((item) => (
+                  <WorkingRow
+                    key={`${item.person.login}:${item.task?.title ?? ""}:${item.branch ?? ""}`}
+                    item={item}
+                  />
+                ))}
+              </ul>
+            </Block>
+            <Block
+              title={today.lastVisitAt === null ? "Shipped" : "Shipped since your last visit"}
+              icon={PullRequestGlyph.merged}
+              items={today.shipped.items}
+              notMeasured={today.shipped.notMeasured}
+              empty={
+                today.lastVisitAt === null
+                  ? { fact: "Nothing shipped yet.", hint: "Merged pull requests show here." }
+                  : {
+                      fact: "Nothing shipped since your last visit.",
+                      hint: "Merged pull requests show here.",
+                    }
+              }
+              action={
+                today.lastVisitAt === null ? undefined : (
+                  <RelativeTime at={today.lastVisitAt} className={TYPE.meta} />
+                )
+              }
+            >
+              <ul aria-label="Shipped items">
+                {today.shipped.items.map((item) => (
+                  <ShippedRow key={`${item.pr.url}:${item.mergedAt}`} item={item} />
+                ))}
+              </ul>
+            </Block>
+          </div>
+        </div>
+        {healthTiles.length === 0 ? (
+          <QuietLine
+            icon={HeartPulseIcon}
+            fact="Health has nothing to show yet."
+            hint="Checks this relay runs show here as tiles."
+          />
+        ) : (
+          <Section
+            title="Health"
+            icon={HeartPulseIcon}
+            count={healthTiles.length}
+            action={
+              healthSummary(today.health.items) === null ? undefined : (
+                <span className={TYPE.meta}>{healthSummary(today.health.items)}</span>
+              )
+            }
+          >
+            <ul aria-label="Health" {...LAYOUT_HEALTH_TILES}>
+              {healthTiles}
+            </ul>
+          </Section>
+        )}
+      </>
+    );
+  }
+
   return (
-    <FeedPage title={`Today in ${workspace.name}`}>
+    <FeedFrame title="Today" company={workspace.name}>
+      <PageHeader
+        title="Today"
+        summary={
+          today === null ? undefined : <Summary counts={todayCounts(today, feed.needsCount)} />
+        }
+      >
+        {environmentId === null ? null : <RefreshButton environmentId={environmentId} />}
+      </PageHeader>
       <FeedStatus
         feed={feed}
         company={workspace.name}
         fetchedAt={feed.todayFetchedAt}
         problem={feed.todayProblem}
       />
-      {today === null ? (
-        feed.todayProblem === null && !feed.unreachable ? (
-          <p className="text-muted-foreground text-sm">Loading…</p>
-        ) : null
-      ) : (
-        <>
-          <FeedSection
-            title="Needs you"
-            empty={today.needsYou.items.length === 0}
-            notMeasured={today.needsYou.notMeasured}
-            action={
-              offersSection(feed, "needs") ? (
-                <Link to="/needs" className="text-primary text-xs hover:underline">
-                  See all
-                </Link>
-              ) : null
-            }
-          >
-            <ul className="divide-y">
-              {today.needsYou.items.map((item) => (
-                <NeedsItemRow key={item.id} item={item} />
-              ))}
-            </ul>
-          </FeedSection>
-
-          <FeedSection
-            title={
-              today.lastVisitAt === null ? (
-                "Shipped"
-              ) : (
-                <>
-                  Shipped since your last visit (<When at={today.lastVisitAt} />)
-                </>
-              )
-            }
-            empty={today.shipped.items.length === 0}
-            notMeasured={today.shipped.notMeasured}
-          >
-            <ul className="flex flex-col gap-1.5 text-sm">
-              {today.shipped.items.map((item) => (
-                <li key={`${item.pr.url}:${item.mergedAt}`} className="flex flex-col">
-                  <span className="break-words">{item.summary}</span>
-                  <span className="text-muted-foreground text-xs">
-                    <ShippedRef pr={item.pr} />
-                    {shippedLabel(item.live)} · <Age at={item.mergedAt} />
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </FeedSection>
-
-          <FeedSection
-            title="Working now"
-            empty={today.working.items.length === 0}
-            notMeasured={today.working.notMeasured}
-          >
-            <ul className="flex flex-col gap-1.5 text-sm">
-              {today.working.items.map((item) => {
-                const state = workingStateLabel(item.state);
-                return (
-                  <li
-                    key={`${item.person.login}:${item.task?.title ?? ""}:${item.branch ?? ""}`}
-                    className="flex items-start gap-3"
-                  >
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="break-words">
-                        {loginOrUnknown(item.person.login)}
-                        {item.task === undefined ? null : (
-                          <>
-                            {" on "}
-                            <TaskTitle task={item.task} />
-                          </>
-                        )}
-                      </span>
-                      <span className="text-muted-foreground text-xs">
-                        {item.state === "not_heard_from" ? (
-                          <>
-                            not heard from since <When at={item.lastActivityAt} />
-                          </>
-                        ) : (
-                          <>
-                            {state === null ? null : `${state} · `}
-                            last activity <Age at={item.lastActivityAt} />
-                          </>
-                        )}
-                        {item.branch === undefined ? null : ` · ${item.branch}`}
-                        {item.sessions === undefined
-                          ? null
-                          : ` · ${item.sessions} ${item.sessions === 1 ? "session" : "sessions"}`}
-                      </span>
-                    </div>
-                    <OpenTarget deepLink={item.deepLink} />
-                  </li>
-                );
-              })}
-            </ul>
-          </FeedSection>
-
-          <FeedSection
-            title="Stuck"
-            empty={today.stuck.items.length === 0}
-            notMeasured={today.stuck.notMeasured}
-          >
-            <ul className="flex flex-col gap-1.5 text-sm">
-              {today.stuck.items.map((item) => (
-                <li
-                  key={`${item.rules.join(",")}:${item.since}:${item.task?.title ?? item.subject?.repo ?? ""}:${item.subject?.job?.name ?? ""}:${item.subject?.run?.name ?? ""}`}
-                  className="flex items-start gap-3"
-                >
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="break-words">
-                      {stuckRulesLabel(item.rules)}
-                      {": "}
-                      <StuckSubjectView task={item.task} subject={item.subject} />
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      since <When at={item.since} />
-                      {item.owner === undefined
-                        ? null
-                        : loginSuffix("claimed by", item.owner.login)}
-                    </span>
-                  </div>
-                  <OpenTarget deepLink={item.deepLink} />
-                </li>
-              ))}
-            </ul>
-          </FeedSection>
-
-          <FeedSection
-            title="Health"
-            empty={today.health.items.length === 0}
-            notMeasured={today.health.notMeasured}
-          >
-            <ul className="flex flex-col gap-1.5 text-sm">
-              {today.health.items.map((item) => (
-                <li key={item.id} className="flex items-start gap-2">
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "mt-1.5 size-2 shrink-0 rounded-full",
-                      TONE_DOT[healthTone(item.state)],
-                    )}
-                  />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="break-words">
-                      {item.label}: {healthStateLabel(item.state)}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      {item.summary === undefined ? null : `${item.summary} · `}
-                      {item.observedAt === null ? (
-                        "not checked yet"
-                      ) : (
-                        <Age at={item.observedAt} prefix="checked" />
-                      )}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </FeedSection>
-        </>
-      )}
-    </FeedPage>
+      {body}
+    </FeedFrame>
   );
 }

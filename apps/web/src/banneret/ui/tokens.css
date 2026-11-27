@@ -101,6 +101,35 @@
     max-width: 75rem;
   }
 
+  /* Today: Needs you and Stuck on the left, Working now and Shipped on the right. Under about
+     1100px the columns stack. */
+  [data-layout="today-columns"] {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 1rem;
+    align-items: start;
+  }
+
+  [data-layout="today-columns"] > * {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  @media (max-width: 68.75rem) {
+    [data-layout="today-columns"] {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  [data-layout="health-tiles"] {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
   /* Map: one compact row per stage on a vertical spine. Columns are the spine (20px), the stage
      name with its progress (248px) and the items. Narrow, the items drop under the name. */
   [data-layout="map-stages"] {
