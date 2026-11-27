@@ -15,8 +15,8 @@ export interface StatusWord {
   readonly word: string;
 }
 
-/** One vocabulary for Board, Map and Feed, in the relay's first-match order. */
-export const STATUS_VOCABULARY: ReadonlyArray<StatusWord & { readonly status: string }> = [
+/** The Task tab and Feed marks, in the relay's first-match order. */
+const STATUS_VOCABULARY: ReadonlyArray<StatusWord & { readonly status: string }> = [
   { status: "ruled_dead", mark: "†", word: "ruled dead" },
   { status: "checked", mark: "●", word: "checked" },
   { status: "sent_back", mark: "✕", word: "sent back" },

@@ -2,8 +2,6 @@
 // status, reason and counter; these only order and join what it sent.
 import type { BanneretMap, BanneretMapItem } from "@t3tools/contracts";
 
-import { STATUS_VOCABULARY } from "./board.logic";
-
 export interface MapStageView {
   readonly id: string;
   readonly title: string;
@@ -39,19 +37,44 @@ function countByStatus(items: ReadonlyArray<BanneretMapItem>): Record<string, nu
   return counts;
 }
 
-/** Non-zero counts, known statuses in the vocabulary's order, then unknown ones by name. */
-export function orderedCounts(
-  counts: Readonly<Record<string, number>>,
-): ReadonlyArray<{ readonly status: string; readonly count: number }> {
-  const known = STATUS_VOCABULARY.map((entry) => entry.status);
-  const rank = (status: string) => {
-    const index = known.indexOf(status);
-    return index === -1 ? known.length : index;
-  };
-  return Object.entries(counts)
-    .filter(([, count]) => count > 0)
-    .toSorted(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
-    .map(([status, count]) => ({ status, count }));
+/** Statuses that count as built in a stage's progress. */
+const BUILT = new Set(["built", "checked"]);
+
+export interface StageProgress {
+  /** Items built or checked. */
+  readonly built: number;
+  /** Every item except dropped ones, which will never be built. */
+  readonly total: number;
+}
+
+export function stageProgress(counts: Readonly<Record<string, number>>): StageProgress {
+  let built = 0;
+  let total = 0;
+  for (const [status, count] of Object.entries(counts)) {
+    if (status === "ruled_dead") continue;
+    total += count;
+    if (BUILT.has(status)) built += count;
+  }
+  return { built, total };
+}
+
+/** Where a stage sits on the spine. */
+export type SpineState = "done" | "current" | "todo";
+
+/**
+ * One state per stage, in order: `done` when every item to build is built, `current` for the
+ * first stage with something still to build, `todo` otherwise. A stage with nothing to build is
+ * never done nor current.
+ */
+export function spineStates(progress: ReadonlyArray<StageProgress>): ReadonlyArray<SpineState> {
+  let currentTaken = false;
+  return progress.map(({ built, total }) => {
+    if (total === 0) return "todo";
+    if (built === total) return "done";
+    if (currentTaken) return "todo";
+    currentTaken = true;
+    return "current";
+  });
 }
 
 /** An item on one side of a rests-on link; `item` is null when the plan names an id the map lacks. */
@@ -79,15 +102,21 @@ export function restsOnView(map: BanneretMap, itemId: string): RestsOnView {
 }
 
 /**
- * "Blocked by <title>" for a `blocked` item, naming its first direct blocker (its id when the map
- * lacks that item) and how many more there are; null for any other status or an empty `blockedBy`.
+ * What a `blocked` item waits on: its first direct blocker's title (its id when the map lacks that
+ * item) and how many more there are; null for any other status or an empty `blockedBy`.
  */
-export function blockedByLabel(map: BanneretMap, item: BanneretMapItem): string | null {
+export function blockedByName(map: BanneretMap, item: BanneretMapItem): string | null {
   if (item.status !== "blocked") return null;
   const [first, ...rest] = item.blockedBy;
   if (first === undefined) return null;
   const title = map.items.find((candidate) => candidate.id === first)?.title ?? first;
-  return rest.length === 0 ? `Blocked by ${title}` : `Blocked by ${title} and ${rest.length} more`;
+  return rest.length === 0 ? title : `${title} and ${rest.length} more`;
+}
+
+/** "Blocked by <title>" for a `blocked` item (see `blockedByName`); null otherwise. */
+export function blockedByLabel(map: BanneretMap, item: BanneretMapItem): string | null {
+  const name = blockedByName(map, item);
+  return name === null ? null : `Blocked by ${name}`;
 }
 
 /** Whether the map holds nothing to draw because its plan could not be used. */

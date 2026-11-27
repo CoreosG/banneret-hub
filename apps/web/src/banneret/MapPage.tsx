@@ -1,20 +1,62 @@
 // Banneret Hub: the build map for an Enterprise workspace, drawn from the relay's snapshot `map` file,
 // with a Rests-on view when the map section carries the `rests_on` flag. The relay computes every
 // stage, status, reason and counter; this page only draws them. Read-only. An item with a task opens
-// its Task tab; an item without one is not clickable and says so. Relay strings render as plain text.
+// its Task tab; an item without one is not clickable. Relay strings render as plain text.
 import type { BanneretBoardTask, BanneretMap, BanneretMapItem } from "@t3tools/contracts";
-import { type ReactNode, useState } from "react";
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon } from "lucide-react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 
-import { cn } from "../lib/utils";
+import { isElectron } from "../env";
+import { Button } from "../components/ui/button";
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxTrigger,
+} from "../components/ui/combobox";
+import { ScrollArea } from "../components/ui/scroll-area";
+import { SidebarInset } from "../components/ui/sidebar";
+import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
+import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { taskRef } from "./board.logic";
 import { FeedStatus, When } from "./FeedParts";
-import { blockedByLabel, mapNotMeasured, mapStages, orderedCounts, restsOnView } from "./map.logic";
+import {
+  blockedByLabel,
+  blockedByName,
+  mapNotMeasured,
+  mapStages,
+  restsOnView,
+  spineStates,
+  stageProgress,
+  type MapStageView,
+  type RestsOnEntry,
+  type SpineState,
+} from "./map.logic";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
-import { StatusCounts, StatusLegend, StatusMark } from "./StatusLegend";
-import { FeedPage, NotJoinedNote } from "./TodayPage";
+import { MapItemCard } from "./ui/MapItemCard";
+import { PageHeader, SummaryFigure } from "./ui/PageHeader";
+import { QuietLine } from "./ui/QuietLine";
+import { legendStatuses } from "./ui/status";
+import { StatusIcon } from "./ui/StatusPill";
+import { StatusLegend } from "./ui/StatusLegend";
+import { TaskCard } from "./ui/TaskCard";
+import {
+  LAYOUT_MAP_STAGE,
+  LAYOUT_MAP_STAGES,
+  LAYOUT_PAGE,
+  LAYOUT_PROGRESS_BAR,
+  LAYOUT_RESTS_ON,
+  RADIUS_PANEL,
+  TYPE,
+  toneProps,
+} from "./ui/tokens";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
 
-type Tab = "map" | "rests_on";
+type View = "map" | "rests_on";
 type OpenTask = (task: BanneretBoardTask) => void;
 
 const PLAN_REASONS: Readonly<Record<string, string>> = {
@@ -23,71 +65,90 @@ const PLAN_REASONS: Readonly<Record<string, string>> = {
 };
 const planReason = (reason: string) => PLAN_REASONS[reason] ?? notMeasuredReason(reason);
 
-/**
- * One item: its status mark and word, its title and the relay's reason. A blocked item names its
- * first direct blocker instead, and the reason moves to the mark's hover. A task makes it a button.
- * `blocksSelected` marks an entry of the Rests-on tab that blocks the selected item.
- */
-function MapItemView(props: {
+const isAtWork = (item: BanneretMapItem, atWork: ReadonlySet<string>) =>
+  item.task !== undefined && atWork.has(item.task.id);
+
+/** One item as a compact card. A blocked item names what blocks it; the relay's reason is the tooltip. */
+function MapItem(props: {
   readonly map: BanneretMap;
   readonly item: BanneretMapItem;
-  readonly atWork: boolean;
+  readonly atWork: ReadonlySet<string>;
   readonly onOpen: OpenTask;
-  readonly blocksSelected?: boolean;
 }) {
   const { item } = props;
-  const blockedBy = blockedByLabel(props.map, item);
-  const content = (
-    <>
-      <StatusMark
-        status={item.status}
-        atWork={props.atWork}
-        why={blockedBy === null ? undefined : item.statusWhy}
-      />
-      <span className="break-words text-sm">{item.title}</span>
-      {blockedBy === null ? (
-        <span data-status-why className="break-words text-muted-foreground text-xs">
-          {item.statusWhy}
-        </span>
-      ) : (
-        <span
-          data-blocked-by={item.blockedBy[0]}
-          className="break-words text-muted-foreground text-xs"
-        >
-          {blockedBy}
-        </span>
-      )}
-      {props.blocksSelected === true ? (
-        <span data-blocks-selected className="text-foreground text-xs">
-          Blocks it
-        </span>
-      ) : null}
-    </>
-  );
-  const box = "flex w-full flex-col gap-1 rounded-md border p-2.5 text-start";
   const { task } = item;
+  const blockedBy = blockedByLabel(props.map, item);
   return (
-    <li data-item-id={item.id} data-at-work={props.atWork ? "" : undefined}>
-      {task === undefined ? (
-        // Quieter than a card with a task, so it does not read as something to click.
-        <div className={cn(box, "cursor-default border-dashed")}>
-          {content}
-          <span data-no-task className="text-muted-foreground/70 text-xs">
-            No task linked
+    <li
+      className="min-w-0 max-w-full"
+      data-item-id={item.id}
+      data-at-work={isAtWork(item, props.atWork) ? "" : undefined}
+      data-blocked-by={blockedBy === null ? undefined : item.blockedBy[0]}
+    >
+      <MapItemCard
+        title={item.title}
+        status={item.status}
+        number={task?.ref.key}
+        why={item.statusWhy}
+        note={blockedBy ?? undefined}
+        atWork={isAtWork(item, props.atWork)}
+        onOpen={task === undefined ? undefined : () => props.onOpen(task)}
+      />
+    </li>
+  );
+}
+
+function StageRow(props: {
+  readonly map: BanneretMap;
+  readonly stage: MapStageView;
+  readonly spine: SpineState;
+  readonly atWork: ReadonlySet<string>;
+  readonly onOpen: OpenTask;
+}) {
+  const { stage } = props;
+  const { built, total } = stageProgress(stage.counts);
+  const quiet = props.spine === "todo";
+  return (
+    <li
+      aria-label={stage.title}
+      data-stage-id={stage.id}
+      data-spine={props.spine}
+      {...LAYOUT_MAP_STAGE}
+    >
+      <span aria-hidden data-slot="spine-node">
+        {props.spine === "done" ? <CheckIcon className="size-2.5" strokeWidth={3.5} /> : null}
+      </span>
+      <div className="flex min-w-0 flex-col gap-1 pt-0.5">
+        <h2 className={quiet ? "text-muted-foreground text-sm" : TYPE.cardTitle}>{stage.title}</h2>
+        {total === 0 ? (
+          <span className={TYPE.meta}>Nothing to build</span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <span
+              aria-hidden
+              {...LAYOUT_PROGRESS_BAR}
+              style={{ "--progress": built / total } as CSSProperties}
+            />
+            <span data-progress className={`${TYPE.meta} tabular-nums`}>
+              {built}/{total} built
+            </span>
           </span>
-        </div>
+        )}
+      </div>
+      {stage.items.length === 0 ? (
+        <p className={`${TYPE.meta} self-center`}>Nothing planned in this stage.</p>
       ) : (
-        <button
-          type="button"
-          data-open-task={task.id}
-          className={cn(
-            box,
-            "cursor-pointer bg-card text-card-foreground shadow-xs/5 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          )}
-          onClick={() => props.onOpen(task)}
-        >
-          {content}
-        </button>
+        <ul className="flex min-w-0 flex-wrap content-start gap-2">
+          {stage.items.map((item) => (
+            <MapItem
+              key={item.id}
+              map={props.map}
+              item={item}
+              atWork={props.atWork}
+              onOpen={props.onOpen}
+            />
+          ))}
+        </ul>
       )}
     </li>
   );
@@ -98,83 +159,170 @@ function BuildMapView(props: {
   readonly atWork: ReadonlySet<string>;
   readonly onOpen: OpenTask;
 }) {
+  const stages = mapStages(props.map);
+  const spine = spineStates(stages.map((stage) => stageProgress(stage.counts)));
   return (
-    <div className="flex flex-col gap-4">
-      {mapStages(props.map).map((stage) => (
-        <section
+    <ol aria-label="Stages" {...LAYOUT_MAP_STAGES}>
+      {stages.map((stage, index) => (
+        <StageRow
           key={stage.id}
-          aria-label={stage.title}
-          data-stage-id={stage.id}
-          className="flex flex-col gap-2 rounded-lg bg-muted/40 p-3"
-        >
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="font-medium text-sm">{stage.title}</h2>
-            <StatusCounts
-              label={`${stage.title} counts`}
-              counts={orderedCounts(stage.counts)}
-              className="ml-auto"
-            />
-          </div>
-          {stage.items.length === 0 ? (
-            <p className="text-muted-foreground text-xs">Nothing planned in this stage.</p>
-          ) : (
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2">
-              {stage.items.map((item) => (
-                <MapItemView
-                  key={item.id}
-                  map={props.map}
-                  item={item}
-                  atWork={item.task !== undefined && props.atWork.has(item.task.id)}
-                  onOpen={props.onOpen}
-                />
-              ))}
-            </ul>
-          )}
-        </section>
+          map={props.map}
+          stage={stage}
+          spine={spine[index]!}
+          atWork={props.atWork}
+          onOpen={props.onOpen}
+        />
       ))}
-    </div>
+    </ol>
   );
 }
 
-function RestsOnList(props: {
+const stageTitleOf = (map: BanneretMap, item: BanneretMapItem) =>
+  map.stages.find((stage) => stage.id === item.stageId)?.title ?? "Other";
+
+/** One card beside the picked item. A click makes it the picked item. */
+function SideCard(props: {
+  readonly map: BanneretMap;
+  readonly entry: RestsOnEntry;
+  readonly directBlocker: boolean;
+  readonly atWork: ReadonlySet<string>;
+  readonly onPick: (id: string) => void;
+}) {
+  const { entry } = props;
+  if (entry.item === null) {
+    return (
+      <li data-item-id={entry.id}>
+        <p className="rounded-lg border border-dashed p-3 text-muted-foreground text-xs">
+          {entry.id} is not on this map.
+        </p>
+      </li>
+    );
+  }
+  const { item } = entry;
+  const ref = item.task === undefined ? undefined : taskRef(item.task);
+  return (
+    <li data-item-id={item.id}>
+      <TaskCard
+        title={item.title}
+        status={item.status}
+        why={item.statusWhy}
+        refLabel={ref?.repo}
+        refNumber={ref?.number}
+        atWork={isAtWork(item, props.atWork)}
+        blockedBy={blockedByName(props.map, item) ?? undefined}
+        lease={
+          props.directBlocker ? (
+            <span
+              data-direct-blocker
+              className="inline-flex h-5 items-center self-start rounded-md border px-1.5 font-medium text-2xs"
+              {...toneProps("warn", "edge", "fg")}
+            >
+              Blocks it directly
+            </span>
+          ) : undefined
+        }
+        footer={stageTitleOf(props.map, item)}
+        className={item.task === undefined ? "border-dashed" : ""}
+        onOpen={() => props.onPick(item.id)}
+      />
+    </li>
+  );
+}
+
+function SideColumn(props: {
   readonly map: BanneretMap;
   readonly label: string;
-  readonly entries: ReadonlyArray<{ readonly id: string; readonly item: BanneretMapItem | null }>;
-  /** Ids among the entries that block the selected item directly. */
+  readonly empty: string;
+  readonly entries: ReadonlyArray<RestsOnEntry>;
   readonly blockers: ReadonlySet<string>;
   readonly atWork: ReadonlySet<string>;
-  readonly onOpen: OpenTask;
+  readonly onPick: (id: string) => void;
 }) {
   return (
-    <section aria-label={props.label} className="flex flex-col gap-2">
-      <h3 className="font-medium text-sm">{props.label}</h3>
+    <section aria-label={props.label} className="flex min-w-0 flex-col gap-2">
+      <h3 className="font-medium text-2xs text-muted-foreground uppercase tracking-wider">
+        {props.label} · {props.entries.length}
+      </h3>
       {props.entries.length === 0 ? (
-        <p className="text-muted-foreground text-xs">Nothing.</p>
+        <QuietLine fact={props.empty} />
       ) : (
         <ul className="flex flex-col gap-2">
-          {props.entries.map((entry) =>
-            entry.item === null ? (
-              <li
-                key={entry.id}
-                data-item-id={entry.id}
-                className="rounded-md border border-dashed p-2.5 text-muted-foreground text-xs"
-              >
-                {entry.id} is not on this map.
-              </li>
-            ) : (
-              <MapItemView
-                key={entry.id}
-                map={props.map}
-                item={entry.item}
-                atWork={entry.item.task !== undefined && props.atWork.has(entry.item.task.id)}
-                onOpen={props.onOpen}
-                blocksSelected={props.blockers.has(entry.id)}
-              />
-            ),
-          )}
+          {props.entries.map((entry) => (
+            <SideCard
+              key={entry.id}
+              map={props.map}
+              entry={entry}
+              directBlocker={props.blockers.has(entry.id)}
+              atWork={props.atWork}
+              onPick={props.onPick}
+            />
+          ))}
         </ul>
       )}
     </section>
+  );
+}
+
+/** The item picker: a searchable list of every item, its stage as the second line. */
+function ItemPicker(props: {
+  readonly map: BanneretMap;
+  readonly selected: BanneretMapItem;
+  readonly onPick: (id: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const items = props.map.items;
+  const filtered = items.filter((item) =>
+    `${item.title} ${stageTitleOf(props.map, item)}`.toLowerCase().includes(needle),
+  );
+  return (
+    <Combobox
+      items={items}
+      filteredItems={filtered}
+      filter={null}
+      autoHighlight
+      itemToStringLabel={(item) => item.title}
+      isItemEqualToValue={(a, b) => a.id === b.id}
+      value={props.selected}
+      onOpenChange={(open) => {
+        if (!open) setQuery("");
+      }}
+      onValueChange={(item) => {
+        if (item) props.onPick(item.id);
+      }}
+    >
+      <ComboboxTrigger
+        aria-label={`Item: ${props.selected.title}`}
+        render={<Button variant="outline" size="sm" />}
+        className="min-w-0 max-w-80"
+      >
+        <StatusIcon status={props.selected.status} />
+        <span className="min-w-0 truncate">{props.selected.title}</span>
+        <ChevronDownIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
+      </ComboboxTrigger>
+      <ComboboxPopup align="start" className="w-96">
+        <ComboboxSearchInput
+          aria-label="Search items"
+          placeholder={`Search ${items.length} items`}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <ComboboxEmpty>No items match.</ComboboxEmpty>
+        <ComboboxList>
+          {(item: BanneretMapItem) => (
+            <ComboboxItem key={item.id} value={item}>
+              <StatusIcon status={item.status} />
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate">{item.title}</span>
+                <span className="truncate text-muted-foreground text-xs">
+                  {stageTitleOf(props.map, item)}
+                </span>
+              </span>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
   );
 }
 
@@ -190,75 +338,62 @@ function RestsOnTab(props: {
     map.items.find((item) => item.restsOn.length > 0) ??
     map.items[0]!;
   const view = restsOnView(map, selected.id);
+  const { task } = selected;
+  const ref = task === undefined ? undefined : taskRef(task);
   return (
     <div className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium">Item</span>
-        <select
-          className="h-8 max-w-md rounded-md border bg-background px-2 text-sm"
-          value={selected.id}
-          onChange={(event) => setChosen(event.target.value)}
-        >
-          {map.items.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.title}
-            </option>
-          ))}
-        </select>
-      </label>
-      <ul aria-label="Selected item" className="max-w-md">
-        <MapItemView
+      <div className="flex flex-wrap items-center gap-3">
+        <span className={TYPE.meta}>Item</span>
+        <ItemPicker map={map} selected={selected} onPick={setChosen} />
+        <span className={TYPE.meta}>
+          {stageTitleOf(map, selected)} · rests on {view.restsOn.length} · unblocks{" "}
+          {view.dependants.length}
+        </span>
+      </div>
+      <div className="border bg-muted" {...RADIUS_PANEL} {...LAYOUT_RESTS_ON}>
+        <SideColumn
           map={map}
-          item={selected}
-          atWork={selected.task !== undefined && props.atWork.has(selected.task.id)}
-          onOpen={props.onOpen}
-        />
-      </ul>
-      <div className="grid gap-4 md:grid-cols-2">
-        <RestsOnList
-          map={map}
-          label="It rests on"
+          label="Needs these first"
+          empty="Nothing. This can start now."
           entries={view.restsOn}
           blockers={new Set(selected.blockedBy)}
           atWork={props.atWork}
-          onOpen={props.onOpen}
+          onPick={setChosen}
         />
-        <RestsOnList
+        <span aria-hidden data-slot="rests-on-arrow">
+          <ArrowRightIcon className="size-4" />
+        </span>
+        <section aria-label="Picked item" data-item-id={selected.id}>
+          <TaskCard
+            title={selected.title}
+            status={selected.status}
+            why={selected.statusWhy}
+            refLabel={ref?.repo}
+            refNumber={ref?.number}
+            atWork={isAtWork(selected, props.atWork)}
+            blockedBy={blockedByName(map, selected) ?? undefined}
+            footer={stageTitleOf(map, selected)}
+            className={
+              task === undefined
+                ? "border-dashed p-4"
+                : "border-primary p-4 ring-3 ring-primary/20 hover:border-primary"
+            }
+            onOpen={task === undefined ? undefined : () => props.onOpen(task)}
+          />
+        </section>
+        <span aria-hidden data-slot="rests-on-arrow">
+          <ArrowRightIcon className="size-4" />
+        </span>
+        <SideColumn
           map={map}
-          label="Rests on it"
+          label="Unblocks these"
+          empty="Nothing waits on this."
           entries={view.dependants.map((item) => ({ id: item.id, item }))}
           blockers={new Set()}
           atWork={props.atWork}
-          onOpen={props.onOpen}
+          onPick={setChosen}
         />
       </div>
-    </div>
-  );
-}
-
-function Tabs(props: { readonly active: Tab; readonly onChange: (tab: Tab) => void }) {
-  const tab = (id: Tab, label: string) => (
-    <button
-      type="button"
-      role="tab"
-      id={`map-tab-${id}`}
-      aria-selected={props.active === id}
-      aria-controls="map-tab-panel"
-      className={cn(
-        "rounded-md px-2.5 py-1 text-sm",
-        props.active === id
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-      onClick={() => props.onChange(id)}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div role="tablist" aria-label="Map views" className="flex gap-1">
-      {tab("map", "Build map")}
-      {tab("rests_on", "Rests on")}
     </div>
   );
 }
@@ -269,10 +404,12 @@ function NotMeasuredNote(props: { readonly map: BanneretMap }) {
     <div
       role="note"
       data-testid="map-not-measured"
-      className="flex flex-col gap-1 rounded-md bg-muted px-3 py-2 text-muted-foreground text-xs"
+      className="rounded-lg border border-dashed px-3 py-2 text-muted-foreground text-xs"
     >
-      <p>The build plan could not be used, so the map is not measured.</p>
-      <ul className="flex flex-col gap-1">
+      <p className="font-semibold text-foreground">
+        The build plan could not be used, so the map is not measured.
+      </p>
+      <ul>
         {props.map.notMeasured.map((line) => (
           <li key={`${line.source}:${line.reason}:${line.since}`}>
             <span>{planReason(line.reason)}</span> since <When at={line.since} />
@@ -288,51 +425,103 @@ function NotMeasuredNote(props: { readonly map: BanneretMap }) {
   );
 }
 
+/** A readable page under the workspace header; the page scrolls, the header stays. */
+function MapFrame(props: { readonly company?: string; readonly children: ReactNode }) {
+  return (
+    <SidebarInset role="main" className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
+      <WorkspacePageHeader electron={isElectron} className="border-b">
+        <span className="flex min-w-0 items-center gap-1.5 text-sm">
+          {props.company === undefined ? null : (
+            <>
+              <span className="truncate text-muted-foreground">{props.company}</span>
+              <span aria-hidden className="text-muted-foreground">
+                /
+              </span>
+            </>
+          )}
+          <span className="font-medium">Build map</span>
+        </span>
+      </WorkspacePageHeader>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto flex w-full flex-col gap-4 px-6 pt-6 pb-8" {...LAYOUT_PAGE}>
+          {props.children}
+        </div>
+      </ScrollArea>
+    </SidebarInset>
+  );
+}
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+function mapSummary(map: BanneretMap, stageCount: number): ReactNode {
+  const counts = map.counters.byStatus;
+  const built = (counts.built ?? 0) + (counts.checked ?? 0);
+  const blocked = counts.blocked ?? 0;
+  return (
+    <>
+      <SummaryFigure>{plural(map.items.length, "item", "items")}</SummaryFigure> in{" "}
+      {plural(stageCount, "stage", "stages")} · {built} built
+      {blocked > 0 ? ` · ${blocked} blocked` : null}
+    </>
+  );
+}
+
 export function MapPage() {
   const enterprise = useEnterpriseFeed();
   const openTask = useOpenTask(enterprise?.environmentId ?? "");
-  const [tab, setTab] = useState<Tab>("map");
+  const [view, setView] = useState<View>("map");
   if (enterprise === null) {
     return (
-      <FeedPage title="Map">
-        <NotJoinedNote />
-      </FeedPage>
+      <MapFrame>
+        <PageHeader title="Build map" />
+        <QuietLine
+          fact="No company here yet."
+          hint="Choose an Enterprise workspace that this machine has joined to see its company here."
+        />
+      </MapFrame>
     );
   }
   const { feed, workspace } = enterprise;
   if (!offersSection(feed, "map")) {
     return (
-      <FeedPage title="Map">
-        <p className="text-muted-foreground text-sm">
-          {workspace.name} does not offer a build map.
-        </p>
-      </FeedPage>
+      <MapFrame company={workspace.name}>
+        <PageHeader title="Build map" />
+        <QuietLine fact={`${workspace.name} does not offer a build map.`} />
+      </MapFrame>
     );
   }
   const read = feed.map;
   const map = read?.value ?? null;
   const atWork = new Set(read?.atWork ?? []);
-  const restsOnOffered = read?.restsOn === true && map !== null && map.items.length > 0;
-  const active: Tab = tab === "rests_on" && restsOnOffered ? "rests_on" : "map";
+  const hasItems = map !== null && map.items.length > 0;
+  const restsOnOffered = read?.restsOn === true && hasItems;
+  const active: View = view === "rests_on" && restsOnOffered ? "rests_on" : "map";
 
   let body: ReactNode;
   if (map === null) {
-    body =
-      read?.problem === undefined && !feed.unreachable ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : null;
+    body = read?.problem === undefined && !feed.unreachable ? <QuietLine fact="Loading…" /> : null;
   } else if (map.items.length === 0) {
     // A broken plan is never shown as an empty one.
     body = mapNotMeasured(map) ? (
       <NotMeasuredNote map={map} />
     ) : (
-      <p className="text-muted-foreground text-sm">This relay has no build plan yet.</p>
+      <QuietLine
+        fact="This relay has no build plan yet."
+        hint="Its stages appear here once the company adds a stage plan."
+      />
     );
   } else {
+    const statuses = legendStatuses(map.counters.byStatus).filter(
+      (status) => read?.checked === true || status !== "checked",
+    );
     body = (
       <>
         {mapNotMeasured(map) ? <NotMeasuredNote map={map} /> : null}
-        <StatusLegend checked={read?.checked === true} counts={map.counters.byStatus} />
+        <StatusLegend
+          counts={map.counters.byStatus}
+          statuses={statuses}
+          atWorkCount={map.items.filter((item) => isAtWork(item, atWork)).length}
+        />
         {active === "rests_on" ? (
           <RestsOnTab map={map} atWork={atWork} onOpen={openTask} />
         ) : (
@@ -343,22 +532,33 @@ export function MapPage() {
   }
 
   return (
-    <FeedPage title={`Build map in ${workspace.name}`}>
-      {restsOnOffered ? <Tabs active={active} onChange={setTab} /> : null}
+    <MapFrame company={workspace.name}>
+      <PageHeader
+        title="Build map"
+        summary={hasItems ? mapSummary(map, mapStages(map).length) : undefined}
+      >
+        {restsOnOffered ? (
+          <ToggleGroup
+            aria-label="Map views"
+            variant="segmented"
+            value={[active]}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (next === "map" || next === "rests_on") setView(next);
+            }}
+          >
+            <Toggle value="map">Build map</Toggle>
+            <Toggle value="rests_on">Rests on</Toggle>
+          </ToggleGroup>
+        ) : null}
+      </PageHeader>
       <FeedStatus
         feed={feed}
         company={workspace.name}
         fetchedAt={read?.fetchedAt ?? null}
         problem={read?.problem ?? null}
       />
-      <div
-        id="map-tab-panel"
-        role={restsOnOffered ? "tabpanel" : undefined}
-        aria-labelledby={restsOnOffered ? `map-tab-${active}` : undefined}
-        className="flex flex-col gap-4"
-      >
-        {body}
-      </div>
-    </FeedPage>
+      {body}
+    </MapFrame>
   );
 }

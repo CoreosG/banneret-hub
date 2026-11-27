@@ -1,7 +1,7 @@
 import type { BanneretMap, BanneretMapItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { blockedByLabel, mapStages, orderedCounts, restsOnView } from "./map.logic";
+import { blockedByLabel, mapStages, restsOnView, spineStates, stageProgress } from "./map.logic";
 
 const item = (id: string, stageId: string, restsOn: string[] = []): BanneretMapItem => ({
   id,
@@ -52,16 +52,26 @@ describe("map shape", () => {
     expect(restsOnView(MAP, "d").restsOn.map((entry) => entry.id)).toEqual(["b"]);
   });
 
-  it("orders counts by the vocabulary and drops zeros", () => {
-    expect(
-      orderedCounts({ planned: 2, mystery: 1, ruled_dead: 1, built: 0, blocked: 3, needs_you: 1 }),
-    ).toEqual([
-      { status: "ruled_dead", count: 1 },
-      { status: "needs_you", count: 1 },
-      { status: "blocked", count: 3 },
-      { status: "planned", count: 2 },
-      { status: "mystery", count: 1 },
+  it("counts built and checked out of every item that is not dropped", () => {
+    expect(stageProgress({ built: 1, checked: 2, planned: 1, ruled_dead: 1 })).toEqual({
+      built: 3,
+      total: 4,
+    });
+    expect(stageProgress({ ruled_dead: 2 })).toEqual({ built: 0, total: 0 });
+    expect(stageProgress({})).toEqual({ built: 0, total: 0 });
+  });
+
+  it("marks done stages, the first unfinished one as current, and the rest not started", () => {
+    const p = (built: number, total: number) => ({ built, total });
+    expect(spineStates([p(1, 1), p(0, 0), p(3, 3), p(1, 2), p(0, 1), p(2, 2)])).toEqual([
+      "done",
+      "todo",
+      "done",
+      "current",
+      "todo",
+      "done",
     ]);
+    expect(spineStates([p(0, 0), p(0, 2)])).toEqual(["todo", "current"]);
   });
 
   it("names a blocked item's first direct blocker, by title, else by id", () => {
