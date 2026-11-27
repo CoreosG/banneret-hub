@@ -35,7 +35,9 @@ import {
   releaseInput,
   type ReleaseForm,
 } from "./lease.logic";
-import { type RelayTarget, relayKey } from "./enrolmentStore";
+import { MachineResources, usePoolResources } from "./ui/MachineResources";
+import { useEnvironmentFeed } from "./relayFeedStore";
+import { useEnrolmentStore, type RelayTarget, relayKey } from "./enrolmentStore";
 import "./lease.css";
 import { chooseLeaseMachine } from "./leaseMachineStore";
 import type { LeaseMachine, LeaseRoute } from "./leaseRoute.logic";
@@ -179,10 +181,15 @@ function MachineSwitcher(props: {
 
 /** The machines a take or release may run on, as radio buttons. */
 function MachinePicker(props: {
+  readonly target?: RelayTarget | undefined;
   readonly machines: ReadonlyArray<LeaseMachine>;
   readonly value: EnvironmentId;
   readonly onChange: (machine: LeaseMachine) => void;
 }) {
+  const feed = useEnvironmentFeed(props.target ?? null);
+  const pool = usePoolResources(props.target ?? null, feed.sections.includes("pool"));
+  const machines = useEnrolmentStore((s) => s.machines);
+  const views = useEnrolmentStore((s) => s.views);
   return (
     <fieldset className="flex flex-col gap-2" data-testid="lease-machine-picker">
       <legend className="mb-2 font-medium text-sm">Machine</legend>
@@ -195,10 +202,25 @@ function MachinePicker(props: {
         }}
       >
         {props.machines.map((machine) => (
-          <label key={machine.environmentId} className="flex items-center gap-2 text-sm">
-            <Radio value={machine.environmentId} />
-            {machine.label}
-          </label>
+          <div key={machine.environmentId}>
+            <label className="flex items-center gap-2 text-sm">
+              <Radio value={machine.environmentId} />
+              {machine.label}
+            </label>
+            {props.target && (
+              <MachineResources
+                target={props.target}
+                selected={machine.environmentId}
+                hostId={machines[machine.environmentId]?.poolHostId}
+                owner={
+                  views[machine.environmentId]?.find(
+                    (v) => v.relayOrigin === props.target?.relayOrigin,
+                  )?.me?.login
+                }
+                pool={pool}
+              />
+            )}
+          </div>
         ))}
       </RadioGroup>
     </fieldset>
@@ -253,6 +275,7 @@ function LeaseConfirmDialog() {
         </DialogHeader>
         <DialogPanel>
           <MachinePicker
+            target={target.operation === "take" ? target.relay : undefined}
             machines={target.machines}
             value={machine.environmentId}
             onChange={setMachine}

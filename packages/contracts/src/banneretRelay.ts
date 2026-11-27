@@ -1,10 +1,14 @@
 // Banneret Hub: enrolment of this server environment in a company relay (docs/banneret/relay-v1).
 // The server holds the machine key and device token and makes every relay call; clients see only
 // the view below, which never carries either.
+import { FolderSizes, PoolResources, ResourceReport, WarningPolicy } from "./banneretResources.ts";
+export * from "./banneretResources.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as Schema from "effect/Schema";
 
 import {
+  AuthDiagnosticsReadScope,
+  AuthFilesystemReadScope,
   AuthEnvironmentMaintainScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -25,6 +29,9 @@ export * from "./taskLeases.ts";
 export * from "./leaseProtocol.ts";
 
 export const BANNERET_RELAY_WS_METHODS = {
+  resources: "banneret.resources",
+  folders: "banneret.resourceFolders",
+  pool: "banneret.poolResources",
   probe: "banneretRelay.probe",
   status: "banneretRelay.status",
   start: "banneretRelay.start",
@@ -100,6 +107,7 @@ export type BanneretEnrolmentView = typeof BanneretEnrolmentView.Type;
 
 /** What this environment tells every relay about itself: the facts support matches a join by. */
 export const BanneretEnrolmentMachine = Schema.Struct({
+  poolHostId: Schema.optional(Schema.String),
   environmentId: Schema.String,
   hostname: Schema.String,
   hubVersion: Schema.String,
@@ -128,6 +136,7 @@ export const BanneretRelayMachine = Schema.Struct({
   kind: Schema.String,
   hostname: Schema.String,
   os: Schema.String,
+  poolHostId: Schema.optional(Schema.String),
   ownerLogin: Schema.String,
   connected: Schema.Boolean,
   lastHeardAt: Schema.NullOr(Schema.String),
@@ -205,6 +214,21 @@ const WsBanneretRelayMatchProjectsRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.match
 
 /** Spread into `WsRpcGroup`. */
 export const BANNERET_RELAY_RPCS = [
+  Rpc.make(BANNERET_RELAY_WS_METHODS.resources, {
+    payload: Schema.Struct({ policy: Schema.optional(WarningPolicy) }),
+    success: ResourceReport,
+    error: RelayRpcError,
+  }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.folders, {
+    payload: Schema.Struct({}),
+    success: FolderSizes,
+    error: RelayRpcError,
+  }),
+  Rpc.make(BANNERET_RELAY_WS_METHODS.pool, {
+    payload: Schema.Struct(RelayTarget),
+    success: PoolResources,
+    error: RelayRpcError,
+  }),
   WsBanneretRelayProbeRpc,
   WsBanneretRelayStatusRpc,
   WsBanneretRelayStartRpc,
@@ -219,6 +243,9 @@ export const BANNERET_RELAY_RPCS = [
 
 /** Spread into `CLIENT_GUARDED_RPC_SCOPES`. Probing dials an address the user typed. */
 export const BANNERET_RELAY_RPC_SCOPES = {
+  [BANNERET_RELAY_WS_METHODS.resources]: AuthDiagnosticsReadScope,
+  [BANNERET_RELAY_WS_METHODS.folders]: AuthFilesystemReadScope,
+  [BANNERET_RELAY_WS_METHODS.pool]: AuthOrchestrationOperateScope,
   [BANNERET_RELAY_WS_METHODS.probe]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.status]: AuthOrchestrationReadScope,
   [BANNERET_RELAY_WS_METHODS.start]: AuthEnvironmentMaintainScope,
@@ -233,6 +260,9 @@ export const BANNERET_RELAY_RPC_SCOPES = {
 
 /** Spread into the server's `RPC_AGGREGATES`. */
 export const BANNERET_RELAY_RPC_AGGREGATES = {
+  [BANNERET_RELAY_WS_METHODS.resources]: "banneret-relay",
+  [BANNERET_RELAY_WS_METHODS.folders]: "banneret-relay",
+  [BANNERET_RELAY_WS_METHODS.pool]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.probe]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.status]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.start]: "banneret-relay",

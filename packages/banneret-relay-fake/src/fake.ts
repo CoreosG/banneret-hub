@@ -152,6 +152,7 @@ interface MachineFacts {
   readonly label: string;
   readonly kind: string;
   readonly hostname: string;
+  readonly poolHostId?: string;
   readonly os: string;
   readonly hubVersion: string;
   readonly policyFingerprint: string | null;
@@ -1116,6 +1117,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       ownerLogin: owner?.login ?? "unknown",
       label: machine.facts.label,
       kind: machine.facts.kind,
+      ...(machine.facts.poolHostId ? { poolHostId: machine.facts.poolHostId } : {}),
       hostname: machine.facts.hostname,
       os: machine.facts.os,
       hubVersion: machine.facts.hubVersion,

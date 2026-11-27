@@ -589,6 +589,7 @@ const machinesByOwner = (
     const machine = {
       id,
       label,
+      ...(typeof source?.poolHostId === "string" ? { poolHostId: source.poolHostId } : {}),
       kind: text(source?.kind, 32) ?? "",
       connected: source?.connected === true,
     };

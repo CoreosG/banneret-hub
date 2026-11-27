@@ -1163,6 +1163,18 @@ any configured host threshold is exceeded. A person's Hub reads local Resources 
 directly to that person's desktop. The host heartbeat can carry only disk, inodes and warning flags
 for that person. The memory warning also covers a new OOM kill. Never send human activity samples.
 
+A workspace Hub with `BANNERET_POOL_HOST_ID` set to its configured host ID includes `poolHostId` in machine facts. Machines and the machines snapshot repeat it so the desktop can join the public pressure reading to the right card. Standalone machines omit it. Access to a live reading always requires a direct connection to the workspace Hub.
+
+| Resource state | Event | Next state |
+| --- | --- | --- |
+| Hidden | Owner opens a linked machine | Read immediately, then every 15 seconds while visible |
+| Visible | Read fails or machine disconnects | Drop its reading |
+| Visible | User leaves or changes workspace | Discard the view and ignore outstanding replies |
+| CPU window warming | Five minutes of counters available | Show throttling from the counter delta |
+| CPU window available | Counters reset, slice changes or sampling gap exceeds five minutes | Warm a new window |
+
+All samples stay in memory. Restart clears the window. Folder sizes are read only on request.
+
 A sandbox offer carries the original signed POST to `/relay/v1/pool/sandboxes` as standard base64 body
 bytes with the original signing headers. Pool calls have no query parameters. Hosts verify the signature
 with the requesting machine key already bound to that person, check the signed host, size and digest,
