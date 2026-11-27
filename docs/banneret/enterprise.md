@@ -87,8 +87,8 @@ When one of your claims has expired or stopped half way, a strip says so. **Revi
 only those, each with its Release button (or Finish and Withdraw for one that stopped half way).
 
 A claim is a **lease**. It stays active while its holder works: pushes, comments and their own running agent
-sessions all count. A lease turns **stale after 6 hours** without a signal, and the card moves to Stuck. It
-**expires after 24 hours**. An expired lease stays in Stuck. It is not shown as Free until the claim is released
+sessions all count. By default a lease turns **stale after 6 hours** without a signal, and the card moves to Stuck. It
+**expires after 24 hours**. Operators can change both clocks in the relay config. An expired lease stays in Stuck. It is not shown as Free until the claim is released
 on the work tracker. A coworker's agent on the same task never refreshes someone else's lease.
 
 **Filters** narrow the board you are looking at: a text box (title, repository and number, people, status), and
@@ -260,7 +260,7 @@ contract, `/relay/v1`. Anyone may build a compatible relay.
 ### You own your data
 
 The relay can always start from an empty store. Sign-in, the board, knowledge and health are rebuilt from
-your work tracker and config. Channels, direct messages and shared threads exist only in the relay's
+your work tracker and config. Alarm history, channels, direct messages and shared threads exist only in the relay's
 database.
 
 **Keeping that data safe is the operator's job.** The relay offers an optional encrypted `backup` command
@@ -288,7 +288,7 @@ directory and health checks. Adapters are compiled into the relay and chosen in 
 | Work tracker    | GitHub issues and pull requests, with leases (claims) |
 | Staff directory | Members of your GitHub org                            |
 | Knowledge       | A Git repository or folder of Markdown files          |
-| Health          | The relay's own health; more sources by config        |
+| Health          | Off until the operator configures sources             |
 
 - **GitHub is the default for everyone.** To use something else, set that adapter to `none` or to another
   adapter in the config. To add an adapter, write one against the relay's adapter interfaces and build the
@@ -321,3 +321,10 @@ pins, which each machine fetches and applies itself.
 - **No running agents on someone else's machine.** An Enterprise workspace refuses an agent link between
   machines owned by different people, so nobody's agents run on another person's machine or provider
   login. A colleague continues your work from a shared thread instead.
+
+### Today integrations
+
+Health appears when the operator enables a source. Each check names its source and kind.
+Signed webhook alarms appear with their severity until resolved. Critical alarms also appear
+in Needs you for founders or configured recipients. Dashboard links open in the system browser.
+The [relay contract](relay-v1/README.md#optional-health-sources-dashboards-and-alarms) describes configuration and payloads.

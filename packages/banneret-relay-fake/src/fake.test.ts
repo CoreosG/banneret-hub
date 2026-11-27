@@ -57,3 +57,16 @@ describe("fake relay publicOrigin", () => {
     expect(parsePublicOrigin("https://h:8443/")).toBe("https://h:8443");
   });
 });
+
+describe("relay configuration", () => {
+  it("rejects non-HTTPS dashboards and lease expiry at or before stale", async () => {
+    await expect(
+      startFakeRelay({
+        dashboards: [{ id: "bad", title: "Metrics", url: "http://metrics.example.org" }],
+      }),
+    ).rejects.toThrow("dashboard");
+    await expect(
+      startFakeRelay({ board: { staleSeconds: 60, expirySeconds: 60 } }),
+    ).rejects.toThrow("lease clocks");
+  });
+});

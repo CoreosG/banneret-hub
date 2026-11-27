@@ -19,3 +19,8 @@ Inc. T3 Tools' privacy policy does not apply to it.
   prompts and code to their providers under those providers' terms.
 - **Updates.** The app checks GitHub releases of `CoreosG/banneret-hub` for updates, which reveals
   your IP address to GitHub.
+
+Operator-configured health sources can send alarm titles, details, links and timestamps to the
+relay. Enrolled staff can read active alarms. Critical alarm notifications go to configured people
+or, by default, founders. Alarm records and signing secrets stay out of GitHub. Opening a dashboard
+contacts its configured HTTPS address in the system browser.

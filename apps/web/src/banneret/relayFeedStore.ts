@@ -133,6 +133,8 @@ export interface EnvironmentFeed {
   readonly live: boolean;
   readonly liveSince: string | null;
   /** False until the relay's capabilities have been read; sections then show until they are. */
+  readonly dashboards?: BanneretFeedState["dashboards"];
+  readonly leaseClocks?: BanneretFeedState["leaseClocks"];
   readonly sectionsKnown: boolean;
   readonly sections: ReadonlyArray<string>;
   /** From the last `needs.changed`; null until one arrives. */
@@ -345,6 +347,8 @@ function applyState(target: RelayTarget, state: BanneretFeedState) {
     liveSince: state.since,
     sectionsKnown: state.sectionsKnown,
     sections: state.sections,
+    dashboards: state.dashboards,
+    leaseClocks: state.leaseClocks,
     needsCount: state.needsCount,
     board: state.board,
     map: state.map,

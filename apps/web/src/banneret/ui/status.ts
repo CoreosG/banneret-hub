@@ -27,6 +27,9 @@ export interface StatusView {
 type Known = Omit<StatusView, "status">;
 
 const KNOWN: Readonly<Record<string, Known>> = {
+  critical: { label: "Critical", tone: "error", icon: "octagon", accent: false, struck: false },
+  warning: { label: "Warning", tone: "warn", icon: "diamond", accent: false, struck: false },
+  info: { label: "Info", tone: "info", icon: "dot", accent: false, struck: false },
   checked: { label: "Checked", tone: "ok", icon: "check", accent: false, struck: false },
   built: {
     label: "Built, needs a check",

@@ -26,6 +26,7 @@ import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { refreshToday } from "./relayFeedStore";
 import { blockView, healthSummary, todayCounts, type TodayCounts } from "./today.logic";
 import {
+  AlarmRow,
   FeedFrame,
   NeedsRow,
   NotMeasuredLines,
@@ -33,6 +34,7 @@ import {
   StuckRow,
   WorkingRow,
 } from "./TodayRows";
+import { readLocalApi } from "../localApi";
 import { HealthTile } from "./ui/HealthTile";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
@@ -180,30 +182,39 @@ export function TodayPage() {
   if (today === null) {
     if (feed.todayProblem === null && !feed.unreachable) body = <QuietLine fact="Loading…" />;
   } else {
-    const healthTiles = [
-      ...today.health.items.map((item) => (
-        <li key={`item:${item.id}`} className="min-w-0">
-          <HealthTile
-            label={item.label}
-            state={item.state}
-            summary={item.summary}
-            observedAt={item.observedAt}
-          />
-        </li>
-      )),
-      ...today.health.notMeasured.map((line) => (
-        <li key={`nm:${line.source}:${line.since}`} className="min-w-0" data-not-measured="">
-          <HealthTile
-            label={humanizeWord(line.source)}
-            state="not_measured"
-            summary={line.detail ?? `${humanizeWord(notMeasuredReason(line.reason))}.`}
-            observedAt={line.since}
-            timePrefix="Off"
-            timeKind="duration"
-          />
-        </li>
-      )),
-    ];
+    const health = feed.sections.includes("health") ? today.health : undefined;
+    const healthTiles = !health
+      ? []
+      : [
+          ...health.alarms.map((alarm) => (
+            <AlarmRow key={JSON.stringify([alarm.sourceId, alarm.id])} alarm={alarm} />
+          )),
+          ...health.items.map((item) => (
+            <li key={JSON.stringify(["item", item.source, item.id])} className="min-w-0">
+              <HealthTile
+                label={item.label}
+                source={item.source}
+                kind={item.kind}
+                state={item.state}
+                summary={item.summary}
+                observedAt={item.observedAt}
+              />
+            </li>
+          )),
+          ...health.notMeasured.map((line) => (
+            <li key={`nm:${line.source}:${line.since}`} className="min-w-0" data-not-measured="">
+              <HealthTile
+                label={humanizeWord(line.source)}
+                {...(line.kind ? { source: line.source, kind: line.kind } : {})}
+                state="not_measured"
+                summary={line.detail ?? `${humanizeWord(notMeasuredReason(line.reason))}.`}
+                observedAt={line.since}
+                timePrefix="Off"
+                timeKind="duration"
+              />
+            </li>
+          )),
+        ];
     body = (
       <>
         <div {...LAYOUT_TODAY_COLUMNS}>
@@ -303,7 +314,7 @@ export function TodayPage() {
             </Block>
           </div>
         </div>
-        {healthTiles.length === 0 ? (
+        {!health ? null : healthTiles.length === 0 ? (
           <QuietLine
             icon={HeartPulseIcon}
             fact="Health has nothing to show yet."
@@ -315,8 +326,8 @@ export function TodayPage() {
             icon={HeartPulseIcon}
             count={healthTiles.length}
             action={
-              healthSummary(today.health.items) === null ? undefined : (
-                <span className={TYPE.meta}>{healthSummary(today.health.items)}</span>
+              healthSummary(health.items) === null ? undefined : (
+                <span className={TYPE.meta}>{healthSummary(health.items)}</span>
               )
             }
           >
@@ -343,6 +354,25 @@ export function TodayPage() {
         fetchedAt={feed.todayFetchedAt}
         problem={feed.todayProblem}
       />
+      {feed.dashboards?.length ? (
+        <nav aria-label="Dashboards" className="flex flex-wrap gap-3">
+          {feed.dashboards.map((d) => (
+            <button
+              type="button"
+              className="text-sm hover:underline"
+              key={d.id}
+              onClick={() =>
+                void readLocalApi()
+                  ?.shell.openExternal(d.url)
+                  .catch(() => undefined)
+              }
+            >
+              {d.group ? d.group + " / " : ""}
+              {d.title}
+            </button>
+          ))}
+        </nav>
+      ) : null}
       {body}
     </FeedFrame>
   );

@@ -1,11 +1,23 @@
 {
-  "state": "not_measured",
-  "items": [],
-  "notMeasured": [
+  "state": "ok",
+  "items": [
     {
-      "source": "health",
-      "reason": "not_configured",
-      "since": "2026-11-20T12:00:00Z"
+      "id": "ping",
+      "source": "service",
+      "kind": "http_check",
+      "label": "Service",
+      "state": "good",
+      "observedAt": "2026-11-26T10:00:00Z"
     }
-  ]
+  ],
+  "alarms": [
+    {
+      "id": "queue_depth",
+      "sourceId": "monitor",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    }
+  ],
+  "notMeasured": []
 }

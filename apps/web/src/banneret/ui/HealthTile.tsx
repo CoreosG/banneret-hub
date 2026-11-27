@@ -10,6 +10,8 @@ import { TYPE, toneProps } from "./tokens";
  * "Not checked yet" when `observedAt` is null.
  */
 export function HealthTile(props: {
+  readonly source?: string;
+  readonly kind?: string;
   readonly label: string;
   readonly state: string;
   readonly summary?: string | undefined;
@@ -27,6 +29,11 @@ export function HealthTile(props: {
       className={cn("flex min-w-0 flex-col gap-1 rounded-lg border bg-card p-3", props.className)}
     >
       <span className={cn(TYPE.meta, "truncate")}>{props.label}</span>
+      {props.source && (
+        <span className={TYPE.meta}>
+          {props.source} · {props.kind}
+        </span>
+      )}
       <span className="inline-flex items-center gap-1.5 font-medium text-sm">
         <span aria-hidden className="size-2 shrink-0 rounded-full" {...toneProps(tone, "solid")} />
         <span {...toneProps(tone, "fg")}>{label}</span>

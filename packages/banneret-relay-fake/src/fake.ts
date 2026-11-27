@@ -10,12 +10,13 @@ import {
   type LeaseFoldResult,
 } from "@t3tools/contracts/leaseProtocol";
 
+import { openAlarmStore, type Alarm } from "./alarms.ts";
 import { publicKeyFromBase64, verify } from "./signing.ts";
 import { loadSpec, type SchemaName } from "./spec.ts";
 import { checkStagePlan, type StagePlan } from "./stage-plan.ts";
 
 /**
- * A fake /relay/v1 relay: a test double and conformance target, never a production server. Everything lives in
+ * A fake /relay/v1 relay: a test double and conformance target. By default everything lives in
  * memory, so every start is an empty store. Enrolment has no browser page; tests confirm, approve and refuse
  * pairings through the methods below or the HTTP control surface under /conformance/v1 (see FAKE.md).
  */
@@ -30,6 +31,7 @@ type Expiry = "code_expired" | "too_many_attempts" | "approval_expired";
 type PairingState = "pending" | "awaiting_approval" | "approved" | "refused" | "expired";
 type ErrorCode =
   | "malformed"
+  | "rate_limited"
   | "too_large"
   | "unauthenticated"
   | "token_revoked"
@@ -75,7 +77,24 @@ export const parsePublicOrigin = (value: string): string => {
   return parsed.origin;
 };
 
+interface HealthSource {
+  readonly id: string;
+  readonly kind: string;
+  readonly secret?: string;
+  readonly measurement?: {
+    label: string;
+    state: "good" | "warning" | "bad" | "not_measured";
+    observedAt: string | null;
+    summary?: string;
+  };
+}
+
 export interface FakeRelayOptions {
+  readonly healthSources?: readonly HealthSource[];
+  readonly criticalRecipients?: readonly string[];
+  readonly dashboards?: ReadonlyArray<{ id: string; title: string; url: string; group?: string }>;
+  readonly board?: { staleSeconds: number; expirySeconds: number };
+  readonly alarmDatabase?: string;
   /** 0 (the default) picks a free port. */
   readonly port?: number;
   readonly host?: string;
@@ -327,6 +346,7 @@ class RelayError extends Error {
 
 const STATUS: Record<ErrorCode, number> = {
   malformed: 400,
+  rate_limited: 429,
   too_large: 413,
   unauthenticated: 401,
   token_revoked: 401,
@@ -357,8 +377,7 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const COUNTER_PATTERN = /^(0|[1-9][0-9]{0,18})$/;
 const SIGNATURE_PATTERN = /^[A-Za-z0-9+/]{86}==$/;
 const COUNTER_WINDOW = 256;
-const LEASE_STALE_MS = 6 * 60 * 60 * 1000;
-const LEASE_EXPIRES_MS = 24 * 60 * 60 * 1000;
+
 const BOARD_COLUMNS = [
   { id: "free", title: "Free" },
   { id: "taken", title: "Taken" },
@@ -537,6 +556,49 @@ export interface FakeRelay {
 export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<FakeRelay> => {
   const publicOrigin =
     options.publicOrigin === undefined ? undefined : parsePublicOrigin(options.publicOrigin);
+  const board = options.board ?? { staleSeconds: 21600, expirySeconds: 86400 };
+  if (spec.check("LeaseClocks", board) || board.expirySeconds <= board.staleSeconds)
+    throw new Error("Invalid lease clocks.");
+  const leaseStaleMs = board.staleSeconds * 1000;
+  const leaseExpiryMs = board.expirySeconds * 1000;
+  const dashboards = options.dashboards ?? [];
+  if (
+    spec.check("Dashboards", dashboards) ||
+    new Set(dashboards.map((d) => d.id)).size !== dashboards.length ||
+    dashboards.some((d) => !URL.canParse(d.url) || new URL(d.url).protocol !== "https:")
+  )
+    throw new Error("Invalid dashboard.");
+  const sources = new Map((options.healthSources ?? []).map((source) => [source.id, source]));
+  if (sources.size !== (options.healthSources?.length ?? 0) || sources.size > 20)
+    throw new Error("Invalid health sources.");
+  for (const source of sources.values()) {
+    if (
+      spec.check("Id", source.id) ||
+      !/^[a-z][a-z0-9_]{0,31}$/.test(source.kind) ||
+      (source.secret !== undefined && (typeof source.secret !== "string" || !source.secret))
+    )
+      throw new Error("Invalid health source.");
+  }
+  if (
+    options.criticalRecipients !== undefined &&
+    (!Array.isArray(options.criticalRecipients) ||
+      options.criticalRecipients.some((id) => spec.check("Id", id)))
+  )
+    throw new Error("Invalid critical recipients.");
+  const measurements = [...sources.values()]
+    .filter((source) => source.measurement || !source.secret)
+    .map((source) => ({
+      ...(source.measurement ?? { label: source.id, state: "not_measured", observedAt: null }),
+      source: source.id,
+      id: source.id,
+      kind: source.kind,
+    }));
+  if (spec.check("HealthBlock", { state: "ok", items: measurements, alarms: [], notMeasured: [] }))
+    throw new Error("Invalid health measurement.");
+  const alarms = sources.size ? openAlarmStore(options.alarmDatabase ?? ":memory:") : undefined;
+  const rates = new Map<string, { until: number; count: number }>();
+  const activeAlarms = () =>
+    (alarms?.active() ?? []).filter((alarm) => sources.has(alarm.sourceId));
   const startedAt = Date.now();
   const log = options.log ?? (() => undefined);
   const autoApprove = options.autoApprove ?? true;
@@ -984,10 +1046,26 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     notMeasured: [{ source, reason: "not_configured", since: iso(startedAt) }],
   });
 
+  const personalNeeds = (person: Person) => {
+    const recipient = options.criticalRecipients?.includes(person.id) ?? person.role === "founder";
+    const critical = recipient ? activeAlarms().filter((a) => a.severity === "critical") : [];
+    return byUrgency([
+      ...(needs.get(person.id) ?? []),
+      ...critical.map((a, seq) => ({
+        seq,
+        id: sha256Hex(Buffer.from(JSON.stringify([a.sourceId, a.id, a.firedAt]))),
+        kind: "health",
+        title: a.title,
+        createdAt: a.firedAt,
+        ...(a.url ? { url: a.url } : {}),
+      })),
+    ]).map(needsView);
+  };
+
   // The needs-you, working, stuck and health blocks of Today for one person. Reads no visit state.
   const todayBlocks = (person: Person) => {
     const now = Date.now();
-    const own = byUrgency(needs.get(person.id) ?? []).map(needsView);
+    const own = personalNeeds(person);
     const working = liveMachines().flatMap((machine) => {
       const owner = people.get(machine.personId);
       const live = machine.sessions.filter((session) => session.state !== "stopped");
@@ -1013,7 +1091,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       needsYou: { state: "ok", ...page(own, 0, TODAY_BLOCK_MAX), notMeasured: [] },
       working: { state: "ok", items: working.slice(0, TODAY_BLOCK_MAX), notMeasured: [] },
       stuck: notConfigured("work_tracker"),
-      health: notConfigured("health"),
+      health:
+        sources.size === 0
+          ? undefined
+          : {
+              state: "ok",
+              items: measurements,
+              alarms: activeAlarms(),
+              notMeasured: [],
+            },
     };
   };
 
@@ -1074,7 +1160,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const leaseState = (task: BoardTask, now: number): string => {
     if (task.forcedLeaseState !== null) return task.forcedLeaseState;
     const age = now - task.lastSignalAt;
-    return age >= LEASE_EXPIRES_MS ? "expired" : age >= LEASE_STALE_MS ? "stale" : "active";
+    return age >= leaseExpiryMs ? "expired" : age >= leaseStaleMs ? "stale" : "active";
   };
 
   const personRefFor = (login: string): PersonView => {
@@ -1152,8 +1238,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             state: leaseState(task, now),
             since: iso(task.since),
             lastSignalAt: iso(task.lastSignalAt),
-            staleAt: iso(task.lastSignalAt + LEASE_STALE_MS),
-            expiresAt: iso(task.lastSignalAt + LEASE_EXPIRES_MS),
+            staleAt: iso(task.lastSignalAt + leaseStaleMs),
+            expiresAt: iso(task.lastSignalAt + leaseExpiryMs),
           };
     }
     const folded = foldTracker(task.tracker, now).lease;
@@ -1173,15 +1259,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       state:
         folded.state !== "active"
           ? folded.state
-          : age >= LEASE_EXPIRES_MS
+          : age >= leaseExpiryMs
             ? "expired"
-            : age >= LEASE_STALE_MS
+            : age >= leaseStaleMs
               ? "stale"
               : "active",
       since: iso(since),
       lastSignalAt: iso(lastSignalAt),
-      staleAt: iso(lastSignalAt + LEASE_STALE_MS),
-      expiresAt: iso(lastSignalAt + LEASE_EXPIRES_MS),
+      staleAt: iso(lastSignalAt + leaseStaleMs),
+      expiresAt: iso(lastSignalAt + leaseExpiryMs),
     };
   };
 
@@ -1482,7 +1568,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const machineList = visibleMachines(person).map((machine) => machineView(machine, person));
     const entries: ReadonlyArray<readonly [string, SchemaName, unknown]> = [
       ["needs", "SnapshotNeeds", blocks.needsYou],
-      ["health", "HealthBlock", blocks.health],
+      ...(blocks.health ? [["health", "HealthBlock", blocks.health] as const] : []),
       ["work", "SnapshotWork", { working: blocks.working, stuck: blocks.stuck }],
       [
         "machines",
@@ -1630,7 +1716,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
     }
     refreshAllHeads();
-    emit("needs.changed", "NeedsChangedEvent", { at, count: list.length }, machine.personId);
+    const owner = people.get(machine.personId);
+    if (owner)
+      emit(
+        "needs.changed",
+        "NeedsChangedEvent",
+        { at, count: personalNeeds(owner).length },
+        machine.personId,
+      );
   };
 
   const seedRepositories = (count: number) => {
@@ -1692,7 +1785,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       error: {
         code: error.code,
         message: error.message,
-        retryable: false,
+        retryable: error.status === 429,
         ...(error.details === undefined ? {} : { details: error.details }),
       },
     };
@@ -1750,6 +1843,59 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     query: URLSearchParams,
   ) => {
     const method = request.method ?? "GET";
+    if (method === "POST" && route.startsWith("/hooks/")) {
+      const source = sources.get(route.slice("/hooks/".length));
+      if (!source?.secret || !alarms) throw new RelayError("not_found", "Unknown webhook.");
+      const now = Date.now();
+      let rate = rates.get(source.id);
+      if (!rate || rate.until <= now) {
+        rate = { until: now + 60_000, count: 0 };
+        rates.set(source.id, rate);
+      }
+      if (++rate.count > 60) {
+        response.setHeader("retry-after", Math.ceil((rate.until - now) / 1000));
+        throw new RelayError("rate_limited", "Too many webhook requests.");
+      }
+      const body = await readBody(request);
+      const timestamp = headerValue(request, "X-Alarm-Timestamp") ?? "";
+      const signature = headerValue(request, "X-Alarm-Signature") ?? "";
+      const sent = Number(timestamp) * 1000;
+      const received = Date.now();
+      if (!/^\d{1,12}$/.test(timestamp) || Math.abs(received - sent) > 300_000)
+        throw new RelayError("clock_skew", "Webhook timestamp outside the replay window.");
+      const mac = NodeCrypto.createHmac("sha256", source.secret)
+        .update(timestamp + ".")
+        .update(body)
+        .digest();
+      if (
+        !/^[0-9a-f]{64}$/.test(signature) ||
+        !NodeCrypto.timingSafeEqual(mac, Buffer.from(signature, "hex"))
+      )
+        throw new RelayError("bad_signature", "Invalid webhook signature.");
+      const alarm = parseJson(body, "Alarm") as Alarm;
+      if (
+        alarm.sourceId !== source.id ||
+        (alarm.resolvedAt && Date.parse(alarm.resolvedAt) < Date.parse(alarm.firedAt))
+      )
+        throw new RelayError("malformed", "Invalid alarm source or times.");
+      if (!alarms.record(alarm, signature, sent + 300_000, received))
+        throw new RelayError("counter_reused", "Webhook already received.");
+      refreshAllHeads();
+      for (const person of people.values()) {
+        if (
+          !person.removed &&
+          (options.criticalRecipients?.includes(person.id) ?? person.role === "founder")
+        )
+          emit(
+            "needs.changed",
+            "NeedsChangedEvent",
+            { at: iso(received), count: personalNeeds(person).length },
+            person.id,
+          );
+      }
+      response.writeHead(204).end();
+      return;
+    }
     const body = await readBody(request);
 
     if (method === "GET" && route === "/capabilities") {
@@ -1773,11 +1919,19 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             role: caller.person.role,
             machineId: caller.machine.id,
           },
+          dashboards,
           sections: [
+            ...(sources.size ? [{ id: "health", kind: "health", version: 1, flags: [] }] : []),
             { id: "today", kind: "today", version: 1, flags: [] },
             { id: "needs", kind: "needs", version: 1, flags: ["mentions"] },
             { id: "machines", kind: "machines", version: 1, flags: ["revoke"] },
-            { id: "board", kind: "board", version: 2, flags: ["leases", "checked", "boards"] },
+            {
+              id: "board",
+              kind: "board",
+              version: 2,
+              flags: ["leases", "checked", "boards"],
+              params: board,
+            },
             ...(stagePlan === null
               ? []
               : [{ id: "map", kind: "map", version: 1, flags: ["rests_on"] }]),
@@ -1794,7 +1948,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             { role: "work_tracker", kind: "none" },
             { role: "staff_directory", kind: "none" },
             { role: "knowledge", kind: "none" },
-            { role: "health", kind: "none" },
           ],
           snapshot: { version: 1, head: `${PREFIX}/snapshot/head` },
         },
@@ -1945,7 +2098,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
 
     if (method === "GET" && route === "/needs") {
       const { offset, limit } = pageParams(query);
-      const ordered = byUrgency(needs.get(caller.person.id) ?? []).map(needsView);
+      const ordered = personalNeeds(caller.person);
       sendJson(response, 200, "NeedsPage", page(ordered, offset, limit));
       return;
     }
@@ -2522,7 +2675,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     close: () =>
       new Promise<void>((resolve) => {
         closeStreams(() => true);
-        server.close(() => resolve());
+        server.close(() => {
+          alarms?.close();
+          resolve();
+        });
         server.closeAllConnections();
       }),
     confirmPairing,

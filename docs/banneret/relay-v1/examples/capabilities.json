@@ -7,11 +7,12 @@
     { "id": "today", "kind": "today", "version": 1, "flags": [] },
     { "id": "needs", "kind": "needs", "version": 1, "flags": ["mentions"] },
     { "id": "machines", "kind": "machines", "version": 1, "flags": ["revoke"] },
-    { "id": "board", "kind": "board", "version": 2, "flags": ["leases", "checked", "boards"] },
+    { "id": "board", "kind": "board", "version": 2, "flags": ["leases", "checked", "boards"], "params": {"staleSeconds":21600,"expirySeconds":86400} },
     { "id": "map", "kind": "map", "version": 1, "flags": ["rests_on"] },
     { "id": "feed", "kind": "feed", "version": 1, "flags": ["graveyard"] },
     { "id": "task", "kind": "task", "version": 1, "flags": [] }
   ],
+  "dashboards": [{"id":"metrics","title":"Metrics","url":"https://metrics.example.org"}],
   "mcpTools": [
     { "name": "banneret_board", "description": "The company's task board.", "role": "limited_staff" },
     { "name": "banneret_needs", "description": "What waits on the caller.", "role": "limited_staff" },
@@ -24,8 +25,7 @@
   "adapters": [
     { "role": "work_tracker", "kind": "github", "version": 1 },
     { "role": "staff_directory", "kind": "github", "version": 1 },
-    { "role": "knowledge", "kind": "markdown", "version": 1 },
-    { "role": "health", "kind": "none" }
+    { "role": "knowledge", "kind": "markdown", "version": 1 }
   ],
   "snapshot": { "version": 1, "head": "/relay/v1/snapshot/head" }
 }

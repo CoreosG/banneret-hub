@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off - a plain Node CLI for manual runs of the fake relay.
+import * as NodeFS from "node:fs";
 import * as NodeUtil from "node:util";
 
-import { startFakeRelay } from "./fake.ts";
+import { startFakeRelay, type FakeRelayOptions } from "./fake.ts";
 
 // node packages/banneret-relay-fake/src/bin.ts --port 0 [--manual-approval] [--network-identity-header <name>] [--public-origin <url>]
 const { values } = NodeUtil.parseArgs({
@@ -12,11 +13,21 @@ const { values } = NodeUtil.parseArgs({
     "manual-approval": { type: "boolean", default: false },
     "network-identity-header": { type: "string" },
     "public-origin": { type: "string" },
+    config: { type: "string" },
     quiet: { type: "boolean", default: false },
   },
 });
 
+const settings: Pick<
+  FakeRelayOptions,
+  "healthSources" | "dashboards" | "board" | "criticalRecipients" | "alarmDatabase"
+> = values.config === undefined ? {} : JSON.parse(NodeFS.readFileSync(values.config, "utf8"));
 const relay = await startFakeRelay({
+  ...(settings.healthSources && { healthSources: settings.healthSources }),
+  ...(settings.dashboards && { dashboards: settings.dashboards }),
+  ...(settings.board && { board: settings.board }),
+  ...(settings.criticalRecipients && { criticalRecipients: settings.criticalRecipients }),
+  ...(settings.alarmDatabase && { alarmDatabase: settings.alarmDatabase }),
   port: Number(values.port),
   host: values.host,
   autoApprove: !values["manual-approval"],

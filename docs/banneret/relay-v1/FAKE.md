@@ -1,7 +1,7 @@
 # The fake relay
 
 `packages/banneret-relay-fake` is a test double for the `/relay/v1` contract in this folder, plus a
-conformance suite that runs against any relay. It is never a production relay: everything lives in memory,
+conformance suite that runs against any relay. It is never a production relay: by default its state lives in memory,
 enrolment has no sign-in page, and a test can approve or refuse any pairing. Release builds do not include it.
 
 ## Run it
@@ -13,6 +13,7 @@ node packages/banneret-relay-fake/src/bin.ts --port 0
 It prints its origin, such as `http://127.0.0.1:41234`. The API is under `/relay/v1`. By default every
 pairing is approved as soon as it starts, as the founder `ada-example`. Options:
 
+- `--config <path>`: read health sources, dashboard links, critical recipients, board clocks and the optional alarm database path from a private JSON file.
 - `--manual-approval`: pairings wait until a test confirms them through the control surface below.
 - `--network-identity-header <name>`: turns on the optional network identity check, reading the caller's
   identity from that request header.
@@ -108,7 +109,7 @@ lease. Its `active` lease ages from the holder's latest comment or heartbeat; `c
 The card carries `lastRelease` from the fold, and `GET /tasks/{taskId}` the same. `feed/seed` with `type` `released`
 gives each entry `reason` `done` and `freeToContinue` false.
 
-The fake computes lease state from age on every read: under 6 h `active`, from 6 h `stale`, from 24 h `expired`. A
+The fake computes lease state from age on every read: by default, under 6 h `active`, from 6 h `stale`, from 24 h `expired`. A
 held card with a stale or expired lease is in Stuck, never Free. A fact with a matching `taskId`, or a matching
 `branch` (and `projectKey`, when the task has one), sets `lastSignalAt` to now and returns the lease to `active`.
 
@@ -154,3 +155,16 @@ node scripts/banneret/sync-relay-spec.mjs <banneret-platform>/internal/hub/contr
 
 It overwrites the canonical `openapi.yaml`, `README.md` and `examples/` here with the platform's, so review the
 diff before committing.
+
+Pass `healthSources`, `dashboards`, `criticalRecipients` and `board` to `startFakeRelay`.
+Each test source may supply a `measurement` with label, state, observedAt and optional summary.
+A per-source `secret` enables signed incoming alarms. Sources and dashboards default to empty.
+The fake stores alarms and replay receipts in SQLite. Its default `alarmDatabase` is `:memory:`;
+supply a disposable database path to exercise restart behavior. Board clocks default to 21600
+and 86400 seconds. See the [wire contract](README.md#optional-health-sources-dashboards-and-alarms).
+
+To run both health configurations against another implementation, set `BANNERET_RELAY_URL`
+to the empty, manual-approval relay. Set `BANNERET_RELAY_HEALTH_URL` to a second disposable relay
+with auto-approved founder enrolment, one `alerts` webhook source using `BANNERET_RELAY_HOOK_SECRET`,
+30/90-second board clocks and a dashboard with id `metrics`, title `Metrics` and URL
+`https://metrics.example.org`. Start the second relay with empty alarm state and rate windows.

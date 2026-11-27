@@ -347,6 +347,40 @@ describe("BanneretRelayFeed", () => {
   );
 });
 
+describe("reshapeToday health", () => {
+  const generatedAt = "2026-11-26T10:00:00Z";
+  const reshape = (body: object) =>
+    RelayFeed.reshapeToday({ generatedAt, ...body }, () => undefined)?.health;
+  it("retains check provenance and only active alarms", () => {
+    const item = {
+      id: "ping",
+      source: "service",
+      kind: "custom_metric",
+      label: "Queue",
+      state: "warning",
+      observedAt: generatedAt,
+    };
+    const alarm = {
+      id: "full",
+      sourceId: "monitor",
+      severity: "critical",
+      title: "Queue full",
+      firedAt: generatedAt,
+    };
+    expect(reshape({})).toBeUndefined();
+    expect(
+      reshape({
+        health: {
+          state: "ok",
+          items: [item, { ...item, source: null }],
+          alarms: [alarm, { ...alarm, resolvedAt: generatedAt }],
+          notMeasured: [],
+        },
+      }),
+    ).toEqual({ state: "ok", items: [item], alarms: [alarm], notMeasured: [] });
+  });
+});
+
 describe("reshapeToday stuck subject", () => {
   const today = (item: unknown) =>
     RelayFeed.reshapeToday(

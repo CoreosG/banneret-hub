@@ -1130,7 +1130,7 @@ describe("snapshot", () => {
     const { reply, head } = await readHead(machine);
     expect(reply.headers.get("etag")).toBe(`"sha256:${sha256(reply.bytes)}"`);
     expect(reply.headers.get("cache-control")).toBe("private, no-cache");
-    for (const kind of ["needs", "health", "work", "machines"]) {
+    for (const kind of ["needs", "work", "machines"]) {
       expect(head.files[kind], kind).toMatch(/^sha256:[0-9a-f]{64}$/);
     }
     const fetched: Record<string, unknown> = {};
@@ -1207,15 +1207,15 @@ describe("snapshot", () => {
     await client.rebuildSnapshot(owner.login);
     const { head } = await readHead(owner);
     const ownersNeeds = bare(head.files.needs ?? "");
-    const ownersHealth = bare(head.files.health ?? "");
+    const ownersWork = bare(head.files.work ?? "");
     expect((await readFile(owner, ownersNeeds)).status).toBe(200);
     // `other` has a head of its own, which does not name the owner's needs file.
     await readHead(other);
     expectNotFound(await readFile(other, ownersNeeds));
-    // `stranger` never read a head. The owner's health file may hold the very bytes `stranger` would get, and
+    // `stranger` never read a head. The owner's work file may hold the very bytes `stranger` would get, and
     // it is still refused: sharing storage never grants access.
     expectNotFound(await readFile(stranger, ownersNeeds));
-    expectNotFound(await readFile(stranger, ownersHealth));
+    expectNotFound(await readFile(stranger, ownersWork));
   });
 
   it.each([
@@ -1367,7 +1367,7 @@ describe("board and leases", () => {
     }
     const head = await call(machine, "GET", "/relay/v1/snapshot/head");
     const files = (head.body as { files: Record<string, string> }).files;
-    for (const key of ["needs", "health", "work", "machines"]) expect(files[key]).toBeDefined();
+    for (const key of ["needs", "work", "machines"]) expect(files[key]).toBeDefined();
   });
 
   it("puts a seeded board in the head, with the five columns, and validates it", async () => {
@@ -2629,4 +2629,102 @@ describe("network identity check", () => {
       }
     },
   );
+});
+
+describe("opt-in health", () => {
+  it("omits unconfigured health from Today, sections and head", async () => {
+    const viewer = await enrol();
+    const read = async (path: string) => (await call(viewer, "GET", "/relay/v1/" + path)).body;
+    expect(await read("today")).not.toHaveProperty("health");
+    expect(await read("snapshot/head")).not.toHaveProperty("files.health");
+    const capabilities = (await read("capabilities")) as { sections: Array<{ kind: string }> };
+    expect(capabilities.sections.find((s) => s.kind === "health")).toBeUndefined();
+    expect(capabilities.sections.find((s) => s.kind === "board")).toMatchObject({
+      params: { staleSeconds: 21600, expirySeconds: 86400 },
+    });
+  });
+
+  it("authenticates and deduplicates deliveries, then resolves a critical need", async () => {
+    const configuredOrigin = process.env.BANNERET_RELAY_HEALTH_URL;
+    const secret = configuredOrigin ? process.env.BANNERET_RELAY_HOOK_SECRET : randomText(32);
+    if (!secret) throw new Error("Set BANNERET_RELAY_HOOK_SECRET for the configured relay.");
+    const config = {
+      healthSources: [{ id: "alerts", kind: "webhook", secret }],
+      board: { staleSeconds: 30, expirySeconds: 90 },
+      dashboards: [{ id: "metrics", title: "Metrics", url: "https://metrics.example.org" }],
+    };
+    const relay = configuredOrigin ? undefined : await startFakeRelay(config);
+    const local = new RelayClient(configuredOrigin ?? relay!.url);
+    try {
+      const key = generateMachineKey();
+      const start = await local.send(key, "POST", "/relay/v1/enroll/start", {
+        body: { publicKey: key.publicKey, machine: machineFacts("env_" + randomText(12)) },
+      });
+      const pairingId = (start.body as { pairingId: string }).pairingId;
+      const approved = await local.send(key, "POST", "/relay/v1/enroll/poll", {
+        body: { pairingId },
+      });
+      const { token, machineId } = approved.body as { token: string; machineId: string };
+      const read = async (path: string) =>
+        (await local.send(key, "GET", "/relay/v1/" + path, { token, device: machineId })).body;
+      const timestamp = String(Math.floor(Date.parse(local.now()) / 1000));
+      const post = async (body: string, time = timestamp, signingSecret = secret) => {
+        const signature = NodeCrypto.createHmac("sha256", signingSecret)
+          .update(time + "." + body)
+          .digest("hex");
+        return (
+          await local.send(key, "POST", "/relay/v1/hooks/alerts", {
+            unsigned: true,
+            rawBody: Buffer.from(body),
+            headers: { "X-Alarm-Signature": signature, "X-Alarm-Timestamp": time },
+          })
+        ).status;
+      };
+      const alarm = {
+        id: "queue",
+        sourceId: "alerts",
+        title: "Queue is full",
+        severity: "critical",
+        firedAt: local.now(),
+      };
+      const body = JSON.stringify(alarm);
+      expect(await read("capabilities")).toMatchObject({
+        dashboards: config.dashboards,
+        sections: expect.arrayContaining([
+          expect.objectContaining({ kind: "health" }),
+          expect.objectContaining({ kind: "board", params: config.board }),
+        ]),
+      });
+      const taskId = "clock_" + randomText(8);
+      await local.control("/board/seed", {
+        tasks: [{ id: taskId, title: "Lease clocks", column: "taken", holder: "ada-example" }],
+      });
+      await local.control("/lease/age", { taskId, hours: 1 / 60 });
+      const task = (await read("tasks/" + taskId)) as {
+        lease?: { state: string };
+        card?: { lease?: { state: string } };
+      };
+      expect(task.card?.lease?.state ?? task.lease?.state).toBe("stale");
+      expect(await post(body, timestamp, "wrong")).toBe(401);
+      expect(await post(body, String(Number(timestamp) - 301))).toBe(401);
+      expect(await post("a".repeat(1024 * 1024 + 1))).toBe(413);
+      expect(await post(body)).toBe(204);
+      expect(await post(body)).toBe(401);
+      expect(await read("today")).toMatchObject({
+        health: { alarms: [alarm] },
+        needsYou: { items: [expect.objectContaining({ kind: "health", title: alarm.title })] },
+      });
+      expect(await read("snapshot/head")).toHaveProperty("files.health");
+      expect(await post(JSON.stringify({ ...alarm, resolvedAt: alarm.firedAt }))).toBe(204);
+      expect(await read("today")).toMatchObject({
+        health: { alarms: [] },
+        needsYou: { items: [] },
+      });
+      expect(await read("needs")).toMatchObject({ items: [] });
+      for (let i = 0; i < 54; i++) await post(body);
+      expect(await post(body)).toBe(429);
+    } finally {
+      await relay?.close();
+    }
+  });
 });

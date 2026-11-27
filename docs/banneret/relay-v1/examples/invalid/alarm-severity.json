@@ -1,0 +1,7 @@
+{
+  "id": "queue_depth",
+  "sourceId": "monitor",
+  "severity": "unknown",
+  "title": "Queue above capacity",
+  "firedAt": "2026-11-26T10:00:00Z"
+}
