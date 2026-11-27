@@ -16,6 +16,7 @@ import type {
 } from "@t3tools/contracts";
 
 type Proof = {
+  publicKey: string;
   machineId: string;
   counter: string;
   sentAt: string;
@@ -270,7 +271,14 @@ export function createPool(
           waitingCount: line.length,
         };
       });
-      return { hosts: rows, me: { workspaces: [...mine.values()] } };
+      return {
+        sandboxes: config?.sandboxes ?? null,
+        bookings: [...bookings.values()]
+          .filter((b) => b.owner === owner)
+          .map((b) => ({ id: b.view.id, hostId: b.request.hostId })),
+        hosts: rows,
+        me: { workspaces: [...mine.values()] },
+      };
     },
     enqueue(owner: string, request: PoolSandboxRequest, proof: Proof) {
       mustHost(request.hostId);

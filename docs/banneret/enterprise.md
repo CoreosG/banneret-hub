@@ -407,3 +407,12 @@ Their sandboxes run as that user. The admin of this machine can read everything 
 
 Your desktop reads live resource measurements directly from your workspace Hub over the linked machine.
 The relay shows you your disk and inode quota and warning flags. Other members can see host pressure.
+
+Choose **Launch a sandbox** on a Pool host, or use the same action in a board
+task's menu to associate the booking with that task. Select the image and size.
+The card shows your place in line and the time and idle limits. During startup,
+pair and join the sandbox Hub from your own host login as described in the
+[host guide](pool-host.md#sandbox-runner). Once running, select its environment
+and open a project to start a thread. Extend a running booking when the line is
+empty, or cancel it from the card. Push commits or copy files out before the
+booking ends. Cleanup deletes the sandbox's local work.

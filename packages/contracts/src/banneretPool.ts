@@ -193,6 +193,8 @@ export type PoolLimitsPolicy = {
 };
 
 export type PoolView = {
+  readonly sandboxes: PoolConfig["sandboxes"] | null;
+  readonly bookings: ReadonlyArray<{ readonly id: string; readonly hostId: string }>;
   readonly hosts: ReadonlyArray<{
     readonly hostId: string;
     readonly level: "staff" | "community";
@@ -251,6 +253,7 @@ export type PoolNextRequest = {
 };
 
 export type PoolOffer = {
+  readonly publicKey: string;
   readonly offerId: string;
   readonly id: string;
   readonly personId: string;

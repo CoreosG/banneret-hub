@@ -35,7 +35,7 @@ export interface MachineKey {
   readonly publicKey: string;
 }
 
-const rawPublicKey = (key: NodeCrypto.KeyObject): string =>
+export const rawPublicKey = (key: NodeCrypto.KeyObject): string =>
   key.export({ format: "der", type: "spki" }).subarray(SPKI_PREFIX.length).toString("base64");
 
 export const keyFromSeed = (seed: Uint8Array): MachineKey => {
