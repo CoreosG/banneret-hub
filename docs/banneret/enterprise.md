@@ -204,13 +204,19 @@ the reason. A task never sits there without one. A text box narrows the entries 
 The Team list shows people, their agents and their claims. Helpers count under their lead. A waiting helper
 makes the lead count as waiting. Claim chips say live, paused or quiet.
 
-On the Floor, each board has a room. Open **Office** or choose **My presence** in the workspace
+Team version 2 supplies the same facts for the Office, Floor and List views. Each board is one room.
+Office draws visible rooms on demand. Drag to pan, use + or - to zoom, or explore the map with arrow keys.
+Enter opens a desk, robot or room and Escape returns to the map. Floor and List work with a screen reader.
+Company teams start in Office. Community teams, reduced motion and forced colours start in Floor.
+The view switch remembers your choice on this device.
+
+Expand **My office** in Office or choose **My presence** in the workspace
 switcher to set Available, Focusing, Away or Off and a short status line. Clearing the line and
 saving removes it. Opening the Hub while Away or Off gives you a private reminder. Your presence
 stays as you set it until you save a change. Founders can edit or clear the office and room meeting
 links. Links open in your browser.
 
-In **Office**, choose what to share from this machine. **Agents only** is the default. **Shared**
+In **My office**, choose what to share from this machine. **Agents only** is the default. **Shared**
 also shows the machine name. **Hidden** hides its agents and name. The preview updates before you
 save. Claims remain visible as `login/private` when the machine name is private. You can share a
 stopped agent's reason separately. Stopped agents stay in the office for one hour. Expand an agent

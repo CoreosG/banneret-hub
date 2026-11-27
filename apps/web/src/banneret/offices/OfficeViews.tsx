@@ -1,6 +1,9 @@
 import { AgentDetails, Hallway, MachineHeard } from "./AgentDetails";
 import { MeetingEditor, PresenceForm, SharingForm } from "./OfficeSettings";
-import { officeMeetingUrlValid } from "@t3tools/contracts";
+import { Meeting } from "./Meeting";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import * as Schema from "effect/Schema";
 import { MachineResources, usePoolResources } from "../ui/MachineResources";
 import type {
   PoolResources,
@@ -8,9 +11,8 @@ import type {
   BanneretBoardEntry,
   OfficeSummary,
 } from "@t3tools/contracts";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { drawSprite, personForLogin, spriteSize } from "./sprites";
-import { readLocalApi } from "../../localApi";
 import type { EnterpriseFeed } from "../useEnterpriseFeed";
 import type { RelayTarget } from "../enrolmentStore";
 import { useRoomSessions } from "./useRoomSessions";
@@ -30,6 +32,8 @@ import {
   type AgentIndex,
 } from "./agentIndex";
 import { useOpenTask } from "../useOpenTask";
+
+const TeamOffice = lazy(() => import("./office/TeamOffice"));
 
 type Person = BanneretTeam["people"][number];
 type Office = NonNullable<BanneretTeam["office"]>;
@@ -73,27 +77,6 @@ function PersonSprite({ login }: { login: string }) {
         }
       }}
     />
-  );
-}
-
-function Meeting({ url }: { url?: string | undefined }) {
-  if (!url || !officeMeetingUrlValid(url)) return null;
-  return (
-    <a
-      className="text-sm underline"
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      onClick={(e) => {
-        const api = readLocalApi();
-        if (api) {
-          e.preventDefault();
-          void api.shell.openExternal(url);
-        }
-      }}
-    >
-      Meeting link
-    </a>
   );
 }
 
@@ -361,7 +344,17 @@ export function OfficeViews({ enterprise, office, people }: Props) {
     rememberFilters(enterprise.workspace.id, "team", { ...filters, ...patch });
     set({ ...filters, ...patch, person: undefined }, { replace: true });
   };
-  const list = raw.view === "list" || (!raw.view && !!raw.person);
+
+  const preferenceKey = "banneret.team.view." + enterprise.workspace.id;
+  const simple = useMediaQuery("(prefers-reduced-motion: reduce), (forced-colors: active)");
+  const [preferred, rememberView] = useLocalStorage(preferenceKey, "", Schema.String);
+  const list = raw.view === "list" || (!raw.view && (!!raw.person || preferred === "List"));
+  const showOffice =
+    raw.view === "office" ||
+    (!raw.view &&
+      !raw.person &&
+      !simple &&
+      (preferred === "Office" || (!preferred && office.preset === "company")));
   const selection = JSON.stringify(filters);
   const [position, scroll] = useState({ selection, start: 0 });
   const start = position.selection === selection ? position.start : 0;
@@ -403,7 +396,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
     ? matches.slice(start, start + 25).some(unresolved) ||
       (matches.length < start + 25 && candidates.some(unresolved))
     : (!!me && unresolved(me)) || (filterPerson && candidates.some(unresolved));
-  useAgentPage(index, more);
+  useAgentPage(index, more || (showOffice && !!filters.state && candidates.some(unresolved)));
   function hasDesk(p: Person, board: string) {
     return (
       byPerson.get(p.id)?.rooms.some((r) => r.board === board) ||
@@ -426,13 +419,14 @@ export function OfficeViews({ enterprise, office, people }: Props) {
     <>
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Team view" className="flex rounded-md border">
-          {["Floor", "List"].map((name) => (
+          {["Floor", "List", "Office"].map((name) => (
             <button
               type="button"
               key={name}
-              aria-pressed={raw.view !== "office" && name === (list ? "List" : "Floor")}
+              aria-pressed={name === (list ? "List" : showOffice ? "Office" : "Floor")}
               className="px-3 py-1 text-sm aria-pressed:bg-accent"
               onClick={() => {
+                rememberView(name);
                 scroll({ selection, start: 0 });
                 set({ view: name.toLowerCase() }, { replace: true });
               }}
@@ -440,14 +434,6 @@ export function OfficeViews({ enterprise, office, people }: Props) {
               {name}
             </button>
           ))}
-          <button
-            type="button"
-            aria-pressed={raw.view === "office"}
-            onClick={() => set({ view: "office" })}
-            className="px-3 py-1 text-sm aria-pressed:bg-accent"
-          >
-            Office
-          </button>
         </div>
         {flags.includes("meeting_links") && (
           <>
@@ -462,112 +448,123 @@ export function OfficeViews({ enterprise, office, people }: Props) {
           </>
         )}
       </div>
-      {raw.view === "office" && me ? (
-        <section className="grid min-h-0 w-full max-w-xl gap-4 overflow-auto">
-          <h2 className="text-lg font-semibold">My office</h2>
-          {flags.some((f) => f === "presence" || f === "status") && (
-            <PresenceForm enterprise={enterprise} person={me} />
-          )}
-          {flags.includes("sharing") && <SharingForm enterprise={enterprise} />}
-        </section>
-      ) : (
-        <>
-          <div className="flex flex-wrap gap-2">
-            <FilterBox
-              placeholder="Find a person"
-              label="Find a person"
-              value={filters.q}
-              onChange={(q) => update({ q })}
-            />
-            <Select
-              label="Boards"
-              selected={filters.board}
-              options={summary.rooms.map((r) => [
-                r.board,
-                boardById.get(r.board)?.title ?? r.board,
-              ])}
-              change={(board) => update({ board })}
-            />
-            <Select
-              label="Agent states"
-              selected={filters.state}
-              options={states.map((k) => [k, labels[k]])}
-              change={(state) => update({ state })}
-            />
-            {flags.includes("presence") && (
-              <Select
-                label="Presence"
-                selected={filters.presence}
-                options={["available", "focusing", "away", "off"].map((k) => [k, k])}
-                change={(presence) => update({ presence })}
-              />
+      {showOffice && me && (
+        <details className="max-h-64 overflow-auto">
+          <summary className="cursor-pointer text-sm">My office</summary>
+          <div className="grid max-w-xl gap-4 py-2">
+            {flags.some((f) => f === "presence" || f === "status") && (
+              <PresenceForm enterprise={enterprise} person={me} />
             )}
+            {flags.includes("sharing") && <SharingForm enterprise={enterprise} />}
           </div>
-          {error && <button onClick={() => index.retry()}>Retry agent counts</button>}
-          {!people.length ? (
-            <QuietLine fact="Nobody is here yet." />
-          ) : list ? (
-            <div
-              key={selection}
-              role="list"
-              aria-label="Team members"
-              className="max-h-[1008px] min-h-0 flex-1 overflow-auto"
-              onScroll={(e) => {
-                const next = Math.max(0, Math.floor(e.currentTarget.scrollTop / 48) - 2);
-                if (next !== start) scroll({ selection, start: next });
-              }}
-            >
-              <div style={{ height: matches.length * 48, position: "relative" }}>
-                {matches.slice(start, start + 25).map((p, i) => (
-                  <div
-                    key={p.id}
-                    role="listitem"
-                    data-person={p.login}
-                    className="absolute flex h-12 w-full items-center gap-3 border-b px-3 text-sm"
-                    style={{ top: (start + i) * 48 }}
-                  >
-                    <strong>{p.displayName ?? p.login}</strong>
-                    {flags.includes("presence") && p.presence}
-                    {flags.includes("status") && <span className="truncate">{p.status?.text}</span>}
-                    <span className="ml-auto">
-                      <AgentCounts counts={byPerson.get(p.id)?.counts} />
-                    </span>
-                  </div>
-                ))}
+        </details>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <FilterBox
+          placeholder="Find a person"
+          label="Find a person"
+          value={filters.q}
+          onChange={(q) => update({ q })}
+        />
+        <Select
+          label="Boards"
+          selected={filters.board}
+          options={summary.rooms.map((r) => [r.board, boardById.get(r.board)?.title ?? r.board])}
+          change={(board) => update({ board })}
+        />
+        <Select
+          label="Agent states"
+          selected={filters.state}
+          options={states.map((k) => [k, labels[k]])}
+          change={(state) => update({ state })}
+        />
+        {flags.includes("presence") && (
+          <Select
+            label="Presence"
+            selected={filters.presence}
+            options={["available", "focusing", "away", "off"].map((k) => [k, k])}
+            change={(presence) => update({ presence })}
+          />
+        )}
+      </div>
+      {error && <button onClick={() => index.retry()}>Retry agent counts</button>}
+      {!people.length ? (
+        <QuietLine fact="Nobody is here yet." />
+      ) : showOffice ? (
+        <Suspense fallback={<p>Loading office…</p>}>
+          <TeamOffice
+            viewer={me?.login}
+            target={enterprise.target}
+            office={office}
+            rooms={roomList}
+            boards={boardById}
+            people={filters.state ? matches : candidates}
+            seatFor={seatFor}
+            hallway={!filters.board && !filters.state}
+            hasBoardDesk={(p) => summary.rooms.some((r) => hasDesk(p, r.board)) || unresolved(p)}
+            openList={(board) => set({ view: "list", board }, { replace: true })}
+          />
+        </Suspense>
+      ) : list ? (
+        <div
+          key={selection}
+          role="list"
+          aria-label="Team members"
+          className="max-h-[1008px] min-h-0 flex-1 overflow-auto"
+          onScroll={(e) => {
+            const next = Math.max(0, Math.floor(e.currentTarget.scrollTop / 48) - 2);
+            if (next !== start) scroll({ selection, start: next });
+          }}
+        >
+          <div style={{ height: matches.length * 48, position: "relative" }}>
+            {matches.slice(start, start + 25).map((p, i) => (
+              <div
+                key={p.id}
+                role="listitem"
+                data-person={p.login}
+                className="absolute flex h-12 w-full items-center gap-3 border-b px-3 text-sm"
+                style={{ top: (start + i) * 48 }}
+              >
+                <strong>{p.displayName ?? p.login}</strong>
+                {flags.includes("presence") && p.presence}
+                {flags.includes("status") && <span className="truncate">{p.status?.text}</span>}
+                <span className="ml-auto">
+                  <AgentCounts counts={byPerson.get(p.id)?.counts} />
+                </span>
               </div>
-              {!matches.length && <QuietLine fact="No matching people." />}
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
-              <Hallway target={enterprise.target} revision={office.files["team.hallway"]} />
-              {roomList.map((room) => (
-                <Room
-                  founder={enterprise.enrolment.me?.role === "founder"}
-                  pool={pool}
-                  key={room.board}
-                  revision={office.files["team.room." + room.board]}
-                  index={index}
-                  seatFor={seatFor}
-                  room={room}
-                  board={boardById.get(room.board)}
-                  flags={flags}
-                  target={enterprise.target}
-                  people={candidates}
-                  state={filters.state}
-                  initialOpen={Boolean(
-                    filters.q ||
-                    filters.presence ||
-                    filters.board ||
-                    filters.state ||
-                    byPerson.get(me?.id ?? "")?.rooms.some((r) => r.board === room.board) ||
-                    claims.some((c) => c.board === room.board && c.login === me?.login),
-                  )}
-                />
-              ))}
-              {!roomList.length && <QuietLine fact="No matching rooms." />}
-            </div>
-          )}
-        </>
+            ))}
+          </div>
+          {!matches.length && <QuietLine fact="No matching people." />}
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          <Hallway target={enterprise.target} revision={office.files["team.hallway"]} />
+          {roomList.map((room) => (
+            <Room
+              founder={enterprise.enrolment.me?.role === "founder"}
+              pool={pool}
+              key={room.board}
+              revision={office.files["team.room." + room.board]}
+              index={index}
+              seatFor={seatFor}
+              room={room}
+              board={boardById.get(room.board)}
+              flags={flags}
+              target={enterprise.target}
+              people={candidates}
+              state={filters.state}
+              initialOpen={Boolean(
+                filters.q ||
+                filters.presence ||
+                filters.board ||
+                filters.state ||
+                byPerson.get(me?.id ?? "")?.rooms.some((r) => r.board === room.board) ||
+                claims.some((c) => c.board === room.board && c.login === me?.login),
+              )}
+            />
+          ))}
+          {!roomList.length && <QuietLine fact="No matching rooms." />}
+        </div>
       )}
     </>
   );

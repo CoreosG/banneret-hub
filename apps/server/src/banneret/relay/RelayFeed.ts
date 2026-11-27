@@ -631,6 +631,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   let graveyardSignature = "";
   // The team: its section's flags (null when not advertised), the last read and the view it was built
   // from. The machines file changes on every heartbeat, so the view itself is the signature.
+  let teamPreset: "company" | "community" = "community";
   let teamFlags: ReadonlyArray<string> | null = null;
   let teamRead: BanneretTeamRead | null = null;
   let teamSignature = "";
@@ -835,6 +836,8 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           mapFlags = sectionFlags(reply.body, "map");
           feedFlags = sectionFlags(reply.body, "feed");
           teamFlags = sectionFlags(reply.body, "team");
+          teamPreset =
+            fields(fields(reply.body)?.team)?.preset === "company" ? "company" : "community";
           snapshotOffered = fields(reply.body)?.snapshot !== undefined;
           wakeSnapshot();
           return publishSnapshot;
@@ -1220,6 +1223,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
             refs["team.people"],
             refs.machines,
             ...Object.entries(roomFiles).flat(),
+            teamPreset,
             ...teamFlags,
           ].join(" ");
           if (!refs.team) teamProblem(notPublished("team"));
@@ -1258,7 +1262,13 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
                     machines: machines.get(p.id) ?? [],
                     sessions: [],
                   })),
-                  office: { summary, revision: refs.team, files: roomFiles, flags: teamFlags },
+                  office: {
+                    summary,
+                    preset: teamPreset,
+                    revision: refs.team,
+                    files: roomFiles,
+                    flags: teamFlags,
+                  },
                 },
                 fetchedAt: at,
               };
