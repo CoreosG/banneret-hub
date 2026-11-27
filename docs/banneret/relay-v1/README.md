@@ -1257,3 +1257,8 @@ and `bookings` (the authenticated owner's retained sandbox and host ID pairs).
 The Hub polls each visible booking by ID. Each non-null offer includes
 `publicKey`, the standard-base64 raw Ed25519 key of the enrolled signing
 machine, supplied by the authenticated relay from its machine record.
+
+PoolSandbox receipts include the board `taskId` from the signed request, or null
+for a standalone booking. With Pool enabled, advertise `banneret_pool_status`,
+`banneret_sandbox_request`, `banneret_sandbox_status` and `banneret_sandbox_cancel`
+in the signed capabilities for members allowed to use them.

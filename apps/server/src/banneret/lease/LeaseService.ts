@@ -3,6 +3,7 @@
 import { IssueTrackerError } from "@t3tools/source-control-core/server/IssueTracker";
 import {
   foldLease,
+  BANNERET_POOL_TOOLS,
   formatClaimLine,
   formatReleaseComment,
   formatWithdrawLine,
@@ -28,6 +29,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
+import { offeredTools } from "../agents/AgentRelays.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as LeaseTracker from "./LeaseTracker.ts";
 import * as BanneretEnrolment from "../relay/Enrolment.ts";
@@ -40,12 +43,15 @@ const MAX_COMMENT_PAGES = 50;
 const UPDATE_ATTEMPTS = 3;
 
 export interface LeaseServiceShape {
-  readonly check: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseStatus, TaskLeaseError>;
+  readonly check: (
+    ref: TaskLeaseRef,
+  ) => Effect.Effect<TaskLeaseStatus & { readonly sandboxAgent?: string }, TaskLeaseError>;
   readonly take: (
     input: TaskLeaseTakeInput,
   ) => Effect.Effect<TaskLeaseResult & { handoff?: Orchestrator.TaskHandoff }, TaskLeaseError>;
   readonly release: (
     input: TaskLeaseReleaseInput,
+    expectedAgent?: string,
   ) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
   readonly finish: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
   readonly withdraw: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
@@ -469,7 +475,11 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
 
   const check = Effect.fn("LeaseService.check")(function* (input: TaskLeaseRef) {
     const ref = input;
-    return statusOf(yield* read(ref), ref);
+    const snapshot = yield* read(ref);
+    return {
+      ...statusOf(snapshot, ref),
+      ...(snapshot.fold.sandboxAgent && { sandboxAgent: snapshot.fold.sandboxAgent }),
+    };
   });
 
   const take: LeaseServiceShape["take"] = (input) => {
@@ -483,6 +493,11 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         const lease = before.fold.lease;
         if (lease !== null) {
           if (lease.claimants[0] !== undefined && same(lease.claimants[0], viewer)) {
+            if (input.agent?.startsWith("sandbox-") && input.agent !== before.fold.sandboxAgent)
+              return yield* new TaskLeaseError({
+                reason: "refused",
+                detail: "Release your earlier claim before moving to this sandbox.",
+              });
             return yield* settleTake(ref, viewer);
           }
           return yield* new TaskLeaseError({
@@ -555,7 +570,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     );
   };
 
-  const release: LeaseServiceShape["release"] = (input) => {
+  const release: LeaseServiceShape["release"] = (input, expectedAgent) => {
     const ref = input;
     const written = {
       reason: input.reason,
@@ -574,6 +589,11 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         const before = yield* read(ref);
         const viewer = yield* requireAvailable(before);
         const claimants = before.fold.lease?.claimants ?? [];
+        if (expectedAgent && claimants.length && before.fold.sandboxAgent !== expectedAgent)
+          return yield* new TaskLeaseError({
+            reason: "refused",
+            detail: "The current claim is not this sandbox's claim.",
+          });
         if (claimants[0] !== undefined && same(claimants[0], viewer)) {
           yield* comment(ref, formatReleaseComment(written)).pipe(Effect.mapError(failed));
           return yield* settleRelease(ref, viewer, claimants.length > 1);
@@ -680,6 +700,44 @@ export const layer = layerWith({}).pipe(
 
 /** Handlers for the lease RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
+  [TASK_LEASE_WS_METHODS.sandboxHandoff]: Effect.fn("LeaseService.rpc.sandboxHandoff")(
+    function* (input: { relayOrigin: string; taskId: string; requestId: string }) {
+      const feed = yield* BanneretRelayFeed;
+      const view = yield* (yield* BanneretEnrolment.BanneretEnrolment).status(input.relayOrigin);
+      const tools = offeredTools(
+        (yield* feed.mcpTools(input.relayOrigin)) ?? [],
+        view.me?.role ?? "",
+      );
+      if (
+        view.state !== "configured" ||
+        !view.me ||
+        !BANNERET_POOL_TOOLS.every((name) => tools.has(name)) ||
+        !tools.has("banneret_lease_take")
+      )
+        return yield* new TaskLeaseError({
+          reason: "unavailable",
+          detail: "Sandbox tools are unavailable for this account.",
+        });
+      const card = (yield* feed.task(input.relayOrigin, input.taskId)).value;
+      if (!card)
+        return yield* new TaskLeaseError({
+          reason: "unavailable",
+          detail: "The task is unavailable.",
+        });
+      return yield* Orchestrator.sendTask(
+        { ...card.task.ref, relayOrigin: input.relayOrigin, handoffTaskId: input.taskId },
+        {
+          url: card.task.ref.url,
+          title: card.task.title,
+          note: card.lastRelease?.note ?? null,
+          claim: input.requestId,
+        },
+        true,
+      ).pipe(
+        Effect.mapError((error) => new TaskLeaseError({ reason: "failed", detail: error.message })),
+      );
+    },
+  ),
   [TASK_LEASE_WS_METHODS.orchestrator]: Orchestrator.selection,
   [TASK_LEASE_WS_METHODS.check]: Effect.fn("LeaseService.rpc.check")(function* (
     input: TaskLeaseRef,

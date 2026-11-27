@@ -137,6 +137,8 @@ own branch protection, rulesets and CODEOWNERS.
 
 Choose **Take** from a board card or its Task tab. Any of your joined machines can claim, even without a checkout. The picker defaults to this machine. The selected machine uses its GitHub login to add a claim comment, assign you and label the issue `claimed`. The login must match your company identity and have triage access. The Hub waits about ten seconds and reads back the issue. The first valid claim wins. Edited claim and release comments do not count.
 
+For **A new sandbox**, Take opens a hand-off to your orchestrator before any claim. Open the thread for your place in line and pairing instructions. Your sandbox thread claims when the booking is running.
+
 A successful Take sends the task to your orchestrator. Choose **Open** to follow it, or check **Just claim it** before confirming to skip the message. You can choose where to work later or ask your agent to move an ongoing task to another machine.
 
 Each machine remembers one main orchestrator per company and one project orchestrator per project in that company. Use the thread menu to designate a thread, retire the main orchestrator, demote a project orchestrator, or choose a replacement. The company sidebar pins the main thread above Today and marks project orchestrators beside their titles.

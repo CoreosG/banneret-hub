@@ -3,10 +3,16 @@ import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import type { FakeRelay } from "@t3tools/banneret-relay-fake";
+import hostFixture from "../../../../../docs/banneret/relay-v1/examples/pool-facts.json" with { type: "json" };
+import machineFixture from "../../../../../docs/banneret/relay-v1/examples/enroll-start-request.json" with { type: "json" };
+import poolFixture from "../../../../../docs/banneret/relay-v1/examples/pool-config.json" with { type: "json" };
+import { refreshHandoffs } from "./SandboxHandoff.ts";
+import type { PoolConfig } from "@t3tools/contracts";
+import { RelayClient, generateMachineKey, type FakeRelay } from "@t3tools/banneret-relay-fake";
 import {
   allBoardCards,
   BANNERET_AGENT_TOOLS,
+  BANNERET_POOL_TOOLS,
   type BanneretBoardCard,
   type BanneretEnrolmentView,
   type BanneretFeedState,
@@ -122,7 +128,13 @@ const writeWorkspaces = (origin: string) =>
     ],
   });
 
+const sandboxNotices: string[] = [];
 const threadsLayer = Layer.mock(ThreadManagementService.ThreadManagementService)({
+  sendToThread: (input) =>
+    Effect.sync(() => {
+      sandboxNotices.push(input.text);
+      return {} as ThreadManagementService.ThreadManagementSendResult;
+    }),
   getThreadShell: (threadId) => {
     const projectId = THREAD_PROJECTS.get(threadId);
     return projectId === undefined
@@ -950,6 +962,118 @@ describe("agent lease tools against the fake relay", () => {
         { chat: true },
       ),
   );
+
+  it.live(
+    "holds the claim until the matching sandbox runs and releases its claim with the saved note on expiry",
+    () => {
+      const tracker = newTracker();
+      return withFake(
+        (fake, relay) =>
+          onHub(
+            tracker,
+            Effect.gen(function* () {
+              yield* joinWithBoard(fake, relay);
+              const taskId = "t_free";
+              const offered = yield* (yield* AgentRelays.BanneretAgentRelays).offered(
+                COMPANY_THREAD,
+              );
+              for (const tool of BANNERET_POOL_TOOLS) expect(offered.has(tool)).toBe(true);
+              const client = new RelayClient(relay.origin);
+              const key = generateMachineKey();
+              const host = yield* Effect.promise(async () => {
+                const path = "/relay/v1/pool/hosts/enroll/";
+                const start = await client.send(key, "POST", path + "start", {
+                  body: {
+                    machine: { ...machineFixture.machine, environmentId: "dev" },
+                    publicKey: key.publicKey,
+                  },
+                });
+                const pairing = start.body as { confirmCode: string; pairingId: string };
+                fake.approve(pairing.confirmCode, { login: "host-admin", role: "founder" });
+                const approved = await client.send(key, "POST", path + "poll", {
+                  body: { pairingId: pairing.pairingId },
+                });
+                return approved.body as { token: string; machineId: string };
+              });
+              const report = (path: string, body: unknown) =>
+                Effect.promise(() =>
+                  client.send(key, "POST", "/relay/v1/pool/" + path, {
+                    device: host.machineId,
+                    token: host.token,
+                    body,
+                  }),
+                );
+              expect((yield* report("hosts/facts", hostFixture)).status).toBe(200);
+              const booking = yield* call("banneret_sandbox_request", {
+                hostId: "dev",
+                size: "small",
+                image: poolFixture.sandboxes.images[0]!.digest,
+                taskId,
+              });
+              expect(booking).toMatchObject({ taskId, state: "waiting", place: 1 });
+              const sandboxId = booking.id;
+              expect(yield* call("banneret_lease_take", { taskId })).toMatchObject({
+                code: "capability_denied",
+              });
+              expect(yield* call("banneret_lease_take", { taskId, sandboxId })).toMatchObject({
+                code: "capability_denied",
+              });
+              expect(tracker.writes).toEqual([]);
+              const view = yield* (yield* Enrolment.BanneretEnrolment).status(relay.origin);
+              const next = yield* report("hosts/next", { size: "small" });
+              const { offer } = next.body as { offer: { offerId: string } };
+              const update = (
+                state: string,
+                machineId: string | null,
+                reason: string | null = null,
+              ) =>
+                report("sandboxes/" + sandboxId + "/state", {
+                  offerId: offer.offerId,
+                  state,
+                  machineId,
+                  reason,
+                });
+              expect((yield* update("starting", null)).status).toBe(200);
+              expect(yield* call("banneret_lease_take", { taskId, sandboxId })).toMatchObject({
+                code: "capability_denied",
+              });
+              expect((yield* update("running", view.machineId!)).status).toBe(200);
+              expect(yield* call("banneret_lease_take", { taskId, sandboxId })).toMatchObject({
+                outcome: "taken",
+              });
+              expect(tracker.writes[0]).toContain("comment claim: " + ME + "/sandbox-");
+              expect(yield* call("banneret_sandbox_cancel", { id: sandboxId })).toMatchObject({
+                code: "invalid_request",
+              });
+              sandboxNotices.length = 0;
+              yield* refreshHandoffs;
+              expect(sandboxNotices[0]).toContain("Route the task and hand-off note");
+              expect((yield* update("ending", null, "expired")).status).toBe(200);
+              expect((yield* update("ended", null, "expired")).status).toBe(200);
+              yield* refreshHandoffs;
+              yield* refreshHandoffs;
+              expect(
+                sandboxNotices.filter((text) => text.includes("Release the sandbox claim")),
+              ).toHaveLength(1);
+              const release = { taskId, sandboxId, reason: "out_of_usage", freeToContinue: true };
+              expect(yield* call("banneret_lease_release", release)).toMatchObject({
+                code: "invalid_request",
+              });
+              const note = "Goal: limit requests. Done: pushed branch. Next: review tests.";
+              expect(
+                yield* call("banneret_lease_release", { ...release, sandboxId: "wrong", note }),
+              ).toMatchObject({ reason: "refused" });
+              expect(yield* call("banneret_lease_release", { ...release, note })).toMatchObject({
+                outcome: "released",
+                status: { lastRelease: { freeToContinue: true, note } },
+              });
+            }),
+          ),
+        { pool: poolFixture as PoolConfig },
+      );
+    },
+  );
+
   it.live(
     "offers the tools once the relay names them, though the Hub missed capabilities.changed",
     () =>
@@ -984,7 +1108,11 @@ describe("agent lease tools against the fake relay", () => {
             );
             const relays = yield* AgentRelays.BanneretAgentRelays;
             expect([...(yield* relays.offered(COMPANY_THREAD))].sort()).toEqual(
-              BANNERET_AGENT_TOOLS.filter((n) => !n.startsWith("banneret_chat_")).sort(),
+              BANNERET_AGENT_TOOLS.filter(
+                (name) =>
+                  !name.startsWith("banneret_chat_") &&
+                  !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name),
+              ).sort(),
             );
           }),
         ),

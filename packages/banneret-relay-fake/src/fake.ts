@@ -5,6 +5,7 @@ import type * as NodeNet from "node:net";
 
 import {
   BANNERET_AGENT_TOOLS,
+  BANNERET_POOL_TOOLS,
   foldLease,
   type LeaseComment,
   type LeaseFoldResult,
@@ -2482,7 +2483,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ],
           // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
           mcpTools: BANNERET_AGENT_TOOLS.filter(
-            (name) => options.chat || !name.startsWith("banneret_chat_"),
+            (name) =>
+              (options.chat || !name.startsWith("banneret_chat_")) &&
+              (options.pool?.enabled || !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
           ).map((name) => ({
             name,
             description: "A Banneret Hub agent tool.",

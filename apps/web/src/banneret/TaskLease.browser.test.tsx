@@ -16,7 +16,8 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { act, render } from "../../test/render";
 import { useProjects, useServerConfigs } from "../state/entities";
 import { useConnectedEnvironmentIds } from "../state/environments";
-import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
+import * as orchestrators from "./orchestratorStore";
+import { enrolmentRpc, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { LeaseConfirmHost, ReleaseDialogHost } from "./LeaseControls";
 import { useLeaseMachineStore } from "./leaseMachineStore";
 import {
@@ -32,6 +33,7 @@ import { taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
 import { singleBoard } from "./boards.testkit";
 
+vi.mock("./orchestratorStore", { spy: true });
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
 vi.mock("../components/issue/IssueDetailPanel", () => ({
@@ -272,6 +274,19 @@ const result = (
   ok({ outcome, status, ...(detail === undefined ? {} : { detail }) });
 
 describe("Take", () => {
+  it("hands a new sandbox request to the orchestrator without writing a claim", async () => {
+    const { emit, rpc } = setup();
+    rpc.check.mockResolvedValue(ok(leaseStatus()));
+    vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({ ok: false, message: "Waiting for pool" });
+    vi.mocked(orchestrators.sandboxHandoff).mockResolvedValue(null);
+    await using _task = await openTask(card());
+    await emit({ ...feed([card()]), sections: ["board", "pool"] });
+    await userEvent.click(button("Take on desk"));
+    await userEvent.click(button("A new sandbox"));
+    expect(orchestrators.sandboxHandoff).toHaveBeenCalledWith(RELAY, "t_2", expect.any(String));
+    expect(rpc.take).not.toHaveBeenCalled();
+  });
+
   it("shows the read-back while the take confirms, then the task as taken by you", async () => {
     const { emit, rpc } = setup();
     rpc.check.mockResolvedValue(ok(leaseStatus()));

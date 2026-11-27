@@ -22,7 +22,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
 import { Radio, RadioGroup } from "../components/ui/radio-group";
 import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
-import { cn } from "../lib/utils";
+import { cn, randomUUID } from "../lib/utils";
 import {
   chooseReason,
   emptyReleaseForm,
@@ -52,6 +52,7 @@ import {
   type LeaseEntry,
   type LeaseOperation,
 } from "./leaseStore";
+import { sandboxHandoff } from "./orchestratorStore";
 import { toneProps } from "./ui/tokens";
 
 const RUNNING_WORDS: Readonly<Record<LeaseOperation, string>> = {
@@ -248,6 +249,10 @@ function LeaseConfirmDialog() {
   const target = useLeaseConfirmStore((state) => state.target)!;
   const [machine, setMachine] = useState<LeaseMachine>(target.chosen);
   const [justClaim, setJustClaim] = useState(false);
+  const feed = useEnvironmentFeed(target.relay);
+  const [requestId] = useState(randomUUID);
+  const [sending, setSending] = useState(false);
+  const [destination, setDestination] = useState<Awaited<ReturnType<typeof sandboxHandoff>>>(null);
   const words = CONFIRM_WORDS[target.operation];
   const confirm = () => {
     openLeaseConfirm(null);
@@ -298,7 +303,36 @@ function LeaseConfirmDialog() {
           <Button variant="outline" onClick={() => openLeaseConfirm(null)}>
             Cancel
           </Button>
-          <Button onClick={confirm}>{`${words.action} on ${machine.label}`}</Button>
+          {target.operation === "take" &&
+            feed.sections.includes("pool") &&
+            !justClaim &&
+            (destination ? (
+              <Link
+                to="/$environmentId/$threadId"
+                params={{ environmentId: target.relay.environmentId, threadId: destination.id }}
+              >
+                Open {destination.title}
+              </Link>
+            ) : (
+              <Button
+                variant="outline"
+                disabled={sending}
+                onClick={async () => {
+                  setSending(true);
+                  setDestination(
+                    await sandboxHandoff(target.relay, target.taskId, requestId).finally(() =>
+                      setSending(false),
+                    ),
+                  );
+                }}
+              >
+                A new sandbox
+              </Button>
+            ))}
+          <Button
+            disabled={sending || !!destination}
+            onClick={confirm}
+          >{`${words.action} on ${machine.label}`}</Button>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

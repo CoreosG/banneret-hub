@@ -2368,8 +2368,9 @@ components:
     PoolSandbox:
       type: object
       additionalProperties: false
-      required: [id, state, place, waitSeconds, machineId, endsAt, reason]
+      required: [id, taskId, state, place, waitSeconds, machineId, endsAt, reason]
       properties:
+        taskId: {anyOf: [{$ref: '#/components/schemas/Id'}, {type: 'null'}]}
         id: {$ref: '#/components/schemas/Id'}
         state:
           type: string

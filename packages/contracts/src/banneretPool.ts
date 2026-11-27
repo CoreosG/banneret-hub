@@ -152,6 +152,7 @@ export type HostContention = {
 };
 
 export type PoolSandbox = {
+  readonly taskId: string | null;
   readonly id: string;
   readonly state:
     | "waiting"

@@ -388,6 +388,7 @@ describe("Team page", () => {
     vi.spyOn(enrolmentRpc, "pool").mockResolvedValue({ ok: true, value: poolExample });
     const waiting = {
       id: "sb1",
+      taskId: null,
       state: "waiting" as const,
       place: 2,
       waitSeconds: 60,
