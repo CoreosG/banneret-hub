@@ -199,11 +199,7 @@ function BoardCard(props: {
               </span>
             )
           ) : (
-            <LeaseChip
-              holder={lease.holder.login}
-              state={lease.state}
-              lastSignalAt={lease.lastSignalAt}
-            />
+            <LeaseChip holder={lease.holder.login} state={lease.state} staleAt={lease.staleAt} />
           ))
         }
         footer={

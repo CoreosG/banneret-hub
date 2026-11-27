@@ -1,7 +1,6 @@
 // Fork UI kit: words and tones for leases, stuck reasons and health. Each set is open; an unknown
 // value keeps its own word in a neutral tone.
 import { humanizeWord } from "./status";
-import { agoLabel, spanLabel } from "./relativeTime";
 import type { Tone } from "./tokens";
 
 /**
@@ -18,19 +17,19 @@ export interface ToneLabel {
   readonly tone: Tone;
 }
 
-/** The lease state words. Active is neutral (the icon is green); quiet warns; expired and conflict alarm. */
+// RelativeTime can describe an agent session or a work event. Never use it to show
+// when a person was active. Claims and leases show state only, without ages.
 export function leaseLabel(
-  lease: { readonly state: string; readonly lastSignalAt: string },
+  lease: { readonly state: string; readonly staleAt: string },
   nowMs: number,
 ): ToneLabel {
   switch (lease.state) {
     case "active":
-      return {
-        label: `active ${agoLabel(lease.lastSignalAt, nowMs)}`.trimEnd(),
-        tone: "muted",
-      };
+      return nowMs < Date.parse(lease.staleAt)
+        ? { label: "live", tone: "muted" }
+        : { label: "quiet", tone: "warn" };
     case "stale":
-      return { label: `quiet ${spanLabel(lease.lastSignalAt, nowMs)}`.trimEnd(), tone: "warn" };
+      return { label: "quiet", tone: "warn" };
     case "expired":
       return { label: "expired, should be released", tone: "error" };
     case "paused":

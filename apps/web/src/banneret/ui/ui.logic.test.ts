@@ -86,14 +86,15 @@ describe("relative time", () => {
 
 describe("labels", () => {
   it.each([
-    ["active", ago(12 * MIN), "active 12 min ago", "muted"],
-    ["stale", ago(7 * HOUR), "quiet 7 h", "warn"],
+    ["active", ago(-MIN), "live", "muted"],
+    ["active", ago(0), "quiet", "warn"],
+    ["stale", ago(7 * HOUR), "quiet", "warn"],
     ["expired", ago(DAY), "expired, should be released", "error"],
     ["paused", ago(DAY), "paused", "muted"],
     ["conflict", ago(DAY), "conflict, two people claim this", "error"],
     ["handed_over", ago(DAY), "handed over", "muted"],
-  ])("lease %s", (state, lastSignalAt, label, tone) => {
-    expect(leaseLabel({ state, lastSignalAt }, NOW)).toEqual({ label, tone });
+  ])("lease %s", (state, staleAt, label, tone) => {
+    expect(leaseLabel({ state, staleAt }, NOW)).toEqual({ label, tone });
   });
 
   it.each([

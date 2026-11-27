@@ -659,10 +659,8 @@ describe("Task dialog facts", () => {
     // The relay served no task read here, so it has not said whether there is a preview.
     expect(empty("Preview")).toBe("Not known");
     expect(empty("Rests on")).toBe("None");
-    expect(panel().querySelector('[data-slot="lease-chip"]')?.textContent).toBe(
-      "bo-examplequiet 7 h",
-    );
-    expect(panel().textContent).toContain("claimed 3 d ago");
+    expect(panel().querySelector('[data-slot="lease-chip"]')?.textContent).toBe("bo-examplequiet");
+    expect(panel().textContent).not.toContain("claimed 3 d ago");
     expect([...panel().querySelectorAll("[data-pr]")].map((pr) => pr.textContent)).toEqual([
       "#57 merged",
       "#60 openChecks passing",
@@ -690,7 +688,7 @@ describe("Task dialog facts", () => {
     const text = release.element().textContent;
     expect(text).toContain("bo-example");
     expect(text).toContain("Other: **moved** to <b>v2</b>");
-    expect(text).toContain("2 h ago");
+    expect(release.element().querySelector("time")).toBeNull();
     expect(text).toContain("Free to continue");
     expect(release.element().querySelector("b")).toBeNull();
     expect(page.getByTestId("task-last-release-note").element().textContent).toBe(

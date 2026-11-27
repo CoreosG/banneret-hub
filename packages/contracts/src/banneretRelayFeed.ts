@@ -94,7 +94,6 @@ export const BanneretFeedWorkingItem = Schema.Struct({
   branch: Schema.optional(Schema.String),
   sessions: Schema.optional(Schema.Number),
   state: Schema.optional(Schema.String),
-  lastActivityAt: Schema.String,
   deepLink: Schema.optional(BanneretFeedDeepLink),
 });
 
@@ -127,7 +126,6 @@ export const BanneretFeedHealthItem = Schema.Struct({
 /** The five Today blocks, in the relay's order. */
 export const BanneretFeedToday = Schema.Struct({
   generatedAt: Schema.String,
-  lastVisitAt: Schema.NullOr(Schema.String),
   needsYou: Schema.Struct({
     state: Schema.String,
     items: Schema.Array(BanneretFeedNeedsItem),
@@ -570,8 +568,8 @@ export const BanneretFeedState = Schema.Struct({
 export type BanneretFeedState = typeof BanneretFeedState.Type;
 
 const WsBanneretRelayTodayRpc = Rpc.make(BANNERET_RELAY_FEED_WS_METHODS.today, {
-  /** `visit` only when the person actually opens Today. */
-  payload: Schema.Struct({ relayOrigin: Schema.String, visit: Schema.optional(Schema.Boolean) }),
+  /** Device-local shipped cutoff. */
+  payload: Schema.Struct({ relayOrigin: Schema.String, since: Schema.optional(Schema.String) }),
   success: BanneretFeedTodayRead,
   error: EnvironmentAuthorizationError,
 });

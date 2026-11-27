@@ -638,58 +638,11 @@ describe("paging", () => {
     expect(new Set(ids).size).toBe(5);
   });
 
-  describe("Today visits", () => {
-    const visitState = async (machine: Enrolled) =>
-      (await client.control("/visits/read", { login: machine.login })) as {
-        lastVisitAt: string | null;
-        lastReadAt: string | null;
-      };
-    const todayAt = async (machine: Enrolled, target: string) => {
-      const reply = await call(machine, "GET", target);
-      expect(reply.status, JSON.stringify(reply.body)).toBe(200);
-      expectSchema("Today", reply.body);
-      return (reply.body as { lastVisitAt: string | null }).lastVisitAt;
-    };
-
-    it("leaves lastVisitAt alone on a read without visit=1", async () => {
-      const machine = await enrol();
-      expect(await todayAt(machine, "/relay/v1/today")).toBeNull();
-      expect(await visitState(machine)).toEqual({ lastVisitAt: null, lastReadAt: null });
-      await todayAt(machine, "/relay/v1/today?visit=1");
-      const before = await visitState(machine);
-      expect(before.lastReadAt).not.toBeNull();
-      await client.control("/visits/age", { login: machine.login, minutes: 45 });
-      const aged = await visitState(machine);
-      expect(await todayAt(machine, "/relay/v1/today")).toBe(aged.lastVisitAt);
-      expect(await visitState(machine)).toEqual(aged);
-    });
-
-    it("moves lastVisitAt on a read with visit=1 after a gap", async () => {
-      const machine = await enrol();
-      expect(await todayAt(machine, "/relay/v1/today?visit=1")).toBeNull();
-      await client.control("/visits/age", { login: machine.login, minutes: 45 });
-      const aged = await visitState(machine);
-      expect(await todayAt(machine, "/relay/v1/today?visit=1")).toBe(aged.lastReadAt);
-      const after = await visitState(machine);
-      expect(after.lastVisitAt).toBe(aged.lastReadAt);
-      expect(Date.parse(after.lastReadAt ?? "")).toBeGreaterThan(Date.parse(aged.lastReadAt ?? ""));
-    });
-
-    it("counts two visit reads less than 30 minutes apart as one visit", async () => {
-      const machine = await enrol();
-      await todayAt(machine, "/relay/v1/today?visit=1");
-      await client.control("/visits/age", { login: machine.login, minutes: 45 });
-      await todayAt(machine, "/relay/v1/today?visit=1");
-      await client.control("/visits/age", { login: machine.login, minutes: 10 });
-      const state = await visitState(machine);
-      expect(await todayAt(machine, "/relay/v1/today?visit=1")).toBe(state.lastVisitAt);
-      expect((await visitState(machine)).lastVisitAt).toBe(state.lastVisitAt);
-    });
-
-    it("refuses a visit value other than 1", async () => {
-      const machine = await enrol();
-      expectError(await call(machine, "GET", "/relay/v1/today?visit=2"), 400, "malformed");
-    });
+  it("rejects visit recording and invalid since timestamps", async () => {
+    const machine = await enrol();
+    for (const query of ["visit=1", "since=yesterday"]) {
+      expectError(await call(machine, "GET", `/relay/v1/today?${query}`), 400, "malformed");
+    }
   });
 
   describe("usage in facts", () => {
@@ -1277,34 +1230,6 @@ describe("snapshot", () => {
       }, POLL)
       .toBe(true);
   });
-
-  it("never moves lastVisitAt, and never counts as a visit", async () => {
-    const machine = await enrol();
-    const visitState = async () =>
-      (await client.control("/visits/read", { login: machine.login })) as {
-        lastVisitAt: string | null;
-        lastReadAt: string | null;
-      };
-    const readAll = async () => {
-      const { reply, head } = await readHead(machine);
-      for (const ref of Object.values(head.files)) {
-        expect((await readFile(machine, bare(ref))).status).toBe(200);
-      }
-      const etag = reply.headers.get("etag") ?? "";
-      expect(
-        (await callBytes(machine, "/relay/v1/snapshot/head", { "If-None-Match": etag })).status,
-      ).toBe(304);
-    };
-    expect(await visitState()).toEqual({ lastVisitAt: null, lastReadAt: null });
-    await readAll();
-    expect(await visitState()).toEqual({ lastVisitAt: null, lastReadAt: null });
-    const visit = await call(machine, "GET", "/relay/v1/today?visit=1");
-    expect(visit.status).toBe(200);
-    await client.control("/visits/age", { login: machine.login, minutes: 45 });
-    const aged = await visitState();
-    await readAll();
-    expect(await visitState()).toEqual(aged);
-  });
 });
 
 describe("board and leases", () => {
@@ -1541,7 +1466,7 @@ describe("board and leases", () => {
       { id: openTask, title: "Still open", prs: [{ number: 42, state: "open" }] },
     ]);
     const machine = await enrol();
-    const reply = await call(machine, "GET", "/relay/v1/today?visit=1");
+    const reply = await call(machine, "GET", "/relay/v1/today");
     expect(reply.status, JSON.stringify(reply.body)).toBe(200);
     expectSchema("Today", reply.body);
     const shipped = (
@@ -1556,6 +1481,11 @@ describe("board and leases", () => {
         };
       }
     ).shipped;
+    const filtered = await call(machine, "GET", "/relay/v1/today?since=2099-01-01T00%3A00%3A00Z");
+    expect(filtered.body).toMatchObject({ shipped: { items: [] } });
+    expect(reply.body).not.toHaveProperty("lastVisitAt");
+    const unfiltered = await call(machine, "GET", "/relay/v1/today");
+    expect(unfiltered.body).toMatchObject({ shipped });
     expect(shipped.state).toBe("ok");
     const item = shipped.items.find((candidate) => candidate.task.id === shippedTask);
     expect(item?.pr.number).toBe(41);
@@ -2733,7 +2663,6 @@ describe("empty store", () => {
       const todayReply = await freshClient.send(key, "GET", "/relay/v1/today", options);
       expectSchema("Today", todayReply.body);
       expect(todayReply.body).toMatchObject({
-        lastVisitAt: null,
         needsYou: { items: [], nextCursor: null },
       });
     } finally {

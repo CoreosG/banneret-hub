@@ -262,7 +262,7 @@ function PersonLine(props: {
               onClick={() => props.onOpen(card.task)}
             >
               <span className="min-w-0 truncate">{card.task.title}</span>
-              <LeaseChip state={card.lease.state} lastSignalAt={card.lease.lastSignalAt} />
+              <LeaseChip state={card.lease.state} staleAt={card.lease.staleAt} />
             </button>
           ))}
         </div>

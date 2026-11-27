@@ -27,7 +27,7 @@ All under `/relay/v1`.
 | `GET /machines` | The Team machines list, paged: every live machine for everyone, revoked ones for their owner and founders. |
 | `DELETE /machines/{machineId}` | Revoke a machine (its owner or a founder). |
 | `POST /facts` | The heartbeat: machine facts plus activity facts, every 30 seconds. |
-| `GET /today` | Needs you, shipped, working, stuck and optionally health. `?visit=1` marks a real open (see below). |
+| `GET /today` | Needs you, shipped, working, stuck and optionally health. `?since=...` filters shipped work (see below). |
 | `GET /needs` | Needs-you items, paged, most urgent first. |
 | `GET /repositories` | The company's repository list, paged: `projectKey`, `name`, optional `url`. |
 | `GET /events` | Server-sent events: `needs.changed`, `mention`, `bundle.changed`, `staff.removed`, `capabilities.changed`, `reset`. |
@@ -121,8 +121,8 @@ relay/v1
 <BODY>            the exact request body bytes; empty when there is none
 ```
 
-The query is part of TARGET, so it is signed: `GET /today?visit=1` and `GET /today` have different signatures, and a
-proxy cannot add or drop `visit=1`.
+The query is part of TARGET, so it is signed: `GET /today?since=2026-11-26T10%3A00%3A00Z` and `GET /today` have different signatures, and a
+proxy cannot add or drop the cutoff.
 
 TARGET is verified byte for byte. Proxies in front of the relay must not rewrite the path or query; a Tailscale
 Serve path mount must preserve the `/relay/v1/...` target as the Hub sent it.
@@ -189,12 +189,18 @@ goes through a different call.
 
 ## Today and visits
 
-`GET /today` returns `lastVisitAt`: when the person last opened Today in an earlier visit, or null. The Hub sends
-`GET /today?visit=1` only when the person actually opens Today, and plain `GET /today` for background refetches
-(such as after `needs.changed`). Only a `visit=1` read can move `lastVisitAt`. Visit reads less than 30 minutes after
-the previous visit read count as one visit and leave it as it was; a visit read 30 minutes or more later starts a new
-visit, and `lastVisitAt` becomes the time of the previous visit's last read. The only accepted value of `visit` is
-`1`; any other is refused with 400 `malformed`.
+The Hub keeps the visit boundary on this device for each workspace. On the first open it requests
+`GET /today`. Later it sends an optional UTC timestamp as `GET /today?since=...`. The relay returns
+pull requests merged strictly after that time. Without a filter it returns recent merges.
+The relay must never persist the timestamp, including in request logs. It stores no visit history.
+The working block reports agent sessions and their owners. It has no human activity times.
+
+| Device event | Local visit state | Filter |
+|---|---|---|
+| First open or cleared browser storage | Save the current open time | None |
+| Open after a gap of at least 30 minutes | Use the previous open as the boundary and save the current open time | Previous open |
+| Open within 30 minutes | Keep the boundary and update the open time | Same boundary |
+| Refresh or restart | Read the saved record for this workspace | Same boundary |
 
 ### Shipped
 
@@ -322,7 +328,7 @@ as snapshot only (the boards, the map and the team) have no live call.
   every heartbeat, so one event per head change would push `needs.changed` and `mention` out of the replay window
   of `GET /events`.
 - **Discovery.** An enrolled caller's capabilities carry `snapshot {version, head}` when the relay serves snapshots.
-- **Not a visit.** Reading a snapshot never moves `lastVisitAt`. Shipped stays on `GET /today?visit=1`.
+- Shipped is fetched separately with the device’s optional `since` filter.
 - **Removal.** A person removed from staff, or a revoked machine, is refused as on every other call. A removed
   person's heads are dropped at once.
 

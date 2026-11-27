@@ -25,3 +25,5 @@ Operator-configured health sources can send alarm titles, details, links and tim
 relay. Enrolled staff can read active alarms. Critical alarm notifications go to configured people
 or, by default, founders. Alarm records and signing secrets stay out of GitHub. Opening a dashboard
 contacts its configured HTTPS address in the system browser.
+
+The Hub never records or shows human activity times or last-seen status. It shows agent session state and machine connectivity. Today keeps its previous visit boundary only on this device, per workspace. The relay filters shipped work using that timestamp and never stores it.

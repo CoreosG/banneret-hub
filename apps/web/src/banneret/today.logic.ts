@@ -23,7 +23,7 @@ export interface TodayCounts {
   readonly needs: string;
   readonly stuck: number;
   readonly shipped: number;
-  /** "since your last visit" applies only when the relay knows that visit. */
+  /** "since your last visit" applies only when the device has a cutoff. */
   readonly sinceVisit: boolean;
 }
 
@@ -50,12 +50,16 @@ export function needsFigure(feed: NeedsSource, today: BanneretFeedToday | null):
 }
 
 /** The header's counts. */
-export function todayCounts(today: BanneretFeedToday, feed: NeedsSource): TodayCounts {
+export function todayCounts(
+  today: BanneretFeedToday,
+  feed: NeedsSource,
+  sinceVisit: boolean,
+): TodayCounts {
   return {
     needs: needsFigure(feed, today),
     stuck: today.stuck.items.length,
     shipped: today.shipped.items.length,
-    sinceVisit: today.lastVisitAt !== null,
+    sinceVisit,
   };
 }
 

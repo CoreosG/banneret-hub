@@ -114,7 +114,7 @@ describe("TaskCard", () => {
             <LeaseChip
               holder="ada"
               state="active"
-              lastSignalAt={new Date(NOW).toISOString()}
+              staleAt={new Date(NOW).toISOString()}
               nowMs={NOW}
             />
           }
@@ -164,7 +164,7 @@ describe("LeaseChip", () => {
         <LeaseChip
           holder="grace-hopper-example"
           state="conflict"
-          lastSignalAt={new Date(NOW).toISOString()}
+          staleAt={new Date(NOW).toISOString()}
           nowMs={NOW}
         />
       </div>,
