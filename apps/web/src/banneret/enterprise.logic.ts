@@ -105,11 +105,15 @@ const relayHost = (origin: string | undefined) => {
 const withCode = (text: string, view: BanneretEnrolmentView) =>
   view.confirmCode === undefined ? text : `${text} \u00b7 code ${view.confirmCode}`;
 
-const PENDING_STATES: ReadonlySet<BanneretEnrolmentView["state"]> = new Set([
-  "requested",
-  "awaiting_approval",
-  "approved",
-]);
+export const machineEnrolment = {
+  unknown: "Status unavailable",
+  none: "Not joined",
+  requested: "Pending",
+  awaiting_approval: "Pending",
+  approved: "Pending",
+  configured: "Joined",
+  revoked: "Revoked",
+} as const;
 
 /**
  * Joins still in progress whose workspace does not exist yet (the server writes it once the join
@@ -122,7 +126,9 @@ export function pendingJoins(
   const live = new Set(
     workspaces.filter((entry) => entry.deleted !== true).map((entry) => entry.id),
   );
-  return views.filter((view) => PENDING_STATES.has(view.state) && !live.has(view.workspaceId));
+  return views.filter(
+    (view) => machineEnrolment[view.state] === "Pending" && !live.has(view.workspaceId),
+  );
 }
 
 /** What "Copy details" puts on the clipboard: the facts support matches to `pairings list`. */

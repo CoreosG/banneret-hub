@@ -74,15 +74,18 @@ function useWorkspaceAutoSwitch() {
 }
 
 /**
- * Reads the enrolments of every connected environment: every 2 s while the wizard is open (this
- * machine only), every 30 s otherwise, and only while a workspace belongs to a relay. Take and release
+ * Reads the enrolments of every connected environment: every 2 s while the wizard is open (the
+ * selected machine only), every 30 s otherwise, and only while a workspace belongs to a relay. Take and release
  * may run on any of them, so each one's relay person is needed. `status` is local; it never reaches
  * the relay.
  */
 function useEnrolmentPolling() {
-  const environmentId = usePrimaryEnvironmentId();
+  const primary = usePrimaryEnvironmentId();
   const connected = useConnectedEnvironmentIds();
-  const wizardOpen = useWorkspacesStore((state) => state.dialog?.kind === "enterprise");
+  const dialog = useWorkspacesStore((state) => state.dialog);
+  const wizardOpen = dialog?.kind === "enterprise";
+  const selected = (wizardOpen ? dialog.environmentId : undefined) ?? primary;
+  const environmentId = selected !== null && connected.includes(selected) ? selected : null;
   const hasEnterprise = useWorkspaces().some((workspace) => workspace.relay !== undefined);
   const others = connected.filter((id) => id !== environmentId).join("\u0000");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's enrolment, which changes on the relay's schedule

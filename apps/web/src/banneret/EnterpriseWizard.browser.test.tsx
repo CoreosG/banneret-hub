@@ -94,7 +94,7 @@ function setup(displayName = "Example Company") {
     activeId: null,
     dialog: null,
   });
-  useEnrolmentStore.setState({ views: {} });
+  useEnrolmentStore.setState({ views: {}, machines: {} });
   state.openExternal.mockReset().mockResolvedValue(undefined);
   let stored: BanneretWorkspace[] = [];
   vi.spyOn(workspacesRpc, "list").mockImplementation(async () => ({ workspaces: stored }));
@@ -234,6 +234,80 @@ function Harness() {
 const relaySpies = (spies: ReturnType<typeof setup>["spies"]) => Object.values(spies);
 
 describe("EnterpriseWizard", () => {
+  it("manages each connected machine on the selected company's relay", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const server = setup();
+    const remote = EnvironmentId.make("banneret-old");
+    const pending = EnvironmentId.make("banneret-dev");
+    const revoked = EnvironmentId.make("removed-server");
+    const connected = [LOCAL, remote, pending, revoked];
+    vi.mocked(useConnectedEnvironmentIds).mockReturnValue(connected);
+    const joined = { ...server.pending, state: "configured" } as const;
+    const records = new Map<EnvironmentId, BanneretEnrolmentView[]>([
+      [LOCAL, [joined]],
+      [remote, [{ ...joined, relayOrigin: OTHER_ORIGIN }]],
+      [pending, [server.pending]],
+      [revoked, [{ ...joined, state: "revoked" }]],
+    ]);
+    server.serverWritesWorkspace();
+    server.spies.status.mockImplementation(async (id) => ({
+      ok: true,
+      value: {
+        machine: { environmentId: id, hostname: id, hubVersion: "1.0" },
+        enrolments: records.get(id) ?? [],
+      },
+    }));
+    await using _screen = await render(<Harness />);
+    const machines = async () => {
+      await act(() => openWorkspaceDialog({ kind: "machines", origin: ORIGIN }));
+    };
+    await machines();
+    const row = page.getByRole("listitem", { name: pending });
+    await expect.element(row.getByText(/ABCD2345/)).toBeVisible();
+    const copied = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    stack.defer(() => copied.mockRestore());
+    await userEvent.click(row.getByRole("button", { name: "Copy details" }));
+    expect(copied).toHaveBeenCalledWith(expect.stringContaining("Environment: banneret-dev"));
+    await expect
+      .element(page.getByRole("listitem", { name: remote }).getByText("Not joined"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("listitem", { name: LOCAL }).getByText("Joined"))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("listitem", { name: revoked }).getByText("Revoked"))
+      .toBeVisible();
+    await userEvent.click(page.getByRole("button", { name: "Join banneret-old…" }));
+    const picker = page.getByRole("combobox", { name: "Machine" });
+    await expect.element(picker).toHaveTextContent(remote);
+    await expect.element(page.getByText("Joining banneret-old to Example Company")).toBeVisible();
+    await userEvent.click(picker);
+    await userEvent.click(page.getByRole("option", { name: pending }));
+    await expect.element(page.getByLabelText("Confirm code")).toHaveTextContent("ABCD2345");
+    await userEvent.click(picker);
+    await userEvent.click(page.getByRole("option", { name: remote }));
+    await userEvent.click(page.getByRole("button", { name: "Continue" }));
+    await userEvent.click(page.getByRole("button", { name: "Join Example Company" }));
+    expect(server.spies.start).toHaveBeenCalledWith(
+      remote,
+      expect.objectContaining({ origin: ORIGIN }),
+    );
+    records.set(remote, [joined]);
+    await act(async () => {
+      await refreshEnrolment(remote);
+    });
+    await machines();
+    await userEvent.click(page.getByRole("button", { name: "Leave banneret-old…" }));
+    server.spies.leave.mockResolvedValue({ ok: true, value: none("left") });
+    await userEvent.click(page.getByRole("button", { name: "Leave", exact: true }));
+    expect(server.spies.leave).toHaveBeenCalledWith(
+      { environmentId: remote, relayOrigin: ORIGIN },
+      "revoke",
+      true,
+    );
+  });
+
   it("walks address, Join, code, approval and projects, and opens sign-in without the code", async () => {
     using stack = new DisposableStack();
     await prepareScreen(stack);
@@ -429,7 +503,7 @@ describe("EnterpriseWizard", () => {
     await server.setView({ ...approved, health: "forbidden" });
     await expect.element(page.getByText("The relay does not allow this machine")).toBeVisible();
     await userEvent.click(page.getByRole("button", { name: "Forget this machine here" }));
-    expect(server.spies.leave).toHaveBeenCalledWith(TARGET, "forget");
+    expect(server.spies.leave).toHaveBeenCalledWith(TARGET, "forget", false);
     // The stub's leave does not change what status answers; make the server agree.
     await server.setView(none("forgotten"));
     await expect

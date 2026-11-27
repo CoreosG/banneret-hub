@@ -491,6 +491,22 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("leaves the machine and preserves a workspace shared with another joined machine", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const enrolment = yield* Enrolment.BanneretEnrolment;
+        const joined = yield* join(fake, relay);
+        const before = yield* Workspaces.list();
+        expect(before.workspaces.map((entry) => entry.id)).toContain(joined.workspaceId);
+        expect(yield* enrolment.leave(relay.origin, "revoke", true)).toEqual(
+          noneOf({ reason: "left" }),
+        );
+        expect(yield* Workspaces.list()).toEqual(before);
+        yield* noSecretsLeft;
+      }).pipe(onFreshHub()),
+    ),
+  );
+
   it.live("a relay that no longer knows the machine is not reported as leaving", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {
