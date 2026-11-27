@@ -507,6 +507,31 @@ const make = Effect.gen(function* () {
         const people = (team.value?.people ?? []).filter(
           (entry) => person === undefined || same(entry.login, person),
         );
+        const sessions = new Map<string, (typeof people)[number]["sessions"][number][]>();
+        if (team.value?.office && people.length) {
+          const wanted = new Set(people.map((p) => p.id));
+          const keys = [null, ...team.value.office.summary.rooms.map((r) => r.board)];
+          for (const board of keys) {
+            let cursor: string | undefined;
+            const seen = new Set<string>();
+            do {
+              const page = yield* feed.room(relay.relayOrigin, board, cursor);
+              if (!page || (page.nextCursor && seen.has(page.nextCursor)))
+                return yield* new OrchestratorMcpFailure({
+                  code: "orchestration_error",
+                  message: "Could not read Team sessions.",
+                });
+              for (const session of page.sessions) {
+                if (!wanted.has(session.personId)) continue;
+                const rows = sessions.get(session.personId) ?? [];
+                rows.push(session);
+                sessions.set(session.personId, rows);
+              }
+              cursor = page.nextCursor ?? undefined;
+              if (cursor) seen.add(cursor);
+            } while (cursor);
+          }
+        }
         return {
           ...companyOf(relay),
           fetchedAt: team.fetchedAt,
@@ -525,7 +550,7 @@ const make = Effect.gen(function* () {
                   ? [{ taskId: card.task.id, title: card.task.title, state: card.lease.state }]
                   : [],
               ),
-              sessions: entry.sessions.map((session) => {
+              sessions: (sessions.get(entry.id) ?? entry.sessions).map((session) => {
                 const title = session.taskId === undefined ? undefined : titles.get(session.taskId);
                 return {
                   id: session.id,

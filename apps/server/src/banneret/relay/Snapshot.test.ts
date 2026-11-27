@@ -40,7 +40,7 @@ import {
   reshapeBoards,
   reshapeMap,
   reshapeTask,
-  reshapeTeam,
+  machinesByOwner,
   taskIdForLinks,
 } from "./Snapshot.ts";
 
@@ -531,8 +531,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
         world.threads = [thread("th-plain")];
         yield* events.next(
           (event) =>
-            event.board?.value != null &&
-            event.team?.value?.people.some((person) => person.sessions.length === 1) === true,
+            event.board?.value != null && event.team?.value?.office?.summary.agents.length === 1,
           "a settled board and team",
         );
         const before = relay.requests.filter((request) => isFile(request.url)).length;
@@ -1370,16 +1369,22 @@ describe("BanneretRelayFeed team from the snapshot", () => {
           const joined = yield* join(fake, relay);
           yield* assignProject(joined.workspaceId!);
           const state = yield* events.next(
-            (event) =>
-              event.team?.value?.people.some((person) => person.sessions.length === 2) === true,
+            (event) => event.team?.value?.office?.summary.hallway.counts.waiting === 1,
             "the team",
           );
           expect(state.sections).toContain("team");
           expect(state.team!.problem).toBeUndefined();
-          const person = state.team!.value!.people.find((entry) => entry.sessions.length === 2)!;
+          const person = state.team!.value!.people[0]!;
           expect(person.role).toBe("founder");
           expect(person.machines).toHaveLength(0);
-          const [lead, child] = person.sessions;
+          expect(person.sessions).toHaveLength(0);
+          const feed = yield* RelayFeed.BanneretRelayFeed;
+          const hallway =
+            "/relay/v1/snapshot/files/" + state.team!.value!.office!.files["team.hallway"];
+          expect(relay.requests.filter((r) => r.url === hallway)).toHaveLength(0);
+          const page = yield* feed.room(focus.origin, null);
+          expect(relay.requests.filter((r) => r.url === hallway)).toHaveLength(1);
+          const [lead, child] = page!.sessions;
           expect(lead!.state).toBe("working");
           expect(lead!.machineId).toBeUndefined();
           expect(lead!.provider).toBe("claude");
@@ -1416,49 +1421,19 @@ describe("BanneretRelayFeed team from the snapshot", () => {
   );
 });
 
-describe("reshapeTeam", () => {
-  it("joins live machines by owner, and drops revoked machines and malformed sessions", () => {
-    const team = reshapeTeam(
+it("excludes revoked machines from the Team directory", () => {
+  const machines = machinesByOwner({
+    items: [
+      { id: "m_1", ownerId: "p_ada", label: "Ada server", kind: "server", connected: true },
       {
-        people: [
-          {
-            id: "p_ada",
-            login: "ada-example",
-            role: "founder",
-          },
-          { login: "no-id", role: "founder", sessions: [] },
-          { id: "p_bo", login: "bo-example", sessions: [] },
-        ],
+        id: "m_2",
+        ownerId: "p_ada",
+        label: "Ada old laptop",
+        kind: "laptop",
+        connected: false,
+        revokedAt: "2026-11-24T18:00:00Z",
       },
-      {
-        items: [
-          { id: "m_1", ownerId: "p_ada", label: "Ada server", kind: "server", connected: true },
-          {
-            id: "m_2",
-            ownerId: "p_ada",
-            label: "Ada old laptop",
-            kind: "laptop",
-            connected: false,
-            revokedAt: "2026-11-24T18:00:00Z",
-          },
-        ],
-        truncated: false,
-      },
-      [
-        {
-          sessions: [
-            { personId: "p_ada", id: "s_1", provider: "claude", state: "working", since: "x" },
-            { personId: "p_ada", id: "s_2", machineId: "m_1", state: "working", since: "x" },
-          ],
-        },
-      ],
-    );
-    expect(team?.people.map((person) => person.login)).toEqual(["ada-example", "bo-example"]);
-    expect(team?.people[0]?.machines).toEqual([
-      { id: "m_1", label: "Ada server", kind: "server", connected: true },
-    ]);
-    expect(team?.people[0]?.sessions.map((session) => session.id)).toEqual(["s_1"]);
-    expect(team?.people[1]?.role).toBe("limited_staff");
-    expect(reshapeTeam({ people: "nope" }, undefined, [])).toBeUndefined();
+    ],
   });
+  expect(machines.get("p_ada")?.map((m) => m.label)).toEqual(["Ada server"]);
 });

@@ -50,6 +50,14 @@ const graveyardPageCommand = createEnvironmentRpcCommand(connectionAtomRuntime, 
   label: "environment-data:banneret-relay:graveyard-page",
   tag: BANNERET_RELAY_FEED_WS_METHODS.graveyardPage,
 });
+const roomCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret-team:room",
+  tag: BANNERET_RELAY_FEED_WS_METHODS.room,
+});
+const agentsCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret-team:agents",
+  tag: BANNERET_RELAY_FEED_WS_METHODS.agents,
+});
 const feedAtom = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
   label: "environment-data:banneret-relay:feed",
   tag: BANNERET_RELAY_FEED_WS_METHODS.feed,
@@ -66,6 +74,20 @@ async function settled<T>(run: Promise<AtomCommandResult<T, unknown>>): Promise<
 
 /** Every call the feed makes; tests replace these. */
 export const feedRpc = {
+  agents: ({ environmentId, relayOrigin }: RelayTarget, cursor: string) =>
+    settled(
+      runAtomCommand(appAtomRegistry, agentsCommand, {
+        environmentId,
+        input: { relayOrigin, cursor },
+      }),
+    ),
+  room: ({ environmentId, relayOrigin }: RelayTarget, board: string | null, cursor?: string) =>
+    settled(
+      runAtomCommand(appAtomRegistry, roomCommand, {
+        environmentId,
+        input: { relayOrigin, board, cursor },
+      }),
+    ),
   today: (
     { environmentId, relayOrigin }: RelayTarget,
     since: string | undefined,

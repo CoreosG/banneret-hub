@@ -11,7 +11,7 @@ export const FILTER_MEMORY_KEY = "banneret.page-filters.v1";
 export type PageFilters = Readonly<Record<string, string>>;
 
 /** The page a set of filters belongs to: a board by its id, or the Map or the Feed. */
-export type FilterScope = `board:${string}` | "map" | "feed";
+export type FilterScope = `board:${string}` | "map" | "feed" | "team";
 
 const slot = (workspaceId: string, scope: FilterScope) => `${workspaceId} ${scope}`;
 
@@ -69,6 +69,7 @@ export function restoredSearch(
   path: string,
   boards: BanneretBoards | null,
 ): PageFilters {
+  if (path === "/team") return rememberedFilters(workspaceId, "team");
   if (path === "/map") return rememberedFilters(workspaceId, "map");
   if (path === "/feed") return rememberedFilters(workspaceId, "feed");
   if (path !== "/board") return {};

@@ -32,6 +32,10 @@ import {
   type BanneretFeedToday,
   type BanneretFeedTodayRead,
   type BanneretTaskRead,
+  OfficeAgentPage,
+  OfficeRoomPage,
+  OfficeSummary,
+  OfficeDirectory,
   type BanneretTeamRead,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -42,6 +46,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
@@ -67,8 +72,7 @@ import {
   reshapeFeedPage,
   reshapeGraveyardPage,
   reshapeTask,
-  reshapeTeam,
-  teamViewKey,
+  machinesByOwner,
   unquoteEtag,
 } from "./Snapshot.ts";
 
@@ -85,6 +89,10 @@ export interface RelayFeedOptions {
   readonly snapshotPollMs: number;
 }
 
+const decodeOfficeDirectory = Schema.decodeUnknownOption(OfficeDirectory);
+const decodeOfficeSummary = Schema.decodeUnknownOption(OfficeSummary);
+const decodeOfficeAgentPage = Schema.decodeUnknownOption(OfficeAgentPage);
+const decodeOfficeRoomPage = Schema.decodeUnknownOption(OfficeRoomPage);
 const DEFAULT_OPTIONS: RelayFeedOptions = {
   retryMs: 2000,
   maxRetryMs: 60_000,
@@ -96,6 +104,11 @@ const DEFAULT_OPTIONS: RelayFeedOptions = {
 
 /** One relay's feed. */
 interface RelayFeedInstance {
+  readonly agents: (cursor: string) => Effect.Effect<OfficeAgentPage | null>;
+  readonly room: (
+    board: string | null,
+    cursor?: string | undefined,
+  ) => Effect.Effect<OfficeRoomPage | null>;
   readonly chat: (action: ChannelAction) => Effect.Effect<ChannelResult>;
   readonly today: (since?: string) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (cursor: string | undefined) => Effect.Effect<BanneretFeedNeedsRead>;
@@ -118,6 +131,12 @@ export interface RelayMcpTool {
 
 /** Every call names its relay; a relay this environment has no enrolment with answers as not joined. */
 interface FeedService {
+  readonly agents: (origin: string, cursor: string) => Effect.Effect<OfficeAgentPage | null>;
+  readonly room: (
+    origin: string,
+    board: string | null,
+    cursor?: string | undefined,
+  ) => Effect.Effect<OfficeRoomPage | null>;
   readonly chat: (origin: string, action: ChannelAction) => Effect.Effect<ChannelResult>;
   readonly today: (relayOrigin: string, since?: string) => Effect.Effect<BanneretFeedTodayRead>;
   readonly needs: (
@@ -159,6 +178,8 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
   "t3/banneret/relay/RelayFeed/BanneretRelayFeed",
   {
     defaultValue: () => ({
+      room: () => Effect.succeed(null),
+      agents: () => Effect.succeed(null),
       chat: () => Effect.succeed(chatUnavailable),
       today: () => Effect.succeed(NOT_JOINED),
       needs: () => Effect.succeed(NOT_JOINED),
@@ -459,7 +480,12 @@ const linkedEnvironments = (body: unknown): Set<string> => {
 };
 
 const sectionKinds = (body: unknown): ReadonlyArray<string> =>
-  defined(list(fields(body)?.sections, 64).map((section) => text(fields(section)?.kind, 32)));
+  defined(
+    list(fields(body)?.sections, 64).map((section) => {
+      const row = fields(section);
+      return row?.kind === "team" && row.version !== 2 ? undefined : text(row?.kind, 32);
+    }),
+  );
 
 const mcpToolsOf = (body: unknown): ReadonlyArray<RelayMcpTool> =>
   defined(
@@ -474,7 +500,7 @@ const mcpToolsOf = (body: unknown): ReadonlyArray<RelayMcpTool> =>
 const sectionFlags = (body: unknown, kind: string): ReadonlyArray<string> | null => {
   const section = list(fields(body)?.sections, 64)
     .map(fields)
-    .find((candidate) => candidate?.kind === kind);
+    .find((candidate) => candidate?.kind === kind && (kind !== "team" || candidate.version === 2));
   return section === undefined
     ? null
     : defined(list(section.flags, 32).map((flag) => text(flag, 64)));
@@ -860,6 +886,10 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         yield* bump;
         return;
       }
+      case "team.changed":
+      case "team.rooms_changed":
+        wakeSnapshot();
+        return;
       case "mention":
         yield* bump;
         return;
@@ -1027,13 +1057,12 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       ...(boardFlags === null && mapFlags === null ? [] : ["work"]),
       ...(feedFlags === null ? [] : ["feed"]),
       ...(graveyardOffered ? ["graveyard"] : []),
-      ...(teamFlags === null ? [] : ["team", "team.people", "team.hallway", "machines"]),
+      ...(teamFlags === null ? [] : ["team", "team.people", "machines"]),
     ];
     const wantsAny = boardFlags !== null || fixed.length > 0;
     // The boards index and every `board.<id>` the head names; chosen per head read.
     const wanted = (keys: ReadonlyArray<string>) => [
       ...(boardFlags === null ? [] : boardHeadKeys(keys)),
-      ...(teamFlags === null ? [] : keys.filter((key) => key.startsWith("team.room."))),
       ...fixed,
     ];
     const at = yield* nowIso;
@@ -1185,30 +1214,55 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           }
         }
         if (teamFlags !== null) {
-          const value =
-            refs.team === undefined
-              ? undefined
-              : reshapeTeam(
-                  files["team.people"],
-                  files.machines,
-                  Object.entries(files)
-                    .filter(([key]) => key === "team.hallway" || key.startsWith("team.room."))
-                    .map(([, file]) => file),
-                );
-          if (refs.team === undefined) teamProblem(notPublished("team"));
-          else if (value === undefined) teamProblem(unreadable);
+          const roomFiles = reader.roomRefs();
+          const signature = [
+            refs.team,
+            refs["team.people"],
+            refs.machines,
+            ...Object.entries(roomFiles).flat(),
+            ...teamFlags,
+          ].join(" ");
+          if (!refs.team) teamProblem(notPublished("team"));
+          else if (signature === teamSignature && teamRead && !teamRead.problem)
+            teamRead = { ...teamRead, fetchedAt: at };
           else {
-            // Only what the page shows counts: a heartbeat that moved nothing on it publishes nothing.
-            const signature = teamViewKey(value);
-            if (
-              signature === teamSignature &&
-              teamRead !== null &&
-              teamRead.problem === undefined
-            ) {
-              teamRead = { ...teamRead, fetchedAt: at };
-            } else {
+            const summary = Option.getOrUndefined(decodeOfficeSummary(files.team));
+            let directory = Option.getOrUndefined(decodeOfficeDirectory(files["team.people"]));
+            const people = [...(directory?.people ?? [])];
+            const seen = new Set<string>();
+            while (directory?.nextCursor) {
+              const cursor = directory.nextCursor;
+              if (seen.has(cursor)) {
+                directory = undefined;
+                break;
+              }
+              seen.add(cursor);
+              const reply = yield* enrolment
+                .signedGet("/relay/v1/team/people?cursor=" + encodeURIComponent(cursor))
+                .pipe(Effect.option);
+              directory = Option.getOrUndefined(
+                Option.flatMap(reply, (r) => decodeOfficeDirectory(r.body)),
+              );
+              if (directory) people.push(...directory.people);
+            }
+            if (!stillJoined(key)) return;
+            if (!summary || !directory) teamProblem(unreadable);
+            else {
+              const machines = machinesByOwner(
+                teamFlags.includes("sharing") ? files.machines : undefined,
+              );
+              teamRead = {
+                value: {
+                  people: people.map((p) => ({
+                    ...p,
+                    machines: machines.get(p.id) ?? [],
+                    sessions: [],
+                  })),
+                  office: { summary, revision: refs.team, files: roomFiles, flags: teamFlags },
+                },
+                fetchedAt: at,
+              };
               teamSignature = signature;
-              teamRead = { value, fetchedAt: at };
               changed = true;
             }
           }
@@ -1458,6 +1512,28 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         : Effect.succeed(chatUnavailable),
     today: readToday,
     needs: readNeeds,
+    agents: (cursor) =>
+      !teamFlags
+        ? Effect.succeed(null)
+        : Effect.map(
+            readPage("/relay/v1/team/agents" + pageQuery(cursor), (body) =>
+              Option.getOrUndefined(decodeOfficeAgentPage(body)),
+            ),
+            (r) => r.value,
+          ),
+    room: Effect.fn("BanneretRelayFeed.room")(function* (board: string | null, cursor?: string) {
+      const key = board === null ? "team.hallway" : "team.room." + board;
+      if (!joined || !teamFlags || !snapshotReader?.roomRefs()[key]) return null;
+      const decode = (body: unknown) => Option.getOrUndefined(decodeOfficeRoomPage(body));
+      if (cursor === undefined)
+        return yield* snapshotReader.roomFile(key).pipe(
+          Effect.map((body) => decode(body) ?? null),
+          Effect.orElseSucceed(() => null),
+        );
+      const path = board === null ? "hallway" : "rooms/" + encodeURIComponent(board);
+      return (yield* readPage("/relay/v1/team/" + path + "/sessions" + pageQuery(cursor), decode))
+        .value;
+    }),
     feedPage: readFeedPage,
     graveyardPage: readGraveyardPage,
     task: readTask,
@@ -1532,6 +1608,14 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   });
 
   const service: FeedService = {
+    room: (origin, board, cursor) =>
+      Effect.flatMap(feedFor(origin), (feed) =>
+        feed ? feed.room(board, cursor) : Effect.succeed(null),
+      ),
+    agents: (origin, cursor) =>
+      Effect.flatMap(feedFor(origin), (feed) =>
+        feed ? feed.agents(cursor) : Effect.succeed(null),
+      ),
     chat: (origin, action) =>
       Effect.flatMap(feedFor(origin), (feed) =>
         feed ? feed.chat(action) : Effect.succeed(chatUnavailable),
@@ -1587,6 +1671,16 @@ export const rpcHandlers = {
   }) => Effect.flatMap(BanneretRelayFeed, (feed) => feed.needs(input.relayOrigin, input.cursor)),
   [BANNERET_RELAY_FEED_WS_METHODS.feed]: (input: { readonly relayOrigin: string }) =>
     Stream.unwrap(Effect.map(BanneretRelayFeed, (feed) => feed.events(input.relayOrigin))),
+  [BANNERET_RELAY_FEED_WS_METHODS.room]: (input: {
+    relayOrigin: string;
+    board: string | null;
+    cursor?: string | undefined;
+  }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) =>
+      feed.room(input.relayOrigin, input.board, input.cursor),
+    ),
+  [BANNERET_RELAY_FEED_WS_METHODS.agents]: (input: { relayOrigin: string; cursor: string }) =>
+    Effect.flatMap(BanneretRelayFeed, (feed) => feed.agents(input.relayOrigin, input.cursor)),
   [BANNERET_RELAY_FEED_WS_METHODS.feedPage]: (input: {
     readonly relayOrigin: string;
     readonly cursor: string;
