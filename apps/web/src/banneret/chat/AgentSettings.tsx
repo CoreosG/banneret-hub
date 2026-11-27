@@ -2,7 +2,7 @@ import { MemoryStrip } from "../MemoryStrip";
 import { ChatHandle, ChatSettings, type EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { ChatHeader as ThreadHeader } from "../../components/chat/ChatHeader";
+import { ThreadTimeline as Timeline } from "../../components/chat/ThreadTimeline";
 import { type ComponentProps, useState } from "react";
 import { useEnterpriseFeed, type EnterpriseFeed } from "../useEnterpriseFeed";
 import { chatRpc, useChatRead } from "./client";
@@ -121,23 +121,32 @@ function ThreadSettings({ enterprise, thread }: { enterprise: EnterpriseFeed; th
   );
 }
 
-export function ChatHeader(props: ComponentProps<typeof ThreadHeader>) {
+export function ThreadTimeline(props: ComponentProps<typeof Timeline>) {
+  const thread = props.draftEntries === null ? props.threadDetailRef : null;
+  if (!thread) return <Timeline {...props} />;
   return (
-    <>
-      <ThreadHeader {...props} />
-      {props.isServerThread && (
-        <MemoryStrip
-          key={props.activeThreadEnvironmentId + ":" + props.activeThreadId}
-          environmentId={props.activeThreadEnvironmentId}
-          threadId={props.activeThreadId}
-        />
+    <MemoryStrip
+      key={thread.environmentId + ":" + thread.threadId}
+      {...thread}
+      working={props.isWorking}
+      renderTimeline={(cards) => (
+        <>
+          <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
+          <Timeline
+            {...props}
+            footer={
+              cards ? (
+                <>
+                  {props.footer}
+                  {cards}
+                </>
+              ) : (
+                props.footer
+              )
+            }
+          />
+        </>
       )}
-      {props.isServerThread && (
-        <AgentThreadHeader
-          thread={props.activeThreadId}
-          environmentId={props.activeThreadEnvironmentId}
-        />
-      )}
-    </>
+    />
   );
 }

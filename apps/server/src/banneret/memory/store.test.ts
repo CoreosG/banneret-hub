@@ -71,3 +71,26 @@ it("keeps complete pinned entries inside the UTF-8 start index budget", () => {
     for (const line of index.split("\n").slice(1)) expect(JSON.parse(line)).toHaveProperty("key");
   });
 });
+
+it("reviews only the displayed version and updates search across edit, dispute and removal", () => {
+  withNotes(fixture(), "a", 10, (s) => {
+    s.propose({ ...proposal, why: "Keep changes small" });
+    const version = () => s.list(false)[0]!.version;
+    const proposed = version();
+    expect(s.list(true)[0]?.why).toBe("Keep changes small");
+    s.review("style", proposed, { kind: "editConfirm", text: "Use atomic commits" });
+    expect(s.search("patches")).toEqual([]);
+    expect(s.search("atomic")[0]?.trust).toBe("confirmed");
+    expect(s.list(true)).toEqual([]);
+    s.flag("style", "Out of date", "chat-a");
+    expect(s.list(true)[0]).toMatchObject({ flaggedBy: "chat-a", reason: "Out of date" });
+    expect(() => s.review("style", proposed, { kind: "keep" })).toThrow();
+    s.review("style", version(), { kind: "keep" });
+    expect(s.read("style").trust).toBe("confirmed");
+    s.review("style", version(), { kind: "remove" });
+    expect(s.search("atomic")).toEqual([]);
+    s.propose(proposal);
+    s.review("style", version(), { kind: "dismiss" });
+    expect(s.list(false)).toEqual([]);
+  });
+});

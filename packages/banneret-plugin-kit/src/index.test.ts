@@ -39,6 +39,7 @@ describe("external plugin contract", () => {
       scope: "project",
       kind: "project",
       source: "README",
+      why: "Keep releases consistent.",
       text: "Run checks first.",
     };
     expect(tools.banneret_memory_propose.input.parse({ ...proposal, confirmed: true })).toEqual(

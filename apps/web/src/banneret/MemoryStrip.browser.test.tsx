@@ -14,7 +14,7 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (load) => {
     createEnvironmentRpcCommand: (
       ...args: Parameters<typeof original.createEnvironmentRpcCommand>
     ) =>
-      args[1].tag === "memory.summary"
+      args[1].tag.startsWith("memory.")
         ? { permissionAtom: () => Atom.make(true) }
         : original.createEnvironmentRpcCommand(...args),
     runAtomCommand: respond,
@@ -28,12 +28,15 @@ it("shows counts and storage disclosure only for an orchestrator", async () => {
     <MemoryStrip environmentId={environmentId} threadId={ThreadId.make("ordinary")} />,
   );
   await vi.waitFor(() => expect(respond).toHaveBeenCalledTimes(1));
-  expect(page.getByText(/Unencrypted/).query()).toBeNull();
+  expect(page.getByText(/unencrypted/).query()).toBeNull();
   respond.mockResolvedValueOnce({ _tag: "Success", value: { total: 7, proposed: 2, disputed: 1 } });
+  respond.mockResolvedValueOnce({ _tag: "Success", value: [] });
   await using _orchestrator = await render(
     <MemoryStrip environmentId={environmentId} threadId={ThreadId.make("orchestrator")} />,
   );
   await expect
-    .element(page.getByText("Memory · 7 notes · 2 proposed · 1 disputed · Unencrypted"))
+    .element(
+      page.getByRole("button", { name: /Memory.*7 notes.*Stored unencrypted on this machine/ }),
+    )
     .toBeVisible();
 });
