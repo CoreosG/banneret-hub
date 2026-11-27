@@ -1,3 +1,4 @@
+import { providerMemoryPolicy } from "../../banneret/memory/providerMemoryPolicy.ts";
 import { pipe } from "effect/Function";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import { brokenRuntimeError } from "../../provider/providerCompatibility.ts";
@@ -1651,6 +1652,7 @@ type CodexSubAgentActivityItem = Extract<
 
 export interface CodexAppServerClientFactoryShape {
   readonly open: (input: {
+    readonly memoryArgs?: readonly string[];
     readonly instanceId: ProviderInstanceId;
     readonly threadId: ThreadId;
     readonly providerSessionId: OrchestrationV2ProviderSession["id"];
@@ -1994,7 +1996,7 @@ export const layerAppServerClientFactory: Layer.Layer<
           command: input.settings.binaryPath || "codex",
           args: codexAppServerArgs(
             resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
-          ),
+          ).concat(input.memoryArgs ?? []),
           env: environment,
           threadId: input.threadId,
         }).pipe(Effect.provideService(AgentScope, agentScope));
@@ -2160,6 +2162,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
               );
         const client = yield* clientFactory.open({
+          memoryArgs: (yield* providerMemoryPolicy(fileSystem, serverConfig.stateDir)).codexArgs,
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,

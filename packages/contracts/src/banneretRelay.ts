@@ -30,6 +30,7 @@ import {
   BANNERET_RELAY_FEED_RPC_SCOPES,
 } from "./banneretRelayFeed.ts";
 
+import { MEMORY_RPCS, MEMORY_RPC_SCOPES, MEMORY_RPC_AGGREGATES } from "./banneretMemory.ts";
 import { TASK_LEASE_RPCS, TASK_LEASE_RPC_AGGREGATES, TASK_LEASE_RPC_SCOPES } from "./taskLeases.ts";
 
 export * from "./banneretRelayFeed.ts";
@@ -270,6 +271,7 @@ export const BANNERET_RELAY_RPCS = [
   WsBanneretRelayRevokeMachineRpc,
   WsBanneretRelayMatchProjectsRpc,
   ...BANNERET_RELAY_FEED_RPCS,
+  ...MEMORY_RPCS,
   ...TASK_LEASE_RPCS,
 ] as const;
 
@@ -290,6 +292,7 @@ export const BANNERET_RELAY_RPC_SCOPES = {
   [BANNERET_RELAY_WS_METHODS.revokeMachine]: AuthEnvironmentMaintainScope,
   [BANNERET_RELAY_WS_METHODS.matchProjects]: AuthOrchestrationOperateScope,
   ...BANNERET_RELAY_FEED_RPC_SCOPES,
+  ...MEMORY_RPC_SCOPES,
   ...TASK_LEASE_RPC_SCOPES,
 } as const;
 
@@ -310,6 +313,7 @@ export const BANNERET_RELAY_RPC_AGGREGATES = {
   [BANNERET_RELAY_WS_METHODS.revokeMachine]: "banneret-relay",
   [BANNERET_RELAY_WS_METHODS.matchProjects]: "banneret-relay",
   ...BANNERET_RELAY_FEED_RPC_AGGREGATES,
+  ...MEMORY_RPC_AGGREGATES,
   ...TASK_LEASE_RPC_AGGREGATES,
 } as const;
 

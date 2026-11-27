@@ -420,3 +420,7 @@ pair and join the sandbox Hub from your own host login as described in the
 and open a project to start a thread. Extend a running booking when the line is
 empty, or cancel it from the card. Push commits or copy files out before the
 booking ends. Cleanup deletes the sandbox's local work.
+
+In Settings → Chat, **Use Banneret memory** turns off Claude and Codex memory in new
+Hub sessions on the selected environment. It defaults to off. Hub memory tools
+and the Memory line are available in either mode.

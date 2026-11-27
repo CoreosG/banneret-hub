@@ -1,7 +1,4 @@
-// Banneret Hub: the agent toolkit and join resource on the Hub's own MCP server (docs/banneret/agents.md).
-// A per-thread visibility hides them from every thread its company's relay does not offer them to, on lists and
-// on calls alike, so a Solo thread neither sees nor reaches them. The handlers still check the thread themselves.
-// The only fork file that touches Effect's McpServer directly: tools still go through McpToolAccess.
+import { memoryAccess } from "../memory/access.ts";
 import * as SandboxHandoff from "./SandboxHandoff.ts";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
@@ -16,7 +13,7 @@ import * as AgentRelays from "./AgentRelays.ts";
 import * as AgentHandlers from "./handlers.ts";
 import { JOIN_URI, joinText } from "./join.ts";
 import { taskPrompts } from "./startTask.ts";
-import { AgentToolkit } from "./tools.ts";
+import { AgentToolkit, memoryNames } from "./tools.ts";
 
 /**
  * Visible when the calling thread is offered the tool, or, for the join resource, any tool. A check that
@@ -25,12 +22,19 @@ import { AgentToolkit } from "./tools.ts";
 const offeredOnly = McpServer.visibility(
   Effect.gen(function* () {
     const relays = yield* AgentRelays.BanneretAgentRelays;
+    const memoryContext = yield* Effect.context<Effect.Services<ReturnType<typeof memoryAccess>>>();
     return ({ target }: McpServer.MiddlewareOptions) =>
       Effect.gen(function* () {
         const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
-        const thread = Option.getOrUndefined(scope)?.thread;
-        if (thread === undefined) return false;
+        const caller = Option.getOrUndefined(scope);
+        const thread = caller?.thread;
+        if (!caller || !thread) return false;
+        if (memoryNames.includes(target)) return true;
         const offered = yield* relays.offered(thread.threadId);
+        if (target === JOIN_URI && offered.size === 0)
+          return (yield* memoryAccess(thread.threadId, caller.environmentId).pipe(
+            Effect.provideContext(memoryContext),
+          )).orchestrator;
         return taskPrompts.some((p) => p.name === target)
           ? offered.has("banneret_lease_take")
           : target === JOIN_URI
@@ -43,6 +47,7 @@ const offeredOnly = McpServer.visibility(
 const joinResource = Layer.effectDiscard(
   Effect.gen(function* () {
     const relays = yield* AgentRelays.BanneretAgentRelays;
+    const memoryContext = yield* Effect.context<Effect.Services<ReturnType<typeof memoryAccess>>>();
     for (const prompt of taskPrompts)
       yield* McpServer.registerPrompt({
         name: prompt.name,
@@ -57,7 +62,7 @@ const joinResource = Layer.effectDiscard(
       uri: JOIN_URI,
       name: "banneret_join",
       description:
-        "The company's lease and chat rules for coding agents. Read before you change anything.",
+        "Read at session start for company rules and the private memory index in orchestrator chats.",
       mimeType: "text/markdown",
       annotations: Context.make(
         McpSchema.EnabledWhen,
@@ -65,14 +70,25 @@ const joinResource = Layer.effectDiscard(
       ),
       content: Effect.gen(function* () {
         const scope = yield* McpInvocationContext.McpInvocationContext;
-        const relay =
-          scope.thread === undefined ? null : yield* relays.forThread(scope.thread.threadId);
-        if (relay === null) {
+        if (!scope.thread)
+          return yield* new McpSchema.InvalidParams({ message: "A Hub thread is required." });
+        const id = scope.thread.threadId;
+        const offered = yield* relays.offered(id);
+        const relay = offered.size ? yield* relays.forThread(id) : null;
+        const index = yield* memoryAccess(id, scope.environmentId).pipe(
+          Effect.provideContext(memoryContext),
+          Effect.flatMap((access) =>
+            access.orchestrator ? access.open((store) => store.index()) : Effect.succeed(""),
+          ),
+          Effect.orElseSucceed(() => ""),
+        );
+        if (!relay && !index)
           return yield* new McpSchema.InvalidParams({
-            message: "This thread is not in a company workspace, so no lease rules apply.",
+            message: "No join resource for this thread.",
           });
-        }
-        return joinText({ company: relay.company, login: relay.me.login });
+        return [relay && joinText({ company: relay.company, login: relay.me.login }), index]
+          .filter(Boolean)
+          .join("\n\n");
       }).pipe(
         Effect.catchTags({
           OrchestratorMcpFailure: (error) =>

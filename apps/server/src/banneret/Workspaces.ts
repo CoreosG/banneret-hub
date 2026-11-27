@@ -27,6 +27,13 @@ export const workspacesFilePath = Effect.gen(function* () {
 // Serializes read-modify-write: two puts from different clients must not drop each other's change.
 const fileLock = Semaphore.makeUnsafe(1);
 
+export const readForMemory = Effect.gen(function* () {
+  const file = yield* workspacesFilePath;
+  const fs = yield* FileSystem.FileSystem;
+  if (!(yield* fs.exists(file))) return [];
+  return (yield* fs.readFileString(file).pipe(Effect.flatMap(decodeFile))).workspaces;
+});
+
 const readFile = Effect.fn("BanneretWorkspaces.readFile")(function* (file: string) {
   const fs = yield* FileSystem.FileSystem;
   return yield* fs.readFileString(file).pipe(

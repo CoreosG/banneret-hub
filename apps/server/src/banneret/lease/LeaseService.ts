@@ -1,3 +1,6 @@
+import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
+import { memorySettingsHandlers } from "../memory/providerMemoryPolicy.ts";
+import { memoryAccess } from "../memory/access.ts";
 // The tracker holds claim and release state. One operation per task runs in memory.
 // See docs/banneret/relay-v1/README.md, "How the Hub writes".
 import { IssueTrackerError } from "@t3tools/source-control-core/server/IssueTracker";
@@ -21,6 +24,7 @@ import {
   type TaskLeaseResult,
   type TaskLeaseStatus,
   type TaskLeaseTakeInput,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -737,6 +741,15 @@ export const rpcHandlers = {
         Effect.mapError((error) => new TaskLeaseError({ reason: "failed", detail: error.message })),
       );
     },
+  ),
+  ...memorySettingsHandlers,
+  "memory.summary": Effect.fn("BanneretMemory.summary")(
+    function* ({ threadId }: { threadId: ThreadId }) {
+      const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;
+      const access = yield* memoryAccess(threadId, environmentId);
+      return access.orchestrator ? yield* access.open((store) => store.counts()) : null;
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),
   [TASK_LEASE_WS_METHODS.orchestrator]: Orchestrator.selection,
   [TASK_LEASE_WS_METHODS.check]: Effect.fn("LeaseService.rpc.check")(function* (

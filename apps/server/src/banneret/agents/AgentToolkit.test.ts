@@ -44,7 +44,7 @@ import * as McpHttpServer from "../../mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as McpToolAccess from "../../mcp/McpToolAccess.ts";
-import { liveThreadShell } from "../../mcp/McpToolAccess.testkit.ts";
+import { idleThreadProjection, liveThreadShell } from "../../mcp/McpToolAccess.testkit.ts";
 import * as ThreadIssueService from "../../orchestration-v2/ThreadIssueService.ts";
 import * as ThreadManagementService from "../../orchestration-v2/ThreadManagementService.ts";
 import { ManagedProjectFolders } from "../../project/ManagedProjectFolders.ts";
@@ -74,7 +74,7 @@ import * as AgentRelays from "./AgentRelays.ts";
 import * as AgentHandlers from "./handlers.ts";
 import { JOIN_LINE, JOIN_URI, joinText } from "./join.ts";
 import * as AgentMcp from "./mcp.ts";
-import { AgentToolkit } from "./tools.ts";
+import { AgentToolkit, memoryNames } from "./tools.ts";
 
 const ENVIRONMENT = "env-agents-1";
 const ORIGIN = "https://relay.example.test";
@@ -135,6 +135,13 @@ const threadsLayer = Layer.mock(ThreadManagementService.ThreadManagementService)
       sandboxNotices.push(input.text);
       return {} as ThreadManagementService.ThreadManagementSendResult;
     }),
+  getThreadRecords: (id) =>
+    Effect.succeed(
+      idleThreadProjection({
+        ...liveThreadShell(id),
+        projectId: ProjectId.make(THREAD_PROJECTS.get(id)!),
+      }),
+    ),
   getThreadShell: (threadId) => {
     const projectId = THREAD_PROJECTS.get(threadId);
     return projectId === undefined
@@ -460,6 +467,7 @@ describe("agent toolkit listing", () => {
           const company = yield* session("company");
           expect(yield* company.tools).toEqual(
             [
+              ...memoryNames,
               ...BANNERET_AGENT_TOOLS.filter((name) => name !== "banneret_lease_withdraw"),
               "upstream_tool",
             ].sort(),
@@ -527,12 +535,32 @@ describe("agent toolkit listing", () => {
             (yield* company.call("banneret_lease_withdraw", { taskId: "t_free" })).error,
           ).toBeDefined();
 
+          const solo = yield* session("solo");
+          const proposed = yield* solo.call("banneret_memory_propose", {
+            key: "indent",
+            text: "Use two spaces",
+            scope: "personal",
+            kind: "feedback",
+            source: "chat",
+          });
+          expect(proposed.result?.structuredContent).toMatchObject({
+            data: expect.stringContaining('"trust":"proposed"'),
+          });
+          expect(
+            (yield* company.call("banneret_memory_search", { query: "spaces" })).result
+              ?.structuredContent,
+          ).toEqual({ data: "[]" });
+          expect(
+            (yield* solo.call("banneret_memory_search", { query: "spaces" })).result
+              ?.structuredContent,
+          ).toMatchObject({ data: expect.stringContaining('"key":"indent"') });
           const scratchMain = yield* session("scratch-main");
+          expect(JSON.stringify((yield* scratchMain.read).result)).toContain("Private memory.");
           expect((yield* scratchMain.prompts).map((p) => p.name)).toContain("banneret_route_task");
           asked.length = 0;
           for (const token of ["solo", "scratch-solo", "unjoined", "broken"]) {
             const other = yield* session(token);
-            expect(yield* other.tools).toEqual(["upstream_tool"]);
+            expect(yield* other.tools).toEqual([...memoryNames, "upstream_tool"].sort());
             expect(yield* other.prompts).toEqual([]);
             expect((yield* other.prompt("banneret_start_task")).error).toBeDefined();
             expect(yield* other.resources).toEqual([]);
@@ -590,7 +618,7 @@ describe("agent toolkit listing", () => {
           Effect.flatMap((response) => response.json),
         )) as { result: { capabilities: { tools?: { listChanged?: boolean } } } };
         expect(discover.result.capabilities.tools?.listChanged).toBe(true);
-        expect(yield* toolNames).toEqual(["upstream_tool"]);
+        expect(yield* toolNames).toEqual([...memoryNames, "upstream_tool"].sort());
 
         const notices = yield* post("subscriptions/listen", {
           notifications: { toolsListChanged: true },
@@ -615,6 +643,7 @@ describe("agent toolkit listing", () => {
         // The list it prompts reads the new offer, not the empty one kept from before.
         expect(yield* toolNames).toEqual(
           [
+            ...memoryNames,
             ...BANNERET_AGENT_TOOLS.filter((name) => name !== "banneret_lease_withdraw"),
             "upstream_tool",
           ].sort(),
