@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { LegendList } from "@legendapp/list/react";
 import type { ChatConversation, ChatMember, ChatMessage, ChannelAction } from "@t3tools/contracts";
+import { allBoardCards } from "@t3tools/contracts";
+import { useOpenTask } from "../useOpenTask";
+import { LeaseChip } from "../ui/Chips";
 import { HashIcon, LockIcon, SendIcon, XIcon, UsersIcon } from "lucide-react";
 import { SidebarInset } from "../../components/ui/sidebar";
 import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
@@ -341,6 +344,10 @@ function Timeline({
   const items = (read.value?.items ?? []).filter(
     (m) => !query || m.text.toLowerCase().includes(query.toLowerCase()),
   );
+  const openTask = useOpenTask(enterprise.target);
+  const tasks = new Map(
+    allBoardCards(enterprise.feed.board?.value).map((card) => [card.task.id, card]),
+  );
   const unreadIndex = root
     ? -1
     : items.findIndex((m) => m.seq > openingCursor && author(m) !== enterprise.enrolment.me?.login);
@@ -439,6 +446,7 @@ function Timeline({
               setSeen(Math.max(0, ...viewableItems.map((t) => t.item.seq)));
             }}
             renderItem={({ item: m, index }) => {
+              const task = m.taskRef && tasks.get(m.taskRef);
               const prior = items[index - 1];
               const date = new Date(m.createdAt);
               const newDay =
@@ -466,6 +474,32 @@ function Timeline({
                         </div>
                       )}
                       {m.deleted ? <i>Message deleted</i> : <Markdown text={m.text} />}
+                      {!m.deleted && m.taskRef && (
+                        <div className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
+                          {task ? (
+                            <button
+                              type="button"
+                              className="text-left hover:underline"
+                              onClick={() => openTask(task.task)}
+                            >
+                              {task.task.title}
+                            </button>
+                          ) : (
+                            m.taskRef
+                          )}
+                          {task && task.lease && (
+                            <LeaseChip
+                              holder={task.lease.holder.login}
+                              staleAt={task.lease.staleAt}
+                              state={
+                                task.lease.state === "active" || task.lease.state === "paused"
+                                  ? task.lease.state
+                                  : "stale"
+                              }
+                            />
+                          )}
+                        </div>
+                      )}
                       {!m.deleted && m.progress && (
                         <section data-agent-progress>
                           <strong>

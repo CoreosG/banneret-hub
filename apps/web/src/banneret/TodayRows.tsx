@@ -33,6 +33,7 @@ import { useState, type ReactNode } from "react";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
+import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
@@ -178,6 +179,21 @@ export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem; target: 
   const { item } = props;
   const navigate = useNavigate();
   const [error, setError] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [sending, setSending] = useState(false);
+  const [answered, setAnswered] = useState(false);
+  async function submit(value: { choice: string } | { text: string }) {
+    if (!item.ask || sending || answered) return;
+    setSending(true);
+    setError("");
+    try {
+      await chatRpc.run(props.target, { kind: "answer", id: item.ask.id, answer: value });
+      setAnswered(true);
+    } catch (e) {
+      setError(String(e));
+    }
+    setSending(false);
+  }
   const read = item.chatRead;
   const Icon = NEEDS_ICONS[item.kind] ?? CircleDotIcon;
   return (
@@ -197,6 +213,42 @@ export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem; target: 
             {" · "}
             <RelativeTime at={item.createdAt} />
           </span>
+          {item.ask?.state === "open" &&
+            (answered ? (
+              <span>Answer sent</span>
+            ) : (
+              <form
+                className="flex flex-wrap items-center gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (answer.trim()) void submit({ text: answer.trim() });
+                }}
+              >
+                {item.ask.choices.map((choice) => (
+                  <Button
+                    type="button"
+                    key={choice}
+                    size="sm"
+                    variant="outline"
+                    disabled={sending}
+                    onClick={() => void submit({ choice })}
+                  >
+                    {choice}
+                  </Button>
+                ))}
+                <input
+                  aria-label="Your answer"
+                  placeholder="Your answer"
+                  value={answer}
+                  onChange={(event) => setAnswer(event.target.value)}
+                  className="min-w-0 rounded-md border px-2 py-1"
+                />
+                <Button size="sm" type="submit" disabled={sending || !answer.trim()}>
+                  Send answer
+                </Button>
+              </form>
+            ))}
+          {error && <span role="alert">{error}</span>}
           {item.recommendation === undefined ? null : (
             <span className={cn(TYPE.meta, "break-words")}>Recommended: {item.recommendation}</span>
           )}
@@ -221,7 +273,6 @@ export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem; target: 
             >
               Mark read
             </button>
-            {error && <span role="alert">{error}</span>}
           </>
         ) : (
           <OpenTarget deepLink={item.deepLink} url={item.url} />

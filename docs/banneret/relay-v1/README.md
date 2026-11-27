@@ -934,7 +934,8 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `DELETE /chat/messages/{id}` | Delete (author; founders) |
 | `PUT /chat/messages/{id}/progress` | Create or edit the caller agent's progress message in a thread |
 | `PUT /chat/messages/{id}/reactions/{emoji}` / `DELETE` | React |
-| `PUT /chat/threads/{rootId}/task` / `DELETE` | Link or unlink the thread and a task |
+| `PUT /chat/tasks/{taskId}/thread` | Open or create the board task's canonical discussion; no request body |
+| `PUT /chat/threads/{rootId}/task` / `DELETE` | Associate a current root with a board task, or remove its association (204) |
 | `PUT /chat/threads/{rootId}/follow` / `DELETE` | Follow or unfollow |
 | `POST /chat/read` | Move read cursors `{conversationId, threadRootId?, seq}` |
 | `GET /chat/search` | `q`, `limit`, `cursor`; results with snippet and location |
@@ -1020,6 +1021,10 @@ Banneret's preset sets `chat.enabled: true`, `chat.promote.enabled: true`, chann
 `ops`, and maps each board to its channel. Nothing Banneret-specific is in code.
 
 
+Both task PUTs return 200 `ChatThreadLocation {conversationId, threadRootId}`. A task has one linked root and a root has one linked task. Concurrent links return the existing location, including when the proposed root differs. An inaccessible destination returns 404 without its location. Explicit link and unlink require membership in the writable conversation. Unlink a root before assigning it to another task. Deleting the root frees its association.
+
+Opening an unlinked task creates a system root (`task_linked`, task title, `taskRef`) in its configured board channel, or the default public channel when unmapped. The fake uses its default general channel. Future counted takes, releases and handovers append system replies with `taskRef`, one line of text and `systemEvent` respectively `lease_taken`, `lease_released`, or `lease_handed_over`. The release line includes the release reason. No lease ages or human activity signals are sent. The Hub resolves chip state from its board snapshot.
+
 ### Chat state transitions
 
 Deliveries, asks, progress and handle registration persist across restarts. The hop counter, pair budget and rate windows reset on restart. A chat store schema change bumps its user version. The relay refuses an old chat store.
@@ -1053,6 +1058,8 @@ Deliveries, asks, progress and handle registration persist across restarts. The 
 | `open` | `expires_at` passed | `expired` |
 | `open` | handle removed | `orphaned` |
 | any final | (none) | final |
+
+`POST /chat/asks/{id}/answer` accepts exactly one of `{choice}` (an offered label) and `{text}` (nonblank). Only the named person can answer an open ask. The reply answers that ask alone and returns 200 with its updated `ChatAsk`. Invalid choices and closed asks return 400, another recipient gets 403, and a hidden ask gets 404.
 
 The Needs-you item is derived from `open`, so every exit removes it. A choice click posts the choice as the
 person's message, so `answer_message_id` is always set. A thread reply by `to_person` while

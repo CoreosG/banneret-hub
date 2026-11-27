@@ -1,0 +1,18 @@
+{
+  "id": "m_release",
+  "conversationId": "c_general",
+  "seq": 1,
+  "author": {
+    "kind": "system"
+  },
+  "kind": "system",
+  "text": "Ada released the task: done.",
+  "mentions": [],
+  "replyCount": 0,
+  "reactions": [],
+  "createdAt": "2026-11-27T12:00:00Z",
+  "deleted": false,
+  "threadRootId": "m_discussion",
+  "systemEvent": "lease_released",
+  "taskRef": "t_build"
+}

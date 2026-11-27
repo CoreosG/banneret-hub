@@ -45,6 +45,7 @@ export type SchemaName =
   | "ChatPost"
   | "ChatEdit"
   | "ChatWriteProgress"
+  | "ChatThreadLocation"
   | "ChatTask"
   | "ChatNewAsk"
   | "ChatAnswer"
@@ -187,6 +188,8 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "chat-post.json": "ChatPost",
   "chat-edit.json": "ChatEdit",
   "chat-write-progress.json": "ChatWriteProgress",
+  "chat-thread-location.json": "ChatThreadLocation",
+  "chat-lease-echo.json": "ChatMessage",
   "chat-task.json": "ChatTask",
   "chat-new-ask.json": "ChatNewAsk",
   "chat-answer.json": "ChatAnswer",

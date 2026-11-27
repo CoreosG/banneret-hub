@@ -317,6 +317,11 @@ export const ChatWriteProgress = Schema.Struct({
 });
 export type ChatWriteProgress = typeof ChatWriteProgress.Type;
 
+export const ChatThreadLocation = Schema.Struct({
+  conversationId: Schema.String,
+  threadRootId: Schema.String,
+});
+
 export const ChatTask = Schema.Struct({ taskRef: Schema.String });
 export type ChatTask = typeof ChatTask.Type;
 
@@ -411,6 +416,8 @@ export const ChannelAction = Schema.Union([
     text: Schema.String,
     key: Schema.String,
   }),
+  Schema.Struct({ kind: Schema.Literal("answer"), id: Id, answer: ChatAnswer }),
+  Schema.Struct({ kind: Schema.Literal("discuss"), id: Id }),
   Schema.Struct({ kind: Schema.Literal("edit"), id: Id, text: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("delete"), id: Id }),
   Schema.Struct({ kind: Schema.Literal("read"), read: ChatRead }),
@@ -483,6 +490,10 @@ export function callChannel<A>(
         private: action.private,
         agents: "allowed",
       });
+    case "answer":
+      return call("POST", "asks/" + action.id + "/answer", action.answer);
+    case "discuss":
+      return call("PUT", "tasks/" + action.id + "/thread");
     case "edit":
       return call("PATCH", "messages/" + action.id, { text: action.text });
     case "delete":

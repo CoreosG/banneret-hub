@@ -10,6 +10,7 @@
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
   ChatNotice,
+  ChatAsk,
   ChatRead,
   type ChannelAction,
   type ChannelResult,
@@ -244,6 +245,7 @@ const deepLink = (value: unknown, labelFor: LabelFor): BanneretFeedDeepLink | un
   };
 };
 
+const isChatAsk = Schema.is(ChatAsk);
 const isChatRead = Schema.is(ChatRead);
 const isChatNotice = Schema.is(ChatNotice);
 const needsItem = (value: unknown, labelFor: LabelFor): BanneretFeedNeedsItem | undefined => {
@@ -260,6 +262,7 @@ const needsItem = (value: unknown, labelFor: LabelFor): BanneretFeedNeedsItem | 
     kind,
     title,
     createdAt,
+    ...(isChatAsk(source?.ask) ? { ask: source.ask } : {}),
     ...(isChatRead(source?.chatRead) ? { chatRead: source.chatRead } : {}),
     ...optional("recommendation", text(source?.recommendation, 500)),
     ...optional("from", person(source?.from)),

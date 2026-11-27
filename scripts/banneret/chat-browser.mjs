@@ -139,6 +139,18 @@ export async function command(op, arg) {
     session = undefined;
     return;
   }
+  if (op === "ask") {
+    await session.leo.call("POST", "chat/asks", {
+      to: session.ada.me.id,
+      question: "Which build should I publish?",
+      choices: ["Linux", "Mac"],
+      asHandle: "h_review",
+      key: "build",
+    });
+    return (await session.ada.call("GET", "needs")).body.items.find(
+      (item) => item.kind === "chat_ask",
+    );
+  }
   if (op === "leo") return session.leo(arg);
   if (op === "call") return session.ada(arg);
   throw new Error("Unknown chat test command.");
