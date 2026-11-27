@@ -3266,12 +3266,31 @@ describe("shared machines", () => {
     expect((await next()).body).toMatchObject({ directives: [] });
     await hostCall("/hosts/facts", heldFacts);
     const another = await call(colleague, "POST", prefix + "/sandboxes", request);
-    expect((await next()).body).toMatchObject({ offer: { id: (another.body as PoolSandbox).id } });
+    const anotherId = (another.body as PoolSandbox).id;
+    const unacknowledged = ((await next()).body as PoolNextResponse).offer!;
+    expect(unacknowledged.id).toBe(anotherId);
     const third = await enrol();
-    expect((await call(third, "POST", prefix + "/sandboxes", request)).body).toMatchObject({
-      state: "waiting",
-    });
+    const queued = await call(third, "POST", prefix + "/sandboxes", request);
+    expect(queued.body).toMatchObject({ state: "waiting" });
     expect((await next()).body).toEqual({ offer: null, directives: [] });
+    const anotherPath = "/sandboxes/" + anotherId;
+    const cancelled = await call(colleague, "DELETE", prefix + anotherPath);
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body).toMatchObject({ state: "ended", reason: "cancelled" });
+    expect((await next()).body).toMatchObject({
+      offer: { id: (queued.body as PoolSandbox).id },
+      directives: [],
+    });
+
+    const lateStart = await hostCall(anotherPath + "/state", {
+      offerId: unacknowledged.offerId,
+      state: "starting",
+      machineId: null,
+      reason: null,
+    });
+    expectError(lateStart, 409, "stale_offer");
+    expectSchema("PoolStateRefusal", lateStart.body);
+    expect(lateStart.body).toMatchObject({ current: { sandboxId: anotherId, state: "ended" } });
     expect((await report("ended")).body).toMatchObject({ state: "ended" });
   });
 });

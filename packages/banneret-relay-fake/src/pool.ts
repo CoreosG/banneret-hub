@@ -279,12 +279,14 @@ export function createPool(
       refresh();
       const b = owned(owner, id);
       if (b.view.state === "cleanup_failed") fail("forbidden", "Cleanup needs an admin.");
-      if (b.offerId && b.view.state !== "ended" && b.view.state !== "ending")
+      const unacknowledged = b.view.state === "waiting" || b.view.state === "offered";
+      if (unacknowledged) b.offerId = null;
+      if (b.offerId && (b.view.state === "starting" || b.view.state === "running"))
         b.directive = { sandboxId: id, offerId: b.offerId, action: "cancel" };
       if (b.view.state !== "ended")
         b.view = {
           ...b.view,
-          state: b.view.state === "waiting" ? "ended" : "ending",
+          state: unacknowledged ? "ended" : "ending",
           place: null,
           waitSeconds: null,
           reason: "cancelled",
