@@ -100,6 +100,8 @@ export type SchemaName =
   | "HostContention"
   | "PoolSandbox"
   | "PoolWorkspace"
+  | "PoolFounderView"
+  | "PoolFounderAction"
   | "PoolView"
   | "PoolWorkspaceRequest"
   | "PoolSandboxRequest"
@@ -208,6 +210,8 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "needs.json": "NeedsPage",
   "repositories.json": "RepositoriesPage",
   "pool-resources-local.json": "Resources",
+  "pool-founder-view.json": "PoolFounderView",
+  "pool-founder-action.json": "PoolFounderAction",
   "pool.json": "PoolView",
   "pool-config.json": "PoolConfig",
   "pool-next.json": "PoolNextResponse",

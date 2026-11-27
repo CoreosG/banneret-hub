@@ -25,6 +25,7 @@ import { Route as ChatTeamRouteImport } from './routes/_chat.team'
 import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatPoolRouteImport } from './routes/_chat.pool'
+import { Route as ChatOfferMachineRouteImport } from './routes/_chat.offer-machine'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatNeedsRouteImport } from './routes/_chat.needs'
 import { Route as ChatMapRouteImport } from './routes/_chat.map'
@@ -141,6 +142,11 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
 const ChatPoolRoute = ChatPoolRouteImport.update({
   id: '/pool',
   path: '/pool',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatOfferMachineRoute = ChatOfferMachineRouteImport.update({
+  id: '/offer-machine',
+  path: '/offer-machine',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatNewRoute = ChatNewRouteImport.update({
@@ -357,6 +363,7 @@ export interface FileRoutesByFullPath {
   '/map': typeof ChatMapRoute
   '/needs': typeof ChatNeedsRoute
   '/new': typeof ChatNewRoute
+  '/offer-machine': typeof ChatOfferMachineRoute
   '/pool': typeof ChatPoolRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
@@ -411,6 +418,7 @@ export interface FileRoutesByTo {
   '/map': typeof ChatMapRoute
   '/needs': typeof ChatNeedsRoute
   '/new': typeof ChatNewRoute
+  '/offer-machine': typeof ChatOfferMachineRoute
   '/pool': typeof ChatPoolRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
@@ -468,6 +476,7 @@ export interface FileRoutesById {
   '/_chat/map': typeof ChatMapRoute
   '/_chat/needs': typeof ChatNeedsRoute
   '/_chat/new': typeof ChatNewRoute
+  '/_chat/offer-machine': typeof ChatOfferMachineRoute
   '/_chat/pool': typeof ChatPoolRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/settings': typeof ChatSettingsRouteWithChildren
@@ -526,6 +535,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/needs'
     | '/new'
+    | '/offer-machine'
     | '/pool'
     | '/pull-requests'
     | '/settings'
@@ -580,6 +590,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/needs'
     | '/new'
+    | '/offer-machine'
     | '/pool'
     | '/pull-requests'
     | '/settings'
@@ -636,6 +647,7 @@ export interface FileRouteTypes {
     | '/_chat/map'
     | '/_chat/needs'
     | '/_chat/new'
+    | '/_chat/offer-machine'
     | '/_chat/pool'
     | '/_chat/pull-requests'
     | '/_chat/settings'
@@ -803,6 +815,13 @@ declare module '@tanstack/react-router' {
       path: '/pool'
       fullPath: '/pool'
       preLoaderRoute: typeof ChatPoolRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/offer-machine': {
+      id: '/_chat/offer-machine'
+      path: '/offer-machine'
+      fullPath: '/offer-machine'
+      preLoaderRoute: typeof ChatOfferMachineRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/new': {
@@ -1145,6 +1164,7 @@ interface ChatRouteChildren {
   ChatMapRoute: typeof ChatMapRoute
   ChatNeedsRoute: typeof ChatNeedsRoute
   ChatNewRoute: typeof ChatNewRoute
+  ChatOfferMachineRoute: typeof ChatOfferMachineRoute
   ChatPoolRoute: typeof ChatPoolRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatSettingsRoute: typeof ChatSettingsRouteWithChildren
@@ -1166,6 +1186,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatMapRoute: ChatMapRoute,
   ChatNeedsRoute: ChatNeedsRoute,
   ChatNewRoute: ChatNewRoute,
+  ChatOfferMachineRoute: ChatOfferMachineRoute,
   ChatPoolRoute: ChatPoolRoute,
   ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatSettingsRoute: ChatSettingsRouteWithChildren,

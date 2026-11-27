@@ -12,7 +12,7 @@ from urllib.error import URLError
 sys.dont_write_bytecode = True
 
 from facts import collect, quota_rows
-from provision import HOMES, IMAGE, filesystem, mounted, provision, run
+from provision import HOMES, IMAGE, checked_seat_policy, filesystem, mounted, provision, run
 from relay import join, post, save, utc
 
 
@@ -63,7 +63,8 @@ def main():
             raise ValueError("Configuration and host credential disagree")
         policy = directory / "policy.json"
         if args.command == "seat":
-            return provision(root, directory, args.person, args.login, args.uid, args.port, json.loads(policy.read_text()))
+            return provision(root, directory, args.person, args.login, args.uid, args.port,
+                             checked_seat_policy(json.loads(policy.read_text()), config["limits"]))
         history = {}
         while True:
             warnings = json.loads(policy.read_text())["warnings"] if policy.exists() else config["warnings"]

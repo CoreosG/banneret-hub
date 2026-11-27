@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import type {
   PoolConfig,
   PoolHostFacts,
+  PoolFounderView,
   PoolSandbox,
   PoolNextResponse,
   PoolView,
@@ -3087,7 +3088,7 @@ describe("chat contract", () => {
 describe("shared machines", () => {
   it("binds host facts and sandbox offers to host credentials and serves quota only to its owner", async () => {
     const owner = await enrol({ poolHostId: "dev" });
-    const colleague = await enrol();
+    const colleague = await enrol({ role: "limited_staff" });
     expect((await call(owner, "GET", "/relay/v1/machines")).body).toMatchObject({
       items: expect.arrayContaining([
         expect.objectContaining({ id: owner.machineId, poolHostId: "dev" }),
@@ -3114,10 +3115,34 @@ describe("shared machines", () => {
     const pairing = started.body as { pairingId: string; confirmCode: string };
     const pollHost = () => hostEnroll("poll", { pairingId: pairing.pairingId });
     expect((await pollHost()).body).toMatchObject({ state: "pending" });
-    await client.control("/pairings/" + pairing.pairingId + "/confirm", {
-      code: pairing.confirmCode,
-      person: { login: newLogin(), role: "founder" },
+    const admin = (body?: unknown) => hub(body ? "POST" : "GET", "/founder", body);
+    expectError(await call(colleague, "GET", prefix + "/founder"), 403, "forbidden");
+    expectError(
+      await call(colleague, "POST", prefix + "/founder", {
+        action: "refuse",
+        pairingId: pairing.pairingId,
+      }),
+      403,
+      "forbidden",
+    );
+    const founderListing = (await admin()).body;
+    expectSchema("PoolFounderView", founderListing);
+    expect(founderListing).toMatchObject({
+      enrolments: expect.arrayContaining([{ hostId, pairingId: pairing.pairingId }]),
     });
+    const unwanted = await hostEnroll("start", {
+      machine: machineFacts(hostId),
+      publicKey: key.publicKey,
+    });
+    const refusedId = (unwanted.body as { pairingId: string }).pairingId;
+    expect((await admin({ action: "refuse", pairingId: refusedId })).status).toBe(200);
+    expect((await hostEnroll("poll", { pairingId: refusedId })).body).toMatchObject({
+      state: "refused",
+    });
+    expect(
+      (await admin({ action: "confirm", pairingId: pairing.pairingId, code: pairing.confirmCode }))
+        .status,
+    ).toBe(200);
     const approved = (await pollHost()).body as { token: string; machineId: string };
     const hostCall = (path: string, body: unknown) =>
       client.send(key, "POST", prefix + path, {
@@ -3165,6 +3190,34 @@ describe("shared machines", () => {
     const founderNeeds = await call(owner, "GET", "/relay/v1/needs");
     expect(founderNeeds.body).toMatchObject({
       items: expect.arrayContaining([expect.objectContaining({ kind: "workspace_request" })]),
+    });
+    const founderView = (await admin()).body as PoolFounderView;
+    const ceiling = {
+      sizes: facts.sizes,
+      limits: { ...facts.limits, sandbox_slots: { small: 1, large: 1 } },
+    };
+    expectError(
+      await admin({
+        action: "limits",
+        requested: {
+          ...ceiling,
+          limits: { ...ceiling.limits, sandbox_slots: { small: 2, large: 1 } },
+        },
+      }),
+      409,
+      "pool_limit_reached",
+    );
+    expect((await admin({ action: "limits", requested: ceiling })).body).toMatchObject({
+      hosts: expect.arrayContaining([
+        expect.objectContaining({ requested: ceiling, effective: ceiling }),
+      ]),
+    });
+    const approval = { action: "approve", requestId: founderView.requests[0]!.requestId };
+    expect((await admin(approval)).status).toBe(200);
+    expect((await admin(approval)).status).toBe(200);
+    expect((await call(colleague, "POST", prefix + "/workspaces", { hostId })).body).toEqual({
+      hostId,
+      state: "approved",
     });
     const request = { hostId, size: "small", image: "sha256:" + "a".repeat(64) };
     const created = await hub("POST", "/sandboxes", request);
@@ -3266,6 +3319,11 @@ describe("shared machines", () => {
     expect((await next()).body).toMatchObject({ directives: [] });
     await hostCall("/hosts/facts", heldFacts);
     const another = await call(colleague, "POST", prefix + "/sandboxes", request);
+    expect((await next()).body).toEqual({ offer: null, directives: [] });
+    expect(
+      (await admin({ action: "limits", requested: { limits: facts.limits, sizes: facts.sizes } }))
+        .status,
+    ).toBe(200);
     const anotherId = (another.body as PoolSandbox).id;
     const unacknowledged = ((await next()).body as PoolNextResponse).offer!;
     expect(unacknowledged.id).toBe(anotherId);

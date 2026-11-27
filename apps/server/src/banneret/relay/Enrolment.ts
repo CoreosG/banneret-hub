@@ -33,6 +33,8 @@ import {
   BANNERET_MACHINE_LABEL_PATTERN,
   BANNERET_RELAY_WS_METHODS,
   PoolResources,
+  PoolFounderView,
+  type PoolFounderAction,
   WorkspaceReceipt,
   type WarningPolicy,
   BanneretMachineKind,
@@ -331,6 +333,9 @@ export interface RelayEnrolment {
     path: string,
     body?: unknown,
   ) => Effect.Effect<RelayReply, RelayCallError>;
+  readonly poolFounder: (
+    action?: PoolFounderAction,
+  ) => Effect.Effect<PoolFounderView, BanneretRelayError>;
   readonly requestWorkspace: (
     hostId: string,
   ) => Effect.Effect<typeof WorkspaceReceipt.Type, BanneretRelayError>;
@@ -1477,6 +1482,14 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           body,
         ),
       ),
+    poolFounder: (action) =>
+      configuredNow.pipe(
+        Effect.flatMap((from) =>
+          signedCall(from, action ? "POST" : "GET", "/relay/v1/pool/founder", undefined, action),
+        ),
+        Effect.flatMap((reply) => decodeReply(PoolFounderView, reply)),
+        Effect.mapError((error) => new BanneretRelayError({ message: error.message })),
+      ),
     requestWorkspace: (hostId) =>
       configuredNow.pipe(
         Effect.flatMap((from) =>
@@ -1662,6 +1675,14 @@ export const rpcHandlers = {
       try: biggestFolders,
       catch: () => new BanneretRelayError({ message: "Home folder sizes could not be read." }),
     }),
+  [BANNERET_RELAY_WS_METHODS.poolFounder]: Effect.fn("BanneretEnrolment.poolFounder")(
+    function* (input: { relayOrigin: string; action?: PoolFounderAction | undefined }) {
+      const service = yield* BanneretEnrolment;
+      const relay = yield* service.relay(input.relayOrigin);
+      if (!relay) return yield* fail("This machine has not joined the company.");
+      return yield* relay.poolFounder(input.action);
+    },
+  ),
   [BANNERET_RELAY_WS_METHODS.requestWorkspace]: Effect.fn("BanneretEnrolment.requestWorkspace")(
     function* (input: { relayOrigin: string; hostId: string }) {
       const service = yield* BanneretEnrolment;

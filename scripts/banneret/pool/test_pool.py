@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib import request
 
 from facts import collect, quota_rows
-from provision import DATA, HOMES, filesystem, provision
+from provision import DATA, HOMES, checked_seat_policy, filesystem, provision
 
 KIT = Path(__file__).resolve().parent
 REPO = KIT.parents[2]
@@ -28,6 +28,16 @@ class PoolKit(unittest.TestCase):
         file = self.root / path
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(value)
+
+    def test_seat_checks_the_current_host_file(self):
+        local = self.config["limits"]
+        policy = json.loads(json.dumps({"limits": local}))
+        each = policy["limits"]["workspaces"]["each"]
+        each["disk"] = "61440M"
+        self.assertEqual(checked_seat_policy(policy, local), policy)
+        each["disk"] = "61441M"
+        with self.assertRaisesRegex(ValueError, "disk"):
+            checked_seat_policy(policy, local)
 
     def test_measurements(self):
         seat = dict(person="alice", uid=1234, project=1234)

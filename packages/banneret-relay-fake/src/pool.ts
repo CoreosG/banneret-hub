@@ -1,7 +1,9 @@
 // @effect-diagnostics globalDate:off nodeBuiltinImport:off - in-memory relay protocol fixture.
 import * as NodeCrypto from "node:crypto";
+import * as NodeUtil from "node:util";
 import type {
   PoolConfig,
+  PoolCeilings,
   PoolHostFacts,
   PoolCurrent,
   PoolDirective,
@@ -55,7 +57,49 @@ export function createPool(
       BigInt(capacity.slice(0, -1)) * 1024n ** BigInt("KMG".indexOf(capacity.slice(-1)) + 1);
     return bytes(a) <= bytes(b) ? a : b;
   }
-  type Asked = { hostId: string; state: "asked"; id: string; createdAt: string };
+  const overrides = new Map<string, PoolCeilings>();
+  function requestedFor(host: string): PoolCeilings {
+    const limits = config?.hosts.find((h) => h.id === host);
+    if (!config || !limits) return fail("not_found", "Unknown host.");
+    return overrides.get(host) ?? { limits, sizes: config.sandboxes.sizes };
+  }
+  function clamp(facts: PoolCeilings, requested: PoolCeilings): PoolCeilings {
+    const local = facts.limits;
+    const configured = requested.limits;
+    const each = local.workspaces.each;
+    const specified = configured.workspaces.each;
+    const size = (key: "small" | "large") => {
+      const hostSize = facts.sizes[key],
+        relaySize = requested.sizes[key];
+      return {
+        cpu: Math.min(hostSize.cpu, relaySize.cpu),
+        memory: smallerCapacity(hostSize.memory, relaySize.memory),
+        disk: smallerCapacity(hostSize.disk, relaySize.disk),
+      };
+    };
+    return {
+      sizes: { small: size("small"), large: size("large") },
+      limits: {
+        id: local.id,
+        level: local.level,
+        sandbox_slots: {
+          small: Math.min(local.sandbox_slots.small, configured.sandbox_slots.small),
+          large: Math.min(local.sandbox_slots.large, configured.sandbox_slots.large),
+        },
+        workspaces: {
+          max: Math.min(local.workspaces.max, configured.workspaces.max),
+          each: {
+            cpu: Math.min(each.cpu, specified.cpu),
+            tasks: Math.min(each.tasks, specified.tasks),
+            memory_floor: smallerCapacity(each.memory_floor, specified.memory_floor),
+            memory_max: smallerCapacity(each.memory_max, specified.memory_max),
+            disk: smallerCapacity(each.disk, specified.disk),
+          },
+        },
+      },
+    };
+  }
+  type Asked = { hostId: string; state: "asked" | "approved"; id: string; createdAt: string };
   const workspaces = new Map<string, Map<string, Asked>>();
   const bookings = new Map<string, Booking>();
   function directives(host: string) {
@@ -88,45 +132,65 @@ export function createPool(
     return b?.owner === owner ? b : fail("not_found", "Unknown sandbox.");
   };
   return {
+    founderHosts() {
+      return (config?.hosts ?? []).map(({ id }) => {
+        const report = hosts.get(id);
+        return {
+          requested: requestedFor(id),
+          local: report ? { limits: report.facts.limits, sizes: report.facts.sizes } : null,
+          effective: report ? { limits: report.policy.limits, sizes: report.policy.sizes } : null,
+        };
+      });
+    },
+    setLimits(requested: PoolCeilings) {
+      const host = requested.limits.id;
+      const report = mustHost(host);
+      const each = requested.limits.workspaces.each;
+      if (
+        requested.limits.level !== report.facts.limits.level ||
+        smallerCapacity(each.memory_floor, each.memory_max) !== each.memory_floor ||
+        !NodeUtil.isDeepStrictEqual(clamp(requested, report.facts), requested)
+      )
+        return fail("pool_limit_reached", "Requested limits must fit the host ceilings.");
+      overrides.set(host, requested);
+      report.policy = { ...report.policy, ...requested };
+    },
+    requests() {
+      return [...workspaces].flatMap(([personId, requests]) =>
+        [...requests.values()].map((w) => ({
+          personId,
+          hostId: w.hostId,
+          requestId: w.id,
+          state: w.state,
+        })),
+      );
+    },
+    approve(id: string) {
+      for (const mine of workspaces.values()) {
+        for (const w of mine.values()) {
+          if (w.id !== id) continue;
+          if (w.state === "approved") return;
+          const report = mustHost(w.hostId);
+          const reserved = [...workspaces.values()].filter(
+            (m) => m.get(w.hostId)?.state === "approved",
+          ).length;
+          if (
+            report.facts.workspaces.filter((seat) => seat.state !== "removed").length + reserved >=
+            report.policy.limits.workspaces.max
+          )
+            return fail("pool_limit_reached", "No workspace seats available.");
+          w.state = "approved";
+          return;
+        }
+      }
+      return fail("not_found", "Unknown workspace request.");
+    },
     report(host: string, facts: PoolHostFacts) {
       if (host !== facts.limits.id) fail("forbidden", "This token belongs to another host.");
       const configured = config?.hosts.find((h) => h.id === host);
       if (!config || !configured || configured.level !== facts.limits.level)
         return fail("level_not_offered", "Host level differs from relay configuration.");
-      const local = facts.limits;
-      const each = local.workspaces.each;
-      const specified = configured.workspaces.each;
-      const size = (key: "small" | "large") => {
-        const hostSize = facts.sizes[key],
-          relaySize = config.sandboxes.sizes[key];
-        return {
-          cpu: Math.min(hostSize.cpu, relaySize.cpu),
-          memory: smallerCapacity(hostSize.memory, relaySize.memory),
-          disk: smallerCapacity(hostSize.disk, relaySize.disk),
-        };
-      };
-      const policy: PoolLimitsPolicy = {
-        warnings: config.warnings,
-        sizes: { small: size("small"), large: size("large") },
-        limits: {
-          id: host,
-          level: local.level,
-          sandbox_slots: {
-            small: Math.min(local.sandbox_slots.small, configured.sandbox_slots.small),
-            large: Math.min(local.sandbox_slots.large, configured.sandbox_slots.large),
-          },
-          workspaces: {
-            max: Math.min(local.workspaces.max, configured.workspaces.max),
-            each: {
-              cpu: Math.min(each.cpu, specified.cpu),
-              tasks: Math.min(each.tasks, specified.tasks),
-              memory_floor: smallerCapacity(each.memory_floor, specified.memory_floor),
-              memory_max: smallerCapacity(each.memory_max, specified.memory_max),
-              disk: smallerCapacity(each.disk, specified.disk),
-            },
-          },
-        },
-      };
+      const policy = { ...clamp(facts, requestedFor(host)), warnings: config.warnings };
       for (const w of facts.workspaces) workspaces.get(w.personId)?.delete(host);
       hosts.set(host, { facts, received: Date.now(), policy });
       return { ...policy, directives: directives(host) };
@@ -145,16 +209,18 @@ export function createPool(
           createdAt: new Date().toISOString(),
         });
       workspaces.set(owner, mine);
-      return { hostId, state: "asked" };
+      return { hostId, state: mine.get(hostId)!.state };
     },
     needs() {
       return [...workspaces].flatMap(([owner, requests]) =>
-        [...requests.values()].map((w) => ({
-          id: w.id,
-          createdAt: w.createdAt,
-          kind: "workspace_request",
-          title: `Workspace on ${w.hostId} requested by ${owner}`,
-        })),
+        [...requests.values()]
+          .filter((w) => w.state === "asked")
+          .map((w) => ({
+            id: w.id,
+            createdAt: w.createdAt,
+            kind: "workspace_request",
+            title: `Workspace on ${w.hostId} requested by ${owner}`,
+          })),
       );
     },
     list(owner: string): PoolView {

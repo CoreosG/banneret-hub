@@ -9,6 +9,7 @@ import {
 import {
   BANNERET_RELAY_WS_METHODS,
   type WarningPolicy,
+  type PoolFounderAction,
   type BanneretEnrolmentList,
   type BanneretEnrolmentMachine,
   type BanneretEnrolmentView,
@@ -34,6 +35,10 @@ const foldersCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
 const requestWorkspaceCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:request-workspace",
   tag: BANNERET_RELAY_WS_METHODS.requestWorkspace,
+});
+const founderCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:banneret:pool-founder",
+  tag: BANNERET_RELAY_WS_METHODS.poolFounder,
 });
 const poolCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:banneret:pool",
@@ -119,6 +124,13 @@ export const enrolmentRpc = {
       runAtomCommand(appAtomRegistry, requestWorkspaceCommand, {
         environmentId,
         input: { relayOrigin, hostId },
+      }),
+    ),
+  poolFounder: ({ environmentId, relayOrigin }: RelayTarget, action?: PoolFounderAction) =>
+    outcome(
+      runAtomCommand(appAtomRegistry, founderCommand, {
+        environmentId,
+        input: { relayOrigin, action },
       }),
     ),
   pool: ({ environmentId, relayOrigin }: RelayTarget) =>

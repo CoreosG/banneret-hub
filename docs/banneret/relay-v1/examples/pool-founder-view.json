@@ -1,0 +1,116 @@
+{
+  "enrolments": [
+    {
+      "pairingId": "pair_dev",
+      "hostId": "dev"
+    }
+  ],
+  "hosts": [
+    {
+      "requested": {
+        "limits": {
+          "id": "dev",
+          "level": "staff",
+          "workspaces": {
+            "max": 4,
+            "each": {
+              "cpu": 4,
+              "memory_floor": "1G",
+              "memory_max": "16G",
+              "disk": "60G",
+              "tasks": 4096
+            }
+          },
+          "sandbox_slots": {
+            "small": 3,
+            "large": 1
+          }
+        },
+        "sizes": {
+          "small": {
+            "cpu": 2,
+            "memory": "4G",
+            "disk": "10G"
+          },
+          "large": {
+            "cpu": 4,
+            "memory": "8G",
+            "disk": "20G"
+          }
+        }
+      },
+      "local": {
+        "limits": {
+          "id": "dev",
+          "level": "staff",
+          "workspaces": {
+            "max": 4,
+            "each": {
+              "cpu": 4,
+              "memory_floor": "1G",
+              "memory_max": "16G",
+              "disk": "60G",
+              "tasks": 4096
+            }
+          },
+          "sandbox_slots": {
+            "small": 3,
+            "large": 1
+          }
+        },
+        "sizes": {
+          "small": {
+            "cpu": 2,
+            "memory": "4G",
+            "disk": "10G"
+          },
+          "large": {
+            "cpu": 4,
+            "memory": "8G",
+            "disk": "20G"
+          }
+        }
+      },
+      "effective": {
+        "limits": {
+          "id": "dev",
+          "level": "staff",
+          "workspaces": {
+            "max": 4,
+            "each": {
+              "cpu": 4,
+              "memory_floor": "1G",
+              "memory_max": "16G",
+              "disk": "60G",
+              "tasks": 4096
+            }
+          },
+          "sandbox_slots": {
+            "small": 3,
+            "large": 1
+          }
+        },
+        "sizes": {
+          "small": {
+            "cpu": 2,
+            "memory": "4G",
+            "disk": "10G"
+          },
+          "large": {
+            "cpu": 4,
+            "memory": "8G",
+            "disk": "20G"
+          }
+        }
+      }
+    }
+  ],
+  "requests": [
+    {
+      "requestId": "req_1",
+      "hostId": "dev",
+      "personId": "p_alice",
+      "state": "asked"
+    }
+  ]
+}
