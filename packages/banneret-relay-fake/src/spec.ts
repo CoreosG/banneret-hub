@@ -167,7 +167,9 @@ export const invalidExampleSchema = (file: string): SchemaName =>
                                 ? "TaskRead"
                                 : file.startsWith("today-")
                                   ? "Today"
-                                  : "FactsRequest";
+                                  : file.startsWith("snapshot-health")
+                                    ? "HealthBlock"
+                                    : "FactsRequest";
 
 export const listExamples = (sub: "" | "invalid/"): ReadonlyArray<string> =>
   NodeFS.readdirSync(`${specDirectory}examples/${sub}`)

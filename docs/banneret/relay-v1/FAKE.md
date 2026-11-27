@@ -11,7 +11,8 @@ node packages/banneret-relay-fake/src/bin.ts --port 0
 ```
 
 It prints its origin, such as `http://127.0.0.1:41234`. The API is under `/relay/v1`. By default every
-pairing is approved as soon as it starts, as the founder `ada-example`. Options:
+pairing is approved as soon as it starts, as the founder `ada-example`. The staff directory starts with `cy-example`, a limited staff member
+who has never signed in and has no machines or sessions. Options:
 
 - `--config <path>`: read health sources, dashboard links, critical recipients, board clocks and the optional alarm database path from a private JSON file.
 - `--manual-approval`: pairings wait until a test confirms them through the control surface below.
@@ -165,8 +166,9 @@ supply a disposable database path to exercise restart behavior. Board clocks def
 and 86400 seconds. See the [wire contract](README.md#optional-health-sources-dashboards-and-alarms).
 
 To run both health configurations against another implementation, set `BANNERET_RELAY_URL`
-to the empty, manual-approval relay. Set `BANNERET_RELAY_HEALTH_URL` to a second disposable relay
-with auto-approved founder enrolment, one `alerts` webhook source using `BANNERET_RELAY_HOOK_SECRET`,
+to the manual-approval relay with the directory-only member `cy-example`. Set `BANNERET_RELAY_HEALTH_URL` to a second disposable relay
+with auto-approved founder enrolment, webhook sources `alerts` and `cap_0` through `cap_5` using
+`BANNERET_RELAY_HOOK_SECRET`,
 30/90-second board clocks and a dashboard with id `metrics`, title `Metrics` and URL
 `https://metrics.example.org`. Start the second relay with empty alarm state and rate windows.
 

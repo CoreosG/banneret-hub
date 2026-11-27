@@ -1,0 +1,714 @@
+{
+  "state": "ok",
+  "items": [],
+  "alarms": [
+    {
+      "id": "a_0",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_1",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_2",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_3",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_4",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_5",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_6",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_7",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_8",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_9",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_10",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_11",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_12",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_13",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_14",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_15",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_16",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_17",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_18",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_19",
+      "sourceId": "s_0",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_20",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_21",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_22",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_23",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_24",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_25",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_26",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_27",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_28",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_29",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_30",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_31",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_32",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_33",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_34",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_35",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_36",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_37",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_38",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_39",
+      "sourceId": "s_1",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_40",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_41",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_42",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_43",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_44",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_45",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_46",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_47",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_48",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_49",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_50",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_51",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_52",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_53",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_54",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_55",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_56",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_57",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_58",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_59",
+      "sourceId": "s_2",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_60",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_61",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_62",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_63",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_64",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_65",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_66",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_67",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_68",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_69",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_70",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_71",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_72",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_73",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_74",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_75",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_76",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_77",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_78",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_79",
+      "sourceId": "s_3",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_80",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_81",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_82",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_83",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_84",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_85",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_86",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_87",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_88",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_89",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_90",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_91",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_92",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_93",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_94",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_95",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_96",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_97",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_98",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_99",
+      "sourceId": "s_4",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    },
+    {
+      "id": "a_100",
+      "sourceId": "s_5",
+      "severity": "critical",
+      "title": "Queue above capacity",
+      "firedAt": "2026-11-26T10:00:00Z"
+    }
+  ],
+  "notMeasured": []
+}

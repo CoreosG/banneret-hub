@@ -351,6 +351,17 @@ describe("reshapeToday health", () => {
   const generatedAt = "2026-11-26T10:00:00Z";
   const reshape = (body: object) =>
     RelayFeed.reshapeToday({ generatedAt, ...body }, () => undefined)?.health;
+  it("keeps the first 100 alarms from the relay", () => {
+    const alarms = Array.from({ length: 101 }, (_, i) => ({
+      id: String(i),
+      sourceId: "monitor",
+      severity: "info",
+      title: "Notice",
+      firedAt: generatedAt,
+    }));
+    expect(reshape({ health: { alarms } })?.alarms).toEqual(alarms.slice(0, 100));
+  });
+
   it("retains check provenance and only active alarms", () => {
     const item = {
       id: "ping",
