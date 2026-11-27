@@ -1,3 +1,4 @@
+import { useServerConfigs } from "../state/entities";
 import { MachineResources, usePoolResources } from "./ui/MachineResources";
 import { useEnvironmentFeed } from "./relayFeedStore";
 import type { BanneretRelayMachine, EnvironmentId } from "@t3tools/contracts";
@@ -17,7 +18,13 @@ import {
   usePrimaryEnvironmentId,
 } from "../state/environments";
 import { CopyDetails } from "./EnterpriseWizard";
-import { canForget, cleanLogin, forgetNotice, machineEnrolment } from "./enterprise.logic";
+import {
+  canForget,
+  cleanLogin,
+  forgetNotice,
+  machineEnrolment,
+  peerUpdateMessage,
+} from "./enterprise.logic";
 import {
   enrolmentRpc,
   storeEnrolmentView,
@@ -40,6 +47,8 @@ function machineStatus(machine: BanneretRelayMachine): string {
 export function MachinesPanel(props: { readonly origin: string; readonly onClose: () => void }) {
   const primary = usePrimaryEnvironmentId();
   const connected = useConnectedEnvironmentIds();
+  const configs = useServerConfigs();
+  const missing = useEnrolmentStore((state) => state.missingStatusRpc);
   const identities = useEnvironmentIdentities();
   const views = useEnrolmentStore((state) => state.views);
   const machines = useEnrolmentStore((state) => state.machines);
@@ -65,7 +74,11 @@ export function MachinesPanel(props: { readonly origin: string; readonly onClose
         <ul aria-label="Your machines" className="flex flex-col rounded-md border">
           {rows.map(({ environmentId, label, view, known }) => {
             const state = view?.state ?? (known ? "none" : "unknown");
-            const status = machineEnrolment[state];
+            const update = peerUpdateMessage(
+              configs.get(environmentId)?.environment.serverVersion,
+              !!missing[environmentId],
+            );
+            const status = update ?? machineEnrolment[state];
             const pending = status === "Pending";
             return (
               <li
@@ -77,13 +90,14 @@ export function MachinesPanel(props: { readonly origin: string; readonly onClose
                   <p className="truncate text-sm">{label}</p>
                   <p className="text-muted-foreground text-xs">
                     {status}
+                    {update && <span className="block">Update Banneret Hub on {label}.</span>}
                     {pending && view?.confirmCode ? ` · code ${view.confirmCode}` : ""}
                   </p>
                 </div>
                 {pending && view && (
                   <CopyDetails target={{ environmentId, relayOrigin: props.origin }} view={view} />
                 )}
-                {state !== "unknown" && (
+                {!update && state !== "unknown" && (
                   <Button
                     type="button"
                     variant="outline"

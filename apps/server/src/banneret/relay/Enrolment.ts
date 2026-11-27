@@ -1688,11 +1688,15 @@ export const layer = layerWith({});
 
 /** Handlers for the `banneretRelay.*` RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
-  [BANNERET_RELAY_WS_METHODS.resources]: (input: { readonly policy?: WarningPolicy | undefined }) =>
-    Effect.tryPromise({
-      try: () => ownResources(input.policy),
-      catch: () => new BanneretRelayError({ message: "Resources could not be read." }),
-    }),
+  [BANNERET_RELAY_WS_METHODS.resources]: Effect.fn("BanneretEnrolment.resources")(
+    function* (input: { readonly policy?: WarningPolicy | undefined }) {
+      const { cwd } = yield* ServerConfig.ServerConfig;
+      return yield* Effect.tryPromise({
+        try: () => ownResources(input.policy, cwd),
+        catch: () => new BanneretRelayError({ message: "Resources could not be read." }),
+      });
+    },
+  ),
   [BANNERET_RELAY_WS_METHODS.folders]: () =>
     Effect.tryPromise({
       try: biggestFolders,

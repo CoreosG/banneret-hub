@@ -33,6 +33,7 @@ const OwnReading = S.Struct({
   pressure: S.Struct({ cpu: ownPsi, memory: ownPsi, io: ownPsi }),
 });
 export const ResourceReport = S.Struct({
+  windowsHost: S.optional(S.Struct({ memory: meter, diskFreeBytes: nullableNumber })),
   recentOomKill: S.Boolean,
   own: OwnReading,
   host: HostPressure,

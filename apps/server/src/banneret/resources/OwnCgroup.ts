@@ -57,6 +57,16 @@ interface Point {
   throttled: number;
   usage: number;
 }
+function cpuSnapshot() {
+  const cpus = NodeOS.cpus();
+  let total = 0;
+  let idle = 0;
+  for (const { times } of cpus) {
+    total += times.user + times.nice + times.sys + times.irq + times.idle;
+    idle += times.idle;
+  }
+  return { count: cpus.length, total, idle };
+}
 export function createResourceReader(
   options = {
     proc: "/proc",
@@ -66,12 +76,15 @@ export function createResourceReader(
     home: NodeOS.homedir(),
     now: Date.now,
   },
+  readCpu = cpuSnapshot,
 ) {
+  const windows = options.platform === "win32";
+  let previousCpu = windows ? readCpu() : null;
   let points: Point[] = [];
   let lastKill: number | null = null;
   let killedUntil = 0;
   let lastSlice = "";
-  return async (policy = defaults): Promise<ResourceReport> => {
+  return async (policy = defaults, workspace = options.home): Promise<ResourceReport> => {
     const linux = options.platform === "linux";
     const path = linux
       ? (await contents(NodePath.join(options.proc, "self/cgroup")))
@@ -115,7 +128,9 @@ export function createResourceReader(
       host("meminfo"),
       linux ? contents(NodePath.join(options.cgroups, "user.slice/memory.current")) : "",
       linux ? contents(NodePath.join(options.cgroups, "user.slice/memory.max")) : "",
-      linux ? NodeFSP.statfs(options.home).catch(() => null) : null,
+      linux || windows
+        ? NodeFSP.statfs(windows ? workspace : options.home).catch(() => null)
+        : null,
       ...["cpu", "io", "memory"].map((k) => host("pressure/" + k).then(psi)),
       ...["cpu", "io", "memory"].map((k) => local(k + ".pressure").then(psi)),
     ] as const);
@@ -133,7 +148,7 @@ export function createResourceReader(
     const [quota, period] = max.split(/\s+/);
     const periodUsec = number(period),
       quotaUsec = number(quota);
-    const coreLimit = periodUsec && quotaUsec !== null ? quotaUsec / periodUsec : null;
+    let coreLimit = periodUsec && quotaUsec !== null ? quotaUsec / periodUsec : null;
     let cpu: ResourceReport["own"]["cpu"] = null;
     let cpuCores: number | null = null;
     if (periods != null && throttled != null && usage != null) {
@@ -207,7 +222,26 @@ export function createResourceReader(
         ? meter(number(pids), number(pidsMax), policy.pids_percent)
         : null;
     const available = number(meminfo.match(/^MemAvailable:\s+(\d+)/m)?.[1]);
+    let windowsHost: ResourceReport["windowsHost"];
+    const freeMemory = windows ? NodeOS.freemem() : null;
+    if (freeMemory !== null) {
+      const total = NodeOS.totalmem();
+      const used = total - freeMemory;
+      windowsHost = {
+        memory: { used, limit: total, warn: used >= (total * policy.memory_percent) / 100 },
+        diskFreeBytes: fs ? fs.bavail * fs.bsize : null,
+      };
+      const current = readCpu();
+      if (previousCpu && current.count === previousCpu.count && current.total > previousCpu.total) {
+        cpuCores =
+          current.count *
+          (1 - (current.idle - previousCpu.idle) / (current.total - previousCpu.total));
+      }
+      previousCpu = current;
+      coreLimit = current.count || null;
+    }
     return {
+      ...(windowsHost ? { windowsHost } : {}),
       recentOomKill,
       cpuCores,
       coreLimit,
@@ -230,7 +264,7 @@ export function createResourceReader(
         memory,
         cpu,
         disk,
-        inodes,
+        inodes: windows ? null : inodes,
         pids: pidMeter,
         pressure: {
           cpu: ownPressure(samples[3], policy.pressure.cpu),
@@ -244,7 +278,7 @@ export function createResourceReader(
           (memoryPsi?.full.avg60 ?? 0) > policy.host_busy.memory_full_avg60 ||
           (ioPsi?.some.avg60 ?? 0) > policy.host_busy.io_some_avg60 ||
           (cpuPsi?.some.avg60 ?? 0) > policy.host_busy.cpu_some_avg60,
-        memAvailableBytes: available === null ? null : available * 1024,
+        memAvailableBytes: freeMemory ?? (available === null ? null : available * 1024),
         poolMemoryUsedBytes: number(poolUsed),
         poolMemoryLimitBytes: number(poolLimit),
       },

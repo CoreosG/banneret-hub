@@ -58,9 +58,11 @@ export function ResourceBar({
   name,
   meter,
   format = String,
+  unavailable = "Not measured",
 }: {
   name: string;
   meter: Meter | null;
+  unavailable?: string;
   format?: (v: number) => string;
 }) {
   return (
@@ -74,7 +76,7 @@ export function ResourceBar({
           {meter
             ? format(meter.used) +
               (meter.limit === null ? " / unlimited" : " / " + format(meter.limit))
-            : "Not measured"}
+            : unavailable}
         </span>
       </span>
       {meter?.limit != null && meter.limit > 0 && (
@@ -105,11 +107,17 @@ function ResourceSummary({
   const [folders, setFolders] = useState<string | null>(null);
   const pressure = (host?.reporting ? host.contention : null) ?? (mine ? report?.host : null);
   const measured = pressure && (pressure.busy || Object.values(pressure.pressure).every(Boolean));
-  const chip = measured
-    ? pressure.busy
-      ? "Host busy"
-      : "Host available"
-    : "Host pressure not measured";
+  const windows = mine ? report?.windowsHost : undefined;
+  const unavailable = windows ? "Not available on Windows" : "Not measured";
+  const chip = windows
+    ? windows.memory.warn
+      ? "High host memory use"
+      : "Host memory available"
+    : measured
+      ? pressure.busy
+        ? "Host busy"
+        : "Host available"
+      : "Host pressure not measured";
   const own = mine ? report?.own : null;
   const quota = mine && host?.reporting ? workspace?.resources : null;
   const disk = quota?.disk ?? own?.disk ?? null,
@@ -153,9 +161,11 @@ function ResourceSummary({
           {chip}
         </TooltipTrigger>
         <TooltipPopup>
-          {hostText
-            ? hostText + " · 60s pressure"
-            : "No current pressure reading is available for this host."}
+          {windows
+            ? "Based on host memory use. PSI is not available on Windows."
+            : hostText
+              ? hostText + " · 60s pressure"
+              : "No current pressure reading is available for this host."}
         </TooltipPopup>
       </Tooltip>
       {mine && measured && <span className="text-muted-foreground">{hostText} · 60s pressure</span>}
@@ -190,13 +200,17 @@ function ResourceSummary({
         <>
           <span className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
             <ResourceBar
-              name={quota?.disk ? "Storage quota" : "Home storage"}
+              name={quota?.disk ? "Storage quota" : windows ? "Workspace drive" : "Home storage"}
               meter={disk}
               format={bytes}
             />
-            <ResourceBar name="Memory" meter={own?.memory ?? null} format={bytes} />
             <ResourceBar
-              name="CPU cores"
+              name={windows ? "Host memory" : "Memory"}
+              meter={windows?.memory ?? own?.memory ?? null}
+              format={bytes}
+            />
+            <ResourceBar
+              name={windows ? "Host CPU cores" : "CPU cores"}
               meter={
                 report?.cpuCores == null
                   ? null
@@ -208,13 +222,18 @@ function ResourceSummary({
               }
               format={(v) => v.toFixed(2)}
             />
-            <ResourceBar name="Processes" meter={own?.pids ?? null} />
-            <ResourceBar name="Inodes" meter={inodes} />
+            <ResourceBar unavailable={unavailable} name="Processes" meter={own?.pids ?? null} />
+            <ResourceBar unavailable={unavailable} name="Inodes" meter={inodes} />
           </span>
+          {windows?.diskFreeBytes != null && (
+            <span>{bytes(windows.diskFreeBytes)} free on workspace drive</span>
+          )}
           <span className="text-muted-foreground">
             {own?.cpu
               ? "CPU throttled in " + own.cpu.throttledPercent.toFixed(1) + "% of periods (5 min)"
-              : "CPU throttling not measured"}
+              : windows
+                ? "CPU throttling: Not available on Windows"
+                : "CPU throttling not measured"}
           </span>
           {own && Object.values(own.pressure).some(Boolean) && (
             <span className="text-muted-foreground">
@@ -240,7 +259,7 @@ function ResourceSummary({
               another host.
             </span>
           )}
-          {warn && environmentId && (
+          {warn && !windows && environmentId && (
             <button
               className="w-fit underline"
               type="button"

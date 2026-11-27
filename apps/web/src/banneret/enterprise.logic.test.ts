@@ -20,11 +20,19 @@ import {
   machineLabelFrom,
   needsItemLabel,
   pendingJoins,
+  peerUpdateMessage,
   remoteUrlsOf,
   revokedMessage,
   roleLabel,
   wizardStep,
 } from "./enterprise.logic";
+
+it("distinguishes older and missing status RPCs from unavailable peers", () => {
+  expect(peerUpdateMessage("0.1.1218", false)).toBe("Update needed to read its status (v0.1.1218)");
+  expect(peerUpdateMessage("0.1.1224", false)).toBeNull();
+  expect(peerUpdateMessage("0.1.1300", true)).toBe("Update needed to read its status (v0.1.1300)");
+  expect(peerUpdateMessage(undefined, false)).toBeNull();
+});
 
 const workspace: BanneretWorkspace = {
   id: "ent-0123456789abcdef",

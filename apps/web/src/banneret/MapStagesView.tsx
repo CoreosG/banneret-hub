@@ -10,9 +10,6 @@ import { LAYOUT_STAGE_BUBBLES, toneProps } from "./ui/tokens";
 
 const toneOf = (status: string) => statusView(status).tone ?? "muted";
 
-const clip = (title: string, max: number) =>
-  title.length <= max ? title : `${title.slice(0, Math.max(1, max - 1)).trimEnd()}…`;
-
 /** What a screen reader hears for one bubble: its place, name, size and status mix. */
 function bubbleLabel(bubble: StageBubble): string {
   if (bubble.count === 0) return `Stage ${bubble.number}, ${bubble.title}: nothing planned`;
@@ -38,7 +35,8 @@ function Bubble(props: {
   };
   const ringRadius = bubble.r - 3;
   const gap = bubble.ring.length > 1 ? 0.004 : 0;
-  const maxChars = Math.floor((Math.max(2 * bubble.r, 132) + 24) / 7.2);
+  const labelY = bubble.labelInside ? 9 : bubble.r + 18;
+  const metaY = bubble.r + 18 + (bubble.labelInside ? 0 : bubble.labelLines.length * 16);
   return (
     <g
       role="button"
@@ -69,7 +67,10 @@ function Bubble(props: {
           {...toneProps(toneOf(segment.status), "stroke")}
         />
       ))}
-      <g aria-hidden>
+      <g
+        aria-hidden
+        transform={bubble.labelInside ? `translate(0 ${-bubble.r * 0.47}) scale(0.5)` : undefined}
+      >
         {bubble.dots.map((dot) => (
           <circle
             key={dot.itemId}
@@ -83,10 +84,17 @@ function Bubble(props: {
           />
         ))}
       </g>
-      <text y={bubble.r + 18} textAnchor="middle" data-slot="bubble-title" aria-hidden>
-        {bubble.number}. {clip(bubble.title, maxChars)}
+      <text className="font-mono" textAnchor="middle" data-slot="bubble-title" aria-hidden>
+        {bubble.labelLines.map((line, index) => {
+          const y = labelY + index * 16;
+          return (
+            <tspan key={y} x={0} y={y}>
+              {line}
+            </tspan>
+          );
+        })}
       </text>
-      <text y={bubble.r + 34} textAnchor="middle" data-slot="bubble-meta" aria-hidden>
+      <text y={metaY} textAnchor="middle" data-slot="bubble-meta" aria-hidden>
         {bubble.count === 0 ? "Nothing planned" : `${bubble.built}/${bubble.total} built`}
       </text>
     </g>

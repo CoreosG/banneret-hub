@@ -530,7 +530,19 @@ describe("Enterprise build map", () => {
     using stack = new DisposableStack();
     const { emit, router, screen } = await openMap(stack);
     await using _screen = screen;
-    await emit(state(["map"], mapRead(MAP())));
+    const longName = "Later deployment and monitoring across all machines";
+    const map = MAP();
+    await emit(
+      state(
+        ["map"],
+        mapRead({
+          ...map,
+          stages: map.stages.map((stage) =>
+            stage.id === "s3" ? { ...stage, title: longName } : stage,
+          ),
+        }),
+      ),
+    );
     await userEvent.click(viewToggle("Stages"));
     await vi.waitFor(() => expect(bubbles()).toHaveLength(3));
     expect(router.state.location.search).toEqual({ view: "stages" });
@@ -561,6 +573,14 @@ describe("Enterprise build map", () => {
         path.hasAttribute("data-blocking"),
       ]),
     ).toEqual([["s1", "s2", false]]);
+
+    const inside = bubble("s2")!.querySelectorAll("[data-slot=bubble-title] tspan");
+    expect(inside).toHaveLength(2);
+    expect(Number(inside[1]!.getAttribute("y"))).toBeLessThan(radius("s2"));
+    const lines = bubble("s3")!.querySelectorAll("[data-slot=bubble-title] tspan");
+    expect([...lines].map((line) => line.textContent).join(" ")).toBe("3. " + longName);
+    (bubble("s3") as unknown as HTMLElement).focus();
+    await expect.element(page.getByRole("tooltip")).toHaveTextContent(longName);
 
     const legend = page.getByRole("list", { name: "Stage legend" });
     await userEvent.click(legend.getByRole("button", { name: /Foundations/ }));
