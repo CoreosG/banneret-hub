@@ -557,7 +557,10 @@ function TaskPanelBody(props: {
         lease={lease}
         note={note}
       />
-      <FactsGrid facts={facts} className="shrink-0 px-4 pb-3" />
+      <FactsGrid
+        facts={facts}
+        className={notFound ? "shrink-0 px-4 pb-3 sm:grid-cols-1" : "shrink-0 px-4 pb-3"}
+      />
       {issueRef === null ? (
         <LinkRow task={surface.task} notFound={notFound} />
       ) : (
