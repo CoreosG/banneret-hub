@@ -1176,6 +1176,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return last === null ? undefined : { ...last, by: personRefFor(last.by) };
   };
 
+  // README, "Free and Taken": the tracker's assignees, or the seeded holder for a task without
+  // tracker fields (a take assigns the taker).
+  const assigneesOf = (task: BoardTask) =>
+    task.tracker !== null
+      ? task.tracker.assignees.map(personRefFor)
+      : task.holder === null
+        ? []
+        : [task.holder];
+
   const cardView = (task: BoardTask, index: number, now: number) => {
     const lease = leaseOf(task, now);
     const lastRelease = lastReleaseOf(task, now);
@@ -1204,6 +1213,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       statusWhy,
       ...(lease === undefined ? {} : { lease }),
       ...(lastRelease === undefined ? {} : { lastRelease }),
+      assignees: assigneesOf(task),
       prs: task.prs.map((pr) => ({
         number: pr.number,
         url: prUrl(pr.number),

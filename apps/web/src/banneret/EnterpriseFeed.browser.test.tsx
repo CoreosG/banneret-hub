@@ -334,7 +334,7 @@ describe("Enterprise Today and Needs you", () => {
     // A block with no rows but a source that is not measured says so, never "nothing here".
     await expect.element(page.getByText("Shipped is not measured.")).toBeVisible();
     await expect
-      .element(page.getByText("Work tracker: not set up on this relay, since", { exact: false }))
+      .element(page.getByText("Work tracker: not set up on this relay for", { exact: false }))
       .toBeVisible();
     // Empty blocks collapse into one quiet line each.
     await expect.element(page.getByText("Nobody is working right now.")).toBeVisible();
@@ -345,7 +345,9 @@ describe("Enterprise Today and Needs you", () => {
     expect(stuckRow.querySelector("time")?.getAttribute("datetime")).toBe(
       "2026-11-26T03:00:00.000Z",
     );
-    expect(stuckRow.textContent).toMatch(/since (\d+ (min|h|d) ago|just now)/);
+    expect(stuckRow.textContent).toMatch(
+      /stuck (for \d+ (min|hours?|days?)|for under a minute|since [A-Z][a-z]{2} \d+)/,
+    );
 
     await userEvent.click(page.getByRole("button", { name: "Open thread" }));
     await expect.element(page.getByText("Thread page")).toBeVisible();

@@ -53,6 +53,7 @@ describe("Task tab words", () => {
       status: "planned",
       statusWhy: "Open.",
       prs: [],
+      assignees: [],
       restsOn: [],
     };
     expect(restsOnItems(["t_1", "t_9"], [card])).toEqual([

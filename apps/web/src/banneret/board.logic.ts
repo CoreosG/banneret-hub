@@ -164,6 +164,51 @@ export function heldBy(card: Pick<BanneretBoardCard, "lease">, login: string): b
   return holder !== "" && holder === cleanLogin(login).toLowerCase();
 }
 
+const sameLogin = (a: string | undefined, b: string) => {
+  const left = cleanLogin(a).toLowerCase();
+  return left !== "" && left === cleanLogin(b).toLowerCase();
+};
+
+/** Whether the tracker names `login` as an assignee. Logins compare case-insensitively. */
+const assignedTo = (card: Pick<BanneretBoardCard, "assignees">, login: string): boolean =>
+  card.assignees.some((person) => sameLogin(person.login, login));
+
+/** Mine: cards whose lease `login` holds, or that name `login` as an assignee. */
+export const isMine = (card: Pick<BanneretBoardCard, "lease" | "assignees">, login: string) =>
+  heldBy(card, login) || assignedTo(card, login);
+
+/** Lease states the holder should look at and release: expired, or a take or release left half way. */
+const NEEDS_RELEASE = new Set(["expired", "incomplete"]);
+
+/** Whether `login` holds the card's lease and it is expired or incomplete. */
+export const needsRelease = (card: Pick<BanneretBoardCard, "lease">, login: string): boolean =>
+  heldBy(card, login) && card.lease !== undefined && NEEDS_RELEASE.has(card.lease.state);
+
+/** "3 assigned to you · 2 leases expired"; the incomplete part only when there is one. */
+export function mineSummary(cards: ReadonlyArray<BanneretBoardCard>, login: string): string {
+  const mine = cards.filter((card) => isMine(card, login));
+  const held = mine.filter((card) => heldBy(card, login));
+  const expired = held.filter((card) => card.lease?.state === "expired").length;
+  const incomplete = held.filter((card) => card.lease?.state === "incomplete").length;
+  const parts = [
+    `${mine.length} assigned to you`,
+    expired === 1 ? "1 lease expired" : `${expired} leases expired`,
+  ];
+  if (incomplete > 0) parts.push(`${incomplete} incomplete`);
+  return parts.join(" \u00b7 ");
+}
+
+/**
+ * The assignees of a card nobody has claimed: Taken by the relay's rule, but with no lease. Empty
+ * when the card has a lease or nobody is assigned.
+ */
+export const unclaimedAssignees = (
+  card: Pick<BanneretBoardCard, "lease" | "assignees">,
+): ReadonlyArray<string> =>
+  card.lease !== undefined
+    ? []
+    : card.assignees.map((person) => cleanLogin(person.login)).filter((login) => login !== "");
+
 const LEGEND_ZEROS = ["needs_you", "sent_back", "built", "checked", "planned", "ruled_dead"];
 
 /** Cards per status for the legend: every known status starts at 0, except `blocked`. */

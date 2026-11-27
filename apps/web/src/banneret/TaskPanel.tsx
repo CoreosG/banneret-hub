@@ -219,6 +219,7 @@ function taskFacts(
     },
     {
       label: "Closed",
+      empty: dated !== null && dated.closedAt === null ? "Still open" : "Not known",
       value:
         dated?.closedAt == null ? undefined : (
           <span data-testid="task-closed">
@@ -229,8 +230,10 @@ function taskFacts(
   ];
   if (view.notFound) {
     return [
-      { label: "Stage", value: stage?.title },
+      { label: "Owner", value: options.leases ? undefined : null },
       ...dates,
+      { label: "Pull request", value: undefined },
+      { label: "Stage", value: stage?.title, empty: "Not on the map" },
       {
         label: "Status",
         value:
@@ -245,32 +248,32 @@ function taskFacts(
   return [
     {
       label: "Owner",
-      value:
-        !options.leases || card === null ? undefined : held === undefined ? (
-          checked === null ? (
-            <span className={TYPE.meta}>Nobody holds it</span>
-          ) : (
-            <span className="flex flex-wrap items-center gap-2" data-testid="owner-from-tracker">
-              <span className="font-medium">{checked.holder}</span>
-              {checked.since === null ? null : (
-                <RelativeTime at={checked.since} prefix="claimed" className={TYPE.meta} />
-              )}
-            </span>
-          )
+      value: !options.leases ? null : card === null ? undefined : held === undefined ? (
+        checked === null ? (
+          <span className={TYPE.meta}>Nobody holds it</span>
         ) : (
-          <span className="flex flex-wrap items-center gap-2">
-            <LeaseChip
-              holder={held.holder.login}
-              state={held.state}
-              lastSignalAt={held.lastSignalAt}
-            />
-            <RelativeTime at={held.since} prefix="claimed" className={TYPE.meta} />
+          <span className="flex flex-wrap items-center gap-2" data-testid="owner-from-tracker">
+            <span className="font-medium">{checked.holder}</span>
+            {checked.since === null ? null : (
+              <RelativeTime at={checked.since} prefix="claimed" className={TYPE.meta} />
+            )}
           </span>
-        ),
+        )
+      ) : (
+        <span className="flex flex-wrap items-center gap-2">
+          <LeaseChip
+            holder={held.holder.login}
+            state={held.state}
+            lastSignalAt={held.lastSignalAt}
+          />
+          <RelativeTime at={held.since} prefix="claimed" className={TYPE.meta} />
+        </span>
+      ),
     },
     ...dates,
     {
       label: card !== null && card.prs.length > 1 ? "Pull requests" : "Pull request",
+      empty: card === null ? "Not known" : "Not linked",
       value:
         card === null || card.prs.length === 0 ? undefined : (
           <span className="flex flex-col gap-1">
@@ -280,9 +283,10 @@ function taskFacts(
           </span>
         ),
     },
-    { label: "Stage", value: stage?.title },
+    { label: "Stage", value: stage?.title, empty: "Not on the map" },
     {
       label: "Preview",
+      empty: "None",
       value:
         preview === undefined ? undefined : (
           <span className="flex flex-wrap items-center gap-2">
@@ -293,6 +297,7 @@ function taskFacts(
     },
     {
       label: "Rests on",
+      empty: card === null ? "Not known" : "Nothing",
       value:
         restsOn.length === 0 ? undefined : (
           <span className="flex flex-col">
@@ -314,8 +319,11 @@ function taskFacts(
     },
     {
       label: "Last release",
+      empty: "None",
       wide: release?.note !== undefined,
-      value: release === null ? undefined : <LastReleaseValue release={release} />,
+      value: !options.leases ? null : release === null ? undefined : (
+        <LastReleaseValue release={release} />
+      ),
     },
   ];
 }

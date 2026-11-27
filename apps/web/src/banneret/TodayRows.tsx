@@ -223,7 +223,7 @@ export function StuckRow(props: { readonly item: StuckItem }) {
               <ReasonChip key={rule} reason={rule} />
             ))}
             <span className={TYPE.meta}>
-              <RelativeTime at={item.since} prefix="since" />
+              <RelativeTime at={item.since} prefix="stuck" kind="duration" />
               {item.owner === undefined ? null : loginSuffix("claimed by", item.owner.login)}
             </span>
           </span>
@@ -272,7 +272,7 @@ export function WorkingRow(props: { readonly item: WorkingItem }) {
               {item.state === "not_heard_from" ? (
                 <>
                   {" · not heard from "}
-                  <RelativeTime at={item.lastActivityAt} prefix="since" />
+                  <RelativeTime at={item.lastActivityAt} kind="duration" />
                 </>
               ) : (
                 <>
@@ -308,7 +308,7 @@ export function ShippedRow(props: { readonly item: ShippedItem }) {
           {...toneProps("ok", "fg")}
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm">{item.summary}</span>
+          <span className="line-clamp-2 break-words text-sm">{item.summary}</span>
           <span className={cn(TYPE.meta, "truncate")}>
             {href === null ? (
               label
@@ -340,8 +340,8 @@ export function NotMeasuredLines(props: {
       {props.lines.map((line) => (
         <span key={`${line.source}:${line.since}`} className={cn("block", props.className)}>
           {humanizeWord(line.source)}: {notMeasuredReason(line.reason)}
-          {line.detail === undefined ? "" : ` (${line.detail})`},{" "}
-          <RelativeTime at={line.since} prefix="since" />.
+          {line.detail === undefined ? "" : ` (${line.detail})`}{" "}
+          <RelativeTime at={line.since} kind="duration" />.
         </span>
       ))}
     </>

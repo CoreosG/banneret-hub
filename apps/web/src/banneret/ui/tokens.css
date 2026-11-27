@@ -11,11 +11,14 @@
   /* zinc-500 text fails AA on its own tint. */
   --status-neutral-foreground: --theme(--color-zinc-600 inline);
   --tone-tint-strength: 8%;
+  /* "Not built yet" reads one step stronger than the other neutral text. */
+  --status-planned-foreground: --theme(--color-zinc-700 inline);
 
   @variant dark {
     --status-neutral: --theme(--color-neutral-400 inline);
     --status-neutral-foreground: --theme(--color-neutral-400 inline);
     --tone-tint-strength: 16%;
+    --status-planned-foreground: --theme(--color-neutral-300 inline);
   }
 }
 
@@ -43,6 +46,10 @@
   [data-tone="muted"] {
     --tone: var(--status-neutral);
     --tone-fg: var(--status-neutral-foreground);
+  }
+
+  [data-slot="status-pill"][data-status="planned"] {
+    --tone-fg: var(--status-planned-foreground);
   }
 
   [data-tone-look~="tint"] {
@@ -91,15 +98,29 @@
     border-radius: 0.625rem;
   }
 
-  /* Board columns: flexible, at least 180px, so five fit at 1280px with the sidebar open. A
-     trailing extra column needs no count. Narrower than that, the grid scrolls, not the page. */
+  /* Board columns: flexible, at least 180px, so five fit at 1280px with the sidebar open. An empty
+     column is a 40px strip and the others take its width. Narrower than that, the row scrolls,
+     not the page. */
   [data-layout="board-columns"] {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(180px, 1fr);
+    display: flex;
     gap: 0.75rem;
     min-height: 20rem;
     overflow-x: auto;
+  }
+
+  [data-layout="board-columns"] > * {
+    flex: 1 1 0;
+    min-width: 180px;
+  }
+
+  [data-layout="board-columns"] > [data-column-empty] {
+    flex: 0 0 2.5rem;
+    min-width: 2.5rem;
+  }
+
+  [data-slot="column-strip-label"] {
+    writing-mode: vertical-rl;
+    white-space: nowrap;
   }
 
   /* A readable page, 1200px at most. */
@@ -186,6 +207,7 @@
     bottom: calc(100% - 1.125rem);
   }
 
+  /* Only done stages before the current one fill the line; a stage built ahead keeps it plain. */
   [data-layout="map-stage"][data-spine="done"]::before {
     background: color-mix(in srgb, var(--success) 55%, transparent);
   }
@@ -203,7 +225,8 @@
     background: var(--background);
   }
 
-  [data-spine="done"] > [data-slot="spine-node"] {
+  [data-spine="done"] > [data-slot="spine-node"],
+  [data-spine="ahead"] > [data-slot="spine-node"] {
     border-color: var(--success);
     background: var(--success);
     color: var(--background);

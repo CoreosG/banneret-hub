@@ -20,9 +20,10 @@ import {
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { taskRef } from "./board.logic";
-import { FeedStatus, When } from "./FeedParts";
+import { FeedStatus } from "./FeedParts";
 import {
   blockedByLabel,
   blockedByName,
@@ -39,6 +40,7 @@ import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { MapItemCard } from "./ui/MapItemCard";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
+import { RelativeTime } from "./ui/RelativeTime";
 import { legendStatuses } from "./ui/status";
 import { StatusIcon } from "./ui/StatusPill";
 import { StatusLegend } from "./ui/StatusLegend";
@@ -115,9 +117,26 @@ function StageRow(props: {
       data-spine={props.spine}
       {...LAYOUT_MAP_STAGE}
     >
-      <span aria-hidden data-slot="spine-node">
-        {props.spine === "done" ? <CheckIcon className="size-2.5" strokeWidth={3.5} /> : null}
-      </span>
+      {props.spine === "ahead" ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                role="img"
+                aria-label="Built ahead of an earlier stage"
+                data-slot="spine-node"
+              />
+            }
+          >
+            <CheckIcon aria-hidden className="size-2.5" strokeWidth={3.5} />
+          </TooltipTrigger>
+          <TooltipPopup>Built ahead of an earlier stage</TooltipPopup>
+        </Tooltip>
+      ) : (
+        <span aria-hidden data-slot="spine-node">
+          {props.spine === "done" ? <CheckIcon className="size-2.5" strokeWidth={3.5} /> : null}
+        </span>
+      )}
       <div className="flex min-w-0 flex-col gap-1 pt-0.5">
         <h2 className={quiet ? "text-muted-foreground text-sm" : TYPE.cardTitle}>{stage.title}</h2>
         {total === 0 ? (
@@ -412,7 +431,7 @@ function NotMeasuredNote(props: { readonly map: BanneretMap }) {
       <ul>
         {props.map.notMeasured.map((line) => (
           <li key={`${line.source}:${line.reason}:${line.since}`}>
-            <span>{planReason(line.reason)}</span> since <When at={line.since} />
+            <span>{planReason(line.reason)}</span> <RelativeTime at={line.since} kind="duration" />
             {line.detail === undefined ? null : (
               <>
                 : <span data-detail>{line.detail}</span>

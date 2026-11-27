@@ -1,4 +1,4 @@
-import type { BanneretBoard, BanneretBoardLease } from "@t3tools/contracts";
+import type { BanneretBoard, BanneretBoardCard, BanneretBoardLease } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -6,12 +6,16 @@ import {
   boardColumns,
   columnCountsLine,
   heldBy,
+  isMine,
   leaseChip,
+  mineSummary,
+  needsRelease,
   prLine,
   prSummary,
   statusCounts,
   statusWord,
   taskRef,
+  unclaimedAssignees,
 } from "./board.logic";
 
 const NOW = Date.parse("2026-11-26T12:00:00.000Z");
@@ -149,6 +153,7 @@ describe("board words", () => {
       status: "planned",
       statusWhy: "Open.",
       prs: [],
+      assignees: [],
       restsOn: [],
     });
     const board: BanneretBoard = {
@@ -169,5 +174,49 @@ describe("board words", () => {
     ]);
     expect(columnCountsLine(boardColumns(board))).toBe("1 free to take, 1 taken");
     expect(boardColumns(board, [card("a", "taken")]).map((c) => c.cards.length)).toEqual([0, 1]);
+  });
+
+  it("counts Mine as held or assigned, and finds my expired and incomplete claims", () => {
+    const held = (state: string, login = "ada") => ({
+      lease: lease(state, 60 * 60_000, login),
+      assignees: [{ login }],
+    });
+    const cards = [
+      held("active"),
+      held("expired", "Ada"),
+      held("incomplete"),
+      held("expired", "bo"),
+      { assignees: [{ login: " ADA " }] },
+      { assignees: [{ login: "bo" }] },
+    ].map((extra, index): BanneretBoardCard => ({
+      task: {
+        id: String(index),
+        title: String(index),
+        ref: { tracker: "github", scope: "o/r", key: String(index), url: "https://x" },
+        openedAt: "2026-11-20T09:00:00.000Z",
+        closedAt: null,
+      },
+      column: "taken",
+      status: "planned",
+      statusWhy: "Open.",
+      prs: [],
+      restsOn: [],
+      ...extra,
+    }));
+    expect(cards.filter((card) => isMine(card, "ada")).map((c) => c.task.id)).toEqual([
+      "0",
+      "1",
+      "2",
+      "4",
+    ]);
+    expect(cards.filter((card) => needsRelease(card, "ada")).map((c) => c.task.id)).toEqual([
+      "1",
+      "2",
+    ]);
+    expect(mineSummary(cards, "ada")).toBe("4 assigned to you · 1 lease expired · 1 incomplete");
+    expect(mineSummary(cards, "cy")).toBe("0 assigned to you · 0 leases expired");
+    expect(unclaimedAssignees(cards[5]!)).toEqual(["bo"]);
+    expect(unclaimedAssignees(cards[0]!)).toEqual([]);
+    expect(unclaimedAssignees({ assignees: [{ login: " " }] })).toEqual([]);
   });
 });

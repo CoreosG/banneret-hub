@@ -40,6 +40,7 @@
       "column": "free",
       "status": "planned",
       "statusWhy": "Open and nobody has taken it yet.",
+      "assignees": [],
       "prs": [],
       "restsOn": [
         "t_K9w3Ls"
@@ -73,6 +74,12 @@
         "staleAt": "2026-11-26T15:58:00Z",
         "expiresAt": "2026-11-27T09:58:00Z"
       },
+      "assignees": [
+        {
+          "id": "p_7Hq2xK",
+          "login": "ada-example"
+        }
+      ],
       "prs": [],
       "restsOn": []
     }

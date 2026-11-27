@@ -19,6 +19,32 @@ export function agoLabel(at: string, nowMs: number): string {
   return `${Math.floor(elapsed / DAY)} d ago`;
 }
 
+const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+
+const SHORT_DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const SHORT_DATE_YEAR = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+/**
+ * How long a state has lasted, for "stuck for 1 day": "for 12 min", "for 3 hours", "for 2 days",
+ * and "since Nov 20" once it is a week or older (with the year when it differs). "" for an
+ * unreadable time.
+ */
+export function durationLabel(at: string, nowMs: number): string {
+  const elapsed = elapsedMs(at, nowMs);
+  if (elapsed === null) return "";
+  if (elapsed < MINUTE) return "for under a minute";
+  if (elapsed < HOUR) return `for ${Math.floor(elapsed / MINUTE)} min`;
+  if (elapsed < DAY) return `for ${plural(Math.floor(elapsed / HOUR), "hour")}`;
+  if (elapsed < 7 * DAY) return `for ${plural(Math.floor(elapsed / DAY), "day")}`;
+  const ms = Date.parse(at);
+  const sameYear = new Date(ms).getFullYear() === new Date(nowMs).getFullYear();
+  return `since ${(sameYear ? SHORT_DATE : SHORT_DATE_YEAR).format(ms)}`;
+}
+
 /** "7 h", "2 d": how long something has been quiet; "" for an unreadable time. */
 export function spanLabel(at: string, nowMs: number): string {
   const elapsed = elapsedMs(at, nowMs);

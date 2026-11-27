@@ -66,6 +66,7 @@ const card = (extra: Partial<BanneretBoardCard> = {}): BanneretBoardCard => ({
   status: "planned",
   statusWhy: "Open and nobody has taken it yet.",
   prs: [],
+  assignees: [],
   restsOn: [],
   ...extra,
 });
@@ -555,7 +556,24 @@ describe("Task dialog facts", () => {
     const panel = () => document.querySelector("[data-task-panel]")!;
     await vi.waitFor(() => expect(panel().textContent).toContain("Stage 1: Identity core"));
     const facts = [...panel().querySelectorAll("dt")].map((term) => term.textContent);
-    expect(facts).toEqual(["Owner", "Opened", "Pull requests", "Stage"]);
+    // Every row stays, so each task's facts have the same shape; a missing one says so. Check is
+    // left out only because this relay has no sign-off rule.
+    expect(facts).toEqual([
+      "Owner",
+      "Opened",
+      "Closed",
+      "Pull requests",
+      "Stage",
+      "Preview",
+      "Rests on",
+      "Last release",
+    ]);
+    const empty = (label: string) =>
+      [...panel().querySelectorAll("dt")]
+        .find((term) => term.textContent === label)
+        ?.nextElementSibling?.querySelector("[data-fact-empty]")?.textContent;
+    expect(empty("Closed")).toBe("Still open");
+    expect(empty("Preview")).toBe("None");
     expect(panel().querySelector('[data-slot="lease-chip"]')?.textContent).toBe(
       "bo-examplequiet 7 h",
     );

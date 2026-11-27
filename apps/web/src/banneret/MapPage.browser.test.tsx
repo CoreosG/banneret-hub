@@ -312,6 +312,44 @@ describe("Enterprise build map", () => {
     await vi.waitFor(() => expect(legend().querySelector('[data-status="checked"]')).toBeNull());
   });
 
+  it("keeps the check on a stage built ahead of the current one, with no fill and a hint", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openMap(stack);
+    await using _screen = screen;
+    const built = (id: string, stageId: string) => item(id, stageId, id, "built", "Merged.");
+    const map: BanneretMap = {
+      state: "ok",
+      notMeasured: [],
+      stages: [
+        { id: "a", title: "First", order: 1 },
+        { id: "b", title: "Second", order: 2 },
+        { id: "c", title: "Third", order: 3 },
+      ],
+      items: [built("one", "a"), item("two", "b", "two", "planned", "Open."), built("three", "c")],
+      counters: {
+        byStatus: { built: 2, planned: 1 },
+        byStage: { a: { built: 1 }, b: { planned: 1 }, c: { built: 1 } },
+      },
+    };
+    await emit(state(["map"], mapRead(map)));
+    await expect.element(page.getByText("three")).toBeVisible();
+    expect(
+      [...document.querySelectorAll("li[data-stage-id]")].map((row) =>
+        row.getAttribute("data-spine"),
+      ),
+    ).toEqual(["done", "current", "ahead"]);
+    // The line fills through the done stage only.
+    const line = (title: string) => getComputedStyle(stageRow(title), "::before").backgroundColor;
+    expect(line("Third")).toBe(line("Second"));
+    expect(line("First")).not.toBe(line("Second"));
+    // The node keeps its check, and says why on hover and to a screen reader.
+    const node = page.getByRole("img", { name: "Built ahead of an earlier stage" });
+    expect(node.element().querySelector("svg")).not.toBeNull();
+    expect(stageRow("First").querySelector('[role="img"]')).toBeNull();
+    await userEvent.hover(node);
+    await expect.element(page.getByText("Built ahead of an earlier stage")).toBeVisible();
+  });
+
   it("says which item blocks a blocked one, and the relay's reason on hover", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openMap(stack);

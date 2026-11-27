@@ -272,6 +272,7 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
     statusWhy,
     ...(held === undefined ? {} : { lease: held }),
     ...(released === undefined ? {} : { lastRelease: released }),
+    assignees: defined(list(source?.assignees, 10).map(person)),
     prs: defined(list(source?.prs, 20).map(linkedPr)),
     restsOn: defined(list(source?.restsOn, 100).map((entry) => text(entry, 64))),
   };

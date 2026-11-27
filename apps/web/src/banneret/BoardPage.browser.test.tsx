@@ -100,6 +100,7 @@ const card = (
   status: "planned",
   statusWhy: "Open and nobody has taken it yet.",
   prs: [],
+  assignees: [],
   restsOn: [],
   ...extra,
 });
@@ -260,11 +261,14 @@ describe("Enterprise board", () => {
     const titles = [...document.querySelectorAll("section[aria-label] h2")].map(
       (heading) => heading.textContent,
     );
-    expect(titles).toEqual(["Free", "Taken", "Validating", "Stuck", "Shipped"]);
+    expect(titles).toEqual(["Free", "Taken", "Validating · 0", "Stuck", "Shipped"]);
     await expect.element(column("Stuck").getByText("Profile blocks")).toBeVisible();
     await expect.element(column("Taken").getByText("Guild invites")).toBeVisible();
-    expect(column("Validating").element().querySelectorAll("li")).toHaveLength(0);
-    await expect.element(column("Validating").getByText("No tasks.")).toBeVisible();
+    // An empty column is a header-only strip with a quiet hint on hover.
+    const empty = column("Validating, no tasks");
+    expect(empty.element().querySelectorAll("li")).toHaveLength(0);
+    await userEvent.hover(empty);
+    await expect.element(page.getByText("Nothing in Validating right now.")).toBeVisible();
 
     // The summary counts the known columns.
     expect(summaryText()).toBe("7 tasks. 1 free to take, 2 taken, 3 stuck, 1 shipped");
@@ -309,7 +313,9 @@ describe("Enterprise board", () => {
     const grid = document.querySelector<HTMLElement>('[data-layout="board-columns"]')!;
     const widths = [...grid.children].map((child) => child.getBoundingClientRect().width);
     expect(widths).toHaveLength(5);
-    for (const width of widths) expect(width).toBeGreaterThanOrEqual(180);
+    // Validating is empty: a 40px strip, and the four others share its width.
+    expect(widths[2]).toBe(40);
+    for (const width of widths.toSpliced(2, 1)) expect(width).toBeGreaterThan(220);
     expect(grid.scrollWidth).toBeLessThanOrEqual(grid.clientWidth);
 
     // A long column scrolls on its own; the grid and the other columns stay put.
@@ -371,8 +377,8 @@ describe("Enterprise board", () => {
     expect(chip("planned")?.querySelector("[data-count]")?.textContent).toBe("4");
     expect(chip("needs_you")?.querySelector("[data-count]")?.textContent).toBe("2");
     expect(chip("checked")?.querySelector("[data-count]")?.textContent).toBe("1");
-    expect(chip("ruled_dead")?.className).toContain("opacity-45");
-    expect(chip("planned")?.className).not.toContain("opacity-45");
+    expect(chip("ruled_dead")?.className).toContain("opacity-60");
+    expect(chip("planned")?.className).not.toContain("opacity-60");
     // Blocked shows only once a card is blocked.
     expect(chip("blocked")).toBeNull();
 
@@ -411,34 +417,95 @@ describe("Enterprise board", () => {
     );
   });
 
-  it("filters to the tasks this person holds with Mine, and back", async () => {
+  it("filters to the tasks this person holds or is assigned with Mine, and back", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openBoard(stack);
     await using _screen = screen;
     const cards = () => [
       ...CARDS(),
       card("8", "My work", "taken", { lease: lease("Ada-Example", "active", MINUTE) }),
+      card("9", "Assigned to me", "taken", { assignees: [{ login: "ADA-example" }] }),
     ];
     await emit(state(["board"], boardRead(boardOf(cards()))));
     await expect.element(page.getByText("My work")).toBeVisible();
 
     await userEvent.click(page.getByRole("button", { name: "Mine" }));
-    await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(1));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(2));
     expect(cardOf("8")).not.toBeNull();
-    expect(summaryText()).toBe("You hold 1 task. 0 free to take, 1 taken, 0 stuck, 0 shipped");
-    expect(legend().querySelector('[data-status="planned"] [data-count]')?.textContent).toBe("1");
+    expect(cardOf("9")).not.toBeNull();
+    expect(summaryText()).toBe("2 assigned to you · 0 leases expired");
+    expect(legend().querySelector('[data-status="planned"] [data-count]')?.textContent).toBe("2");
 
     // Without leases there is nothing to filter by, so the toggle goes and everyone shows.
     await emit(state(["board"], boardRead(boardOf(cards()), { leases: false })));
-    await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(8));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(9));
     expect(page.getByRole("button", { name: "Mine" }).elements()).toHaveLength(0);
 
     await emit(state(["board"], boardRead(boardOf(CARDS()))));
     await userEvent.click(page.getByRole("button", { name: "Mine" }));
     await expect.element(page.getByText("Nothing of yours here.")).toBeVisible();
-    expect(summaryText()).toBe("You hold no tasks.");
+    expect(summaryText()).toBe("0 assigned to you · 0 leases expired");
     await userEvent.click(page.getByRole("button", { name: "Everyone" }));
     await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(7));
+  });
+
+  it("shows a card assigned without a claim in Taken, as assigned and not claimed", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    await emit(
+      state(
+        ["board"],
+        boardRead(
+          boardOf([
+            card("1", "Assigned elsewhere", "taken", {
+              assignees: [{ login: "bo-example" }, { login: "cy-example" }],
+            }),
+            card("2", "Claimed", "taken", {
+              lease: lease("bo-example", "active", MINUTE),
+              assignees: [{ login: "bo-example" }],
+            }),
+          ]),
+        ),
+      ),
+    );
+    await expect.element(column("Taken").getByText("Assigned elsewhere")).toBeVisible();
+    const chip = cardOf("1").querySelector('[data-testid="assigned-not-claimed"]');
+    expect(chip?.textContent).toBe("assigned · not claimed · bo-example, cy-example");
+    expect(chip?.getAttribute("data-tone")).toBe("muted");
+    expect(chipOf("1")).toBeNull();
+    // A claimed card shows its lease chip only.
+    expect(cardOf("2").querySelector('[data-testid="assigned-not-claimed"]')).toBeNull();
+    expect(chipOf("2")).not.toBeNull();
+
+    // Without leases the relay says nothing about claims, so the card does not guess.
+    await emit(
+      state(
+        ["board"],
+        boardRead(
+          boardOf([
+            card("1", "Assigned elsewhere", "taken", { assignees: [{ login: "bo-example" }] }),
+          ]),
+          { leases: false },
+        ),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="assigned-not-claimed"]')).toBeNull(),
+    );
+  });
+
+  it("wraps a long title to three lines, then truncates", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    const long = Array.from({ length: 200 }, (_, index) => `word${index}`).join(" ");
+    await emit(state(["board"], boardRead(boardOf([card("1", long, "free")]))));
+    await expect.element(page.getByText(long)).toBeInTheDocument();
+    const title = page.getByText(long).element() as HTMLElement;
+    const lineHeight = Number.parseFloat(getComputedStyle(title).lineHeight);
+    expect(title.clientHeight).toBe(Math.round(lineHeight * 3));
+    expect(title.scrollHeight).toBeGreaterThan(title.clientHeight);
   });
 
   it("has no row without the board section, and says so when the board is empty or partial", async () => {
@@ -691,6 +758,94 @@ describe("Enterprise board", () => {
         expect(document.querySelector('[aria-label="Actions for Rate limits"]')).toBeNull(),
       );
       expect(document.querySelector('[data-testid="free-to-continue"]')).toBeNull();
+    });
+
+    it("nudges me to my expired and incomplete claims, each with its lease buttons", async () => {
+      using stack = new DisposableStack();
+      const rpc = useLeases();
+      rpc.check.mockImplementation(async (_environment, input) =>
+        input.key === "21"
+          ? {
+              ok: true,
+              value: free({
+                lease: {
+                  holder: "ada-example",
+                  state: "expired",
+                  since: null,
+                  claimants: ["ada-example"],
+                },
+                actions: { take: false, release: true, finish: false, withdraw: false },
+              }),
+            }
+          : {
+              ok: true,
+              value: free({
+                lease: {
+                  holder: "ada-example",
+                  state: "incomplete",
+                  since: null,
+                  claimants: [],
+                },
+                actions: { take: false, release: false, finish: true, withdraw: true },
+              }),
+            },
+      );
+      const mine = () => [
+        ...CARDS(),
+        card("20", "Mine and fine", "taken", {
+          lease: lease("ada-example", "active", MINUTE),
+        }),
+        card("21", "Mine and expired", "stuck", {
+          lease: lease("Ada-Example", "expired", 26 * HOUR),
+        }),
+        card("22", "Mine half way", "stuck", {
+          lease: lease("ada-example", "incomplete", 2 * HOUR),
+        }),
+      ];
+      const { emit, screen } = await openBoard(stack);
+      await using _screen = screen;
+      await emit(state(["board"], boardRead(boardOf(mine()))));
+      // Someone else's expired lease (task 4) is not mine to review.
+      const nudge = page.getByTestId("claims-nudge");
+      await expect.element(nudge).toBeVisible();
+      expect(nudge.element().textContent).toContain("2 of your claims are expired or incomplete.");
+      // Nothing reads the tracker until I review.
+      expect(rpc.check).not.toHaveBeenCalled();
+
+      await userEvent.click(nudge.getByRole("button", { name: "Review your expired claims" }));
+      await vi.waitFor(() =>
+        expect(
+          [...document.querySelectorAll("[data-task-id]")].map(
+            (row) => (row as HTMLElement).dataset.taskId,
+          ),
+        ).toEqual(["21", "22"]),
+      );
+      expect(page.getByTestId("claims-nudge").elements()).toHaveLength(0);
+      expect(summaryText()).toBe("3 assigned to you · 1 lease expired · 1 incomplete");
+      expect(rpc.check).toHaveBeenCalledTimes(2);
+      // Each card follows the server's check: Release for the expired one, Finish or Withdraw for
+      // the one left half way.
+      const expired = cardOf("21");
+      await vi.waitFor(() =>
+        expect(expired.querySelector('[data-testid="lease-buttons"]')?.textContent).toBe(
+          "Release…",
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(cardOf("22").querySelector('[data-testid="lease-buttons"]')?.textContent).toBe(
+          "FinishWithdraw",
+        ),
+      );
+      await userEvent.click(page.getByRole("button", { name: "Release…" }));
+      const dialog = page.getByTestId("release-dialog");
+      await expect.element(dialog.getByText("Mine and expired")).toBeVisible();
+      await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+
+      // The strip leads back to all of mine, where the nudge returns.
+      await userEvent.click(page.getByRole("button", { name: "Show all of mine" }));
+      await vi.waitFor(() => expect(document.querySelectorAll("[data-task-id]")).toHaveLength(3));
+      await expect.element(page.getByTestId("claims-nudge")).toBeVisible();
+      expect(document.querySelector('[data-testid="lease-buttons"]')).toBeNull();
     });
   });
 });

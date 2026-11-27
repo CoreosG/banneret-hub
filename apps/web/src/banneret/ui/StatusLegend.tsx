@@ -34,7 +34,7 @@ export function StatusLegend(props: {
             className={cn(
               "inline-flex h-6 items-center gap-1 rounded-md px-2 font-medium text-2xs",
               view.tone === null && "border border-border",
-              empty && "opacity-45",
+              empty && "opacity-60",
             )}
             {...tone}
           >
@@ -53,7 +53,7 @@ export function StatusLegend(props: {
           data-slot="legend-at-work"
           className={cn(
             "inline-flex h-6 items-center gap-1.5 px-2 text-2xs text-muted-foreground",
-            props.atWorkCount === 0 && "opacity-45",
+            props.atWorkCount === 0 && "opacity-60",
           )}
         >
           <span aria-hidden className="inline-flex size-3 rounded-full ring-2 ring-primary" />

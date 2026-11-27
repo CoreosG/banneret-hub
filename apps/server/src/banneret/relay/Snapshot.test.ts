@@ -850,6 +850,7 @@ describe("snapshot reshaping", () => {
             { number: 4, url: "https://x/pull/4", state: "open", checks: { state: "failing" } },
             { number: "5", url: "https://x/pull/5", state: "open" },
           ],
+          assignees: [{ id: "p_1", login: "bo" }, { id: "p_2" }],
           restsOn: [],
         },
         {
@@ -892,6 +893,9 @@ describe("snapshot reshaping", () => {
       { number: 4, url: "https://x/pull/4", state: "open", checks: { state: "failing" } },
     ]);
     expect(board.cards[1]?.prs).toEqual([]);
+    // Assignees keep their logins; one with no login is dropped, and a missing list is empty.
+    expect(board.cards[0]?.assignees).toEqual([{ login: "bo" }]);
+    expect(board.cards[1]?.assignees).toEqual([]);
     expect(board.cards[1]?.task.closedAt).toBe("2026-11-21T09:00:00Z");
     const index = board.cards.map((card) => ({
       id: card.task.id,
