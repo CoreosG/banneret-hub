@@ -2,25 +2,44 @@
 import * as Schema from "effect/Schema";
 // @effect-diagnostics nodeBuiltinImport:off - hashes the workspace id for a secret-store filename.
 import * as NodeCrypto from "node:crypto";
-import { manifestSchema } from "@t3tools/banneret-plugin-kit";
 import { TaskLeaseError, parseBanneretRelayAddress } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Semaphore from "effect/Semaphore";
-import { z } from "zod";
 import * as Secrets from "../../auth/ServerSecretStore.ts";
 import { readForMemory } from "../Workspaces.ts";
 import { readCapped } from "../relay/RelayClient.ts";
 
-const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const manifestSchema = Schema.Struct({
+  source: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/)),
+  description: Schema.NonEmptyString,
+  auth: Schema.Literals(["per-user-token", "service"]),
+  capabilities: Schema.NonEmptyArray(
+    Schema.Literals(["tasks", "skills", "memory", "chat", "search", "health"]),
+  ),
+  toolPrefix: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/))),
+  atomicClaim: Schema.optionalKey(Schema.Boolean),
+}).check(
+  Schema.makeFilter(
+    (m) =>
+      !m.capabilities.includes("tasks") ||
+      m.atomicClaim !== undefined ||
+      "Task providers must declare atomicClaim.",
+  ),
+);
+const decodeManifest = Schema.decodeUnknownSync(Schema.fromJsonString(manifestSchema));
+const installation = Schema.Struct({
+  manifest: manifestSchema,
+  endpoint: Schema.String,
+  token: Schema.String,
+});
+type Installation = typeof installation.Type;
+const installations = Schema.fromJsonString(Schema.Array(installation));
+const decodeInstalled = Schema.decodeUnknownSync(installations);
+const encodeInstalled = Schema.encodeSync(installations);
 const fetchManifest = (url: URL) =>
   fetch(url, { redirect: "error", signal: AbortSignal.timeout(8000) });
-const installed = z.array(
-  z.object({ manifest: manifestSchema, endpoint: z.string(), token: z.string() }),
-);
-type Installation = z.infer<typeof installed>[number];
 const failure = (detail: string) => new TaskLeaseError({ reason: "failed", detail });
 const isTaskError = Schema.is(TaskLeaseError);
 const storeFailure = () => failure("Could not access the plugin settings.");
@@ -48,7 +67,7 @@ export const readPlugins = Effect.fn("SoloPlugins.read")(function* (id: string) 
   const secret = yield* (yield* secretStore).get(key(id));
   if (Option.isNone(secret)) return [];
   return yield* Effect.try({
-    try: () => installed.parse(decodeJson(new TextDecoder().decode(secret.value))),
+    try: () => decodeInstalled(new TextDecoder().decode(secret.value)),
     catch: storeFailure,
   });
 }, Effect.mapError(storeFailure));
@@ -62,9 +81,12 @@ const checkWorkspace = Effect.fn("SoloPlugins.workspace")(
   Effect.mapError((e) => (isTaskError(e) ? e : storeFailure())),
 );
 
-const summary = (items: Installation[]) =>
+const summary = (items: ReadonlyArray<Installation>) =>
   items.map(({ manifest, endpoint }) => ({ ...manifest, endpoint }));
-const change = (id: string, update: (items: Installation[]) => Installation[]) =>
+const change = (
+  id: string,
+  update: (items: ReadonlyArray<Installation>) => ReadonlyArray<Installation>,
+) =>
   lock.withPermits(1)(
     Effect.gen(function* () {
       yield* checkWorkspace(id);
@@ -74,7 +96,7 @@ const change = (id: string, update: (items: Installation[]) => Installation[]) =
         catch: () => failure("Remove the existing capability owner first."),
       });
       const store = yield* secretStore;
-      if (next.length) yield* store.set(key(id), new TextEncoder().encode(encodeJson(next)));
+      if (next.length) yield* store.set(key(id), new TextEncoder().encode(encodeInstalled(next)));
       else yield* store.remove(key(id));
       return summary(next);
     }).pipe(Effect.mapError((e) => (isTaskError(e) ? e : storeFailure()))),
@@ -104,7 +126,7 @@ export const pluginHandlers = {
         if (!response.ok) throw new Error();
         const bytes = await readCapped(response, 65536);
         if (!bytes) throw new Error();
-        const parsed = manifestSchema.parse(decodeJson(new TextDecoder().decode(bytes)));
+        const parsed = decodeManifest(new TextDecoder().decode(bytes));
         return { endpoint: endpoint.href, manifest: parsed };
       },
       catch: () => failure("Could not read plugin.json. Check the endpoint and manifest URL."),

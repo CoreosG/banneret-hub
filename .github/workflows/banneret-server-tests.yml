@@ -11,12 +11,12 @@ on:
     paths:
       - apps/server/**
       - apps/web/**
-      - packages/client-runtime/**
+      - packages/**
       - scripts/mobile-behavior/fake-fx.ts
-      - packages/contracts/**
-      - packages/banneret-relay-fake/**
-      - packages/shared/**
-      - packages/ssh/**
+      - scripts/lib/cli-*.ts
+      - vite.config.ts
+      - pnpm-workspace.yaml
+      - package.json
       - scripts/banneret/**
       - pnpm-lock.yaml
       - .github/workflows/banneret-server-tests.yml
@@ -25,12 +25,12 @@ on:
     paths:
       - apps/server/**
       - apps/web/**
-      - packages/client-runtime/**
+      - packages/**
       - scripts/mobile-behavior/fake-fx.ts
-      - packages/contracts/**
-      - packages/banneret-relay-fake/**
-      - packages/shared/**
-      - packages/ssh/**
+      - scripts/lib/cli-*.ts
+      - vite.config.ts
+      - pnpm-workspace.yaml
+      - package.json
       - scripts/banneret/**
       - pnpm-lock.yaml
       - .github/workflows/banneret-server-tests.yml
@@ -61,6 +61,9 @@ jobs:
         # The whole workspace: the shared root test config imports from scripts/, infra/ and packages/shared.
         with:
           save-pnpm-store: "false"
+
+      - name: Build and check server CLI executable imports
+        run: node apps/server/scripts/cli.ts build-exe
 
       - name: Server typecheck
         working-directory: apps/server
