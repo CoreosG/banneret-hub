@@ -2,6 +2,7 @@
 // and the line that says how the last change went. Every button follows the server's `leases.check`
 // answer from the machine the route picked; nothing here decides who may do what.
 import type { EnvironmentId, TaskLeaseStatus } from "@t3tools/contracts";
+import { Link } from "@tanstack/react-router";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
@@ -77,32 +78,19 @@ export function useLeaseCheck(
   // Compared field by field: a new object for the same machine and issue must not read again.
   const on = machine?.environmentId ?? null;
   const label = machine?.label ?? "";
-  const projectId = machine?.ref.projectId ?? null;
   const tracker = machine?.ref.tracker ?? null;
   const host = machine?.ref.host;
   const scope = machine?.ref.scope ?? "";
   const key = machine?.ref.key ?? "";
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the tracker's lease when the task is shown
   useEffect(() => {
-    if (!enabled || on === null || projectId === null || tracker === null) return;
+    if (!enabled || on === null || tracker === null) return;
     void checkLease({ environmentId, relayOrigin }, taskId, {
       environmentId: on,
       label,
-      ref: { projectId, tracker, ...(host === undefined ? {} : { host }), scope, key },
+      ref: { tracker, ...(host === undefined ? {} : { host }), scope, key },
     });
-  }, [
-    environmentId,
-    relayOrigin,
-    taskId,
-    enabled,
-    on,
-    label,
-    projectId,
-    tracker,
-    host,
-    scope,
-    key,
-  ]);
+  }, [environmentId, relayOrigin, taskId, enabled, on, label, tracker, host, scope, key]);
   return entry;
 }
 
@@ -131,7 +119,7 @@ export function startLease(
     });
     return;
   }
-  const ask = route.machines.length > 1 && (operation === "take" || !route.held);
+  const ask = operation === "take" || (route.machines.length > 1 && !route.held);
   if (ask) {
     openLeaseConfirm({
       relay: target,
@@ -143,7 +131,6 @@ export function startLease(
     });
     return;
   }
-  if (operation === "take") chooseLeaseMachine(route.chosen.ref, route.chosen.environmentId);
   void runLease(target, taskId, route.chosen, operation);
 }
 
@@ -238,11 +225,19 @@ export function LeaseConfirmHost() {
 function LeaseConfirmDialog() {
   const target = useLeaseConfirmStore((state) => state.target)!;
   const [machine, setMachine] = useState<LeaseMachine>(target.chosen);
+  const [justClaim, setJustClaim] = useState(false);
   const words = CONFIRM_WORDS[target.operation];
   const confirm = () => {
     openLeaseConfirm(null);
     if (target.operation === "take") chooseLeaseMachine(machine.ref, machine.environmentId);
-    void runLease(target.relay, target.taskId, machine, target.operation);
+    void runLease(
+      target.relay,
+      target.taskId,
+      machine,
+      target.operation,
+      undefined,
+      target.operation === "take" && !justClaim ? target.taskId : undefined,
+    );
   };
   return (
     <Dialog
@@ -263,8 +258,18 @@ function LeaseConfirmDialog() {
             onChange={setMachine}
           />
           <p className="mt-3 text-muted-foreground text-xs">
-            The machine writes with its own tracker login.
+            Any of your joined machines can claim.
           </p>
+          {target.operation === "take" && (
+            <label>
+              <input
+                type="checkbox"
+                checked={justClaim}
+                onChange={(event) => setJustClaim(event.target.checked)}
+              />{" "}
+              Just claim it
+            </label>
+          )}
         </DialogPanel>
         <DialogFooter>
           <Button variant="outline" onClick={() => openLeaseConfirm(null)}>
@@ -424,7 +429,12 @@ export function LeaseNoticeLine(props: {
           className={cn("break-words", line.tone === "muted" && "text-muted-foreground")}
           {...(line.tone === "muted" ? {} : toneProps(line.tone, "fg"))}
         >
-          {line.text}
+          {line.text}{" "}
+          {line.key === "notice" && entry.notice?.destination && (
+            <Link to="/$environmentId/$threadId" params={entry.notice.destination}>
+              Open
+            </Link>
+          )}
         </p>
       ))}
     </div>

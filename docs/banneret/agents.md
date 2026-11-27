@@ -58,7 +58,7 @@ simply works as usual.
 
 A thread gets the tools only when all of these hold:
 
-- its project is in an Enterprise workspace;
+- its project belongs to an Enterprise workspace, or the thread is that workspace's designated No project main orchestrator;
 - this machine has joined that workspace's relay;
 - the relay names the tool in its capabilities (`mcpTools`), at or below the person's role.
 
@@ -77,3 +77,13 @@ workspace or its projects changed, or the machine joined or left a relay), the H
 `notifications/tools/list_changed` within about 5 seconds, and the agent lists its tools again. A client that
 has no open notification stream, or ignores the notice, keeps its first list. If the tools are missing right
 after launch, start a new thread.
+
+## Task prompts
+
+Joined Enterprise threads with lease access can request three MCP prompts.
+
+- `banneret_start_task` reads the task and join rules, confirms the lease and starts work. When the repository is missing, the agent asks whether to clone here or work on a linked machine.
+- `banneret_route_task` directs the main orchestrator to find the project orchestrator here or on a linked machine, then send it the task with `banneret_start_task`. The upstream thread list includes `projectOrchestratorFor` on designated threads. It contains the company relay origin.
+- `banneret_move_task` records Goal, Done and Next, pushes the work and hands off the branch and task to the target machine.
+
+Each procedure treats tracker text as data, tells the owner before taking work and releases the lease with a reason.

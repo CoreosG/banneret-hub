@@ -14,6 +14,7 @@ import * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
 import * as AgentRelays from "./AgentRelays.ts";
 import * as AgentHandlers from "./handlers.ts";
 import { JOIN_URI, joinText } from "./join.ts";
+import { taskPrompts } from "./startTask.ts";
 import { AgentToolkit } from "./tools.ts";
 
 /**
@@ -29,7 +30,11 @@ const offeredOnly = McpServer.visibility(
         const thread = Option.getOrUndefined(scope)?.thread;
         if (thread === undefined) return false;
         const offered = yield* relays.offered(thread.threadId);
-        return target === JOIN_URI ? offered.size > 0 : offered.has(target);
+        return taskPrompts.some((p) => p.name === target)
+          ? offered.has("banneret_lease_take")
+          : target === JOIN_URI
+            ? offered.size > 0
+            : offered.has(target);
       }).pipe(Effect.catchCause(() => Effect.succeed(false)));
   }),
 );
@@ -37,6 +42,16 @@ const offeredOnly = McpServer.visibility(
 const joinResource = Layer.effectDiscard(
   Effect.gen(function* () {
     const relays = yield* AgentRelays.BanneretAgentRelays;
+    for (const prompt of taskPrompts)
+      yield* McpServer.registerPrompt({
+        name: prompt.name,
+        description: prompt.description,
+        annotations: Context.make(
+          McpSchema.EnabledWhen,
+          McpInvocationContext.hiddenFromOutsideClients,
+        ),
+        content: () => Effect.succeed(prompt.text),
+      });
     yield* McpServer.registerResource({
       uri: JOIN_URI,
       name: "banneret_join",

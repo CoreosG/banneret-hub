@@ -289,6 +289,7 @@ import {
   SidebarSectionHeader,
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
+import { threadMenuFor } from "../banneret/orchestratorStore";
 import { WorkspaceNoThreads } from "../banneret/WorkspaceNoThreads";
 import { EnterpriseSidebarRows } from "../banneret/EnterpriseSidebarRows";
 import {
@@ -2725,7 +2726,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ),
           ) ?? null;
         const clicked = await settlePromise(() =>
-          api.contextMenu.show(
+          threadMenuFor(api, threadRef, thread.projectId)(
             buildThreadActionMenuItems({
               canOperate: readEnvironmentScope(
                 threadRef.environmentId,

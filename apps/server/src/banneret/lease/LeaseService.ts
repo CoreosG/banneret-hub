@@ -1,6 +1,6 @@
-// Take and release a task on its work tracker, on the person's own login, through the issue and pull request
-// services. The tracker holds the state; this keeps one in-memory operation per task and nothing on disk. The
-// state table is in docs/banneret/relay-v1/README.md, "How the Hub writes".
+// The tracker holds claim and release state. One operation per task runs in memory.
+// See docs/banneret/relay-v1/README.md, "How the Hub writes".
+import { IssueTrackerError } from "@t3tools/source-control-core/server/IssueTracker";
 import {
   foldLease,
   formatClaimLine,
@@ -8,12 +8,9 @@ import {
   formatWithdrawLine,
   checkReleaseComment,
   LEASE_LABEL_CLAIMED,
-  LEASE_LABEL_PAUSED,
   parseLeaseLine,
   type IssueComment,
-  type IssueDetail,
   IssueOperationError,
-  type IssueRef,
   IssueUnavailableError,
   type LeaseFoldResult,
   TASK_LEASE_WS_METHODS,
@@ -31,8 +28,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import * as IssueService from "../../issue/IssueService.ts";
-import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
+import * as Orchestrator from "../Orchestrator.ts";
+import * as LeaseTracker from "./LeaseTracker.ts";
 import * as BanneretEnrolment from "../relay/Enrolment.ts";
 import * as CommentEdits from "./CommentEdits.ts";
 
@@ -44,24 +41,15 @@ const UPDATE_ATTEMPTS = 3;
 
 export interface LeaseServiceShape {
   readonly check: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseStatus, TaskLeaseError>;
-  readonly take: (input: TaskLeaseTakeInput) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
+  readonly take: (
+    input: TaskLeaseTakeInput,
+  ) => Effect.Effect<TaskLeaseResult & { handoff?: Orchestrator.TaskHandoff }, TaskLeaseError>;
   readonly release: (
     input: TaskLeaseReleaseInput,
   ) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
   readonly finish: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
   readonly withdraw: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
 }
-
-/** The relay whose person a lease call acts for; set once per call from its `relayOrigin`. */
-class ActingRelay extends Context.Reference<string | undefined>(
-  "t3/banneret/lease/LeaseService/ActingRelay",
-  { defaultValue: () => undefined },
-) {}
-
-const actingFor =
-  (input: { readonly relayOrigin?: string | undefined }) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    Effect.provideService(effect, ActingRelay, input.relayOrigin);
 
 const notRunning = Effect.fail(
   new TaskLeaseError({ reason: "unavailable", detail: "Take and release are not running." }),
@@ -85,17 +73,10 @@ export interface LeaseServiceOptions {
   readonly readBackDelay: Duration.Input;
 }
 
-/** The fields of a reference that name the task; the project only says whose credentials serve it. */
-const issueRefOf = (ref: IssueRef): IssueRef => ({
-  projectId: ref.projectId,
-  tracker: ref.tracker,
-  ...(ref.host === undefined ? {} : { host: ref.host }),
-  scope: ref.scope,
-  key: ref.key,
-});
-
-const taskKey = (ref: IssueRef) =>
-  [ref.tracker, ref.host ?? "", ref.scope, ref.key].map((part) => part.toLowerCase()).join(" ");
+const taskKey = (ref: TaskLeaseRef) =>
+  [ref.tracker, ref.host ?? "github.com", ref.scope, ref.key]
+    .map((part) => part.toLowerCase())
+    .join(" ");
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -107,19 +88,20 @@ const protocolCommentId = (comment: IssueComment): string =>
   /#issuecomment-(\d+)$/.exec(comment.url ?? "")?.[1] ?? comment.id;
 
 interface Snapshot {
-  readonly detail: IssueDetail;
+  readonly detail: Effect.Success<ReturnType<LeaseTracker.LeaseTracker["Service"]["detail"]>>;
   readonly fold: LeaseFoldResult;
   readonly viewer: string | null;
   readonly availability: TaskLeaseStatus["availability"];
   readonly unavailableDetail?: string;
 }
 
+const isTrackerError = Schema.is(IssueTrackerError);
 const isOperationError = Schema.is(IssueOperationError);
 const isUnavailableError = Schema.is(IssueUnavailableError);
 
 /** One plain sentence for a tracker failure; people and agent tools read it as the reason. */
 const describeError = (error: unknown): string => {
-  if (isOperationError(error)) {
+  if (isOperationError(error) || isTrackerError(error)) {
     if (error.reason === "rate-limited") {
       return "The tracker's rate limit is used up. Try again in a few minutes.";
     }
@@ -136,8 +118,7 @@ const describeError = (error: unknown): string => {
 };
 
 const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseServiceOptions> = {}) {
-  const issues = yield* IssueService.IssueService;
-  const pullRequests = yield* PullRequestService.PullRequestService;
+  const issues = yield* LeaseTracker.LeaseTracker;
   const enrolment = yield* BanneretEnrolment.BanneretEnrolment;
   const commentEdits = yield* CommentEdits.CommentEdits;
   const readBackDelay = options.readBackDelay ?? READ_BACK_DELAY;
@@ -147,12 +128,13 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   const failed = (error: unknown) =>
     new TaskLeaseError({ reason: "failed", detail: describeError(error) });
 
-  const read = Effect.fn("LeaseService.read")(function* (ref: IssueRef) {
-    const relayOrigin = yield* ActingRelay;
-    const me = relayOrigin === undefined ? undefined : (yield* enrolment.status(relayOrigin)).me;
+  const read = Effect.fn("LeaseService.read")(function* (ref: TaskLeaseRef) {
+    const { relayOrigin } = ref;
+    const view = yield* enrolment.status(relayOrigin);
+    const me = view.me;
     // A call for a company this machine has not joined has no person to check the login against, so
     // it is refused before the tracker is asked anything.
-    if (relayOrigin !== undefined && me === undefined) {
+    if (view.state !== "configured" || me === undefined) {
       return yield* new TaskLeaseError({
         reason: "unavailable",
         detail: `This machine has not joined the company at ${relayOrigin}.`,
@@ -227,13 +209,6 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
           "This tracker cannot comment, label and assign, so take and release are off.",
       } satisfies Snapshot;
     }
-    if (!detail.writable) {
-      return {
-        ...base,
-        availability: "read-only",
-        unavailableDetail: "This issue is outside the project's repositories.",
-      } satisfies Snapshot;
-    }
     if (viewer === null) {
       return {
         ...base,
@@ -285,7 +260,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     };
   };
 
-  const statusOf = (snapshot: Snapshot, ref: IssueRef): TaskLeaseStatus => ({
+  const statusOf = (snapshot: Snapshot, ref: TaskLeaseRef): TaskLeaseStatus => ({
     availability: snapshot.availability,
     ...(snapshot.unavailableDetail === undefined ? {} : { detail: snapshot.unavailableDetail }),
     viewer: snapshot.viewer,
@@ -307,7 +282,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
 
   /** Runs one operation on a task, refusing a second one that overlaps it. */
   const exclusive = <A>(
-    ref: IssueRef,
+    ref: TaskLeaseRef,
     kind: string,
     effect: Effect.Effect<A, TaskLeaseError>,
   ): Effect.Effect<A, TaskLeaseError> =>
@@ -330,11 +305,11 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   const attempt = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<string | null> =>
     Effect.match(effect, { onFailure: describeError, onSuccess: () => null });
 
-  const comment = (ref: IssueRef, body: string) => issues.comment({ ...ref, body });
+  const comment = (ref: TaskLeaseRef, body: string) => issues.comment({ ...ref, body });
 
   /** Re-reads the issue and writes only the assignee and label sets that change. */
   const reconcile = Effect.fn("LeaseService.reconcile")(function* (
-    ref: IssueRef,
+    ref: TaskLeaseRef,
     change: (current: {
       readonly assignees: ReadonlyArray<string>;
       readonly labels: ReadonlyArray<string>;
@@ -363,35 +338,8 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   const withoutName = (names: ReadonlyArray<string>, name: string) =>
     names.filter((other) => !same(other, name));
 
-  /**
-   * Adds or removes `paused` on the task's open pull requests (`draftsOnly` for a release). The pull request
-   * API, not the issue `update`: GitHub's issue tracker resolves a number as an Issue and refuses a pull request.
-   */
-  const setPaused = Effect.fn("LeaseService.setPaused")(function* (
-    ref: IssueRef,
-    applied: boolean,
-  ) {
-    const detail = yield* issues.detail(ref);
-    const targets = detail.linkedPullRequests.filter(
-      (pr) => pr.state === "open" && (!applied || pr.isDraft),
-    );
-    for (const pr of targets) {
-      const prRef = {
-        projectId: ref.projectId,
-        ...(ref.host === undefined ? {} : { host: ref.host }),
-        repository: pr.repository,
-        number: pr.number,
-      };
-      const current = yield* pullRequests.detail(prRef);
-      const has = current.labels.some((label) => same(label.name, LEASE_LABEL_PAUSED));
-      // Removing a label the pull request lacks is a 404 on GitHub, so only change what differs.
-      if (has === applied) continue;
-      yield* pullRequests.setLabels({ ...prRef, labels: [LEASE_LABEL_PAUSED], applied });
-    }
-  });
-
   const result = Effect.fn("LeaseService.result")(function* (
-    ref: IssueRef,
+    ref: TaskLeaseRef,
     outcome: TaskLeaseResult["outcome"],
     detail?: string,
   ) {
@@ -406,7 +354,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   });
 
   /** Assign the holder and add `claimed`, re-reading before each of up to three tries. */
-  const assignHolder = (ref: IssueRef, viewer: string) =>
+  const assignHolder = (ref: TaskLeaseRef, viewer: string) =>
     reconcile(ref, (current) => ({
       assignees: current.assignees.some((name) => same(name, viewer))
         ? current.assignees
@@ -416,7 +364,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
 
   /** The tracker side of a release, after its comment: unassign, unlabel, pause the draft. */
   const settleRelease = Effect.fn("LeaseService.settleRelease")(function* (
-    ref: IssueRef,
+    ref: TaskLeaseRef,
     viewer: string,
     othersStanding: boolean,
   ) {
@@ -433,40 +381,24 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         `The release comment is posted, but unassigning failed: ${unassigned} Finish retries it.`,
       );
     }
-    const paused = yield* attempt(setPaused(ref, true));
-    if (paused !== null) {
-      return yield* result(
-        ref,
-        "incomplete",
-        `Released, but adding paused to the draft pull request failed: ${paused} Finish retries it.`,
-      );
-    }
     return yield* result(ref, "released");
   });
 
   /** Complete a take the viewer holds: assignee, `claimed`, and no `paused` on open pull requests. */
   const settleTake = Effect.fn("LeaseService.settleTake")(function* (
-    ref: IssueRef,
+    ref: TaskLeaseRef,
     viewer: string,
   ) {
     const assigned = yield* attempt(assignHolder(ref, viewer));
     if (assigned !== null) {
       return yield* result(ref, "incomplete", `Assigning you failed: ${assigned}`);
     }
-    const unpaused = yield* attempt(setPaused(ref, false));
-    if (unpaused !== null) {
-      return yield* result(
-        ref,
-        "taken",
-        `Taken, but removing paused from the pull request failed: ${unpaused} Finish retries it.`,
-      );
-    }
     return yield* result(ref, "taken");
   });
 
   /** Withdraw the viewer's standing claim with a system reason, then unassign them. */
   const withdrawClaim = Effect.fn("LeaseService.withdrawClaim")(function* (
-    ref: IssueRef,
+    ref: TaskLeaseRef,
     viewer: string,
     line: string,
     keepClaimedLabel: boolean,
@@ -504,12 +436,12 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   });
 
   const check = Effect.fn("LeaseService.check")(function* (input: TaskLeaseRef) {
-    const ref = issueRefOf(input);
+    const ref = input;
     return statusOf(yield* read(ref), ref);
   });
 
   const take: LeaseServiceShape["take"] = (input) => {
-    const ref = issueRefOf(input);
+    const ref = input;
     return exclusive(
       ref,
       "take",
@@ -557,7 +489,22 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         const after = yield* read(ref);
         const claimants = after.fold.lease?.claimants ?? [];
         const position = claimants.findIndex((login) => same(login, viewer));
-        if (position === 0) return yield* settleTake(ref, viewer);
+        if (position === 0) {
+          const taken = yield* settleTake(ref, viewer);
+          if (!input.handoffTaskId || taken.outcome !== "taken") return taken;
+          const claim = after.detail.comments.findLast(
+            (c) => c.author?.login === viewer && parseLeaseLine(c.body)?.kind === "claim",
+          );
+          return {
+            ...taken,
+            handoff: {
+              url: before.detail.url,
+              title: before.detail.title,
+              note: before.fold.lastRelease?.note ?? null,
+              claim: claim?.id ?? after.fold.lease?.since ?? "",
+            },
+          };
+        }
         if (position < 0) {
           return yield* result(
             ref,
@@ -579,7 +526,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   };
 
   const release: LeaseServiceShape["release"] = (input) => {
-    const ref = issueRefOf(input);
+    const ref = input;
     const written = {
       reason: input.reason,
       reasonText: input.reasonText,
@@ -613,7 +560,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   };
 
   const finish: LeaseServiceShape["finish"] = (input) => {
-    const ref = issueRefOf(input);
+    const ref = input;
     return exclusive(
       ref,
       "finish",
@@ -636,7 +583,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
   };
 
   const withdraw: LeaseServiceShape["withdraw"] = (input) => {
-    const ref = issueRefOf(input);
+    const ref = input;
     return exclusive(
       ref,
       "withdraw",
@@ -691,22 +638,19 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     );
   };
 
-  return {
-    check: (input) => check(input).pipe(actingFor(input)),
-    take: (input) => take(input).pipe(actingFor(input)),
-    release: (input) => release(input).pipe(actingFor(input)),
-    finish: (input) => finish(input).pipe(actingFor(input)),
-    withdraw: (input) => withdraw(input).pipe(actingFor(input)),
-  } satisfies LeaseServiceShape;
+  return { check, take, release, finish, withdraw } satisfies LeaseServiceShape;
 });
 
 export const layerWith = (options: Partial<LeaseServiceOptions>) =>
   Layer.effect(LeaseService, make(options));
 
-export const layer = layerWith({}).pipe(Layer.provide(CommentEdits.layer));
+export const layer = layerWith({}).pipe(
+  Layer.provide(Layer.merge(CommentEdits.layer, LeaseTracker.layer)),
+);
 
 /** Handlers for the lease RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
+  [TASK_LEASE_WS_METHODS.orchestrator]: Orchestrator.selection,
   [TASK_LEASE_WS_METHODS.check]: Effect.fn("LeaseService.rpc.check")(function* (
     input: TaskLeaseRef,
   ) {
@@ -715,7 +659,21 @@ export const rpcHandlers = {
   [TASK_LEASE_WS_METHODS.take]: Effect.fn("LeaseService.rpc.take")(function* (
     input: TaskLeaseTakeInput,
   ) {
-    return yield* (yield* LeaseService).take(input);
+    const { handoff, ...result } = yield* (yield* LeaseService).take(input);
+    if (!handoff) return result;
+    return yield* Orchestrator.sendTask(input, handoff).pipe(
+      Effect.match({
+        onSuccess: (thread) => ({
+          ...result,
+          orchestratorThreadId: thread.id,
+          detail: `Taken. Sent to ${thread.title}.`,
+        }),
+        onFailure: (error) => ({
+          ...result,
+          detail: `Taken. Could not send to your orchestrator. ${error.message}`,
+        }),
+      }),
+    );
   }),
   [TASK_LEASE_WS_METHODS.release]: Effect.fn("LeaseService.rpc.release")(function* (
     input: TaskLeaseReleaseInput,

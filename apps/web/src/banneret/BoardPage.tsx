@@ -6,6 +6,7 @@ import type { BanneretBoardCard, BanneretBoardEntry, BanneretBoardTask } from "@
 import { SquareKanbanIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
+import { Link } from "@tanstack/react-router";
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import { ApprovalLine } from "./ApprovalLine";
@@ -75,7 +76,6 @@ import {
 import { FilterBox } from "./ui/FilterBox";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
-import { useTaskIssueRef } from "./useTaskIssueRef";
 import { useUrlSearch } from "./useUrlSearch";
 
 const CHECK_TONES: Readonly<Record<string, Tone>> = {
@@ -142,6 +142,7 @@ function BoardCard(props: {
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const { card } = props;
+  const entry = useLeaseEntry(props.target, card.task.id);
   const lease = props.leases ? card.lease : undefined;
   const ref = taskRef(card.task);
   const localLease = useLocalLease(props.target, card, props.me);
@@ -223,6 +224,14 @@ function BoardCard(props: {
       {props.leases ? (
         <BoardCardMenu target={props.target} card={card} onOpen={props.onOpen} />
       ) : null}
+      {entry?.notice?.destination && (
+        <p role="status">
+          {entry.notice.message}{" "}
+          <Link to="/$environmentId/$threadId" params={entry.notice.destination}>
+            Open
+          </Link>
+        </p>
+      )}
       {props.review ? <ClaimReviewActions target={props.target} card={card} /> : null}
     </li>
   );
@@ -237,8 +246,7 @@ function ClaimReviewActions(props: {
   readonly card: BanneretBoardCard;
 }) {
   const { card, target } = props;
-  const issueRef = useTaskIssueRef(target.environmentId, card.task);
-  const route = useLeaseRoute(target, card.task, issueRef);
+  const route = useLeaseRoute(target, card.task);
   const entry = useLeaseCheck(target, card.task.id, routeMachine(route), true);
   if (route.kind === "loading") return null;
   if (route.kind !== "ready") {

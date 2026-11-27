@@ -396,6 +396,7 @@ export const OrchestratorMcpThreadBackgroundTask = Schema.Struct({
 export type OrchestratorMcpThreadBackgroundTask = typeof OrchestratorMcpThreadBackgroundTask.Type;
 
 export const OrchestratorMcpThreadListItem = Schema.Struct({
+  projectOrchestratorFor: Schema.optional(Schema.String),
   threadId: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
