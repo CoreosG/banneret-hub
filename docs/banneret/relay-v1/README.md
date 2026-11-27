@@ -350,8 +350,8 @@ and names the `board` file in the snapshot head. A Hub does not
 read the board unless capabilities carry the section. The board is snapshot-only: the relay computes it, the Hub
 draws it. The flag `leases` also means the relay parses the lease protocol below. There is no second flag.
 
-The relay only reads. Take and release are written to the work tracker by the Hub, on the person's own login (see
-"Lease protocol"). The relay has no write endpoint for them.
+A relay only reads. Every take, release and hand-off write comes from the Hub on the person's own login (see "Lease
+protocol"). The relay has no write endpoint for them.
 
 **The file.** `SnapshotBoard` is `{state, notMeasured, columns[], cards[]}`.
 
@@ -369,7 +369,7 @@ The relay only reads. Take and release are written to the work tracker by the Hu
 - `lease` is `{holder{id, login}, state, since, lastSignalAt, staleAt, expiresAt}`. A card with no `lease` is
   Free. A relay that cannot read claims says so in the board's `state` and `notMeasured`, never as a lease state.
 - `lastRelease` is `{by{id, login}, at, reason, freeToContinue, reasonText?, note?}`: the latest counted release,
-  present while no claim stands (see "Lease protocol"). The same object is on `GET /tasks/{taskId}`.
+  present only while nobody holds a standing claim, and absent as soon as one stands (see "Lease protocol"). The same object is on `GET /tasks/{taskId}`.
 - The "agent at work" ring is not in the file. The Hub derives it from the `work` file, joined by task id.
 
 **Status.** `status` is an open string; a client accepts values it does not know. One vocabulary serves the board,
@@ -411,12 +411,18 @@ A take or a release is a comment on the tracker issue plus an assignee and label
 the person's own login. Line 1 of the comment is the machine format; there is no hidden marker and no local
 journal. The relay derives everything from the issue's comments, assignees and labels.
 
-**Comments.** Only line 1 counts. It is matched exactly, in lower case, after trimming spaces. The separator is
-` · ` (a middle dot with a space on each side).
+**Comments.** Only line 1 counts. The line is trimmed of spaces first. The separator is ` · ` (a middle dot with a
+space on each side).
+
+**Matching rules.** The line prefixes `claim:` and `release:` are exact and lower case: `Claim:` and `Release: done`
+are not protocol lines. Reason ids are exact and lower case too: `DONE` is not `done`, and reads as `other`. Two things
+match without regard to case: the `free to continue` suffix (`Free To Continue` counts), and logins (`Ada-Example`
+and `ada-example` are the same person, for the claim line against the comment's author, for assignees, for founders
+and for the holder).
 
 | Line 1 | Meaning |
 |---|---|
-| `claim: <login>/<agent>` | A take. `<login>` must be the comment's author, or the line is ignored. `<agent>` is a tool name such as `hub` (`[A-Za-z0-9._-]{1,64}`); `claim: <login>` alone is also read. |
+| `claim: <login>/<agent>` | A take. `<login>` must be the comment's author, or the line is ignored. `<agent>` is a tool name such as `hub`. It must match `[A-Za-z0-9._-]{1,64}`, so it may not contain `#` or a space. An old `persona#n` claim has a `#` in it and does not count: the line is ignored. `claim: <login>` alone is also read. |
 | `release: <reason>[ · <text>][ · free to continue]` | A release. The rest of the comment is the note. |
 | `release: lost_claim[ · <text>]`, `release: take_failed[ · <text>]` | A withdrawal by the Hub. Never a release. |
 
@@ -471,7 +477,7 @@ Time runs from the claim, or, with no standing claim, from the last protocol com
 shows the claim as `active`, or the release as done, because the Hub writes the comment first and the assignee a
 moment later. An `incomplete` lease with no standing claim is held by the released holder when they are still
 assigned or `claimed` is still on; otherwise by the ended claimant who is still assigned, or by the first assignee
-when only the label is left. Its `since` is the holder's claim time, or null when no claim comment backs it. A
+when only the label is left. Its `since` in the fold is the claim time of the released holder, and only when that holder is the one shown. In every other case (the ended claimant or the first assignee, or a leftover `claimed` label) the fold gives null, because no claim comment backs it. The fold never reads assignment or issue times. A card still needs a timestamp in `BoardLease.since`, and the fold does not say which one a relay should use then. A
 `claimed` label with nobody named anywhere (no assignee, no release) has no holder to show, so it makes no lease.
 
 **A plain assignee is not a lease.** Many issues are assigned outside the protocol. An assignee with no standing
@@ -480,8 +486,14 @@ claim, no `claimed` label and no release or withdrawal for that person is not an
 follows the assignee as usual, so the relay may show such a card in Taken. When someone takes it, the Hub's claim
 comment starts a lease and the Hub leaves the existing assignees as they are, adding the taker.
 
-**lastRelease.** The latest counted release, present while no claim stands. A withdrawn claim does not hide it; a
-standing claim does. `freeToContinue` is true only when line 1 says free to continue **and** nobody is assigned now.
+**lastRelease.** The latest counted release, present only while nobody holds a standing claim. It is not "the
+current or last epoch": the moment any claim stands, `lastRelease` is null, and it comes back when that claim ends
+by a counted release (a new, later one) or is withdrawn (the earlier one). A withdrawal is never a release, so a
+later `lost_claim` or `take_failed` by another claimant does not replace or hide the earlier release. For example,
+in the fixture `withdrawn-take-keeps-release`, Ada releases with `free to continue`, Bob takes and then withdraws
+with `take_failed`, and `lastRelease` is still Ada's, with `freeToContinue` true. `freeToContinue` is true only when
+line 1 of that release says free to continue **and** nobody is assigned now. It survives a later withdrawal, but
+not an assignee: once someone is assigned, it reads false.
 
 **Feed.** Every counted release is a `released` entry with the release's author, `reason` and `freeToContinue` as
 written, and `reasonText` and `note` when present. Withdrawals make no entry.

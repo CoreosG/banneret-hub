@@ -1380,14 +1380,15 @@ components:
         Present only on a held task; a task with no lease is Free. `state` is an open string with known values
         `active`, `stale`, `expired`, `paused`, `conflict` and `incomplete` (README, "Lease protocol": the tracker's
         assignee and `claimed` label disagree with the claim comments for longer than the 60 s settle window). A relay
-        that cannot read claims says so in the board's `notMeasured`, never as a lease state.
+        that cannot read claims says so in the board's `notMeasured`, never as a lease state. A relay only reads:
+        every take, release and hand-off write comes from the Hub on the person's own login.
       type: object
       additionalProperties: false
       required: [holder, state, since, lastSignalAt, staleAt, expiresAt]
       properties:
         holder: { $ref: "#/components/schemas/PersonRef" }
         state: { $ref: "#/components/schemas/OpenToken" }
-        since: { description: "When the lease began.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
+        since: { description: "When the lease began: the holder's claim comment time. For an `incomplete` lease with no standing claim, the fold gives the released holder's claim time, or null when no claim comment backs it (README, \"Lease protocol\"); the fold does not choose a fallback.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
         lastSignalAt: { description: "The last heartbeat, push or comment.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
         staleAt: { description: "`lastSignalAt` plus 6 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
         expiresAt: { description: "`lastSignalAt` plus 24 hours.", allOf: [{ $ref: "#/components/schemas/Timestamp" }] }
@@ -1399,8 +1400,9 @@ components:
       allOf: [{ $ref: "#/components/schemas/OpenToken" }]
     LeaseLastRelease:
       description: |
-        The latest counted release of the task (README, "Lease protocol"), present while no claim stands. Text is
-        plain: a client shows `reasonText` and `note` as written and renders no markup.
+        The latest counted release of the task (README, "Lease protocol"), present only while nobody holds a standing
+        claim, and absent as soon as one stands. A later withdrawal (`lost_claim`, `take_failed`) by another claimant
+        does not replace or hide it. Text is plain: a client shows `reasonText` and `note` as written and renders no markup.
       type: object
       additionalProperties: false
       required: [by, at, reason, freeToContinue]
@@ -1409,7 +1411,7 @@ components:
         at: { $ref: "#/components/schemas/Timestamp" }
         reason: { $ref: "#/components/schemas/LeaseReason" }
         freeToContinue:
-          description: Written as free to continue, and nobody is assigned to the task now.
+          description: Line 1 of the release ends with `free to continue` (any case), and nobody is assigned to the task now. It survives a later withdrawal by another claimant.
           type: boolean
         reasonText: { description: "The text after the reason id, or the raw text of an unknown one.", type: string, minLength: 1, maxLength: 200 }
         note: { description: "The comment after line 1: Goal, Done, Next and follow-ups.", type: string, minLength: 1, maxLength: 2048 }
