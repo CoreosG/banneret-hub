@@ -46,6 +46,18 @@ const LOCAL = EnvironmentId.make("local");
 // A Tailscale relay on a non-default port, as the live relay runs.
 const ORIGIN = "https://relay-host.tail0000.ts.net:10000";
 const WORKSPACE_ID = "ent-0123456789abcdef";
+const TARGET = { environmentId: LOCAL, relayOrigin: ORIGIN };
+/** A second company's relay, joined from the same machine. */
+const OTHER_ORIGIN = "https://oss-relay.example.org";
+const OTHER_ID = "ent-fedcba9876543210";
+
+/** A `none` view of a relay, with the last result. */
+const none = (reason?: string, origin = ORIGIN): BanneretEnrolmentView => ({
+  state: "none",
+  workspaceId: origin === ORIGIN ? WORKSPACE_ID : OTHER_ID,
+  relayOrigin: origin,
+  ...(reason === undefined ? {} : { reason }),
+});
 const HOSTILE = '<img src=x onerror="window.__pwned=1">';
 
 function project(id: string, remoteUrl: string | null): Project {
@@ -90,7 +102,9 @@ function setup(displayName = "Example Company") {
     stored = mergeBanneretWorkspaces(stored, workspaces);
     return { workspaces: stored };
   });
-  let view: BanneretEnrolmentView = { state: "none" };
+  // What the server knows, per relay; `view` is the relay under test's.
+  const views = new Map<string, BanneretEnrolmentView>();
+  let view: BanneretEnrolmentView = none();
   const pending: BanneretEnrolmentView = {
     state: "requested",
     workspaceId: WORKSPACE_ID,
@@ -102,9 +116,15 @@ function setup(displayName = "Example Company") {
     expiresAt: "2099-01-01T00:10:00.000Z",
   };
   const spies = {
-    status: vi
-      .spyOn(enrolmentRpc, "status")
-      .mockImplementation(async () => ({ ok: true, value: view })),
+    status: vi.spyOn(enrolmentRpc, "status").mockImplementation(async () => ({
+      ok: true,
+      value: {
+        enrolments: [...views.values()]
+          .filter((entry) => entry.relayOrigin !== ORIGIN)
+          .concat(view.state === "none" && view.reason === undefined ? [] : [view])
+          .toSorted((a, b) => a.relayOrigin.localeCompare(b.relayOrigin)),
+      },
+    })),
     probe: vi.spyOn(enrolmentRpc, "probe").mockImplementation(async () => ({
       ok: true,
       value: { origin: ORIGIN, displayName },
@@ -114,7 +134,7 @@ function setup(displayName = "Example Company") {
       return { ok: true, value: view };
     }),
     cancel: vi.spyOn(enrolmentRpc, "cancel").mockImplementation(async () => {
-      view = { state: "none", reason: "cancelled" };
+      view = none("cancelled");
       return { ok: true, value: view };
     }),
     leave: vi.spyOn(enrolmentRpc, "leave"),
@@ -167,19 +187,20 @@ function setup(displayName = "Example Company") {
   return {
     spies,
     setView: async (next: BanneretEnrolmentView) => {
-      view = next;
+      if (next.relayOrigin === ORIGIN) view = next;
+      else views.set(next.relayOrigin, next);
       await act(async () => {
         await refreshEnrolment(LOCAL);
       });
     },
-    serverWritesWorkspace: () => {
+    serverWritesWorkspace: (origin = ORIGIN, name = displayName) => {
       stored = mergeBanneretWorkspaces(stored, [
         {
-          id: WORKSPACE_ID,
-          name: displayName,
+          id: origin === ORIGIN ? WORKSPACE_ID : OTHER_ID,
+          name,
           kind: "enterprise",
           projectKeys: [],
-          relay: { origin: ORIGIN, displayName },
+          relay: { origin, displayName: name },
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
       ]);
@@ -274,7 +295,7 @@ describe("EnterpriseWizard", () => {
       .element(page.getByText("Ticked: projects in Example Company's repository list."))
       .toBeVisible();
     expect(server.spies.matchProjects).toHaveBeenCalledWith(
-      LOCAL,
+      TARGET,
       expect.arrayContaining(["git@github.com:example-org/alpha.git"]),
     );
     const alpha = page.getByRole("checkbox").first();
@@ -311,7 +332,7 @@ describe("EnterpriseWizard", () => {
     await userEvent.click(page.getByRole("button", { name: "Continue" }));
     await userEvent.click(page.getByRole("button", { name: "Join Example Company" }));
     await expect.element(page.getByLabelText("Confirm code")).toBeVisible();
-    await server.setView({ state: "none", reason });
+    await server.setView(none(reason));
     await expect.element(page.getByRole("status")).toHaveTextContent(message);
     await expect.element(page.getByLabelText("Relay address")).toHaveValue(ORIGIN);
   });
@@ -321,8 +342,9 @@ describe("EnterpriseWizard", () => {
     await prepareScreen(stack);
     const server = setup();
     await using _screen = await render(<Harness />);
-    await server.setView({ state: "none", reason: "cancelled" });
-    await act(() => openWorkspaceDialog({ kind: "enterprise" }));
+    await server.setView(none("cancelled"));
+    // The last result belongs to that relay: it shows when the wizard opens for it.
+    await act(() => openWorkspaceDialog({ kind: "enterprise", origin: ORIGIN }));
     await expect.element(page.getByRole("status")).toHaveTextContent("Joining was cancelled.");
 
     await userEvent.fill(page.getByLabelText("Relay address"), ORIGIN);
@@ -370,7 +392,7 @@ describe("EnterpriseWizard", () => {
       me: { login: "ada-example", role: "founder" },
       health: "healthy",
     });
-    await act(() => openWorkspaceDialog({ kind: "machines" }));
+    await act(() => openWorkspaceDialog({ kind: "machines", origin: ORIGIN }));
     await expect.element(page.getByText(HOSTILE, { exact: true })).toBeVisible();
     await expect.element(page.getByText("This machine")).toBeVisible();
 
@@ -385,7 +407,7 @@ describe("EnterpriseWizard", () => {
     const server = setup();
     server.spies.leave.mockImplementation(async () => ({
       ok: true,
-      value: { state: "none", reason: "forgotten" },
+      value: none("forgotten"),
     }));
     await using _screen = await render(<Harness />);
     const approved: BanneretEnrolmentView = {
@@ -397,7 +419,7 @@ describe("EnterpriseWizard", () => {
       label: "Ada laptop",
     };
     await server.setView(approved);
-    await act(() => openWorkspaceDialog({ kind: "enterprise" }));
+    await act(() => openWorkspaceDialog({ kind: "enterprise", origin: ORIGIN }));
     await expect.element(page.getByText("Finishing setup…")).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Cancel" })).toBeVisible();
     expect(page.getByRole("button", { name: "Forget this machine here" }).query()).toBeNull();
@@ -405,9 +427,9 @@ describe("EnterpriseWizard", () => {
     await server.setView({ ...approved, health: "forbidden" });
     await expect.element(page.getByText("The relay does not allow this machine")).toBeVisible();
     await userEvent.click(page.getByRole("button", { name: "Forget this machine here" }));
-    expect(server.spies.leave).toHaveBeenCalledWith(LOCAL, "forget");
+    expect(server.spies.leave).toHaveBeenCalledWith(TARGET, "forget");
     // The stub's leave does not change what status answers; make the server agree.
-    await server.setView({ state: "none", reason: "forgotten" });
+    await server.setView(none("forgotten"));
     await expect
       .element(page.getByRole("status"))
       .toHaveTextContent(
@@ -419,7 +441,7 @@ describe("EnterpriseWizard", () => {
       .element(page.getByText(/^Cannot reach relay-host\.tail0000\.ts\.net:10000/))
       .toBeVisible();
     await userEvent.click(page.getByRole("button", { name: "Cancel" }));
-    expect(server.spies.cancel).toHaveBeenCalledWith(LOCAL);
+    expect(server.spies.cancel).toHaveBeenCalledWith(TARGET);
     await expect.element(page.getByLabelText("Relay address")).toBeVisible();
   });
 
@@ -444,7 +466,7 @@ describe("EnterpriseWizard", () => {
       health: "refused",
     };
     await server.setView(refused);
-    await act(() => openWorkspaceDialog({ kind: "leave" }));
+    await act(() => openWorkspaceDialog({ kind: "leave", origin: ORIGIN }));
     await expect
       .element(page.getByText(/The relay refused this machine, so it cannot confirm/))
       .toBeVisible();
@@ -454,7 +476,7 @@ describe("EnterpriseWizard", () => {
     await act(async () => {
       await refreshEnrolment(LOCAL);
     });
-    expect(useEnrolmentStore.getState().views[LOCAL]).toEqual(refused);
+    expect(useEnrolmentStore.getState().views[LOCAL]).toEqual([refused]);
 
     await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
     await userEvent.click(page.getByRole("menuitem", { name: "Join again…" }));
@@ -478,5 +500,114 @@ describe("EnterpriseWizard", () => {
       expect(server.stored().map((entry) => entry.name)).toEqual(["Client work"]),
     );
     for (const spy of relaySpies(server.spies)) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("joins a second company from the address step, and each workspace keeps its own status", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const server = setup();
+    await using _screen = await render(<Harness />);
+    // This machine already belongs to Example Company.
+    server.serverWritesWorkspace();
+    const configured: BanneretEnrolmentView = {
+      state: "configured",
+      workspaceId: WORKSPACE_ID,
+      relayOrigin: ORIGIN,
+      displayName: "Example Company",
+      machineId: "m_1",
+      label: "Ada laptop",
+      me: { login: "ada-example", role: "founder" },
+      health: "healthy",
+    };
+    await server.setView(configured);
+    await act(async () => {
+      await loadEnvironmentWorkspaces(LOCAL);
+      useWorkspacesStore.setState({ activeId: WORKSPACE_ID });
+    });
+
+    // New workspace, Enterprise: the address step, not the joined company's projects.
+    await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
+    await userEvent.click(page.getByRole("menuitem", { name: "New workspace…" }));
+    await userEvent.click(page.getByRole("button", { name: "Enterprise" }));
+    await expect.element(page.getByLabelText("Relay address")).toHaveValue("");
+    expect(page.getByText("Connected as ada-example · Founder").query()).toBeNull();
+
+    server.spies.probe.mockImplementation(async () => ({
+      ok: true,
+      value: { origin: OTHER_ORIGIN, displayName: "OSS Project" },
+    }));
+    server.spies.start.mockImplementation(async () => ({
+      ok: true,
+      value: {
+        state: "requested",
+        workspaceId: OTHER_ID,
+        relayOrigin: OTHER_ORIGIN,
+        displayName: "OSS Project",
+        label: "Ada laptop",
+        confirmCode: "WXYZ6789",
+        browserUrl: `${OTHER_ORIGIN}/admin/hub/enroll/pr_2`,
+        expiresAt: "2099-01-01T00:10:00.000Z",
+      },
+    }));
+    await userEvent.fill(page.getByLabelText("Relay address"), "oss-relay.example.org");
+    await userEvent.click(page.getByRole("button", { name: "Continue" }));
+    await userEvent.click(page.getByRole("button", { name: "Join OSS Project" }));
+    await expect.element(page.getByLabelText("Confirm code")).toHaveTextContent("WXYZ6789");
+
+    server.serverWritesWorkspace(OTHER_ORIGIN, "OSS Project");
+    await server.setView({
+      state: "awaiting_approval",
+      workspaceId: OTHER_ID,
+      relayOrigin: OTHER_ORIGIN,
+      displayName: "OSS Project",
+      label: "Ada laptop",
+    });
+    await expect.element(page.getByText(/Waiting for a founder to approve/)).toBeVisible();
+    await act(async () => {
+      useWorkspacesStore.setState({ dialog: null });
+      await loadEnvironmentWorkspaces(LOCAL);
+    });
+
+    // Each Enterprise row has its own status line; Machines acts on the active workspace's relay.
+    await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
+    const menu = page.getByRole("menu");
+    await expect.element(menu.getByText("Connected as ada-example · Founder")).toBeVisible();
+    await expect.element(menu.getByText("Waiting for a founder to approve")).toBeVisible();
+    await userEvent.click(page.getByRole("menuitem", { name: "Machines…" }));
+    await vi.waitFor(() => expect(server.spies.machines).toHaveBeenCalledWith(TARGET));
+  });
+
+  it("an address this machine already joined opens that workspace instead of joining again", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const server = setup();
+    await using _screen = await render(<Harness />);
+    server.serverWritesWorkspace();
+    await server.setView({
+      state: "configured",
+      workspaceId: WORKSPACE_ID,
+      relayOrigin: ORIGIN,
+      displayName: "Example Company",
+      machineId: "m_1",
+      label: "Ada laptop",
+      me: { login: "ada-example", role: "founder" },
+      health: "healthy",
+    });
+    await act(async () => {
+      await loadEnvironmentWorkspaces(LOCAL);
+    });
+    expect(useWorkspacesStore.getState().activeId).toBeNull();
+
+    await act(() => openWorkspaceDialog({ kind: "enterprise" }));
+    await userEvent.fill(page.getByLabelText("Relay address"), ORIGIN);
+    await userEvent.click(page.getByRole("button", { name: "Continue" }));
+    await expect
+      .element(page.getByRole("status"))
+      .toHaveTextContent(
+        "This machine has already joined Example Company. Its workspace is now open.",
+      );
+    expect(useWorkspacesStore.getState().activeId).toBe(WORKSPACE_ID);
+    expect(page.getByRole("button", { name: "Join Example Company" }).query()).toBeNull();
+    expect(server.spies.start).not.toHaveBeenCalled();
   });
 });

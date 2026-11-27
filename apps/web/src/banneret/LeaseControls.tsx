@@ -1,7 +1,7 @@
 // Banneret Hub: Take, Release, Finish and Withdraw for one task, the Release dialog, and the line that
 // says how the last change went. Every button follows the server's `leases.check` answer; nothing here
 // decides who may do what.
-import type { EnvironmentId, IssueRef, TaskLeaseStatus } from "@t3tools/contracts";
+import type { IssueRef, TaskLeaseStatus } from "@t3tools/contracts";
 import { useEffect, useId, useState } from "react";
 
 import { Button } from "../components/ui/button";
@@ -32,6 +32,7 @@ import {
   releaseInput,
   type ReleaseForm,
 } from "./lease.logic";
+import { type RelayTarget, relayKey } from "./enrolmentStore";
 import "./lease.css";
 import {
   checkLease,
@@ -53,12 +54,13 @@ const RUNNING_WORDS: Readonly<Record<LeaseOperation, string>> = {
 
 /** Reads the lease when the task is shown; the tracker may have changed since the last read. */
 export function useLeaseCheck(
-  environmentId: EnvironmentId,
+  target: RelayTarget,
   taskId: string,
   ref: IssueRef | null,
   enabled: boolean,
 ): LeaseEntry | undefined {
-  const entry = useLeaseEntry(environmentId, taskId);
+  const entry = useLeaseEntry(target, taskId);
+  const { environmentId, relayOrigin } = target;
   // Compared field by field: a new object for the same issue must not read again.
   const projectId = ref?.projectId ?? null;
   const tracker = ref?.tracker ?? null;
@@ -68,14 +70,14 @@ export function useLeaseCheck(
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the tracker's lease when the task is shown
   useEffect(() => {
     if (!enabled || projectId === null || tracker === null) return;
-    void checkLease(environmentId, taskId, {
+    void checkLease({ environmentId, relayOrigin }, taskId, {
       projectId,
       tracker,
       ...(host === undefined ? {} : { host }),
       scope,
       key,
     });
-  }, [environmentId, taskId, enabled, projectId, tracker, host, scope, key]);
+  }, [environmentId, relayOrigin, taskId, enabled, projectId, tracker, host, scope, key]);
   return entry;
 }
 
@@ -102,7 +104,7 @@ function situationLine(status: TaskLeaseStatus): string | null {
 
 /** The buttons for the task header. Nothing shows until the check answers. */
 export function LeaseButtons(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly taskId: string;
   readonly title: string;
   readonly issueRef: IssueRef;
@@ -117,7 +119,7 @@ export function LeaseButtons(props: {
   // While a check runs the buttons still show the last answer, so they wait for the new one.
   const disabled = running !== null || status.busy || entry?.phase.kind === "checking";
   const run = (operation: LeaseOperation) =>
-    void runLease(props.environmentId, props.taskId, issueRef, operation);
+    void runLease(props.target, props.taskId, issueRef, operation);
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="lease-buttons">
       {status.actions.take ? (
@@ -132,7 +134,7 @@ export function LeaseButtons(props: {
           disabled={disabled}
           onClick={() =>
             openReleaseDialog({
-              environmentId: props.environmentId,
+              relay: props.target,
               taskId: props.taskId,
               title: props.title,
               ref: issueRef,
@@ -339,12 +341,12 @@ function ReleaseFormBody(props: {
 export function ReleaseDialogHost() {
   const target = useReleaseDialogStore((state) => state.target);
   if (target === null) return null;
-  return <ReleaseDialog key={`${target.environmentId}\u0000${target.taskId}`} />;
+  return <ReleaseDialog key={`${relayKey(target.relay)}\u0000${target.taskId}`} />;
 }
 
 function ReleaseDialog() {
   const target = useReleaseDialogStore((state) => state.target)!;
-  const entry = useLeaseEntry(target.environmentId, target.taskId);
+  const entry = useLeaseEntry(target.relay, target.taskId);
   const [form, setForm] = useState<ReleaseForm>(emptyReleaseForm);
   const [failure, setFailure] = useState<string | null>(null);
   const running = entry?.phase.kind === "running";
@@ -353,7 +355,7 @@ function ReleaseDialog() {
     if (form.reason === null || problem !== null) return;
     setFailure(null);
     const answer = await runLease(
-      target.environmentId,
+      target.relay,
       target.taskId,
       target.ref,
       "release",

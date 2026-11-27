@@ -25,7 +25,7 @@ import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
 import { useThreadShell } from "../state/entities";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
-import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
+import { relayKey, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { NeedsPage } from "./NeedsPage";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
@@ -46,6 +46,19 @@ const enterprise: BanneretWorkspace = {
   projectKeys: [],
   updatedAt: "2026-11-26T10:00:00.000Z",
   relay: { origin: "https://relay.example.com", displayName: "Example Company" },
+};
+
+const RELAY = { environmentId: LOCAL, relayOrigin: "https://relay.example.com" };
+
+/** A second company this machine joined, with its own relay. */
+const OTHER_ORIGIN = "https://oss-relay.example.org";
+const other: BanneretWorkspace = {
+  id: "ent-fedcba9876543210",
+  name: "OSS Project",
+  kind: "enterprise",
+  projectKeys: [],
+  updatedAt: "2026-11-26T10:00:00.000Z",
+  relay: { origin: OTHER_ORIGIN, displayName: "OSS Project" },
 };
 
 const configured: BanneretEnrolmentView = {
@@ -150,7 +163,11 @@ function setup(
       ? ({ environmentId: LOCAL, id: ref.threadId } as EnvironmentThreadShell)
       : null,
   );
-  const listeners = new Set<(event: BanneretFeedState) => void>();
+  // Each subscription with the relay it follows.
+  const listeners = new Set<{
+    readonly relayOrigin: string;
+    readonly listener: (event: BanneretFeedState) => void;
+  }>();
   const server = {
     today: {
       joined: true,
@@ -166,14 +183,16 @@ function setup(
   const spies = {
     today: vi.spyOn(feedRpc, "today").mockImplementation(async () => server.today),
     needs: vi.spyOn(feedRpc, "needs").mockImplementation(async () => server.needs),
-    subscribe: vi.spyOn(feedRpc, "subscribe").mockImplementation((_environmentId, listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
+    subscribe: vi.spyOn(feedRpc, "subscribe").mockImplementation((target, listener) => {
+      const entry = { relayOrigin: target.relayOrigin, listener };
+      listeners.add(entry);
+      return () => listeners.delete(entry);
     }),
   };
-  const emit = (event: BanneretFeedState) =>
+  /** Sends a feed state from one relay (the first company's by default). */
+  const emit = (event: BanneretFeedState, relayOrigin = RELAY.relayOrigin) =>
     act(() => {
-      for (const listener of listeners) listener(event);
+      for (const entry of listeners) if (entry.relayOrigin === relayOrigin) entry.listener(event);
     });
   return { server, spies, emit, listeners };
 }
@@ -259,6 +278,54 @@ describe("Enterprise Today and Needs you", () => {
     expect(sidebar().getByRole("button").elements()).toHaveLength(0);
   });
 
+  it("switching to another company's workspace swaps the rows and pages to its relay", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    const { emit, spies } = setup();
+    useWorkspacesStore.setState({ local: [enterprise, other] });
+    storeEnrolmentView(LOCAL, {
+      ...configured,
+      workspaceId: other.id,
+      relayOrigin: OTHER_ORIGIN,
+      displayName: "OSS Project",
+      machineId: "m_9",
+    });
+    const otherToday: BanneretFeedToday = {
+      ...TODAY,
+      needsYou: {
+        ...block,
+        items: [item("o1", "mention", "Review the OSS release")],
+        nextCursor: null,
+      },
+      stuck: block,
+    };
+    spies.today.mockImplementation(async (target) =>
+      target.relayOrigin === OTHER_ORIGIN
+        ? { joined: true, value: otherToday, fetchedAt: "2026-11-26T10:00:00.000Z" }
+        : { joined: true, value: TODAY, fetchedAt: "2026-11-26T10:00:00.000Z" },
+    );
+    const router = createFeedRouter("/today");
+    await using _screen = await render(<RouterProvider router={router} />, { router: false });
+    await emit(snapshot(["today", "needs"], 4));
+    await expect.element(page.getByText("Should invites expire?")).toBeVisible();
+    await expect.element(page.getByTestId("needs-count")).toHaveTextContent("4");
+
+    await act(() => useWorkspacesStore.setState({ activeId: other.id }));
+    await vi.waitFor(() =>
+      expect(spies.today).toHaveBeenCalledWith(
+        { environmentId: LOCAL, relayOrigin: OTHER_ORIGIN },
+        true,
+      ),
+    );
+    await emit(snapshot(["today", "needs"], 1), OTHER_ORIGIN);
+    await expect.element(page.getByText("Review the OSS release")).toBeVisible();
+    expect(page.getByText("Should invites expire?").query()).toBeNull();
+    await expect.element(page.getByTestId("needs-count")).toHaveTextContent("1");
+    // The first company's feed still says 4; it no longer reaches these rows.
+    await emit(snapshot(["today", "needs"], 7));
+    await expect.element(page.getByTestId("needs-count")).toHaveTextContent("1");
+  });
+
   it("counts Needs you from the relay, refetches on a change and keeps the relay's order", async () => {
     using stack = new DisposableStack();
     await prepareScreen(stack);
@@ -317,7 +384,7 @@ describe("Enterprise Today and Needs you", () => {
     await emit(snapshot(["today", "needs"]));
 
     // Opening Today is the one read that counts as a visit.
-    await vi.waitFor(() => expect(spies.today).toHaveBeenCalledWith(LOCAL, true));
+    await vi.waitFor(() => expect(spies.today).toHaveBeenCalledWith(RELAY, true));
     expect(spies.today.mock.calls.filter(([, visit]) => visit).length).toBe(1);
 
     await expect.element(page.getByText("Should invites expire?")).toBeVisible();
@@ -486,7 +553,7 @@ describe("Enterprise Today and Needs you", () => {
     server.needs = null;
     await emit(snapshot(["today", "needs"], null, 3));
     await vi.waitFor(() =>
-      expect(useRelayFeedStore.getState().feeds[LOCAL]?.unreachable).toBe(true),
+      expect(useRelayFeedStore.getState().feeds[relayKey(RELAY)]?.unreachable).toBe(true),
     );
     expect(statusText()).toContain("Showing what Example Company said");
     await expect.element(page.getByText("Should invites expire?")).toBeVisible();

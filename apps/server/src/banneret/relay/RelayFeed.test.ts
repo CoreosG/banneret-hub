@@ -3,7 +3,11 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import type { FakeRelay } from "@t3tools/banneret-relay-fake";
-import { type BanneretFeedState, EnvironmentId } from "@t3tools/contracts";
+import {
+  type BanneretFeedState,
+  type BanneretFeedTodayRead,
+  EnvironmentId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -16,7 +20,7 @@ import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.t
 import * as Enrolment from "./Enrolment.ts";
 import * as Facts from "./Facts.ts";
 import * as RelayFeed from "./RelayFeed.ts";
-import { type Forwarder, withFake } from "./relayHarness.testkit.ts";
+import { focus, type Forwarder, withFake } from "./relayHarness.testkit.ts";
 
 const ENVIRONMENT_ID = "env-feed-1";
 // The fake ages its event log by this clock only; the 24-hour reset moves it forward.
@@ -83,14 +87,12 @@ const control = (fake: FakeRelay, path: string, body: unknown) =>
     return (await response.json()) as Record<string, unknown>;
   });
 
-const feed = RelayFeed.BanneretRelayFeed;
-
-const waitForState = (state: string) =>
+const waitForState = (state: string, origin = focus.origin) =>
   Effect.gen(function* () {
     const enrolment = yield* Enrolment.BanneretEnrolment;
     for (;;) {
       const changed = yield* enrolment.nextChange;
-      if ((yield* enrolment.status).state === state) return;
+      if ((yield* enrolment.status(origin)).state === state) return;
       yield* changed;
     }
   }).pipe(
@@ -99,6 +101,18 @@ const waitForState = (state: string) =>
       orElse: () => Effect.die(new Error(`timed out waiting for ${state}`)),
     }),
   );
+
+/** The feed of the relay under test (the one `withFake` started last). */
+const focusedFeed = Effect.map(RelayFeed.BanneretRelayFeed, (service) => ({
+  today: (visit: boolean) => service.today(focus.origin, visit),
+  needs: (cursor: string | undefined) => service.needs(focus.origin, cursor),
+  feedPage: (cursor: string) => service.feedPage(focus.origin, cursor),
+  graveyardPage: (cursor: string) => service.graveyardPage(focus.origin, cursor),
+  task: (taskId: string) => service.task(focus.origin, taskId),
+  events: Stream.suspend(() => service.events(focus.origin)),
+}));
+
+const feed = focusedFeed;
 
 const join = (fake: FakeRelay, relay: Forwarder) =>
   Effect.gen(function* () {
@@ -109,15 +123,15 @@ const join = (fake: FakeRelay, relay: Forwarder) =>
       kind: "laptop",
     });
     fake.approve(view.confirmCode!, { login: "ada-example", role: "founder" });
-    yield* waitForState("configured");
-    return (yield* enrolment.status).machineId!;
+    yield* waitForState("configured", relay.origin);
+    return (yield* enrolment.status(relay.origin)).machineId!;
   });
 
-/** A client of the feed: every event it receives, and a way to wait for one. */
-const subscribe = Effect.gen(function* () {
+/** A client of one relay's feed: every event it receives, and a way to wait for one. */
+const subscribeTo = Effect.fn("subscribeTo")(function* (origin: string) {
   const queue = yield* Queue.unbounded<BanneretFeedState>();
-  const service = yield* feed;
-  yield* service.events.pipe(
+  const service = yield* RelayFeed.BanneretRelayFeed;
+  yield* service.events(origin).pipe(
     Stream.runForEach((event) => Queue.offer(queue, event)),
     Effect.forkScoped,
   );
@@ -135,6 +149,7 @@ const subscribe = Effect.gen(function* () {
     );
   return { next };
 });
+const subscribe = Effect.suspend(() => subscribeTo(focus.origin));
 
 const isLive = (event: BanneretFeedState) => event.live;
 const isDown = (event: BanneretFeedState) => event.joined && !event.live;
@@ -161,7 +176,7 @@ describe("BanneretRelayFeed", () => {
           yield* join(fake, relay);
           yield* client.next(isLive, "live");
           const enrolment = yield* Enrolment.BanneretEnrolment;
-          yield* enrolment.leave("revoke");
+          yield* enrolment.leave(focus.origin, "revoke");
           yield* client.next((event) => !event.joined, "not joined after leave");
           relay.requests.length = 0;
           // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- proving silence needs a window; no event marks "no request was sent".
@@ -408,4 +423,56 @@ describe("reshapeToday shipped", () => {
     expect(shipped({ ...base, pr: { number: 41, url: pr.url } })).toEqual([]);
     expect(shipped({ ...base, pr, ref: { ...ref, url: undefined } })).toEqual([{ ...kept, pr }]);
   });
+
+  it.live("follows each joined relay on its own: two companies' data never mix", () =>
+    withFake((fakeA, relayA) =>
+      withFake((fakeB, relayB) =>
+        onFreshHub(
+          Effect.gen(function* () {
+            const unknown = yield* subscribeTo(relayB.origin);
+            yield* unknown.next((event) => !event.joined, "not joined before the join");
+            const machineA = yield* join(fakeA, relayA);
+            const machineB = yield* join(fakeB, relayB);
+            yield* control(fakeA, "/needs", { machineId: machineA, count: 2, kind: "mention" });
+            yield* control(fakeB, "/needs", {
+              machineId: machineB,
+              count: 3,
+              kind: "thread_question",
+            });
+            const clientA = yield* subscribeTo(relayA.origin);
+            yield* clientA.next(isLive, "A live");
+            // A subscription opened before its relay was joined follows it once joined.
+            yield* unknown.next(isLive, "B live");
+
+            const service = yield* RelayFeed.BanneretRelayFeed;
+            const kindsOf = (read: { readonly value: BanneretFeedTodayRead["value"] }) =>
+              read.value?.needsYou.items.map((item) => item.kind);
+            expect(kindsOf(yield* service.today(relayA.origin, false))).toEqual([
+              "mention",
+              "mention",
+            ]);
+            expect(kindsOf(yield* service.today(relayB.origin, false))).toEqual([
+              "thread_question",
+              "thread_question",
+              "thread_question",
+            ]);
+            relayA.requests.length = 0;
+            yield* service.needs(relayB.origin, undefined);
+            expect(
+              relayA.requests.some((request) => request.url.startsWith("/relay/v1/needs")),
+            ).toBe(false);
+
+            // Leaving one company stops only its feed.
+            const enrolment = yield* Enrolment.BanneretEnrolment;
+            yield* enrolment.leave(relayA.origin, "revoke");
+            yield* clientA.next((event) => !event.joined, "A not joined after leave");
+            expect((yield* service.today(relayA.origin, false)).joined).toBe(false);
+            expect((yield* service.today(relayB.origin, false)).joined).toBe(true);
+            // A relay this machine never tried answers as not joined.
+            expect((yield* service.today("https://unknown.example", false)).joined).toBe(false);
+          }),
+        ),
+      ),
+    ),
+  );
 });

@@ -2,16 +2,13 @@
 // for the preview and the sign-off; the header draws from the board card when the board holds the
 // task. With no thread or draft open to hold a right panel, the Task tab opens in a dialog instead.
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import {
-  BANNERET_RELAY_FEED_WS_METHODS,
-  type BanneretTaskRead,
-  type EnvironmentId,
-} from "@t3tools/contracts";
+import { BANNERET_RELAY_FEED_WS_METHODS, type BanneretTaskRead } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { type RelayTarget, relayKey } from "./enrolmentStore";
 import type { TaskSurface } from "./taskSurface";
 
 const taskCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
@@ -21,11 +18,14 @@ const taskCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
 
 /** Every call the Task tab makes; tests replace it. Null when the call itself failed. */
 export const taskRpc = {
-  read: async (environmentId: EnvironmentId, taskId: string): Promise<BanneretTaskRead | null> => {
+  read: async (
+    { environmentId, relayOrigin }: RelayTarget,
+    taskId: string,
+  ): Promise<BanneretTaskRead | null> => {
     try {
       const result = await runAtomCommand(appAtomRegistry, taskCommand, {
         environmentId,
-        input: { taskId },
+        input: { relayOrigin, taskId },
       });
       return result._tag === "Success" ? result.value : null;
     } catch {
@@ -44,7 +44,7 @@ export type TaskReadState =
  * so the preview or the sign-off may have changed). A reread keeps showing the last answer.
  */
 export function useTaskRead(
-  environmentId: EnvironmentId,
+  target: RelayTarget,
   taskId: string,
   enabled: boolean,
   revision: string | null,
@@ -54,18 +54,20 @@ export function useTaskRead(
     readonly revision: string | null;
     readonly read: BanneretTaskRead | null;
   } | null>(null);
-  const key = `${environmentId}\u0000${taskId}`;
+  const { environmentId, relayOrigin } = target;
+  const key = `${relayKey(target)}\u0000${taskId}`;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the relay when the tab opens and when the board changes
   useEffect(() => {
     if (!enabled) return;
     let current = true;
-    void taskRpc.read(environmentId, taskId).then((read) => {
-      if (current) setAnswer({ key: `${environmentId}\u0000${taskId}`, revision, read });
+    const asked = { environmentId, relayOrigin };
+    void taskRpc.read(asked, taskId).then((read) => {
+      if (current) setAnswer({ key: `${relayKey(asked)}\u0000${taskId}`, revision, read });
     });
     return () => {
       current = false;
     };
-  }, [environmentId, taskId, enabled, revision]);
+  }, [environmentId, relayOrigin, taskId, enabled, revision]);
   if (!enabled) return { kind: "idle" };
   return answer?.key === key ? { kind: "done", read: answer.read } : { kind: "loading" };
 }

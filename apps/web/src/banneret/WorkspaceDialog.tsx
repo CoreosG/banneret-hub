@@ -224,9 +224,9 @@ function dialogBody(dialog: Exclude<WorkspaceDialogState, null>, close: () => vo
         <EnterpriseWizard key={dialog.origin ?? ""} initialOrigin={dialog.origin} onClose={close} />
       );
     case "machines":
-      return <MachinesPanel onClose={close} />;
+      return <MachinesPanel key={dialog.origin} origin={dialog.origin} onClose={close} />;
     case "leave":
-      return <LeavePanel onClose={close} />;
+      return <LeavePanel key={dialog.origin} origin={dialog.origin} onClose={close} />;
   }
 }
 

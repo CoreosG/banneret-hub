@@ -28,7 +28,7 @@ import * as Workspaces from "../Workspaces.ts";
 import * as Enrolment from "./Enrolment.ts";
 import * as Facts from "./Facts.ts";
 import { projectKeyFromRemote } from "./projectKey.ts";
-import { type Forwarder, withFake } from "./relayHarness.testkit.ts";
+import { focus, type Forwarder, withFake } from "./relayHarness.testkit.ts";
 
 const ENVIRONMENT = "env-facts-1";
 const INTERVAL_MS = 200;
@@ -167,7 +167,9 @@ const makeBaseDir = Effect.gen(function* () {
   return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "banneret-facts-" }));
 }).pipe(Effect.provide(NodeServices.layer));
 
-const status = Effect.flatMap(Enrolment.BanneretEnrolment, (enrolment) => enrolment.status);
+const statusOf = (origin: string) =>
+  Effect.flatMap(Enrolment.BanneretEnrolment, (enrolment) => enrolment.status(origin));
+const status = Effect.suspend(() => statusOf(focus.origin));
 
 /** Re-reads `effect` at each enrolment change (every heartbeat is one) until `predicate` holds. */
 const waitFor = <A, E, R>(
@@ -232,7 +234,7 @@ const join = (fake: FakeRelay, relay: Forwarder) =>
       kind: "laptop",
     });
     fake.approve(view.confirmCode!, { login: "ada-example", role: "founder" });
-    return yield* waitFor(status, (current) => current.state === "configured");
+    return yield* waitFor(statusOf(relay.origin), (current) => current.state === "configured");
   });
 
 /** Puts the Enterprise project in the relay's workspace and the solo one in a Solo workspace. */
@@ -416,6 +418,65 @@ describe("BanneretFacts heartbeat", () => {
     },
   );
 
+  it.live("with two companies joined, each relay gets only its own workspace's threads", () => {
+    const OTHER = project(
+      "oss-tool",
+      "https://github.com/oss-org/oss-tool.git",
+      "github.com/oss-org/oss-tool",
+    );
+    const world = { ...emptyWorld(), projects: [ENTERPRISE, OTHER, SOLO] };
+    const mine = thread("th-company-a", ENTERPRISE);
+    const theirs = thread("th-company-b", OTHER);
+    const solo = thread("th-solo-9", SOLO);
+    world.threads = [mine, theirs, solo];
+    return withFake((fakeA, relayA) =>
+      withFake((fakeB, relayB) =>
+        Effect.gen(function* () {
+          const joinedA = yield* join(fakeA, relayA);
+          const joinedB = yield* join(fakeB, relayB);
+          expect(joinedA.workspaceId).not.toBe(joinedB.workspaceId);
+          yield* assignProjects(joinedA.workspaceId);
+          const b = (yield* Workspaces.list()).workspaces.find(
+            (workspace) => workspace.id === joinedB.workspaceId,
+          )!;
+          yield* Workspaces.put({
+            workspaces: [
+              {
+                ...b,
+                projectKeys: [`repo:${OTHER.repositoryIdentity!.canonicalKey}`],
+                updatedAt: "2100-01-01T00:00:00.000Z",
+              },
+            ],
+          });
+
+          const has = (id: string) => (body: FactsBody) =>
+            body.activity.some((fact) => fact.threadId === id);
+          yield* waitForFacts(relayA, has(mine.id));
+          yield* waitForFacts(relayB, has(theirs.id));
+          const sentA = factsRequests(relayA)
+            .map((request) => request.body)
+            .join("\n");
+          const sentB = factsRequests(relayB)
+            .map((request) => request.body)
+            .join("\n");
+          const keyOf = (owner: Facts.FactsProject) =>
+            projectKeyFromRemote(owner.repositoryIdentity!.locator.remoteUrl)!;
+          for (const leak of [theirs.id, solo.id, keyOf(OTHER), keyOf(SOLO)]) {
+            expect(sentA).not.toContain(leak);
+          }
+          for (const leak of [mine.id, solo.id, keyOf(ENTERPRISE), keyOf(SOLO)]) {
+            expect(sentB).not.toContain(leak);
+          }
+          // Each relay only ever hears from its own enrolment.
+          const devices = (relay: Forwarder) =>
+            new Set(relay.requests.map((request) => request.headers["x-banneret-device"]));
+          expect(devices(relayA).has(joinedB.machineId)).toBe(false);
+          expect(devices(relayB).has(joinedA.machineId)).toBe(false);
+        }),
+      ),
+    ).pipe(onFreshHub(world));
+  });
+
   it.live("sends usage only when a reading is available, and only of the owner's logins", () => {
     const world = emptyWorld();
     return withFake((fake, relay) =>
@@ -485,7 +546,10 @@ describe("BanneretFacts heartbeat", () => {
         const enrolment = yield* Enrolment.BanneretEnrolment;
         yield* join(fake, relay);
         yield* waitForFacts(relay, () => true);
-        expect(yield* enrolment.leave("revoke")).toEqual({ state: "none", reason: "left" });
+        expect(yield* enrolment.leave(relay.origin, "revoke")).toMatchObject({
+          state: "none",
+          reason: "left",
+        });
         expect(yield* requestsDuring(relay)).toEqual([]);
       }).pipe(onFreshHub(world)),
     );

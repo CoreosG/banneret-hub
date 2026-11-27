@@ -27,10 +27,17 @@ have. Threads, drafts and the command palette follow the active workspace.
    Hub is showing you right now.
 4. A person new to the company then waits for a founder to approve.
 
-The whole machine (this Banneret Hub server) joins once, whichever workspace is active. A machine that has not
+The whole machine (this Banneret Hub server) joins, whichever workspace is active. A machine that has not
 joined never contacts a relay.
 
-**Machines.** The switcher shows this machine's status and lists the company's machines: who owns each one,
+**Several companies.** A machine can join several relays, for example two employers, or a company and an open
+source project. Each relay gets its own Enterprise workspace, and New workspace, Enterprise always starts at the
+address. If you enter a relay this machine already joined, the wizard says so and opens its workspace. Each relay
+keeps its own key and token, and hears only about threads in its own workspace's projects. Leaving one company
+leaves the others as they are.
+
+**Machines.** The switcher shows this machine's status for each Enterprise workspace, and lists that company's
+machines: who owns each one,
 whether it is online, its Banneret Hub version, its policy fingerprint and whether its sandbox is on. You can
 remove your own machines from the list. Founders can remove any.
 
@@ -40,8 +47,9 @@ a founder has approved the machine but setup cannot finish.
 
 ## What the Enterprise workspace shows
 
-Each screen below is shown only when the relay advertises it. When the relay cannot be reached, a screen keeps
-showing what the relay last said, with its age.
+Each screen below is shown only when the relay advertises it. Screens show the active workspace's company, so
+switching workspaces switches the company. When the relay cannot be reached, a screen keeps showing what the
+relay last said, with its age.
 
 ### Today and Needs you
 

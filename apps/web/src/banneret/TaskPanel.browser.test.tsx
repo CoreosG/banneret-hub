@@ -45,6 +45,8 @@ vi.mock("../components/issue/IssueDetailPanel", () => ({
 }));
 
 const LOCAL = EnvironmentId.make("local");
+/** The relay the tests' tasks belong to, on this environment. */
+const RELAY = { environmentId: LOCAL, relayOrigin: "https://relay.example.com" };
 const HOSTILE = '<img src=x onerror="window.__pwned=1">';
 const MINUTE = 60_000;
 
@@ -236,12 +238,12 @@ describe("Task tab", () => {
         checked: { by: { login: "cy-example" }, at: "2026-11-26T09:30:00.000Z", valid: true },
       }),
     );
-    await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
     await emit(state(["board", "task"], [shown, card("1", "Rate limits")]));
 
     await expect.element(page.getByRole("heading", { name: "Guild invites" })).toBeVisible();
     await vi.waitFor(() => expect(header().textContent).toContain("Preview"));
-    expect(read).toHaveBeenCalledWith(LOCAL, "t_2");
+    expect(read).toHaveBeenCalledWith(RELAY, "t_2");
     const text = header().textContent!;
     expect(header().querySelector("[data-status]")?.textContent).toContain("Needs you");
     expect(header().querySelector('[data-testid="task-ref"]')?.textContent).toBe("example-app#2");
@@ -288,7 +290,7 @@ describe("Task tab", () => {
     const { emit, read } = setup();
     const relayTask = card("8", "Search", { statusWhy: "Open and nobody has taken it yet." });
     read.mockResolvedValue(found({ ...relayTask, status: "planned" }));
-    await using _panel = await openPanel(taskSurface(LOCAL, relayTask.task));
+    await using _panel = await openPanel(taskSurface(RELAY, relayTask.task));
     await emit(state(["task"], null));
 
     await vi.waitFor(() =>
@@ -301,7 +303,7 @@ describe("Task tab", () => {
   it("keeps its title and link out with a neutral line when the relay has no details", async () => {
     const { emit, read } = setup();
     read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
-    await using _panel = await openPanel(taskSurface(LOCAL, card("9", "Gone").task));
+    await using _panel = await openPanel(taskSurface(RELAY, card("9", "Gone").task));
     await emit(state(["task"], null));
     await expect.element(page.getByText("Details from the relay aren't available.")).toBeVisible();
     await expect.element(page.getByRole("heading", { name: "Gone" })).toBeVisible();
@@ -315,7 +317,7 @@ describe("Task tab", () => {
     const { emit, read } = setup({ issues: true });
     read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
     const closed = { ...card("12", "Closed delivery").task, closedAt: "2026-11-25T16:00:00.000Z" };
-    await using _panel = await openPanel(taskSurface(LOCAL, closed));
+    await using _panel = await openPanel(taskSurface(RELAY, closed));
     await emit(
       withMap(state(["map", "task"], null), {
         id: "i_12",
@@ -349,7 +351,7 @@ describe("Task tab", () => {
     const { emit, read } = setup();
     read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: true });
     const waiting = card("13", "Guild chat").task;
-    await using _panel = await openPanel(taskSurface(LOCAL, waiting));
+    await using _panel = await openPanel(taskSurface(RELAY, waiting));
     await emit(
       withMap(
         state(["map", "task"], null),
@@ -386,7 +388,7 @@ describe("Task tab", () => {
   it("does not read a relay that does not offer the task section", async () => {
     const { emit, read } = setup();
     const shown = card("2", "Guild invites");
-    await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
     await emit(state(["board"], [shown]));
     await expect.element(page.getByRole("heading", { name: "Guild invites" })).toBeVisible();
     expect(header().textContent).toContain("Required checks are failing.");
@@ -407,7 +409,7 @@ describe("Task tab", () => {
         },
       }),
     );
-    await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
     await emit(state(["board", "task"], [shown]));
 
     await vi.waitFor(() =>
@@ -435,7 +437,7 @@ describe("Task tab", () => {
     });
     const shown = card("3", "Profile blocks", { status: "built" });
     read.mockResolvedValue(found(shown));
-    await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
     await emit(state(["board", "task"], [shown]));
     await vi.waitFor(() => expect(read).toHaveBeenCalled());
     await expect.element(page.getByRole("heading", { name: "Profile blocks" })).toBeVisible();
@@ -445,7 +447,7 @@ describe("Task tab", () => {
   it("links out when no project here is on the task's tracker", async () => {
     const { emit } = setup({ issues: false });
     const shown = card("2", "Guild invites");
-    await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
     await emit(state(["board"], [shown]));
     expect(document.querySelector('[data-testid="task-link-out"]')?.textContent).toContain(
       "No local project for example-app",
@@ -469,7 +471,7 @@ describe("Task tab", () => {
         url: "https://youtrack.example.com/issue/EX-5",
       },
     };
-    await using _panel = await openPanel(taskSurface(LOCAL, odd));
+    await using _panel = await openPanel(taskSurface(RELAY, odd));
     await emit(state([], null));
     expect(document.querySelector('[data-testid="task-link-out"]')).not.toBeNull();
     expect(linkOut()?.textContent).toBe("Open on youtrack");
@@ -481,7 +483,7 @@ describe("Task tab", () => {
   it("embeds upstream's issue thread when a project here is on the task's repository", async () => {
     const { emit } = setup({ issues: true });
     const shown = card("2", "Guild invites");
-    await using _panel = await openPanel(taskSurface(LOCAL, shown.task));
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
     await emit(state(["board"], [shown]));
     await expect
       .element(page.getByTestId("issue-thread"))
@@ -513,7 +515,7 @@ describe("Task tab", () => {
         },
       }),
     );
-    await using _panel = await openPanel(taskSurface(LOCAL, evilTask));
+    await using _panel = await openPanel(taskSurface(RELAY, evilTask));
     await emit(state(["task"], null));
     await vi.waitFor(() =>
       expect(header().querySelector('[data-checked="ignored"]')).not.toBeNull(),
@@ -535,7 +537,7 @@ describe("Task tab", () => {
 
 describe("Task tab in a thread's right panel", () => {
   it("keeps a saved task tab when the app reloads", async () => {
-    const surface = taskSurface(LOCAL, card("2", "Guild invites").task);
+    const surface = taskSurface(RELAY, card("2", "Guild invites").task);
     const key = scopedThreadKey(scopeThreadRef(LOCAL, ThreadId.make("thread-1")));
     const saved = { isOpen: true, activeSurfaceId: surface.id, surfaces: [surface] };
     const storageKey = "t3code:right-panel-state:v2";
@@ -563,7 +565,7 @@ describe("Task tab in a thread's right panel", () => {
     useRightPanelStore.setState({ byThreadKey: {} });
     const task = card("2", "Guild invites").task;
     function Opener() {
-      const open = useOpenTask(LOCAL);
+      const open = useOpenTask(RELAY);
       return (
         <button type="button" onClick={() => open(task)}>
           Open task
@@ -587,8 +589,8 @@ describe("Task tab in a thread's right panel", () => {
     const ref = scopeThreadRef(LOCAL, ThreadId.make("thread-1"));
     const panel = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref);
     expect(panel.isOpen).toBe(true);
-    expect(panel.surfaces).toEqual([taskSurface(LOCAL, task)]);
-    expect(panel.activeSurfaceId).toBe(taskSurface(LOCAL, task).id);
+    expect(panel.surfaces).toEqual([taskSurface(RELAY, task)]);
+    expect(panel.activeSurfaceId).toBe(taskSurface(RELAY, task).id);
   });
 });
 
@@ -601,7 +603,7 @@ describe("Task dialog", () => {
     document.head.append(style);
     const shown = card("2", "Guild invites");
     const screen = await render(<TaskDialogHost />);
-    await act(async () => openTaskDialog(taskSurface(LOCAL, shown.task)));
+    await act(async () => openTaskDialog(taskSurface(RELAY, shown.task)));
     await emit(state(["board"], [shown]));
     await expect.element(page.getByRole("heading", { name: "Guild invites" })).toBeVisible();
     const popup = () => document.querySelector('[data-slot="dialog-popup"]') as HTMLElement;

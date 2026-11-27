@@ -18,6 +18,7 @@ import {
   type LeaseFoldResult,
   TASK_LEASE_WS_METHODS,
   TaskLeaseError,
+  type TaskLeaseRef,
   type TaskLeaseReleaseInput,
   type TaskLeaseResult,
   type TaskLeaseStatus,
@@ -42,14 +43,25 @@ const MAX_COMMENT_PAGES = 50;
 const UPDATE_ATTEMPTS = 3;
 
 export interface LeaseServiceShape {
-  readonly check: (ref: IssueRef) => Effect.Effect<TaskLeaseStatus, TaskLeaseError>;
+  readonly check: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseStatus, TaskLeaseError>;
   readonly take: (input: TaskLeaseTakeInput) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
   readonly release: (
     input: TaskLeaseReleaseInput,
   ) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
-  readonly finish: (ref: IssueRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
-  readonly withdraw: (ref: IssueRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
+  readonly finish: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
+  readonly withdraw: (ref: TaskLeaseRef) => Effect.Effect<TaskLeaseResult, TaskLeaseError>;
 }
+
+/** The relay whose person a lease call acts for; set once per call from its `relayOrigin`. */
+class ActingRelay extends Context.Reference<string | undefined>(
+  "t3/banneret/lease/LeaseService/ActingRelay",
+  { defaultValue: () => undefined },
+) {}
+
+const actingFor =
+  (input: { readonly relayOrigin?: string | undefined }) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.provideService(effect, ActingRelay, input.relayOrigin);
 
 const notRunning = Effect.fail(
   new TaskLeaseError({ reason: "unavailable", detail: "Take and release are not running." }),
@@ -184,8 +196,8 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
         body: comment.body,
       });
     }
-    const status = yield* enrolment.status;
-    const me = status.me;
+    const relayOrigin = yield* ActingRelay;
+    const me = relayOrigin === undefined ? undefined : (yield* enrolment.status(relayOrigin)).me;
     const now = yield* DateTime.now;
     const fold = foldLease({
       comments: foldComments,
@@ -481,7 +493,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     return yield* result(ref, outcome, detail);
   });
 
-  const check = Effect.fn("LeaseService.check")(function* (input: IssueRef) {
+  const check = Effect.fn("LeaseService.check")(function* (input: TaskLeaseRef) {
     const ref = issueRefOf(input);
     return statusOf(yield* read(ref), ref);
   });
@@ -669,7 +681,13 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
     );
   };
 
-  return { check, take, release, finish, withdraw } satisfies LeaseServiceShape;
+  return {
+    check: (input) => check(input).pipe(actingFor(input)),
+    take: (input) => take(input).pipe(actingFor(input)),
+    release: (input) => release(input).pipe(actingFor(input)),
+    finish: (input) => finish(input).pipe(actingFor(input)),
+    withdraw: (input) => withdraw(input).pipe(actingFor(input)),
+  } satisfies LeaseServiceShape;
 });
 
 export const layerWith = (options: Partial<LeaseServiceOptions>) =>
@@ -679,7 +697,9 @@ export const layer = layerWith({}).pipe(Layer.provide(CommentEdits.layer));
 
 /** Handlers for the lease RPCs, spread into the WebSocket handler group. */
 export const rpcHandlers = {
-  [TASK_LEASE_WS_METHODS.check]: Effect.fn("LeaseService.rpc.check")(function* (input: IssueRef) {
+  [TASK_LEASE_WS_METHODS.check]: Effect.fn("LeaseService.rpc.check")(function* (
+    input: TaskLeaseRef,
+  ) {
     return yield* (yield* LeaseService).check(input);
   }),
   [TASK_LEASE_WS_METHODS.take]: Effect.fn("LeaseService.rpc.take")(function* (
@@ -692,11 +712,13 @@ export const rpcHandlers = {
   ) {
     return yield* (yield* LeaseService).release(input);
   }),
-  [TASK_LEASE_WS_METHODS.finish]: Effect.fn("LeaseService.rpc.finish")(function* (input: IssueRef) {
+  [TASK_LEASE_WS_METHODS.finish]: Effect.fn("LeaseService.rpc.finish")(function* (
+    input: TaskLeaseRef,
+  ) {
     return yield* (yield* LeaseService).finish(input);
   }),
   [TASK_LEASE_WS_METHODS.withdraw]: Effect.fn("LeaseService.rpc.withdraw")(function* (
-    input: IssueRef,
+    input: TaskLeaseRef,
   ) {
     return yield* (yield* LeaseService).withdraw(input);
   }),

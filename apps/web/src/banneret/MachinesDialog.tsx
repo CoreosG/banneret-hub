@@ -1,5 +1,6 @@
-// Banneret Hub: the company's machines as the relay lists them, with revoke, and Leave for this
-// machine. Labels and logins come from the relay and render only as text.
+// Banneret Hub: one company's machines as its relay lists them, with revoke, and Leave for this
+// machine. Both act on the relay of the Enterprise workspace they were opened from. Labels and logins
+// come from the relay and render only as text.
 import type { BanneretRelayMachine } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
@@ -25,9 +26,10 @@ function machineStatus(machine: BanneretRelayMachine): string {
   return machine.connected ? "Connected" : "Not heard from";
 }
 
-export function MachinesPanel(props: { readonly onClose: () => void }) {
+export function MachinesPanel(props: { readonly origin: string; readonly onClose: () => void }) {
   const environmentId = usePrimaryEnvironmentId();
-  const view = useEnrolmentView(environmentId);
+  const view = useEnrolmentView(environmentId, props.origin);
+  const target = environmentId === null ? null : { environmentId, relayOrigin: props.origin };
   const [items, setItems] = useState<ReadonlyArray<BanneretRelayMachine> | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export function MachinesPanel(props: { readonly onClose: () => void }) {
   useEffect(() => {
     if (environmentId === null) return;
     let current = true;
-    void enrolmentRpc.machines(environmentId).then((result) => {
+    void enrolmentRpc.machines({ environmentId, relayOrigin: props.origin }).then((result) => {
       if (!current) return;
       if (result.ok) {
         setItems(result.value.items);
@@ -55,11 +57,11 @@ export function MachinesPanel(props: { readonly onClose: () => void }) {
     return () => {
       current = false;
     };
-  }, [environmentId]);
+  }, [environmentId, props.origin]);
 
   const loadMore = async () => {
-    if (environmentId === null || nextCursor === null) return;
-    const result = await enrolmentRpc.machines(environmentId, nextCursor);
+    if (target === null || nextCursor === null) return;
+    const result = await enrolmentRpc.machines(target, nextCursor);
     if (!result.ok) {
       setError(result.message);
       return;
@@ -69,11 +71,11 @@ export function MachinesPanel(props: { readonly onClose: () => void }) {
   };
 
   const revoke = async (machineId: string) => {
-    if (environmentId === null) return;
-    const result = await enrolmentRpc.revokeMachine(environmentId, machineId);
+    if (target === null) return;
+    const result = await enrolmentRpc.revokeMachine(target, machineId);
     setConfirming(null);
     if (!result.ok) setError(result.message);
-    else showFirstPage(await enrolmentRpc.machines(environmentId));
+    else showFirstPage(await enrolmentRpc.machines(target));
   };
 
   return (
@@ -156,9 +158,9 @@ export function MachinesPanel(props: { readonly onClose: () => void }) {
   );
 }
 
-export function LeavePanel(props: { readonly onClose: () => void }) {
+export function LeavePanel(props: { readonly origin: string; readonly onClose: () => void }) {
   const environmentId = usePrimaryEnvironmentId();
-  const view = useEnrolmentView(environmentId);
+  const view = useEnrolmentView(environmentId, props.origin);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const company = view?.displayName ?? "the company";
@@ -167,7 +169,7 @@ export function LeavePanel(props: { readonly onClose: () => void }) {
   const leave = async (mode: "revoke" | "forget") => {
     if (environmentId === null) return;
     setBusy(true);
-    const result = await enrolmentRpc.leave(environmentId, mode);
+    const result = await enrolmentRpc.leave({ environmentId, relayOrigin: props.origin }, mode);
     setBusy(false);
     if (!result.ok) {
       setError(result.message);

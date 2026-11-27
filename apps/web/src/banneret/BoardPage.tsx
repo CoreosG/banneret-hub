@@ -1,7 +1,7 @@
 // Banneret Hub: the board for an Enterprise workspace, drawn from the relay's snapshot `board` file.
 // The relay computes columns, statuses and leases; this page only draws them. A card opens its Task
 // tab; its menu takes and releases through the server's LeaseService when the board flags `leases`.
-import type { BanneretBoardCard, BanneretBoardTask, EnvironmentId } from "@t3tools/contracts";
+import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
@@ -28,7 +28,7 @@ import {
   type BoardColumnView,
 } from "./board.logic";
 import { BoardCardMenu } from "./BoardCardMenu";
-import { useEnrolmentView } from "./enrolmentStore";
+import type { RelayTarget } from "./enrolmentStore";
 import { FeedStatus } from "./FeedParts";
 import { freeToContinueFirst, freeToContinueLine, isFreeToContinue } from "./lease.logic";
 import { LeaseButtons, LeaseNoticeLine, useLeaseCheck } from "./LeaseControls";
@@ -92,11 +92,11 @@ const CHIP =
  * snapshot wins once it agrees or after five minutes.
  */
 function useLocalLease(
-  environmentId: EnvironmentId,
+  target: RelayTarget,
   card: BanneretBoardCard,
   me: string,
 ): "taking" | "taken" | null {
-  const entry = useLeaseEntry(environmentId, card.task.id);
+  const entry = useLeaseEntry(target, card.task.id);
   const nowMs = useNowMs();
   if (entry?.phase.kind === "running" && entry.phase.operation === "take") return "taking";
   const takenAt = entry?.takenAt ?? null;
@@ -106,7 +106,7 @@ function useLocalLease(
 }
 
 function BoardCard(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly card: BanneretBoardCard;
   readonly atWork: boolean;
   readonly leases: boolean;
@@ -118,7 +118,7 @@ function BoardCard(props: {
   const { card } = props;
   const lease = props.leases ? card.lease : undefined;
   const ref = taskRef(card.task);
-  const localLease = useLocalLease(props.environmentId, card, props.me);
+  const localLease = useLocalLease(props.target, card, props.me);
   const local =
     !props.leases || localLease === null ? null : (
       <span
@@ -183,9 +183,9 @@ function BoardCard(props: {
         onOpen={() => props.onOpen(card.task)}
       />
       {props.leases ? (
-        <BoardCardMenu environmentId={props.environmentId} card={card} onOpen={props.onOpen} />
+        <BoardCardMenu target={props.target} card={card} onOpen={props.onOpen} />
       ) : null}
-      {props.review ? <ClaimReviewActions environmentId={props.environmentId} card={card} /> : null}
+      {props.review ? <ClaimReviewActions target={props.target} card={card} /> : null}
     </li>
   );
 }
@@ -195,12 +195,12 @@ function BoardCard(props: {
  * `leases.check`, read for these few cards only; Release opens the Release dialog.
  */
 function ClaimReviewActions(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly card: BanneretBoardCard;
 }) {
-  const { card, environmentId } = props;
-  const issueRef = useTaskIssueRef(environmentId, card.task);
-  const entry = useLeaseCheck(environmentId, card.task.id, issueRef, true);
+  const { card, target } = props;
+  const issueRef = useTaskIssueRef(target.environmentId, card.task);
+  const entry = useLeaseCheck(target, card.task.id, issueRef, true);
   if (issueRef === null) {
     return (
       <p className="px-1 pt-1 text-muted-foreground text-xs" data-testid="review-off">
@@ -211,7 +211,7 @@ function ClaimReviewActions(props: {
   return (
     <div className="flex flex-col gap-1 px-1 pt-1.5" data-testid="claim-review">
       <LeaseButtons
-        environmentId={environmentId}
+        target={target}
         taskId={card.task.id}
         title={card.task.title}
         issueRef={issueRef}
@@ -248,7 +248,7 @@ function EmptyColumn(props: { readonly column: BoardColumnView }) {
 }
 
 function BoardColumn(props: {
-  readonly environmentId: EnvironmentId;
+  readonly target: RelayTarget;
   readonly column: BoardColumnView;
   readonly atWork: ReadonlySet<string>;
   readonly leases: boolean;
@@ -288,7 +288,7 @@ function BoardColumn(props: {
         ).map((card) => (
           <BoardCard
             key={card.task.id}
-            environmentId={props.environmentId}
+            target={props.target}
             card={card}
             atWork={props.atWork.has(card.task.id)}
             leases={props.leases}
@@ -333,8 +333,8 @@ type MineView = "mine" | "review";
 
 export function BoardPage() {
   const enterprise = useEnterpriseFeed();
-  const enrolment = useEnrolmentView(enterprise?.environmentId ?? null);
-  const openTask = useOpenTask(enterprise?.environmentId ?? "");
+  const enrolment = enterprise?.enrolment ?? null;
+  const openTask = useOpenTask(enterprise?.target ?? null);
   // The workspace Mine was chosen in, so switching workspaces falls back to Everyone.
   const [mineIn, setMineIn] = useState<{
     readonly workspaceId: string;
@@ -500,7 +500,7 @@ export function BoardPage() {
                 {columns.map((column) => (
                   <BoardColumn
                     key={column.id}
-                    environmentId={enterprise.environmentId}
+                    target={enterprise.target}
                     column={column}
                     atWork={atWork}
                     leases={leases}

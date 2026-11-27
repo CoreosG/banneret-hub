@@ -41,6 +41,7 @@ vi.mock("../state/environments", { spy: true });
 vi.mock("../state/entities", { spy: true });
 
 const LOCAL = EnvironmentId.make("local");
+const RELAY = { environmentId: LOCAL, relayOrigin: "https://relay.example.com" };
 const WORKSPACE_ID = "ent-0123456789abcdef";
 const HOSTILE = '<img src=x onerror="window.__pwned=1">';
 const MINUTE = 60_000;
@@ -658,7 +659,7 @@ describe("Enterprise board", () => {
 
       await userEvent.click(page.getByRole("button", { name: "Actions for Invite limits" }));
       await userEvent.click(page.getByRole("menuitem", { name: "Continue…" }));
-      expect(rpc.check).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "8" }));
+      expect(rpc.check).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "8" }));
       // Continue shows the note first, in the Task dialog, with Continue to take it.
       const dialog = page.getByRole("dialog");
       await expect
@@ -680,7 +681,7 @@ describe("Enterprise board", () => {
         },
       });
       await userEvent.click(dialog.getByRole("button", { name: "Continue", exact: true }));
-      expect(rpc.take).toHaveBeenCalledWith(LOCAL, expect.objectContaining({ key: "8" }));
+      expect(rpc.take).toHaveBeenCalledWith(RELAY, expect.objectContaining({ key: "8" }));
     });
 
     it("takes from the card menu, showing the read-back on the card until the board agrees", async () => {

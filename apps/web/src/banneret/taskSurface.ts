@@ -10,14 +10,21 @@ export interface TaskSurface {
   readonly kind: "task";
   /** The environment that joined the relay and reads the task. */
   readonly environmentId: string;
+  /** The relay the task belongs to: a machine can join several companies. */
+  readonly relayOrigin: string;
   readonly task: TaskIdentity;
 }
 
-export function taskSurface(environmentId: string, task: TaskIdentity): TaskSurface {
+export function taskSurface(
+  where: { readonly environmentId: string; readonly relayOrigin: string },
+  task: TaskIdentity,
+): TaskSurface {
+  const { environmentId, relayOrigin } = where;
   return {
-    id: `task:${encodeURIComponent(environmentId)}:${encodeURIComponent(task.id)}`,
+    id: `task:${encodeURIComponent(environmentId)}:${encodeURIComponent(relayOrigin)}:${encodeURIComponent(task.id)}`,
     kind: "task",
     environmentId,
+    relayOrigin,
     task: {
       id: task.id,
       title: task.title,
@@ -41,18 +48,22 @@ const isName = (value: unknown): value is string => isText(value) && value.trim(
  */
 export function decodeTaskSurface(surface: unknown): TaskSurface | null {
   if (typeof surface !== "object" || surface === null) return null;
-  const { environmentId, task } = surface as Record<string, unknown>;
-  if (!isName(environmentId) || typeof task !== "object" || task === null) return null;
+  const { environmentId, relayOrigin, task } = surface as Record<string, unknown>;
+  if (!isName(environmentId) || !isName(relayOrigin)) return null;
+  if (typeof task !== "object" || task === null) return null;
   const { id, title, ref } = task as Record<string, unknown>;
   if (!isName(id) || !isText(title) || typeof ref !== "object" || ref === null) return null;
   const { tracker, host, scope, key, url } = ref as Record<string, unknown>;
   if (!isText(tracker) || !isText(scope) || !isText(key) || !isText(url)) return null;
   if (host !== undefined && !isText(host)) return null;
-  return taskSurface(environmentId, {
-    id,
-    title,
-    ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) },
-  });
+  return taskSurface(
+    { environmentId, relayOrigin },
+    {
+      id,
+      title,
+      ref: { tracker, scope, key, url, ...(host === undefined ? {} : { host }) },
+    },
+  );
 }
 
 /** The tab's title: the task's own, or "Task" for a saved copy that is not one. */

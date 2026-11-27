@@ -74,8 +74,9 @@ export const BANNERET_MACHINE_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}
 export const BanneretEnrolmentView = Schema.Struct({
   state: BanneretEnrolmentState,
   /** The Enterprise workspace this enrolment belongs to: `ent-` + 16 hex of sha256(origin). */
-  workspaceId: Schema.optional(Schema.String),
-  relayOrigin: Schema.optional(Schema.String),
+  workspaceId: Schema.String,
+  /** The relay this enrolment is with. A machine has one enrolment per relay. */
+  relayOrigin: Schema.String,
   displayName: Schema.optional(Schema.String),
   machineId: Schema.optional(Schema.String),
   label: Schema.optional(Schema.String),
@@ -93,6 +94,15 @@ export const BanneretEnrolmentView = Schema.Struct({
   unreachableSince: Schema.optional(Schema.String),
 });
 export type BanneretEnrolmentView = typeof BanneretEnrolmentView.Type;
+
+/** Every relay this environment has joined, is joining, or last tried. */
+export const BanneretEnrolmentList = Schema.Struct({
+  enrolments: Schema.Array(BanneretEnrolmentView),
+});
+export type BanneretEnrolmentList = typeof BanneretEnrolmentList.Type;
+
+/** Which relay a call is for; the server reduces it to its origin. */
+const RelayTarget = { relayOrigin: Schema.String };
 
 export const BanneretRelayProbeResult = Schema.Struct({
   origin: Schema.String,
@@ -129,7 +139,7 @@ const WsBanneretRelayProbeRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.probe, {
 
 const WsBanneretRelayStatusRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.status, {
   payload: Schema.Struct({}),
-  success: BanneretEnrolmentView,
+  success: BanneretEnrolmentList,
   error: EnvironmentAuthorizationError,
 });
 
@@ -144,7 +154,7 @@ const WsBanneretRelayStartRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.start, {
 });
 
 const WsBanneretRelayCancelRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.cancel, {
-  payload: Schema.Struct({}),
+  payload: Schema.Struct(RelayTarget),
   success: BanneretEnrolmentView,
   error: RelayRpcError,
 });
@@ -154,19 +164,19 @@ const WsBanneretRelayCancelRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.cancel, {
  * is the only way out of `approved` besides `cancel`.
  */
 const WsBanneretRelayLeaveRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.leave, {
-  payload: Schema.Struct({ mode: Schema.Literals(["revoke", "forget"]) }),
+  payload: Schema.Struct({ ...RelayTarget, mode: Schema.Literals(["revoke", "forget"]) }),
   success: BanneretEnrolmentView,
   error: RelayRpcError,
 });
 
 const WsBanneretRelayMachinesRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.machines, {
-  payload: Schema.Struct({ cursor: Schema.optional(Schema.String) }),
+  payload: Schema.Struct({ ...RelayTarget, cursor: Schema.optional(Schema.String) }),
   success: BanneretRelayMachinesPage,
   error: RelayRpcError,
 });
 
 const WsBanneretRelayRevokeMachineRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.revokeMachine, {
-  payload: Schema.Struct({ machineId: Schema.String }),
+  payload: Schema.Struct({ ...RelayTarget, machineId: Schema.String }),
   success: Schema.Struct({}),
   error: RelayRpcError,
 });
@@ -176,7 +186,7 @@ const WsBanneretRelayRevokeMachineRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.revok
  * this server, which hashes them into project keys; the relay never sees a remote or a path.
  */
 const WsBanneretRelayMatchProjectsRpc = Rpc.make(BANNERET_RELAY_WS_METHODS.matchProjects, {
-  payload: Schema.Struct({ remoteUrls: Schema.Array(Schema.String) }),
+  payload: Schema.Struct({ ...RelayTarget, remoteUrls: Schema.Array(Schema.String) }),
   success: Schema.Struct({ matched: Schema.Array(Schema.String) }),
   error: RelayRpcError,
 });

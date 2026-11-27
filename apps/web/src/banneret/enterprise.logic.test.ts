@@ -44,6 +44,13 @@ const joined = (overrides: Partial<BanneretEnrolmentView> = {}): BanneretEnrolme
   ...overrides,
 });
 
+/** A view of the test relay with only the given fields besides its identity. */
+const at = (fields: Pick<BanneretEnrolmentView, "state"> & Partial<BanneretEnrolmentView>) => ({
+  workspaceId: workspace.id,
+  relayOrigin: "https://relay.example.com",
+  ...fields,
+});
+
 describe("wizardStep", () => {
   it.each([
     [null, "address"],
@@ -57,7 +64,7 @@ describe("wizardStep", () => {
     [{ state: "configured", health: "unknown_machine" }, "address"],
     [{ state: "revoked" }, "revoked"],
   ] as const)("maps %j to %s", (view, step) => {
-    expect(wizardStep(view)).toBe(step);
+    expect(wizardStep(view === null ? null : at(view))).toBe(step);
   });
 });
 
@@ -80,39 +87,43 @@ describe("lastResultMessage", () => {
     ["left", "You left the company. This machine is no longer joined."],
     ["forgotten", "This machine was forgotten here. A founder must still remove it on the relay."],
   ])("says why for %s", (reason, message) => {
-    expect(lastResultMessage({ state: "none", reason })).toBe(message);
+    expect(lastResultMessage(at({ state: "none", reason }))).toBe(message);
   });
 
   it("says the company no longer knows the machine after a relay reset, not that you left", () => {
     const message =
       "Example Company no longer knows this machine (the relay may have been reset). Join again.";
-    expect(lastResultMessage({ state: "none", reason: "unknown_machine", message })).toBe(message);
-    expect(lastResultMessage({ state: "none", reason: "unknown_machine" })).toBe(
+    expect(lastResultMessage(at({ state: "none", reason: "unknown_machine", message }))).toBe(
+      message,
+    );
+    expect(lastResultMessage(at({ state: "none", reason: "unknown_machine" }))).toBe(
       "The company no longer knows this machine (the relay may have been reset). Join again.",
     );
   });
 
   it("falls back to the relay's words, then a generic line, for an unknown reason", () => {
-    expect(lastResultMessage({ state: "none", reason: "refused", message: "Nope." })).toBe("Nope.");
-    expect(lastResultMessage({ state: "none", reason: "something_new" })).toBe(
+    expect(lastResultMessage(at({ state: "none", reason: "refused", message: "Nope." }))).toBe(
+      "Nope.",
+    );
+    expect(lastResultMessage(at({ state: "none", reason: "something_new" }))).toBe(
       "Joining did not finish. Try again.",
     );
   });
 
   it("says nothing without a last result or outside none", () => {
     expect(lastResultMessage(null)).toBeNull();
-    expect(lastResultMessage({ state: "none" })).toBeNull();
-    expect(lastResultMessage({ state: "requested", reason: "declined" })).toBeNull();
+    expect(lastResultMessage(at({ state: "none" }))).toBeNull();
+    expect(lastResultMessage(at({ state: "requested", reason: "declined" }))).toBeNull();
   });
 });
 
 describe("revokedMessage", () => {
   it("names the company, or says the machine was replaced", () => {
     expect(
-      revokedMessage({ state: "revoked", displayName: "Example Company", reason: "removed" }),
+      revokedMessage(at({ state: "revoked", displayName: "Example Company", reason: "removed" })),
     ).toBe("This machine was removed from Example Company");
     expect(
-      revokedMessage({ state: "revoked", displayName: "Example Company", reason: "replaced" }),
+      revokedMessage(at({ state: "revoked", displayName: "Example Company", reason: "replaced" })),
     ).toBe("This machine was replaced by a newer enrolment");
   });
 });
@@ -123,7 +134,7 @@ describe("enrolmentLine", () => {
       tone: "muted",
       text: "Not joined on this machine · Join",
     });
-    expect(enrolmentLine(workspace, { state: "none" })).toEqual({
+    expect(enrolmentLine(workspace, at({ state: "none" }))).toEqual({
       tone: "muted",
       text: "Not joined on this machine · Join",
     });
@@ -190,7 +201,7 @@ describe("helpers", () => {
     expect(canForget(joined())).toBe(false);
     expect(canForget(joined({ health: "unreachable" }))).toBe(true);
     expect(canForget(joined({ health: "refused" }))).toBe(true);
-    expect(canForget({ state: "revoked" })).toBe(false);
+    expect(canForget(at({ state: "revoked" }))).toBe(false);
     expect(canForget(joined({ state: "approved" }))).toBe(false);
     expect(canForget(joined({ state: "approved", health: "forbidden" }))).toBe(true);
   });

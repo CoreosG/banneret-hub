@@ -37,6 +37,7 @@ import { useWorkspacesStore } from "./workspacesStore";
 vi.mock("../state/environments", { spy: true });
 
 const LOCAL = EnvironmentId.make("local");
+const RELAY = { environmentId: LOCAL, relayOrigin: "https://relay.example.com" };
 const WORKSPACE_ID = "ent-0123456789abcdef";
 const HOSTILE = '<img src=x onerror="window.__pwned=1">';
 
@@ -327,7 +328,7 @@ describe("Enterprise feed", () => {
     });
     await userEvent.click(page.getByRole("button", { name: "Load older" }));
     await vi.waitFor(() => expect(entryIds()).toEqual(["e1", "e2", "e3"]));
-    expect(feedPage).toHaveBeenLastCalledWith(LOCAL, "c1");
+    expect(feedPage).toHaveBeenLastCalledWith(RELAY, "c1");
 
     feedPage.mockResolvedValueOnce({
       joined: true,
@@ -336,7 +337,7 @@ describe("Enterprise feed", () => {
     });
     await userEvent.click(page.getByRole("button", { name: "Load older" }));
     await vi.waitFor(() => expect(entryIds()).toEqual(["e1", "e2", "e3", "e4"]));
-    expect(feedPage).toHaveBeenLastCalledWith(LOCAL, "c2");
+    expect(feedPage).toHaveBeenLastCalledWith(RELAY, "c2");
     expect(page.getByRole("button", { name: "Load older" }).elements()).toHaveLength(0);
 
     // A new snapshot file keeps the older pages and merges the overlap.
@@ -386,7 +387,7 @@ describe("Enterprise feed", () => {
         ),
       ).toEqual(["t1", "t2", "t3"]),
     );
-    expect(graveyardPage).toHaveBeenLastCalledWith(LOCAL, "g1");
+    expect(graveyardPage).toHaveBeenLastCalledWith(RELAY, "g1");
     expect(page.getByRole("button", { name: "Load older" }).elements()).toHaveLength(0);
 
     await emit(state(["feed"], feedRead([]), graveyardRead([])));

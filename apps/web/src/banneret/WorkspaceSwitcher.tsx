@@ -25,7 +25,7 @@ import {
 } from "../components/ui/menu";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { canJoinAgain, enrolmentLine, type EnrolmentTone } from "./enterprise.logic";
-import { useEnrolmentView } from "./enrolmentStore";
+import { useEnrolmentViews } from "./enrolmentStore";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
   openWorkspaceDialog,
@@ -51,11 +51,12 @@ export function WorkspaceSwitcher(props: {
   );
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? null;
   const activeName = active?.name ?? null;
-  const enrolment = useEnrolmentView(usePrimaryEnvironmentId());
-  const joinedHere =
-    active?.relay !== undefined &&
-    enrolment?.workspaceId === active.id &&
-    enrolment.state === "configured";
+  // Each Enterprise workspace has its own relay, so its own enrolment on this machine.
+  const views = useEnrolmentViews(usePrimaryEnvironmentId());
+  const viewOf = (workspace: BanneretWorkspace) =>
+    views.find((view) => view.workspaceId === workspace.id) ?? null;
+  const enrolment = active === null ? null : viewOf(active);
+  const joinedHere = active?.relay !== undefined && enrolment?.state === "configured";
 
   return (
     <Menu>
@@ -102,7 +103,7 @@ export function WorkspaceSwitcher(props: {
               value={workspace.id}
               name={workspace.name}
               workspace={workspace}
-              enrolment={enrolment}
+              enrolment={viewOf(workspace)}
             />
           ))}
         </MenuRadioGroup>
@@ -125,11 +126,21 @@ export function WorkspaceSwitcher(props: {
             ) : null}
             {joinedHere ? (
               <>
-                <MenuItem onClick={() => openWorkspaceDialog({ kind: "machines" })}>
+                <MenuItem
+                  onClick={() =>
+                    active.relay !== undefined &&
+                    openWorkspaceDialog({ kind: "machines", origin: active.relay.origin })
+                  }
+                >
                   <LaptopIcon />
                   Machines…
                 </MenuItem>
-                <MenuItem onClick={() => openWorkspaceDialog({ kind: "leave" })}>
+                <MenuItem
+                  onClick={() =>
+                    active.relay !== undefined &&
+                    openWorkspaceDialog({ kind: "leave", origin: active.relay.origin })
+                  }
+                >
                   <LogOutIcon />
                   Leave…
                 </MenuItem>
@@ -145,7 +156,7 @@ export function WorkspaceSwitcher(props: {
                 }
               >
                 <UsersIcon />
-                {enrolment?.workspaceId === active.id && enrolment.state !== "none"
+                {enrolment !== null && enrolment.state !== "none"
                   ? "Enrolment…"
                   : "Join on this machine…"}
               </MenuItem>

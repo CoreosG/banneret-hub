@@ -1,5 +1,6 @@
-// Banneret Hub: this client's view of each environment's relay enrolment. The server holds the key
-// and token and makes every relay call; `status` is a local read, so polling it never reaches a relay.
+// Banneret Hub: this client's view of each environment's relay enrolments, one per relay. The server
+// holds the keys and tokens and makes every relay call; `status` is a local read, so polling it never
+// reaches a relay.
 import {
   type AtomCommandResult,
   createEnvironmentRpcCommand,
@@ -7,6 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   BANNERET_RELAY_WS_METHODS,
+  type BanneretEnrolmentList,
   type BanneretEnrolmentView,
   type BanneretMachineKind,
   type BanneretRelayMachinesPage,
@@ -74,9 +76,18 @@ async function outcome<T>(run: Promise<AtomCommandResult<T, unknown>>): Promise<
   }
 }
 
+/** One relay as seen from one environment: what every per-company call and store is keyed by. */
+export interface RelayTarget {
+  readonly environmentId: EnvironmentId;
+  readonly relayOrigin: string;
+}
+
+export const relayKey = (target: RelayTarget) =>
+  `${target.environmentId}\u0000${target.relayOrigin}`;
+
 /** Every relay call a screen makes; tests replace these. */
 export const enrolmentRpc = {
-  status: (environmentId: EnvironmentId): Promise<RelayOutcome<BanneretEnrolmentView>> =>
+  status: (environmentId: EnvironmentId): Promise<RelayOutcome<BanneretEnrolmentList>> =>
     outcome(runAtomCommand(appAtomRegistry, statusCommand, { environmentId, input: {} })),
   probe: (
     environmentId: EnvironmentId,
@@ -88,73 +99,113 @@ export const enrolmentRpc = {
     input: { readonly origin: string; readonly label: string; readonly kind: BanneretMachineKind },
   ): Promise<RelayOutcome<BanneretEnrolmentView>> =>
     outcome(runAtomCommand(appAtomRegistry, startCommand, { environmentId, input })),
-  cancel: (environmentId: EnvironmentId): Promise<RelayOutcome<BanneretEnrolmentView>> =>
-    outcome(runAtomCommand(appAtomRegistry, cancelCommand, { environmentId, input: {} })),
+  cancel: ({
+    environmentId,
+    relayOrigin,
+  }: RelayTarget): Promise<RelayOutcome<BanneretEnrolmentView>> =>
+    outcome(
+      runAtomCommand(appAtomRegistry, cancelCommand, { environmentId, input: { relayOrigin } }),
+    ),
   leave: (
-    environmentId: EnvironmentId,
+    { environmentId, relayOrigin }: RelayTarget,
     mode: "revoke" | "forget",
   ): Promise<RelayOutcome<BanneretEnrolmentView>> =>
-    outcome(runAtomCommand(appAtomRegistry, leaveCommand, { environmentId, input: { mode } })),
+    outcome(
+      runAtomCommand(appAtomRegistry, leaveCommand, {
+        environmentId,
+        input: { relayOrigin, mode },
+      }),
+    ),
   machines: (
-    environmentId: EnvironmentId,
+    { environmentId, relayOrigin }: RelayTarget,
     cursor?: string,
   ): Promise<RelayOutcome<BanneretRelayMachinesPage>> =>
     outcome(
       runAtomCommand(appAtomRegistry, machinesCommand, {
         environmentId,
-        input: cursor === undefined ? {} : { cursor },
+        input: cursor === undefined ? { relayOrigin } : { relayOrigin, cursor },
       }),
     ),
   revokeMachine: (
-    environmentId: EnvironmentId,
+    { environmentId, relayOrigin }: RelayTarget,
     machineId: string,
   ): Promise<RelayOutcome<unknown>> =>
     outcome(
       runAtomCommand(appAtomRegistry, revokeMachineCommand, {
         environmentId,
-        input: { machineId },
+        input: { relayOrigin, machineId },
       }),
     ),
   matchProjects: (
-    environmentId: EnvironmentId,
+    { environmentId, relayOrigin }: RelayTarget,
     remoteUrls: ReadonlyArray<string>,
   ): Promise<RelayOutcome<{ readonly matched: ReadonlyArray<string> }>> =>
     outcome(
       runAtomCommand(appAtomRegistry, matchProjectsCommand, {
         environmentId,
-        input: { remoteUrls },
+        input: { relayOrigin, remoteUrls },
       }),
     ),
 };
 
 interface EnrolmentState {
-  readonly views: Readonly<Record<EnvironmentId, BanneretEnrolmentView>>;
+  /** Per environment, its enrolment with each relay it has tried, in origin order. */
+  readonly views: Readonly<Record<EnvironmentId, ReadonlyArray<BanneretEnrolmentView>>>;
 }
 
 export const useEnrolmentStore = create<EnrolmentState>(() => ({ views: {} }));
 
+const EMPTY_VIEWS: ReadonlyArray<BanneretEnrolmentView> = [];
+
+/** Stores one relay's view, as a call about that relay answered it. */
 export function storeEnrolmentView(environmentId: EnvironmentId, view: BanneretEnrolmentView) {
-  useEnrolmentStore.setState((state) => ({ views: { ...state.views, [environmentId]: view } }));
+  useEnrolmentStore.setState((state) => {
+    const others = (state.views[environmentId] ?? EMPTY_VIEWS).filter(
+      (entry) => entry.relayOrigin !== view.relayOrigin,
+    );
+    const next = [...others, view].toSorted((a, b) => a.relayOrigin.localeCompare(b.relayOrigin));
+    return { views: { ...state.views, [environmentId]: next } };
+  });
 }
 
 /**
- * Reads the environment's enrolment. A failed read keeps the last view, so a dropped connection
- * never shows a joined machine as not joined; with nothing read yet it shows as not joined.
+ * Reads the environment's enrolments. A failed read keeps the last views, so a dropped connection
+ * never shows a joined machine as not joined; with nothing read yet it shows none.
  */
 export async function refreshEnrolment(environmentId: EnvironmentId) {
   const result = await enrolmentRpc.status(environmentId);
-  if (result.ok) storeEnrolmentView(environmentId, result.value);
-  else if (useEnrolmentStore.getState().views[environmentId] === undefined) {
-    storeEnrolmentView(environmentId, { state: "none" });
+  if (result.ok) {
+    useEnrolmentStore.setState((state) => ({
+      views: { ...state.views, [environmentId]: result.value.enrolments },
+    }));
+  } else if (useEnrolmentStore.getState().views[environmentId] === undefined) {
+    useEnrolmentStore.setState((state) => ({
+      views: { ...state.views, [environmentId]: EMPTY_VIEWS },
+    }));
   }
-  return result.ok ? result.value : null;
+  return result.ok ? result.value.enrolments : null;
 }
 
+/** Every relay this environment has an enrolment with. */
+export function useEnrolmentViews(
+  environmentId: EnvironmentId | null,
+): ReadonlyArray<BanneretEnrolmentView> {
+  return useEnrolmentStore((state) =>
+    environmentId === null ? EMPTY_VIEWS : (state.views[environmentId] ?? EMPTY_VIEWS),
+  );
+}
+
+/** The environment's enrolment with one relay, by relay origin; null when it has none. */
 export function useEnrolmentView(
   environmentId: EnvironmentId | null,
+  relayOrigin: string | null | undefined,
 ): BanneretEnrolmentView | null {
   return useEnrolmentStore((state) =>
-    environmentId === null ? null : (state.views[environmentId] ?? null),
+    environmentId === null || relayOrigin == null
+      ? null
+      : ((state.views[environmentId] ?? EMPTY_VIEWS).find(
+          (view) => view.relayOrigin === relayOrigin,
+        ) ?? null),
   );
 }
 
