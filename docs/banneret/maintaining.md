@@ -12,6 +12,8 @@ Banneret Hub is upstream T3 Code plus a thin layer of our own commits. Keep that
 - **The route tree is regenerated, not merged.** `node scripts/banneret/generate-route-tree.mjs` rewrites `apps/web/src/routeTree.gen.ts` with the TanStack router plugin's generator (needs `vp install --filter=@t3tools/web`). The sync runs it after every merge, so conflicts in that file resolve themselves.
 - **Identity is guarded.** `node scripts/banneret/check-identity.mjs` fails when shipped source names official T3 Code identity (`~/.t3`, `com.t3tools.*`, `pingdotgg/t3code`, the `t3` launcher, `t3code://`, official hosts) beyond the reviewed baseline in `identity-baseline.json`. Bundled source is checked as shipped, after the build's rewrite (below), so it also fails when a rewrite rule stops matching or server copy still names the `t3` command. Rename the new hit, or review it and run with `--update`. `scripts/banneret/brand.test.ts` checks the rewrite rules, and `identity-bundle.test.ts` the built server.
 
+- **Mobile-compatible.** CI runs the stock client from upstream v0.1.13 against the built Hub server. It pairs, opens a company project thread, sends a message and answers a provider request. Run `bash scripts/banneret/mobile/check.sh` when changing these paths. Update the pinned client only when changing the supported mobile release.
+
 ## Identity
 
 |                               | Value                                                                                                                             |
@@ -53,6 +55,8 @@ scheme and the server's CORS origins. Each rule is anchored on upstream's exact 
 also registered outside bundles, by hand: electron-builder `protocols` in
 `scripts/build-desktop-artifact.ts`, the dev launcher, and `apps/desktop/resources/installer.nsh`
 (electron-builder registers schemes on macOS and Linux only). Dev web servers keep `t3code-dev://`.
+
+On the stock phone app, scan the terminal pairing QR or paste the HTTP(S) pairing URL. The separate `banneret://pair` link opens Banneret desktop. Company membership and orchestrator designations are visible on the Hub. On mobile, open the same thread under its project.
 
 Source and tests keep upstream's names. `scripts/banneret/identity-bundle.test.ts` builds the server
 with the plugin and runs it to prove the shipped values, and `check-identity.mjs` scans bundled
