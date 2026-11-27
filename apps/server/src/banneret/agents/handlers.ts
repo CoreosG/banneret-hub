@@ -1,3 +1,7 @@
+import * as DateTime from "effect/DateTime";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { searchKnowledge, knowledgeLabel } from "../memory/KbIndex.ts";
+import { personalMessage, sameRule, sentences } from "../memory/corrections.ts";
 import * as Schema from "effect/Schema";
 import { memoryAccess, unavailable } from "../memory/access.ts";
 import type { NoteStore } from "../memory/store.ts";
@@ -233,16 +237,20 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.provideService(BanneretEnrolment, enrolment), Effect.mapError(poolFailure));
   });
   const memoryContext = yield* Effect.context<Effect.Services<ReturnType<typeof memoryAccess>>>();
+  const accessForCaller = Effect.gen(function* () {
+    const scope = yield* McpInvocationContext.McpInvocationContext;
+    if (!scope.thread) return yield* unavailable();
+    const thread = scope.thread.threadId;
+    const access = yield* memoryAccess(thread, scope.environmentId).pipe(
+      Effect.provideContext(memoryContext),
+    );
+    return { thread, access };
+  });
   const memory = Effect.fn("BanneretMemory.invoke")(function* <T>(
     run: (store: NoteStore, thread: ThreadId) => T,
   ) {
-    const scope = yield* McpInvocationContext.McpInvocationContext;
-    const caller = scope.thread;
-    if (!caller) return yield* unavailable();
-    const access = yield* memoryAccess(caller.threadId, scope.environmentId).pipe(
-      Effect.provideContext(memoryContext),
-    );
-    const data = yield* access.open((store) => run(store, caller.threadId));
+    const { access, thread } = yield* accessForCaller;
+    const data = yield* access.open((store) => run(store, thread));
     return {
       data: yield* encodeMemory(data).pipe(
         Effect.mapError(
@@ -256,6 +264,27 @@ const make = Effect.gen(function* () {
     };
   });
   return {
+    banneret_kb_search: McpToolAccess.readsAsCaller(({ query }) =>
+      Effect.gen(function* () {
+        const { access } = yield* accessForCaller;
+        const folders = yield* access.open((s) => s.folders());
+        if (!folders.length) return yield* unavailable();
+        const hits = yield* Effect.tryPromise({
+          try: () => searchKnowledge(folders, query),
+          catch: () =>
+            new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message: "Could not read the configured knowledge folders.",
+            }),
+        });
+        return {
+          data:
+            knowledgeLabel +
+            "\n" +
+            (yield* encodeMemory(hits).pipe(Effect.mapError(() => unavailable()))),
+        };
+      }),
+    ),
     banneret_memory_read: McpToolAccess.readsAsCaller(({ key }) => memory((s) => s.read(key))),
     banneret_memory_search: McpToolAccess.readsAsCaller(({ query }) =>
       memory((s) => s.search(query)),
@@ -263,7 +292,28 @@ const make = Effect.gen(function* () {
     banneret_memory_use: McpToolAccess.actsAsCaller(({ key }) =>
       memory((s, thread) => s.use(key, thread)),
     ),
-    banneret_memory_propose: McpToolAccess.actsAsCaller((input) => memory((s) => s.propose(input))),
+    banneret_memory_propose: McpToolAccess.actsAsCaller((input) =>
+      Effect.gen(function* () {
+        if (!input.raisedAgain) return yield* memory((s) => s.propose(input));
+        const { thread } = yield* accessForCaller;
+        const records = yield* (yield* ThreadManagementService)
+          .getThreadRecords(thread, ["messages"], { messageRoles: ["user"] })
+          .pipe(Effect.mapError(() => unavailable()));
+        const evidence = records.messages.filter(personalMessage).flatMap((message) =>
+          sentences(message.text)
+            .filter((sentence) => sameRule(sentence, input.source))
+            .map((sentence) => ({
+              thread,
+              id: message.id,
+              sentence,
+              at: DateTime.toEpochMillis(message.createdAt),
+            })),
+        );
+        if (!evidence.some((row) => row.sentence === input.source))
+          return yield* invalid("Quote the exact instruction sentence from your person's message.");
+        return yield* memory((store) => evidence.map((row) => store.correction(row, input.key)));
+      }),
+    ),
     banneret_memory_flag: McpToolAccess.actsAsCaller(({ key, reason }) =>
       memory((s, thread) => s.flag(key, reason, thread)),
     ),
@@ -635,7 +685,7 @@ const make = Effect.gen(function* () {
               message:
                 "Save the hand-off note, choose handing_over or out_of_usage and leave the task free to continue.",
             });
-          return yield* leases.release(
+          const released = yield* leases.release(
             {
               ...ref,
               reason,
@@ -646,6 +696,9 @@ const make = Effect.gen(function* () {
             },
             sandboxId ? "sandbox-" + relayHash(sandboxId) : undefined,
           );
+          if (released.outcome === "released")
+            yield* memory((store, thread) => store.nudge(thread)).pipe(Effect.ignoreCause);
+          return released;
         }),
     ),
     banneret_lease_withdraw: McpToolAccess.actsAsCaller(({ taskId }) =>

@@ -44,6 +44,10 @@ export const memoryReviewInput = Schema.Struct({
   version: Schema.String,
   action: reviewAction,
 });
+const preferences = Schema.Struct({
+  folders: Schema.Array(bounded(4096)).check(Schema.isMaxLength(8)),
+  nudges: Schema.Boolean,
+});
 export const MEMORY_RPCS = [
   Rpc.make("memory.repoSetting", {
     payload: Schema.Struct({ threadId: ThreadId }),
@@ -67,6 +71,16 @@ export const MEMORY_RPCS = [
   Rpc.make("memory.sync", {
     payload: Schema.Struct({ threadId: ThreadId }),
     success: Schema.String,
+    error,
+  }),
+  Rpc.make("memory.preferences", {
+    payload: Schema.Struct({ threadId: ThreadId }),
+    success: preferences,
+    error,
+  }),
+  Rpc.make("memory.configure", {
+    payload: Schema.Struct({ threadId: ThreadId, ...preferences.fields }),
+    success: Schema.Void,
     error,
   }),
   Rpc.make("memory.confirmImport", {
@@ -101,7 +115,12 @@ export const MEMORY_RPCS = [
   Rpc.make("memory.summary", {
     payload: Schema.Struct({ threadId: ThreadId }),
     success: Schema.NullOr(
-      Schema.Struct({ total: Schema.Int, proposed: Schema.Int, disputed: Schema.Int }),
+      Schema.Struct({
+        cardsOnly: Schema.optional(Schema.Boolean),
+        total: Schema.Int,
+        proposed: Schema.Int,
+        disputed: Schema.Int,
+      }),
     ),
     error,
   }),
@@ -123,6 +142,8 @@ export const MEMORY_RPC_SCOPES = {
   "memory.repoSetting": AuthSettingsWriteScope,
   "memory.setRepo": AuthSettingsWriteScope,
   "memory.sync": AuthSettingsWriteScope,
+  "memory.configure": AuthSettingsWriteScope,
+  "memory.preferences": AuthSettingsWriteScope,
   "memory.confirmImport": AuthSettingsWriteScope,
   "memory.importFile": AuthSettingsWriteScope,
   "memory.exportFiles": AuthSettingsWriteScope,
@@ -138,6 +159,8 @@ export const MEMORY_RPC_AGGREGATES = {
   "memory.repoSetting": "leases",
   "memory.setRepo": "leases",
   "memory.sync": "leases",
+  "memory.configure": "leases",
+  "memory.preferences": "leases",
   "memory.confirmImport": "leases",
   "memory.importFile": "leases",
   "memory.exportFiles": "leases",

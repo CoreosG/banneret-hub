@@ -109,7 +109,13 @@ export const memoryAccess = Effect.fn("BanneretMemory.access")(
       },
       Effect.mapError((e) => (e._tag === "OrchestratorMcpFailure" ? e : unavailable())),
     );
-    return { open, orchestrator, repo, enterprise: owner?.kind === "enterprise" };
+    return {
+      open,
+      orchestrator,
+      main: workspace.main,
+      repo,
+      enterprise: owner?.kind === "enterprise",
+    };
   },
   Effect.mapError(() => unavailable()),
 );
