@@ -109,8 +109,7 @@ function expectFits() {
 const router: AppRouter = await mountApp(threadPath(THREAD.id));
 
 async function go(to: string) {
-  await act(() => router.history.push(to));
-  await vi.waitFor(() => expect(router.state.location.pathname).toBe(to));
+  await act(() => router.navigate({ href: to }));
 }
 
 describe("open tabs frame layout", () => {
@@ -167,12 +166,9 @@ describe("open tabs frame layout", () => {
 
   it("opens settings over the bar and the sidebar", async () => {
     await go("/settings/general");
-    const modal = await vi.waitFor(() => {
-      const found = document.querySelector<HTMLElement>("[data-app-modal]")?.parentElement;
-      expect(found).toBeDefined();
-      return found!;
-    });
-    const box = modal.getBoundingClientRect();
+    const dialog = page.getByRole("dialog", { name: "Settings" });
+    await expect.element(dialog).toBeVisible();
+    const box = dialog.element().parentElement!.getBoundingClientRect();
     expect(box.top).toBe(0);
     expect(box.left).toBe(0);
     expect(box.bottom).toBe(window.innerHeight);
