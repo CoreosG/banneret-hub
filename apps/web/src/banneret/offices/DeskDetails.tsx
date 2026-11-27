@@ -10,6 +10,7 @@ import type { RelayTarget } from "../enrolmentStore";
 import { MachineResources } from "../ui/MachineResources";
 import { LeaseChip } from "../ui/Chips";
 import { toneProps } from "../ui/tokens";
+import { Message } from "./OfficeChat";
 import { AgentDetails } from "./AgentDetails";
 import { useOpenTask } from "../useOpenTask";
 type Person = BanneretTeam["people"][number];
@@ -130,6 +131,7 @@ export function DeskDetails({
   return (
     <>
       <strong>{p.displayName ?? p.login}</strong>
+      <Message person={p} target={target} />
       {flags.includes("presence") && (
         <span className="ml-2 text-muted-foreground">{p.presence}</span>
       )}

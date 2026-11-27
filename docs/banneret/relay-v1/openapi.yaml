@@ -3865,6 +3865,15 @@ components:
       - rate
       - retentionDays
       properties:
+        boards:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [board, channel]
+            properties:
+              board: { type: string }
+              channel: { type: string }
         maxTextBytes:
           type: integer
           minimum: 0

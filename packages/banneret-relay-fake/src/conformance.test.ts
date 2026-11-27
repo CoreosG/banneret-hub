@@ -2643,6 +2643,48 @@ describe("team", () => {
     }
   });
 
+  it.skipIf(external).each(["company", "community"] as const)(
+    "serves the %s scale fixture through Team v2",
+    async (preset) => {
+      const relay = await startFakeRelay({ officeFixture: preset, autoApprove: false });
+      const original = client;
+      client = new RelayClient(relay.url);
+      try {
+        const reader = await enrol({ login: "ada-example" });
+        const files = await filesFor(reader);
+        const summary = (await readFile(reader, files.team!, "SnapshotTeam")) as {
+          agents: { personId: string }[];
+          agentsNextCursor: string | null;
+          rooms: { desks: number; counts: { working: number } }[];
+          people: { total: number };
+        };
+        expect(Buffer.byteLength(JSON.stringify(summary))).toBeLessThanOrEqual(65536);
+        expect(summary.rooms).toHaveLength(50);
+        expect(summary.people.total).toBe(preset === "company" ? 500 : 2000);
+        if (preset === "company") {
+          expect(
+            summary.rooms.every((room) => room.desks === 10 && room.counts.working === 30),
+          ).toBe(true);
+          expect(summary.agentsNextCursor).toEqual(expect.any(String));
+          const page = await call(
+            reader,
+            "GET",
+            "/relay/v1/team/agents?cursor=" + encodeURIComponent(summary.agentsNextCursor!),
+          );
+          expectSchema("TeamAgentsPage", page.body);
+          expect((page.body as { agents: { personId: string }[] }).agents[0]?.personId).not.toBe(
+            summary.agents.at(-1)?.personId,
+          );
+        } else {
+          const last = await call(reader, "GET", "/relay/v1/team/people?q=builder-1999");
+          expect(last.body).toMatchObject({ people: [{ login: "builder-1999" }] });
+        }
+      } finally {
+        client = original;
+        await relay.close();
+      }
+    },
+  );
   it("fits 500 agent owners into a paged summary and finds directory entries past the first page", async () => {
     const isolated = external
       ? undefined

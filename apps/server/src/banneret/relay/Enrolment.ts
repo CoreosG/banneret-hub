@@ -147,6 +147,7 @@ const Persisted = Schema.Union([
     machineId: Schema.String,
     label: Schema.String,
     kind: BanneretMachineKind,
+    community: Schema.optional(Schema.Boolean),
     sharing: Schema.optional(OfficeSharing),
     me: Me,
     replacedLabel: Schema.optional(Schema.String),
@@ -191,7 +192,10 @@ const PublicCapabilities = Schema.Struct({
   displayName: Schema.String,
   enrolment: Schema.Struct({ start: Schema.String, browser: Schema.String }),
 });
-const EnrolledCapabilities = Schema.Struct({ me: Me });
+const EnrolledCapabilities = Schema.Struct({
+  me: Me,
+  team: Schema.optional(Schema.Struct({ preset: Schema.Literals(["company", "community"]) })),
+});
 const MachinesReply = Schema.Struct({
   items: Schema.Array(
     Schema.Struct({
@@ -1012,9 +1016,9 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     const outcome = yield* Effect.gen(function* () {
       const capabilities = yield* signedCall(from, "GET", "/relay/v1/capabilities");
       etag = capabilities.etag;
-      const { me } = yield* decodeReply(EnrolledCapabilities, capabilities);
+      const { me, team } = yield* decodeReply(EnrolledCapabilities, capabilities);
       const replacedLabel = yield* findReplaced(from, me.id);
-      return { me, replacedLabel };
+      return { me, replacedLabel, community: team?.preset === "community" };
     }).pipe(Effect.result);
     if (Result.isFailure(outcome)) {
       if (outcome.failure.code === "token_revoked") return 0;
@@ -1026,7 +1030,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       return nextBackoff();
     }
     backoffMs = 0;
-    const { me, replacedLabel } = outcome.success;
+    const { me, replacedLabel, community } = outcome.success;
     const lastOkAt = yield* nowIso;
     yield* whileStill(
       from,
@@ -1039,6 +1043,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           machineId: from.machineId,
           label: from.label,
           kind: from.kind,
+          community,
           me,
           lastOkAt,
           ...(replacedLabel === undefined ? {} : { replacedLabel }),
@@ -1080,11 +1085,20 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       Option.map(decoded, (body) => body.me),
       () => from.me,
     );
-    if (me.login !== from.me.login || me.role !== from.me.role) {
+    const community = Option.isSome(decoded)
+      ? decoded.value.team?.preset === "community"
+      : from.community === true;
+    if (
+      community !== Boolean(from.community) ||
+      me.login !== from.me.login ||
+      me.role !== from.me.role
+    ) {
       yield* whileStill(
         from,
         Effect.suspend(() =>
-          current.state === "configured" ? persist({ ...current, me, lastOkAt }) : Effect.void,
+          current.state === "configured"
+            ? persist({ ...current, me, community, lastOkAt })
+            : Effect.void,
         ),
       );
     } else {
@@ -1101,7 +1115,11 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       taskIdForLinks(tasks, links),
     );
     const body = factsRequestBody(
-      { ...machineFacts(environmentId, from.label, from.kind), ...from.sharing },
+      {
+        ...machineFacts(environmentId, from.label, from.kind),
+        ...(from.community && { share: "hidden" }),
+        ...from.sharing,
+      },
       collected,
     );
     const outcome = yield* signedCall(from, "POST", "/relay/v1/facts", undefined, body).pipe(

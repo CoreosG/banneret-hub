@@ -657,6 +657,19 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("keeps the first community heartbeat hidden unless the owner chooses to share", () =>
+    withFake(
+      (fake, relay) =>
+        Effect.gen(function* () {
+          yield* join(fake, relay);
+          yield* waitFor(status, () => relay.requests.some((r) => r.url === "/relay/v1/facts"));
+          expect(
+            JSON.parse(relay.requests.find((r) => r.url === "/relay/v1/facts")!.body).machine,
+          ).toMatchObject({ share: "hidden", shareUsage: false });
+        }).pipe(onFreshHub()),
+      { teamPreset: "community" },
+    ),
+  );
   it.live("persists sharing on this enrolment and applies founder meeting edits", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {

@@ -637,6 +637,7 @@ export const BanneretFeedState = Schema.Struct({
   sections: Schema.Array(Schema.String),
   /** The open needs-you count from the last `needs.changed`, if one arrived. */
   needsCount: Schema.NullOr(Schema.Number),
+  boardChannels: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   chatFlags: Schema.optional(Schema.Array(Schema.String)),
   chatNotice: Schema.optional(ChatNotice),
   chatRevision: Schema.optional(Schema.Number),

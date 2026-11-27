@@ -129,7 +129,13 @@ interface HealthSource {
 }
 
 export interface FakeRelayOptions {
-  readonly chat?: boolean | { readonly defaultChannels: readonly string[] };
+  readonly chat?:
+    | boolean
+    | {
+        readonly defaultChannels: readonly string[];
+        readonly boards?: readonly { board: string; channel: string }[];
+      };
+  readonly officeFixture?: "company" | "community";
   readonly teamPreset?: "company" | "community";
   readonly promote?: boolean;
   readonly search?: boolean;
@@ -1857,6 +1863,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         ...(presence.get(id) ?? { presence: "off" as const }),
       }));
 
+  const fixtureSessions: {
+    board: string;
+    heardAt: number;
+    session: { id: string; personId: string; provider: string; state: string; since: string };
+  }[] = [];
   const teamSessions = () => {
     const now = Date.now();
     const rows = liveMachines()
@@ -1911,6 +1922,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ];
         });
       });
+    rows.push(...fixtureSessions);
     const visibleIds = new Map(
       [...Map.groupBy(rows, (r) => r.session.personId)].map(([id, owned]) => [
         id,
@@ -2293,7 +2305,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     channels.set(channel.id, channel);
     return channel;
   });
-  personFor({ login: "cy-example", role: "limited_staff" });
+  if (!options.officeFixture) personFor({ login: "cy-example", role: "limited_staff" });
   const visible = (c: Channel, p: string) => !c.private || c.members.has(p);
   const chatChange = (channel: Channel, value: ChatChange, person?: string) => {
     if (value.kind === "read.moved") {
@@ -2695,6 +2707,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ...(options.chat
             ? {
                 chat: {
+                  ...(typeof options.chat === "object" &&
+                    options.chat.boards && { boards: options.chat.boards }),
                   maxTextBytes: 16384,
                   editWindowSeconds: 0,
                   rate: {
@@ -2759,7 +2773,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               flags: ["presence", "status", "sharing", "meeting_links"],
             },
           ],
-          team: { preset: options.teamPreset ?? "company", stoppedKeptSeconds: 3600 },
+          team: {
+            preset: options.officeFixture ?? options.teamPreset ?? "company",
+            stoppedKeptSeconds: 3600,
+          },
           // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
           mcpTools: BANNERET_AGENT_TOOLS.filter(
             (name) =>
@@ -4692,6 +4709,33 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     });
   });
 
+  if (options.officeFixture) {
+    const company = options.officeFixture === "company";
+    boards = Array.from({ length: 50 }, (_, i) => ({
+      id: "board-" + String(i + 1).padStart(2, "0"),
+      title: "Board " + (i + 1),
+    }));
+    for (let i = 0; i < (company ? 500 : 2000); i++) {
+      const person = personFor(
+        i === 0 ? defaultPerson : { login: "builder-" + String(i).padStart(4, "0") },
+      );
+      if (!company) continue;
+      const board = boards[Math.floor(i / 10)]!.id;
+      presence.set(person.id, { presence: "available", seatBoard: board });
+      for (const provider of ["codex", "claude", "cursor"])
+        fixtureSessions.push({
+          board,
+          heardAt: startedAt,
+          session: {
+            id: "s_" + i + "_" + provider,
+            personId: person.id,
+            provider,
+            state: "working",
+            since: iso(startedAt),
+          },
+        });
+    }
+  }
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port ?? 0, options.host ?? "127.0.0.1", () => resolve());

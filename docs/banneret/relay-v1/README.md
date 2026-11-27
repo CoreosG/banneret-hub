@@ -756,7 +756,7 @@ Founders set or clear `meetingUrl` with `PUT /team/office` or `PUT /team/rooms/{
 to 300 UTF-8 bytes without credentials. Store the link without fetching it. The Hub opens it in the system browser.
 Both writes emit `team.rooms_changed`. Both Team events are live only, without a replay ID.
 
-Each heartbeat carries the machine's sharing choice. The Hub defaults to `agents_only`. A missing choice
+Each heartbeat carries the machine's sharing choice. The Hub defaults to `agents_only` for companies and `hidden` for communities. A missing choice
 means hidden. Hidden machines contribute no sessions. Only `agents_and_name` includes the session's
 `machineId` and lists the machine for colleagues. Owners and founders can manage machines.
 Claims stay visible. Use `<login>/private` when the machine name is private. Claim chips show live, paused or quiet.
@@ -1046,7 +1046,7 @@ An edit window of zero permits the author to edit at any age. Text and card limi
 | Any | Reload or reconnect | Read membership from the relay. Pending UI and open message actions reset on reload. |
 
 Banneret's preset sets `chat.enabled: true`, `chat.promote.enabled: true`, channels `general`, `platform`, `hub`,
-`ops`, and maps each board to its channel. Nothing Banneret-specific is in code.
+`ops`, and maps each board to its channel. Authenticated chat capabilities can publish those mappings as `chat.boards[]` entries with `board` and `channel`. The Hub resolves them against the channels visible to the caller. Nothing Banneret-specific is in code.
 
 
 Both task PUTs return 200 `ChatThreadLocation {conversationId, threadRootId}`. A task has one linked root and a root has one linked task. Concurrent links return the existing location, including when the proposed root differs. An inaccessible destination returns 404 without its location. Explicit link and unlink require membership in the writable conversation. Unlink a root before assigning it to another task. Deleting the root frees its association.

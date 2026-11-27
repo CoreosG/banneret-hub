@@ -1,4 +1,5 @@
 import { MeetingEditor, PresenceForm, SharingForm } from "./OfficeSettings";
+import { OfficeChat, RoomChannel, Message } from "./OfficeChat";
 import { Meeting } from "./Meeting";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -252,6 +253,7 @@ function Room({
             {countText(room.counts) && " · " + countText(room.counts)}
           </span>
         </button>
+        <RoomChannel board={room.board} title={board?.title ?? room.board} />
         {flags.includes("meeting_links") && (
           <>
             <Meeting url={room.meetingUrl} />
@@ -292,7 +294,13 @@ function Room({
 }
 
 export function OfficeViews({ enterprise, office, people }: Props) {
-  const pool = usePoolResources(enterprise.target, enterprise.feed.sections.includes("pool"));
+  const community = office.preset === "community";
+  const [showMachines, setShowMachines] = useState(false);
+  const machinesVisible = !community || showMachines;
+  const pool = usePoolResources(
+    enterprise.target,
+    machinesVisible && enterprise.feed.sections.includes("pool"),
+  );
   const [raw, set] = useUrlSearch();
   const filters = {
     q: value(raw.q) || value(raw.person),
@@ -314,7 +322,8 @@ export function OfficeViews({ enterprise, office, people }: Props) {
   const selection = JSON.stringify(filters);
   const [position, scroll] = useState({ selection, start: 0 });
   const start = position.selection === selection ? position.start : 0;
-  const { summary, flags } = office;
+  const { summary } = office;
+  const flags = machinesVisible ? office.flags : office.flags.filter((f) => f !== "sharing");
   const [cached, setCached] = useState(() => ({
     revision: office.revision,
     index: createAgentIndex(enterprise.target, summary),
@@ -380,7 +389,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
       (!filterPerson || candidates.some((p) => hasDesk(p, r.board))),
   );
   return (
-    <>
+    <OfficeChat enterprise={enterprise}>
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Team view" className="flex rounded-md border">
           {["Floor", "List", "Office"].map((name) => (
@@ -419,11 +428,21 @@ export function OfficeViews({ enterprise, office, people }: Props) {
             {flags.some((f) => f === "presence" || f === "status") && (
               <PresenceForm enterprise={enterprise} person={me} />
             )}
-            {flags.includes("sharing") && <SharingForm enterprise={enterprise} />}
+            {office.flags.includes("sharing") && <SharingForm enterprise={enterprise} />}
           </div>
         </details>
       )}
       <div className="flex flex-wrap gap-2">
+        {community && office.flags.includes("sharing") && (
+          <label>
+            <input
+              type="checkbox"
+              checked={showMachines}
+              onChange={(e) => setShowMachines(e.target.checked)}
+            />{" "}
+            Show machines
+          </label>
+        )}
         <FilterBox
           placeholder="Find a person"
           label="Find a person"
@@ -460,10 +479,9 @@ export function OfficeViews({ enterprise, office, people }: Props) {
             pool={pool}
             index={index}
             cardsFor={cardsFor}
-            dms={enterprise.feed.chatFlags?.includes("dms") ?? false}
             viewer={me?.login}
             target={enterprise.target}
-            office={office}
+            office={{ ...office, flags }}
             rooms={roomList}
             boards={boardById}
             people={filters.state ? matches : candidates}
@@ -494,6 +512,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
                 style={{ top: (start + i) * 48 }}
               >
                 <strong>{p.displayName ?? p.login}</strong>
+                <Message person={p} target={enterprise.target} />
                 {flags.includes("presence") && p.presence}
                 {flags.includes("status") && <span className="truncate">{p.status?.text}</span>}
                 <div className="flex min-w-0 gap-2 overflow-x-auto">
@@ -544,6 +563,6 @@ export function OfficeViews({ enterprise, office, people }: Props) {
           {!roomList.length && <QuietLine fact="No matching rooms." />}
         </div>
       )}
-    </>
+    </OfficeChat>
   );
 }

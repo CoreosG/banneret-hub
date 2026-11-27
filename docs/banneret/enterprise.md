@@ -208,15 +208,15 @@ Team version 2 supplies the same facts for the Office, Floor and List views. Eac
 Office draws visible rooms on demand. Drag to pan, use + or - to zoom, or explore the map with arrow keys.
 Enter opens a desk, robot or room and Escape returns to the map. Floor and List work with a screen reader.
 Teams start in Floor. Select Office to explore the map. Reduced motion and forced colours favour Floor.
-The view switch remembers your choice on this device.
+The view switch remembers your choice on this device. When chat is enabled, **Message** opens a direct message and **Open channel** opens the board’s configured or matching channel.
 
 Expand **My office** in Office or choose **My presence** in the workspace
 switcher to set Available, Focusing, Away or Off and a short status line. Clearing the line and
-saving removes it. Opening the Hub while Away or Off gives you a private reminder. Your presence
+saving removes it. In a company, opening the Hub while Away or Off gives you a private reminder. Your presence
 stays as you set it until you save a change. Founders can edit or clear the office and room meeting
 links. Links open in your browser.
 
-In **My office**, choose what to share from this machine. **Agents only** is the default. **Shared**
+In **My office**, choose what to share from this machine. **Agents only** is the company default. Communities start with **Hidden**. Choose **Show machines** to see machines shared with the community. **Shared**
 also shows the machine name. **Hidden** hides its agents and name. The preview updates before you
 save. Claims remain visible as `login/private` when the machine name is private. You can share a
 stopped agent's reason separately. Stopped agents stay in the office for one hour. Expand an agent
