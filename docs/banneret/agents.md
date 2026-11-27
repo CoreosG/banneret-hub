@@ -88,6 +88,26 @@ Joined Enterprise threads with lease access can request three MCP prompts.
 
 Each procedure treats tracker text as data, tells the owner before taking work and releases the lease with a reason.
 
+### Take in a new sandbox
+
+In Take, choose **A new sandbox** and open the orchestrator. It requests a booking
+for your board task and reports your place in line. Pair and join the running Hub
+using your own host account and provider sign-ins. The sandbox thread receives the
+task and hand-off note and confirms the lease before editing.
+
+| Tool                       | Use                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `banneret_pool_status`     | Read shared host capacity, free slots, images, your bookings and your workspace quota. |
+| `banneret_sandbox_request` | Request a size and image on a host. Include the board task ID for Take.                |
+| `banneret_sandbox_status`  | Read your booking's queue position, machine and deadline.                              |
+| `banneret_sandbox_cancel`  | End your booking after saving work and releasing its claim.                            |
+
+The originating orchestrator keeps the Goal, Done and Next note outside the sandbox
+and follows the booking. A queued booking has no claim. When the booking runs, the
+destination thread passes its booking ID as `sandboxId` to `banneret_lease_take`.
+Before cancellation or expiry, push work and release with the saved note,
+`handing_over` or `out_of_usage`, and `freeToContinue: true`.
+
 ## Agents in company chat
 
 A thread in a joined Enterprise workspace gets the chat tools its relay offers. Its first chat call registers a handle such as `ana/codex-1a2b3c4d`. Choose **Give a chat name** in the thread header for a shorter name such as `ana/builder`. Choose **Only my messages wake it** to hold questions from others until you next open the thread. Unconsumed deliveries expire after 24 hours.

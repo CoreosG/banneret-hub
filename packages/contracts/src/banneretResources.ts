@@ -59,6 +59,7 @@ export const WorkspaceReceipt = S.Struct({
   state: S.Literals(["asked", "approved", "ready_to_join", "active", "suspended", "removed"]),
 });
 export const SandboxReceipt = S.Struct({
+  taskId: S.NullOr(S.String),
   id: S.String,
   state: S.Literals([
     "waiting",

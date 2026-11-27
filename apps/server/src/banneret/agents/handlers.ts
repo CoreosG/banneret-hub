@@ -4,6 +4,7 @@
 // and the account and triage checks are the ones the Take and Release buttons get.
 import {
   allBoardCards,
+  type SandboxAction,
   type BanneretBoardCard,
   type BanneretFeedState,
   type IssueRef,
@@ -21,9 +22,10 @@ import * as McpToolAccess from "../../mcp/McpToolAccess.ts";
 import * as ThreadIssueService from "../../orchestration-v2/ThreadIssueService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { LeaseService } from "../lease/LeaseService.ts";
+import { follow, hasHandoff } from "./SandboxHandoff.ts";
+import { poolResources, sandboxBooking, BanneretEnrolment, relayHash } from "../relay/Enrolment.ts";
 import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
 import { type AgentRelay, BanneretAgentRelays } from "./AgentRelays.ts";
-import { BanneretEnrolment } from "../relay/Enrolment.ts";
 import { chatClient, invalid } from "../chat/AgentChat.ts";
 import { AgentToolkit } from "./tools.ts";
 
@@ -96,6 +98,7 @@ const problemOf = (read: { readonly problem?: { readonly message: string } | und
   read.problem === undefined ? {} : { problem: read.problem.message };
 
 const make = Effect.gen(function* () {
+  const enrolment = yield* BanneretEnrolment;
   const relays = yield* BanneretAgentRelays;
   const feed = yield* BanneretRelayFeed;
   const leases = yield* LeaseService;
@@ -192,7 +195,6 @@ const make = Effect.gen(function* () {
     (effect) => Effect.ignoreCause(effect),
   );
 
-  const enrolment = yield* BanneretEnrolment;
   const chat = Effect.gen(function* () {
     const { thread, relay } = yield* requireRelay;
     const device = yield* enrolment.relay(relay.relayOrigin);
@@ -212,6 +214,18 @@ const make = Effect.gen(function* () {
     );
     yield* client.ensure;
     return client;
+  });
+  const watchContext = yield* Effect.context<Effect.Services<ReturnType<typeof follow>>>();
+  const poolFailure = (error: { message: string }) =>
+    new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message });
+  const sandbox = Effect.fn("BanneretAgentTools.sandbox")(function* (
+    action: typeof SandboxAction.Type,
+  ) {
+    const { relay } = yield* requireRelay;
+    return yield* sandboxBooking({
+      relayOrigin: relay.relayOrigin,
+      action,
+    }).pipe(Effect.provideService(BanneretEnrolment, enrolment), Effect.mapError(poolFailure));
   });
   return {
     banneret_chat_read: McpToolAccess.readsAsCaller(({ conversation, thread, after, limit }) =>
@@ -279,6 +293,50 @@ const make = Effect.gen(function* () {
     banneret_chat_inbox: McpToolAccess.readsAsCaller(({ after }) =>
       Effect.gen(function* () {
         return yield* (yield* chat).read("deliveries", after ? { cursor: after } : {});
+      }),
+    ),
+    banneret_pool_status: McpToolAccess.readsAsCaller(() =>
+      Effect.gen(function* () {
+        const { relay } = yield* requireRelay;
+        return yield* poolResources({
+          relayOrigin: relay.relayOrigin,
+        }).pipe(Effect.provideService(BanneretEnrolment, enrolment), Effect.mapError(poolFailure));
+      }),
+    ),
+    banneret_sandbox_status: McpToolAccess.readsAsCaller(({ id }) => sandbox({ kind: "read", id })),
+    banneret_sandbox_request: McpToolAccess.actsAsCaller((input) =>
+      Effect.gen(function* () {
+        const { thread, relay } = yield* requireRelay;
+        const receipt = yield* sandbox({ kind: "launch", ...input });
+        if (input.taskId)
+          yield* follow({
+            relayOrigin: relay.relayOrigin,
+            login: relay.me.login,
+            threadId: thread.threadId,
+            taskId: input.taskId,
+            id: receipt.id,
+          }).pipe(
+            Effect.provideContext(watchContext),
+            Effect.tapError(() => sandbox({ kind: "cancel", id: receipt.id })),
+            Effect.mapError(poolFailure),
+          );
+        return receipt;
+      }),
+    ),
+    banneret_sandbox_cancel: McpToolAccess.actsAsCaller(({ id }) =>
+      Effect.gen(function* () {
+        const booking = yield* sandbox({ kind: "read", id });
+        if (booking.taskId && booking.state === "running") {
+          const { relay } = yield* requireRelay;
+          const current = yield* leases.check(yield* leaseRef(relay, booking.taskId));
+          if (current.sandboxAgent === "sandbox-" + relayHash(id))
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message:
+                "Save the hand-off note and release this sandbox claim with handing_over and freeToContinue true before cancelling.",
+            });
+        }
+        return yield* sandbox({ kind: "cancel", id });
       }),
     ),
     banneret_board: McpToolAccess.readsAsCaller(({ board: boardId, column, mine, repo, limit }) =>
@@ -453,31 +511,75 @@ const make = Effect.gen(function* () {
         return yield* leases.check(yield* leaseRef(relay, taskId));
       }),
     ),
-    banneret_lease_take: McpToolAccess.actsAsCaller(({ taskId }) =>
+    banneret_lease_take: McpToolAccess.actsAsCaller(({ taskId, sandboxId }) =>
       Effect.gen(function* () {
         const { thread, relay } = yield* requireRelay;
+        if (
+          !sandboxId &&
+          (yield* hasHandoff(relay.relayOrigin, relay.me.login, taskId).pipe(
+            Effect.provideContext(watchContext),
+            Effect.mapError(poolFailure),
+          ))
+        )
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message:
+              "This task has a sandbox booking. Claim it on the running sandbox Hub with its sandboxId.",
+          });
+        if (sandboxId !== undefined) {
+          const booking = yield* sandbox({ kind: "read", id: sandboxId });
+          const here = yield* enrolment.status(relay.relayOrigin);
+          if (
+            booking.taskId !== taskId ||
+            booking.state !== "running" ||
+            !booking.machineId ||
+            here.machineId !== booking.machineId
+          )
+            return yield* new OrchestratorMcpFailure({
+              code: "capability_denied",
+              message: "Claim from the running sandbox Hub for this task.",
+            });
+        }
         const { relayOrigin, ...ref } = yield* leaseRef(relay, taskId);
-        const result = yield* leases.take({ ...ref, relayOrigin, agent: yield* agentFor(thread) });
+        const result = yield* leases.take({
+          ...ref,
+          relayOrigin,
+          agent: sandboxId ? "sandbox-" + relayHash(sandboxId) : yield* agentFor(thread),
+        });
         if (result.outcome === "taken")
           yield* linkThread(thread.threadId, { ...ref, projectId: relay.projectId });
         return result;
       }),
     ),
     banneret_lease_release: McpToolAccess.actsAsCaller(
-      ({ taskId, reason, reasonText, note, freeToContinue, followUps }) =>
+      ({ taskId, sandboxId, reason, reasonText, note, freeToContinue, followUps }) =>
         Effect.gen(function* () {
           const { relay } = yield* requireRelay;
           const ref = yield* leaseRef(relay, taskId);
           // LeaseService releases only a lease the tracker login holds, and that login must be the relay's
           // person: an agent never releases someone else's lease.
-          return yield* leases.release({
-            ...ref,
-            reason,
-            reasonText,
-            note,
-            freeToContinue: freeToContinue ?? FREE_TO_CONTINUE_BY_DEFAULT.has(reason),
-            followUps,
-          });
+          if (
+            sandboxId !== undefined &&
+            (!note?.trim() ||
+              (reason !== "out_of_usage" && reason !== "handing_over") ||
+              freeToContinue === false)
+          )
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message:
+                "Save the hand-off note, choose handing_over or out_of_usage and leave the task free to continue.",
+            });
+          return yield* leases.release(
+            {
+              ...ref,
+              reason,
+              reasonText,
+              note,
+              freeToContinue: freeToContinue ?? FREE_TO_CONTINUE_BY_DEFAULT.has(reason),
+              followUps,
+            },
+            sandboxId ? "sandbox-" + relayHash(sandboxId) : undefined,
+          );
         }),
     ),
     banneret_lease_withdraw: McpToolAccess.actsAsCaller(({ taskId }) =>

@@ -36,8 +36,15 @@ const BANNERET_CHAT_TOOLS = [
   "banneret_chat_ask",
   "banneret_chat_inbox",
 ] as const;
+export const BANNERET_POOL_TOOLS = [
+  "banneret_pool_status",
+  "banneret_sandbox_request",
+  "banneret_sandbox_status",
+  "banneret_sandbox_cancel",
+] as const;
 export const BANNERET_AGENT_TOOLS = [
   ...BANNERET_CHAT_TOOLS,
+  ...BANNERET_POOL_TOOLS,
   "banneret_board",
   "banneret_needs",
   "banneret_task",
@@ -123,6 +130,7 @@ export interface LeaseLastRelease {
 }
 
 export interface LeaseFoldResult {
+  readonly sandboxAgent?: string;
   /** Null means free. */
   readonly lease: LeaseFoldLease | null;
   /** The latest counted release, while no claim stands. A withdrawn claim does not hide it. */
@@ -288,6 +296,7 @@ const compareLeaseComments = (a: LeaseComment, b: LeaseComment): number =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || compareIds(a.id, b.id);
 
 interface Claim {
+  readonly agent?: string;
   readonly login: string;
   readonly at: string;
 }
@@ -318,7 +327,11 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
     if (Date.parse(comment.updatedAt) > Date.parse(comment.createdAt)) continue;
     if (line.kind === "claim") {
       if (!same(line.login, author) || indexOf(author) >= 0) continue;
-      standing.push({ login: author, at: comment.createdAt });
+      standing.push({
+        login: author,
+        at: comment.createdAt,
+        ...(line.agent && { agent: line.agent }),
+      });
       lastEventAt = comment.createdAt;
       continue;
     }
@@ -389,6 +402,7 @@ export const foldLease = (input: LeaseFoldInput): LeaseFoldResult => {
   }
 
   return {
+    ...(first?.agent?.startsWith("sandbox-") && { sandboxAgent: first.agent }),
     lease,
     lastRelease:
       first !== undefined || lastRelease === null

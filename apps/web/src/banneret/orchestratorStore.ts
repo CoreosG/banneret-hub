@@ -24,6 +24,24 @@ import { relayKey, type RelayTarget } from "./enrolmentStore";
 import { resolveWorkspaces, workspaceIdForProject } from "./workspaces.logic";
 import { useWorkspacesStore } from "./workspacesStore";
 
+const sandboxHandoffCommand = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "banneret:sandbox-handoff",
+  tag: TASK_LEASE_WS_METHODS.sandboxHandoff,
+});
+export async function sandboxHandoff(target: RelayTarget, taskId: string, requestId: string) {
+  const result = await runAtomCommand(appAtomRegistry, sandboxHandoffCommand, {
+    environmentId: target.environmentId,
+    input: { relayOrigin: target.relayOrigin, taskId, requestId },
+  });
+  if (result._tag === "Success") return result.value;
+  toastManager.add({
+    type: "error",
+    title: "Could not send sandbox request",
+    description: String(Cause.squash(result.cause)),
+  });
+  return null;
+}
+
 const command = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:orchestrator",
   tag: TASK_LEASE_WS_METHODS.orchestrator,

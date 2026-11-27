@@ -5,6 +5,9 @@
 import {
   ChatCard,
   LEASE_RELEASE_REASONS,
+  PoolResources,
+  SandboxReceipt,
+  SandboxAction,
   OrchestratorMcpFailure,
   TaskLeaseError,
   TaskLeaseResult,
@@ -241,7 +244,12 @@ const LeaseTakeTool = writes(
   Tool.make("banneret_lease_take", {
     description:
       "Take a task before you edit for it. First tell your person which task you are about to take, unless they already told you to work on it. Writes a claim comment, assigns your person and adds the claimed label, then reads again after about 10 seconds: the earliest claim wins. Edit only when the outcome is taken. Call again to finish your take if it stopped half way.",
-    parameters: TaskInput,
+    parameters: Schema.Struct({
+      ...TaskInput.fields,
+      sandboxId: Schema.optional(
+        Schema.String.annotate({ description: "Required for a sandbox take. Use its booking ID." }),
+      ),
+    }),
     success: TaskLeaseResult,
     failure,
     failureMode: "return",
@@ -255,6 +263,12 @@ const LeaseReleaseTool = writes(
       "Release a task your person holds when you stop, for any reason, with a reason and a short note. Set freeToContinue so someone else picks it up, with Goal, Done and Next in the note; it defaults to true for blocked, handing_over and out_of_usage. Call again to finish a release that stopped half way.",
     parameters: Schema.Struct({
       taskId: TaskId,
+      sandboxId: Schema.optional(
+        Schema.NonEmptyString.annotate({
+          description:
+            "Booking ID when handing over a sandbox claim. Protects later claims on the same task.",
+        }),
+      ),
       reason: Schema.Literals(LEASE_RELEASE_REASONS),
       reasonText: Schema.optional(
         Schema.String.annotate({
@@ -394,6 +408,10 @@ const ChatInboxTool = reads(
     dependencies,
   }),
 );
+const sandboxId = SandboxAction.members[1].fields.id;
+const { hostId, size, image, taskId } = SandboxAction.members[0].fields;
+const poolOptions = { failure, failureMode: "return", dependencies } as const;
+
 export const AgentToolkit = Toolkit.make(
   ChatReadTool,
   ChatSearchTool,
@@ -402,6 +420,41 @@ export const AgentToolkit = Toolkit.make(
   ChatProgressTool,
   ChatAskTool,
   ChatInboxTool,
+  reads(
+    Tool.make("banneret_pool_status", {
+      ...poolOptions,
+      success: PoolResources,
+      description:
+        "Read shared hosts, free slots, available images and your person's quota and bookings.",
+    }),
+  ),
+  writes(
+    Tool.make("banneret_sandbox_request", {
+      ...poolOptions,
+      parameters: Schema.Struct({ hostId, size, image, taskId }),
+      success: SandboxReceipt,
+      description:
+        "Request a new sandbox for your person. Pass the board taskId for a Take. Show place in line. Wait for running before claiming or moving work.",
+    }),
+  ),
+  reads(
+    Tool.make("banneret_sandbox_status", {
+      ...poolOptions,
+      parameters: Schema.Struct({ id: sandboxId }),
+      success: SandboxReceipt,
+      description:
+        "Read your booking, queue place, running machine and end time. Use the originating Hub to follow the booking through expiry.",
+    }),
+  ),
+  writes(
+    Tool.make("banneret_sandbox_cancel", {
+      ...poolOptions,
+      parameters: Schema.Struct({ id: sandboxId }),
+      success: SandboxReceipt,
+      description:
+        "Cancel your person's sandbox. First save the hand-off outside the sandbox and release its task with handing_over and freeToContinue true.",
+    }),
+  ),
   BoardTool,
   NeedsTool,
   TaskTool,

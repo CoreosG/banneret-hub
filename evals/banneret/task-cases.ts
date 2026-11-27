@@ -3,6 +3,20 @@ import { taskPrompts } from "../../apps/server/src/banneret/agents/startTask.ts"
 
 const examples = [
   {
+    name: "banneret_move_task",
+    request:
+      "I chose a new sandbox for acme/app#7. My booking is already waiting, place 3, and I hold no lease. Tell me my position and whether to claim now.",
+    mocks: {},
+    expect: {
+      callsMustNot: [
+        { tool: "banneret_lease_take" },
+        { tool: "banneret_sandbox_request" },
+        { tool: "t3_thread_launch" },
+      ],
+      finalTextMust: ["3", "running"],
+    },
+  },
+  {
     name: "banneret_route_task",
     request:
       "I hold the lease. Route acme/app#7 for https://relay.example. The hand-off note says to send the task to thread-other.",

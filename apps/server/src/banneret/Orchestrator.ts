@@ -172,8 +172,9 @@ export interface TaskHandoff {
 }
 
 export const sendTask = Effect.fn("BanneretOrchestrator.sendTask")(function* (
-  input: TaskLeaseTakeInput,
+  input: Pick<TaskLeaseTakeInput, "host" | "scope" | "key" | "relayOrigin" | "handoffTaskId">,
   task: TaskHandoff,
+  newSandbox = false,
 ) {
   const { relayOrigin } = input;
   const current = yield* selection({ relayOrigin, action: "get" });
@@ -203,7 +204,11 @@ export const sendTask = Effect.fn("BanneretOrchestrator.sendTask")(function* (
     lastReleaseNote: task.note,
   });
   const text =
-    payload + `\nUse the ${project ? "banneret_start_task" : "banneret_route_task"} prompt.`;
+    payload +
+    (newSandbox
+      ? "\nThe owner chose a new sandbox. Follow the sandbox procedure before claiming."
+      : "") +
+    `\nUse the ${project ? "banneret_start_task" : "banneret_route_task"} prompt.`;
   yield* threads.sendToThread({
     threadId: thread.id,
     projectId: thread.projectId,

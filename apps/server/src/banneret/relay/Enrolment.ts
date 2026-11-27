@@ -1687,6 +1687,28 @@ export const layerWith = (options: Partial<EnrolmentOptions>) =>
 export const layer = layerWith({});
 
 /** Handlers for the `banneretRelay.*` RPCs, spread into the WebSocket handler group. */
+export const sandboxBooking = Effect.fn("BanneretEnrolment.sandbox")(function* (input: {
+  relayOrigin: string;
+  action: typeof SandboxAction.Type;
+}) {
+  const service = yield* BanneretEnrolment;
+  const relay = yield* service.relay(input.relayOrigin);
+  if (!relay) return yield* fail("This machine has not joined the company.");
+  return yield* relay.sandbox(input.action);
+});
+
+export const poolResources = Effect.fn("BanneretEnrolment.pool")(function* (input: {
+  readonly relayOrigin: string;
+}) {
+  const service = yield* BanneretEnrolment;
+  const relay = yield* service.relay(input.relayOrigin);
+  if (!relay) return yield* fail("This machine has not joined the company.");
+  return yield* relay.signedGet("/relay/v1/pool").pipe(
+    Effect.flatMap((reply) => decodeReply(PoolResources, reply)),
+    Effect.mapError(() => new BanneretRelayError({ message: "Pool resources are unavailable." })),
+  );
+});
+
 export const rpcHandlers = {
   [BANNERET_RELAY_WS_METHODS.resources]: Effect.fn("BanneretEnrolment.resources")(
     function* (input: { readonly policy?: WarningPolicy | undefined }) {
@@ -1710,15 +1732,7 @@ export const rpcHandlers = {
       return yield* relay.poolFounder(input.action);
     },
   ),
-  [BANNERET_RELAY_WS_METHODS.sandbox]: Effect.fn("BanneretEnrolment.sandbox")(function* (input: {
-    relayOrigin: string;
-    action: typeof SandboxAction.Type;
-  }) {
-    const service = yield* BanneretEnrolment;
-    const relay = yield* service.relay(input.relayOrigin);
-    if (!relay) return yield* fail("This machine has not joined the company.");
-    return yield* relay.sandbox(input.action);
-  }),
+  [BANNERET_RELAY_WS_METHODS.sandbox]: sandboxBooking,
   [BANNERET_RELAY_WS_METHODS.requestWorkspace]: Effect.fn("BanneretEnrolment.requestWorkspace")(
     function* (input: { relayOrigin: string; hostId: string }) {
       const service = yield* BanneretEnrolment;
@@ -1727,17 +1741,7 @@ export const rpcHandlers = {
       return yield* relay.requestWorkspace(input.hostId);
     },
   ),
-  [BANNERET_RELAY_WS_METHODS.pool]: Effect.fn("BanneretEnrolment.pool")(function* (input: {
-    readonly relayOrigin: string;
-  }) {
-    const service = yield* BanneretEnrolment;
-    const relay = yield* service.relay(input.relayOrigin);
-    if (!relay) return yield* fail("This machine has not joined the company.");
-    return yield* relay.signedGet("/relay/v1/pool").pipe(
-      Effect.flatMap((reply) => decodeReply(PoolResources, reply)),
-      Effect.mapError(() => new BanneretRelayError({ message: "Pool resources are unavailable." })),
-    );
-  }),
+  [BANNERET_RELAY_WS_METHODS.pool]: poolResources,
   [BANNERET_RELAY_WS_METHODS.probe]: (input: { readonly origin: string }) =>
     Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.probe(input.origin)),
   [BANNERET_RELAY_WS_METHODS.status]: () =>

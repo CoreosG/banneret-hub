@@ -2,6 +2,7 @@
 // A per-thread visibility hides them from every thread its company's relay does not offer them to, on lists and
 // on calls alike, so a Solo thread neither sees nor reaches them. The handlers still check the thread themselves.
 // The only fork file that touches Effect's McpServer directly: tools still go through McpToolAccess.
+import * as SandboxHandoff from "./SandboxHandoff.ts";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -124,5 +125,6 @@ export const layer = (
   Layer.mergeAll(
     register(AgentToolkit, AgentHandlers.layer),
     joinResource,
+    SandboxHandoff.lifecycle,
     relistOnOfferChange(options.relistEvery ?? "5 seconds"),
   ).pipe(Layer.provide(offeredOnly.layer), Layer.provide(AgentRelays.layer));

@@ -292,6 +292,7 @@ export function createPool(
         fail("pool_limit_reached", "One waiting request per person.");
       const id = NodeCrypto.randomUUID();
       const view: PoolSandbox = {
+        taskId: request.taskId ?? null,
         id,
         state: "waiting",
         place: waiting(request.hostId).length + 1,
