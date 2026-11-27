@@ -7,7 +7,7 @@
     { "id": "today", "kind": "today", "version": 1, "flags": [] },
     { "id": "needs", "kind": "needs", "version": 1, "flags": ["mentions"] },
     { "id": "machines", "kind": "machines", "version": 1, "flags": ["revoke"] },
-    { "id": "board", "kind": "board", "version": 1, "flags": ["leases", "checked"] },
+    { "id": "board", "kind": "board", "version": 2, "flags": ["leases", "checked", "boards"] },
     { "id": "map", "kind": "map", "version": 1, "flags": ["rests_on"] },
     { "id": "feed", "kind": "feed", "version": 1, "flags": ["graveyard"] },
     { "id": "task", "kind": "task", "version": 1, "flags": [] }

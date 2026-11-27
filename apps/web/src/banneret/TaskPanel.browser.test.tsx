@@ -32,6 +32,7 @@ import { TaskPanel } from "./TaskPanel";
 import { openTaskDialog, taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
 import { useOpenTask } from "./useOpenTask";
+import { singleBoard } from "./boards.testkit";
 
 vi.mock("../state/entities", { spy: true });
 // Upstream's issue panel needs a live tracker; the stub shows which issue the tab embedded.
@@ -79,6 +80,7 @@ const card = (key: string, title: string, extra: Partial<BanneretBoardCard> = {}
       openedAt: "2026-11-20T09:00:00.000Z",
       closedAt: null,
     },
+    kind: "issue",
     column: "taken",
     status: "needs_you",
     statusWhy: "Required checks are failing.",
@@ -115,7 +117,7 @@ const state = (sections: string[], cards: BanneretBoardCard[] | null): BanneretF
     cards === null
       ? null
       : {
-          value: { state: "ok", notMeasured: [], columns: [], cards },
+          value: singleBoard({ state: "ok", notMeasured: [], columns: [], cards }),
           fetchedAt: "2026-11-26T10:00:00.000Z",
           atWork: [],
           leases: true,

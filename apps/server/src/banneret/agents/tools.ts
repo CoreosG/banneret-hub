@@ -91,8 +91,11 @@ const writes = <T extends Tool.Any>(tool: T) =>
 const BoardTool = reads(
   Tool.make("banneret_board", {
     description:
-      "Your company's task board, from the relay's last snapshot (no tracker calls). Filter by column (free, taken, validating, stuck, shipped), mine (tasks your person holds or is assigned) or repo (owner/name). Lease rules: read banneret://join.",
+      "Your company's task boards, from the relay's last snapshot (no tracker calls). A company can have several boards; `boards` lists them. Pick one with board (its id), or leave it out for every board. Filter by column (free, taken, validating, stuck, shipped), mine (tasks your person holds or is assigned) or repo (owner/name). Lease rules: read banneret://join.",
     parameters: Schema.Struct({
+      board: Schema.optional(
+        Schema.String.annotate({ description: "A board id from `boards`. Default: every board." }),
+      ),
       column: Schema.optional(
         Schema.String.annotate({ description: "A column id, such as free." }),
       ),
@@ -108,8 +111,23 @@ const BoardTool = reads(
       ...Company,
       /** The relay parses the lease protocol, so take and release work here. */
       leases: Schema.Boolean,
+      /** Every board the relay publishes, with its cards per column. */
+      boards: Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          title: Schema.String,
+          mode: Schema.String,
+          counts: Schema.Record(Schema.String, Schema.Number),
+        }),
+      ),
       total: Schema.Number,
-      cards: Schema.Array(Card),
+      cards: Schema.Array(
+        Schema.Struct({
+          /** The id of the board the card is on (its first board when two boards show it). */
+          board: Schema.String,
+          ...Card.fields,
+        }),
+      ),
     }),
     failure,
     failureMode: "return",

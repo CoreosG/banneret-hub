@@ -8,6 +8,8 @@ import * as NodeCrypto from "node:crypto";
 import type {
   BanneretBoard,
   BanneretBoardCard,
+  BanneretBoardEntry,
+  BanneretBoards,
   BanneretBoardLease,
   BanneretBoardPr,
   BanneretBoardTask,
@@ -22,6 +24,7 @@ import type {
   BanneretTask,
 } from "@t3tools/contracts";
 import {
+  allBoardCards,
   capCodePoints,
   capUtf8,
   LEASE_NOTE_MAX_BYTES,
@@ -61,6 +64,11 @@ export const unquoteEtag = (etag: string | undefined): string | undefined =>
 
 const badFile = (message: string) =>
   new RelayCallError({ status: 200, code: "bad_response", message, retryable: true });
+
+/** The head keys to read: a fixed list, or one chosen from the keys the current head names. */
+export type SnapshotWanted =
+  | ReadonlyArray<string>
+  | ((keys: ReadonlyArray<string>) => ReadonlyArray<string>);
 
 export interface SnapshotRead {
   /** The head's ETag, unquoted. */
@@ -106,9 +114,13 @@ export function makeSnapshotReader(get: SnapshotGet) {
     return reply.body;
   });
 
-  const readWanted = Effect.fn("BanneretSnapshot.files")(function* (wanted: ReadonlyArray<string>) {
+  const keysOf = (wanted: SnapshotWanted) =>
+    typeof wanted === "function" ? wanted(Object.keys(refs)) : wanted;
+
+  const readWanted = Effect.fn("BanneretSnapshot.files")(function* (wanted: SnapshotWanted) {
     const files: Record<string, unknown> = {};
-    for (const key of wanted) {
+    // Chosen from the head just read, so a retry after a newer head picks up its keys.
+    for (const key of keysOf(wanted)) {
       const hex = refs[key];
       if (hex !== undefined) files[key] = yield* readFile(hex);
     }
@@ -116,7 +128,7 @@ export function makeSnapshotReader(get: SnapshotGet) {
   });
 
   /** Reads the head and the wanted files it names; fails with the relay's error. */
-  const read = Effect.fn("BanneretSnapshot.read")(function* (wanted: ReadonlyArray<string>) {
+  const read = Effect.fn("BanneretSnapshot.read")(function* (wanted: SnapshotWanted) {
     yield* readHead(true);
     const files = yield* readWanted(wanted).pipe(
       // A 404 file has aged out of retention: the head moved on. Read it again, once.
@@ -128,7 +140,7 @@ export function makeSnapshotReader(get: SnapshotGet) {
     const named = new Set(Object.values(refs));
     cache = new Map([...cache].filter(([hex]) => named.has(hex)));
     const wantedRefs: Record<string, string> = {};
-    for (const key of wanted) {
+    for (const key of keysOf(wanted)) {
       const hex = refs[key];
       if (hex !== undefined) wantedRefs[key] = hex;
     }
@@ -252,11 +264,13 @@ const linkedPr = (value: unknown): BanneretBoardPr | undefined => {
 const card = (value: unknown): BanneretBoardCard | undefined => {
   const source = fields(value);
   const task = boardTask(source?.task);
+  const kind = text(source?.kind, 32);
   const column = text(source?.column, 32);
   const status = text(source?.status, 32);
   const statusWhy = text(source?.statusWhy, 240);
   if (
     task === undefined ||
+    kind === undefined ||
     column === undefined ||
     status === undefined ||
     statusWhy === undefined
@@ -267,6 +281,7 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
   const released = lastRelease(source?.lastRelease);
   return {
     task,
+    kind,
     column,
     status,
     statusWhy,
@@ -278,7 +293,7 @@ const card = (value: unknown): BanneretBoardCard | undefined => {
   };
 };
 
-/** The `board` file (SnapshotBoard); undefined when it is not one. */
+/** A `board.<id>` file (SnapshotBoard); undefined when it is not one. */
 export function reshapeBoard(body: unknown): BanneretBoard | undefined {
   const source = fields(body);
   if (source === undefined || !Array.isArray(source.cards) || !Array.isArray(source.columns)) {
@@ -288,7 +303,7 @@ export function reshapeBoard(body: unknown): BanneretBoard | undefined {
     state: text(source.state, 32) ?? "not_measured",
     notMeasured: defined(list(source.notMeasured, 32).map(notMeasured)),
     columns: defined(
-      list(source.columns, 16).map((value) => {
+      list(source.columns, 51).map((value) => {
         const column = fields(value);
         const id = text(column?.id, 32);
         const title = text(column?.title, 40);
@@ -297,6 +312,49 @@ export function reshapeBoard(body: unknown): BanneretBoard | undefined {
     ),
     cards: defined(list(source.cards, 1000).map(card)),
   };
+}
+
+/** The head key of one board's file. */
+const boardFileKey = (id: string) => `board.${id}`;
+
+/** The head keys the boards need: the index and every `board.<id>` the head names. */
+export const boardHeadKeys = (keys: ReadonlyArray<string>): ReadonlyArray<string> =>
+  keys.filter((key) => key === "boards" || (key.startsWith("board.") && ID.test(key.slice(6))));
+
+/**
+ * The `boards` index (SnapshotBoards) with each board's file from `files`; undefined when the index
+ * is not one. A board whose file is missing or unreadable keeps its entry with `board` null; a
+ * repeated or malformed id is dropped.
+ */
+export function reshapeBoards(
+  index: unknown,
+  files: Readonly<Record<string, unknown>>,
+): BanneretBoards | undefined {
+  const source = fields(index);
+  if (source === undefined || !Array.isArray(source.boards)) return undefined;
+  const seen = new Set<string>();
+  const boards: Array<BanneretBoardEntry> = [];
+  for (const value of list(source.boards, 50)) {
+    const entry = fields(value);
+    const id = text(entry?.id, 64);
+    const title = text(entry?.title, 60);
+    const mode = text(entry?.mode, 32);
+    const sourceKind = text(fields(entry?.source)?.kind, 32);
+    if (id === undefined || !ID.test(id) || seen.has(id)) continue;
+    if (title === undefined || mode === undefined || sourceKind === undefined) continue;
+    seen.add(id);
+    const url = text(fields(entry?.source)?.url, 2048);
+    const key = boardFileKey(id);
+    boards.push({
+      id,
+      title,
+      mode,
+      source: { kind: sourceKind, ...(url === undefined ? {} : { url }) },
+      counts: statusCounts(entry?.counts, 51),
+      board: key in files ? (reshapeBoard(files[key]) ?? null) : null,
+    });
+  }
+  return { boards };
 }
 
 const mapItem = (value: unknown): BanneretMapItem | undefined => {
@@ -509,8 +567,8 @@ export interface IssueLinkKey {
   readonly key: string;
 }
 
-export const boardTaskIndex = (board: BanneretBoard): ReadonlyArray<BoardTaskEntry> =>
-  board.cards.map((entry) => ({
+export const boardTaskIndex = (boards: BanneretBoards): ReadonlyArray<BoardTaskEntry> =>
+  allBoardCards(boards).map((entry) => ({
     id: entry.task.id,
     tracker: entry.task.ref.tracker,
     host: entry.task.ref.host,

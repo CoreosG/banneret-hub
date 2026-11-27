@@ -1,6 +1,6 @@
 // Banneret Hub: the company rows above the thread list (Today, Needs you with its count, the Board,
 // the Map and the Feed), shown only for an Enterprise workspace this machine has joined, and only for sections the
-// relay offers.
+// relay offers. They also hold the `/` search over that company, so it works on every page.
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { ActivityIcon, InboxIcon, MapIcon, SquareKanbanIcon, SunIcon } from "lucide-react";
 
@@ -11,6 +11,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "../components/ui/sidebar";
+import { CompanySearch } from "./CompanySearch";
 import { needsCountLabel, offersSection } from "./relayFeed.logic";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
@@ -26,7 +27,8 @@ export function EnterpriseSidebarRows() {
   const showBoard = offersSection(feed, "board");
   const showMap = offersSection(feed, "map");
   const showFeed = offersSection(feed, "feed");
-  if (!showToday && !showNeeds && !showBoard && !showMap && !showFeed) return null;
+  const search = <CompanySearch enterprise={enterprise} />;
+  if (!showToday && !showNeeds && !showBoard && !showMap && !showFeed) return search;
   const go = (to: "/today" | "/needs" | "/board" | "/map" | "/feed") => {
     if (isMobile) setOpenMobile(false);
     void navigate({ to });
@@ -90,6 +92,7 @@ export function EnterpriseSidebarRows() {
           </SidebarMenuItem>
         ) : null}
       </SidebarMenu>
+      {search}
     </SidebarGroup>
   );
 }

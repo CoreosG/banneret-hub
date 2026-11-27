@@ -69,14 +69,20 @@ A stuck item can have several reasons. They are shown most important first.
 
 ### Board
 
-The Board has five columns: Free, Taken, Validating, Stuck and Shipped. Each card shows a status mark, a short
+A company can have **several boards**, for example one per team. The relay's settings list them; the Hub does not
+find them on its own. When there is more than one, a selector in the Board header picks one and shows each board's
+size. The Hub remembers the last board per workspace in this browser. With one board there is no selector. A task
+is the same task on every board that shows it, with the same claim.
+
+A board has five columns: Free, Taken, Validating, Stuck and Shipped. Each card shows a status mark, a short
 plain reason for that status, the pull request and its checks, and who holds the claim. An empty column shrinks to
 a narrow strip with its name and 0, so the others get more room.
 
 A task is **Taken** when someone holds a claim on it or is assigned to it, and **Free** when nobody is. A task
 assigned without a claim says "assigned · not claimed" with the assignee's login. Anyone may still take it.
 
-**Mine** shows the tasks you hold or are assigned, with how many there are and how many of your claims expired.
+**Mine** shows the tasks you hold or are assigned on the board you are looking at, with how many there are and how
+many of your claims expired. It stays on when you switch boards.
 When one of your claims has expired or stopped half way, a strip says so. **Review your expired claims** shows
 only those, each with its Release button (or Finish and Withdraw for one that stopped half way).
 
@@ -84,6 +90,10 @@ A claim is a **lease**. It stays active while its holder works: pushes, comments
 sessions all count. A lease turns **stale after 6 hours** without a signal, and the card moves to Stuck. It
 **expires after 24 hours**. An expired lease stays in Stuck. It is not shown as Free until the claim is released
 on the work tracker. A coworker's agent on the same task never refreshes someone else's lease.
+
+**Filters** narrow the board you are looking at: a text box (title, repository and number, people, status), and
+Repo, Person (who holds the claim or is assigned) and Status. **Clear filters** removes them all. The board and its
+filters are part of the page address, so a link, a reload or a tab keeps them.
 
 The checked mark appears only when the board says it applies a sign-off rule. A person with the sign-off role
 adds the check, and it counts only after the pull request merged, its checks passed and someone else approved
@@ -136,11 +146,20 @@ The line on the left marks progress. The current stage is the first one that is 
 that is already built keeps its check, but the line does not fill through it: it was built ahead of an earlier
 stage.
 
+The Map has a text box too. It hides the items that do not match, and the stages left empty.
+
 ### Feed and Graveyard
 
 The **Feed** is the company's activity, newest first: claims taken and released, expired leases, pull requests
 opened and merged, and tasks built, checked or sent back. The **Graveyard** lists tasks ruled dead, each with
-the reason. A task never sits there without one.
+the reason. A task never sits there without one. A text box narrows the entries already loaded.
+
+### Search
+
+Press **/** anywhere outside a text box to search the company: the cards of every board, the Map's items and the
+Feed's entries, grouped by kind. Use the arrow keys and **Enter** to open a result. A card or an item with a task
+opens in the Task tab. A Map item without a task opens the Map filtered to it, and a Feed entry without a task opens
+its link. Search looks only at what the Hub already holds, so it asks the relay for nothing.
 
 ### The Task tab
 
@@ -155,7 +174,7 @@ that tracker, the tab shows one row that links to the issue instead.
 ### The open tabs bar
 
 A bar above the main view keeps your open threads and workspace pages (Today, Needs you, Board, Map, Feed) as
-tabs.
+tabs. A page tab keeps the page's board and filters.
 
 - Click a tab to open it. Double-click keeps a preview tab. Pin keeps a tab for good.
 - Middle-click closes. Drag reorders.

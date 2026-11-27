@@ -22,7 +22,7 @@ const thread = (id: string, environmentId = "env-a"): TabTarget => ({
   draft: false,
 });
 
-const page = (href: "/map" | "/board", workspaceId: string | null): TabTarget => ({
+const page = (href: string, workspaceId: string | null): TabTarget => ({
   kind: "page",
   href,
   workspaceId,
@@ -43,6 +43,16 @@ function visit(state: TabsState, targets: ReadonlyArray<TabTarget>, newId = ids(
 }
 
 describe("observeTarget", () => {
+  it("keeps one tab per page while its filters change, and remembers the latest filters", () => {
+    const state = visit(EMPTY_TABS, [
+      page("/board", "w1"),
+      page("/board?board=ops&q=deploy", "w1"),
+    ]);
+    expect(state.tabs).toHaveLength(1);
+    expect(state.tabs[0]!.href).toBe("/board?board=ops&q=deploy");
+    expect(tabKey(state.tabs[0]!)).toBe("page:w1:/board");
+  });
+
   it("reuses one preview tab while browsing", () => {
     const state = visit(EMPTY_TABS, [thread("a"), thread("b"), page("/map", "w1")]);
     expect(state.tabs).toHaveLength(1);

@@ -1,13 +1,22 @@
-// Banneret Hub: the board for an Enterprise workspace, drawn from the relay's snapshot `board` file.
-// The relay computes columns, statuses and leases; this page only draws them. A card opens its Task
-// tab; its menu takes and releases through the server's LeaseService when the board flags `leases`.
-import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
+// Banneret Hub: the boards of an Enterprise workspace, drawn from the relay's snapshot `boards` index
+// and one `board.<id>` file per board. The relay computes columns, statuses and leases; this page only
+// draws them. A switcher picks the board, filters narrow it, and both live in the URL. A card opens its
+// Task tab; its menu takes and releases through the server's LeaseService when the boards flag `leases`.
+import type { BanneretBoardCard, BanneretBoardEntry, BanneretBoardTask } from "@t3tools/contracts";
+import { SquareKanbanIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
 import { cn } from "../lib/utils";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { Button } from "../components/ui/button";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
@@ -28,6 +37,17 @@ import {
   type BoardColumnView,
 } from "./board.logic";
 import { BoardCardMenu } from "./BoardCardMenu";
+import { rememberBoard, rememberedBoard } from "./boardChoice";
+import {
+  boardSearchFromUrl,
+  boardSizeLabel,
+  filterCards,
+  filterOptions,
+  hasFilters,
+  pickBoard,
+  type BoardSearch,
+  type FilterOption,
+} from "./boards.logic";
 import type { RelayTarget } from "./enrolmentStore";
 import { FeedStatus } from "./FeedParts";
 import { freeToContinueFirst, freeToContinueLine, isFreeToContinue } from "./lease.logic";
@@ -50,9 +70,11 @@ import {
   toneProps,
   type Tone,
 } from "./ui/tokens";
+import { FilterBox } from "./ui/FilterBox";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { useOpenTask } from "./useOpenTask";
 import { useTaskIssueRef } from "./useTaskIssueRef";
+import { useUrlSearch } from "./useUrlSearch";
 
 const CHECK_TONES: Readonly<Record<string, Tone>> = {
   passing: "ok",
@@ -337,11 +359,144 @@ const tasksLabel = (count: number) => (count === 1 ? "1 task." : `${count} tasks
 /** Mine: held by or assigned to the person. Review: only their expired or incomplete claims. */
 type MineView = "mine" | "review";
 
+/** The "any" choice of a filter; no repository, login or status token is ever `*`. */
+const ANY = "*";
+
+/** One filter as a compact select: "Repo: any" or the chosen value. */
+function FilterSelect(props: {
+  readonly label: string;
+  readonly value: string | undefined;
+  readonly options: ReadonlyArray<FilterOption>;
+  readonly onChange: (value: string | undefined) => void;
+}) {
+  const items = [
+    { value: ANY, label: `${props.label}: any` },
+    ...props.options.map((option) => ({
+      value: option.value,
+      label: `${props.label}: ${option.label}`,
+    })),
+  ];
+  return (
+    <Select
+      value={props.value ?? ANY}
+      onValueChange={(value) => props.onChange(value === null || value === ANY ? undefined : value)}
+      items={items}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label={`Filter by ${props.label.toLowerCase()}`}
+        className="w-auto min-w-28"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectPopup>
+        {items.map((item) => (
+          <SelectItem key={item.value} value={item.value}>
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
+  );
+}
+
+/** The board switcher: each board with its size. Hidden while the relay has one board. */
+function BoardSwitcher(props: {
+  readonly boards: ReadonlyArray<BanneretBoardEntry>;
+  readonly active: BanneretBoardEntry;
+  readonly onPick: (id: string) => void;
+}) {
+  if (props.boards.length < 2) return null;
+  return (
+    <Select
+      value={props.active.id}
+      onValueChange={(value) => {
+        if (value !== null) props.onPick(value);
+      }}
+      items={props.boards.map((entry) => ({ value: entry.id, label: entry.title }))}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Board"
+        data-testid="board-switcher"
+        className="w-auto min-w-32"
+      >
+        <SquareKanbanIcon aria-hidden className="size-3.5 text-muted-foreground" />
+        <SelectValue />
+      </SelectTrigger>
+      <SelectPopup>
+        {props.boards.map((entry) => (
+          <SelectItem key={entry.id} value={entry.id}>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate">{entry.title}</span>
+              <span className="text-muted-foreground text-xs tabular-nums">
+                {boardSizeLabel(entry)}
+              </span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
+  );
+}
+
+function FilterBar(props: {
+  readonly cards: ReadonlyArray<BanneretBoardCard>;
+  readonly search: BoardSearch;
+  readonly onChange: (
+    patch: Partial<Record<keyof BoardSearch, string | undefined>>,
+    replace?: boolean,
+  ) => void;
+}) {
+  const options = filterOptions(props.cards, props.search);
+  return (
+    <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-2">
+      <FilterBox
+        label="Filter tasks"
+        placeholder="Filter tasks"
+        value={props.search.q ?? ""}
+        onChange={(q) => props.onChange({ q }, true)}
+      />
+      <FilterSelect
+        label="Repo"
+        value={props.search.repo}
+        options={options.repos}
+        onChange={(repo) => props.onChange({ repo })}
+      />
+      <FilterSelect
+        label="Person"
+        value={props.search.person}
+        options={options.people}
+        onChange={(person) => props.onChange({ person })}
+      />
+      <FilterSelect
+        label="Status"
+        value={props.search.status}
+        options={options.statuses}
+        onChange={(status) => props.onChange({ status })}
+      />
+      {hasFilters(props.search) ? (
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() =>
+            props.onChange({ q: undefined, repo: undefined, person: undefined, status: undefined })
+          }
+        >
+          Clear filters
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 export function BoardPage() {
   const enterprise = useEnterpriseFeed();
   const enrolment = enterprise?.enrolment ?? null;
   const openTask = useOpenTask(enterprise?.target ?? null);
-  // The workspace Mine was chosen in, so switching workspaces falls back to Everyone.
+  const [rawSearch, setSearch] = useUrlSearch();
+  // The workspace Mine was chosen in, so switching workspaces falls back to Everyone. Switching
+  // boards keeps it: Mine then shows the person's cards on the new board.
   const [mineIn, setMineIn] = useState<{
     readonly workspaceId: string;
     readonly view: MineView;
@@ -366,8 +521,11 @@ export function BoardPage() {
       </BoardFrame>
     );
   }
+  const search = boardSearchFromUrl(rawSearch);
   const read = feed.board;
-  const board = read?.value ?? null;
+  const entries = read?.value?.boards ?? [];
+  const active = pickBoard(entries, search.board, rememberedBoard(workspace.id));
+  const board = active?.board ?? null;
   const leases = read?.leases === true;
   const me = enrolment?.me?.login.trim() ?? "";
   const canFilter = leases && me !== "";
@@ -377,7 +535,7 @@ export function BoardPage() {
   const review = view === "review";
   const toReview =
     board === null || !canFilter ? [] : board.cards.filter((c) => needsRelease(c, me));
-  const cards =
+  const viewCards =
     board === null
       ? []
       : review
@@ -385,6 +543,8 @@ export function BoardPage() {
         : mine
           ? board.cards.filter((card) => isMine(card, me))
           : board.cards;
+  const cards = filterCards(viewCards, search);
+  const filtered = hasFilters(search);
   const columns = board === null ? [] : boardColumns(board, cards);
   const atWork = new Set(read?.atWork ?? []);
   const counts = statusCounts(cards);
@@ -392,16 +552,26 @@ export function BoardPage() {
     (status) => read?.checked === true || status !== "checked",
   );
   const summary =
-    board === null || board.cards.length === 0 ? undefined : mine ? (
+    board === null || board.cards.length === 0 ? undefined : mine && !filtered ? (
       <SummaryFigure>{mineSummary(board.cards, me)}</SummaryFigure>
     ) : (
       <>
         <SummaryFigure>{tasksLabel(cards.length)}</SummaryFigure> {columnCountsLine(columns)}
       </>
     );
+  const pickBoardId = (id: string) => {
+    rememberBoard(workspace.id, id);
+    setSearch({ board: id });
+  };
   return (
     <BoardFrame company={workspace.name}>
-      <PageHeader title="Board" summary={summary}>
+      <PageHeader
+        title={active === null || entries.length < 2 ? "Board" : active.title}
+        summary={summary}
+      >
+        {active === null ? null : (
+          <BoardSwitcher boards={entries} active={active} onPick={pickBoardId} />
+        )}
         {canFilter ? (
           <ToggleGroup
             aria-label="Whose tasks"
@@ -424,7 +594,14 @@ export function BoardPage() {
         fetchedAt={read?.fetchedAt ?? null}
         problem={read?.problem ?? null}
       />
-      {board === null ? (
+      {read?.value != null && entries.length === 0 ? (
+        <QuietLine fact="No boards yet." hint="Boards appear here once the relay lists some." />
+      ) : active !== null && board === null ? (
+        <QuietLine
+          fact={`The ${active.title} board could not be read yet.`}
+          hint="It shows here once the relay publishes it."
+        />
+      ) : board === null ? (
         read?.problem === undefined && !feed.unreachable ? (
           <QuietLine fact="Loading…" />
         ) : null
@@ -452,6 +629,11 @@ export function BoardPage() {
             <QuietLine fact="No tasks yet." hint="Tasks appear here once the tracker has some." />
           ) : (
             <>
+              <FilterBar
+                cards={board.cards}
+                search={search}
+                onChange={(patch, replace) => setSearch(patch, { replace: replace === true })}
+              />
               <StatusLegend
                 counts={counts}
                 statuses={statuses}
@@ -496,6 +678,11 @@ export function BoardPage() {
                     Show all of mine
                   </Button>
                 </div>
+              ) : filtered && cards.length === 0 ? (
+                <QuietLine
+                  fact="No tasks match these filters."
+                  hint="Clear a filter to see more of this board."
+                />
               ) : mine && cards.length === 0 ? (
                 <QuietLine
                   fact="Nothing of yours here."

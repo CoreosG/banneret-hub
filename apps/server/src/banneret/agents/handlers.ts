@@ -3,6 +3,7 @@
 // LeaseService with the same reference the Board builds, so the claim grammar, the settle window, the read-back
 // and the account and triage checks are the ones the Take and Release buttons get.
 import {
+  allBoardCards,
   type BanneretBoardCard,
   type BanneretFeedState,
   type IssueRef,
@@ -154,7 +155,7 @@ const make = Effect.gen(function* () {
         message: `${relay.company}'s relay does not read leases, so take and release are off.`,
       });
     }
-    const card = board.value?.cards.find((candidate) => candidate.task.id === taskId);
+    const card = allBoardCards(board.value).find((candidate) => candidate.task.id === taskId);
     const url =
       card?.task.ref.url ?? (yield* feed.task(relay.relayOrigin, taskId)).value?.task.ref.url;
     if (url === undefined) {
@@ -202,7 +203,7 @@ const make = Effect.gen(function* () {
   );
 
   return {
-    banneret_board: McpToolAccess.readsAsCaller(({ column, mine, repo, limit }) =>
+    banneret_board: McpToolAccess.readsAsCaller(({ board: boardId, column, mine, repo, limit }) =>
       Effect.gen(function* () {
         const { relay } = yield* requireRelay;
         const board = (yield* feedState(relay))?.board ?? null;
@@ -212,9 +213,28 @@ const make = Effect.gen(function* () {
             message: `${relay.company}'s relay does not offer a board.`,
           });
         }
+        const entries = board.value?.boards ?? [];
+        const picked =
+          boardId === undefined ? entries : entries.filter((entry) => entry.id === boardId);
+        if (boardId !== undefined && picked.length === 0) {
+          const known = entries.map((entry) => entry.id).join(", ");
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: `${relay.company} has no board ${boardId}. Boards: ${known === "" ? "none yet" : known}.`,
+          });
+        }
         const me = relay.me.login;
-        const cards = (board.value?.cards ?? []).filter(
-          (card) =>
+        // A task id is relay-wide: a task two boards show is listed once, on its first board.
+        const seen = new Set<string>();
+        const onBoards = picked.flatMap((entry) =>
+          (entry.board?.cards ?? []).flatMap((card) => {
+            if (seen.has(card.task.id)) return [];
+            seen.add(card.task.id);
+            return [{ boardId: entry.id, card }];
+          }),
+        );
+        const cards = onBoards.filter(
+          ({ card }) =>
             (column === undefined || same(card.column, column)) &&
             (repo === undefined || same(card.task.ref.scope, repo)) &&
             (mine !== true ||
@@ -226,8 +246,16 @@ const make = Effect.gen(function* () {
           fetchedAt: board.fetchedAt,
           ...problemOf(board),
           leases: board.leases,
+          boards: entries.map((entry) => ({
+            id: entry.id,
+            title: entry.title,
+            mode: entry.mode,
+            counts: entry.counts,
+          })),
           total: cards.length,
-          cards: cards.slice(0, limit ?? DEFAULT_BOARD_LIMIT).map(cardView),
+          cards: cards
+            .slice(0, limit ?? DEFAULT_BOARD_LIMIT)
+            .map(({ boardId: id, card }) => ({ board: id, ...cardView(card) })),
         };
       }),
     ),

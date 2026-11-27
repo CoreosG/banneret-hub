@@ -36,6 +36,8 @@ import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
 import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
+import { rememberedBoard } from "./boardChoice";
+import { boardEntry, singleBoard } from "./boards.testkit";
 
 vi.mock("../state/environments", { spy: true });
 vi.mock("../state/entities", { spy: true });
@@ -97,6 +99,7 @@ const card = (
     openedAt: "2026-11-20T09:00:00.000Z",
     closedAt: null,
   },
+  kind: "issue",
   column,
   status: "planned",
   statusWhy: "Open and nobody has taken it yet.",
@@ -153,7 +156,7 @@ const CARDS = (): BanneretBoardCard[] => [
 ];
 
 const boardRead = (value: BanneretBoard | null, extra: Partial<BanneretFeedBoardRead> = {}) => ({
-  value,
+  value: value === null ? null : singleBoard(value),
   fetchedAt: "2026-11-26T10:00:00.000Z",
   atWork: [],
   leases: true,
@@ -855,5 +858,161 @@ describe("Enterprise board", () => {
       await expect.element(page.getByTestId("claims-nudge")).toBeVisible();
       expect(document.querySelector('[data-testid="lease-buttons"]')).toBeNull();
     });
+  });
+});
+
+describe("Several boards, filters and search", () => {
+  const OPS = (): BanneretBoardCard[] => [
+    card("o1", "Deploy pipeline", "free", {
+      task: {
+        id: "o1",
+        title: "Deploy pipeline",
+        ref: {
+          tracker: "github",
+          scope: "example-org/example-ops",
+          key: "11",
+          url: "https://github.com/example-org/example-ops/issues/11",
+        },
+        openedAt: "2026-11-20T09:00:00.000Z",
+        closedAt: null,
+      },
+    }),
+    card("o2", "Backup checks", "taken", { assignees: [{ login: "ada-example" }] }),
+  ];
+  const twoBoards = (platform: BanneretBoardCard[], ops: BanneretBoardCard[]) =>
+    state(["board", "today"], {
+      ...boardRead(null),
+      value: {
+        boards: [
+          boardEntry("platform", "Platform", boardOf(platform)),
+          boardEntry("ops", "Ops", boardOf(ops)),
+        ],
+      },
+    });
+  const shownIds = () =>
+    [...document.querySelectorAll<HTMLElement>("[data-task-id]")].map((row) => row.dataset.taskId);
+  const switcher = () => document.querySelector('[data-testid="board-switcher"]');
+
+  it("hides the switcher with one board, and switches boards with it, remembered per workspace", async () => {
+    localStorage.removeItem("banneret.board-choice.v1");
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openBoard(stack);
+    await using _screen = screen;
+    await emit(state(["board"], boardRead(boardOf(CARDS()))));
+    await expect.element(page.getByText("Guild invites")).toBeVisible();
+    expect(switcher()).toBeNull();
+    await expect.element(page.getByRole("heading", { level: 1, name: "Board" })).toBeVisible();
+
+    await emit(twoBoards(CARDS(), OPS()));
+    await vi.waitFor(() => expect(switcher()).not.toBeNull());
+    await expect.element(page.getByRole("heading", { level: 1, name: "Platform" })).toBeVisible();
+    await userEvent.click(switcher()!);
+    // Each board names its size.
+    await expect.element(page.getByRole("option", { name: "Platform 7 tasks" })).toBeVisible();
+    await userEvent.click(page.getByRole("option", { name: "Ops 2 tasks" }));
+    await vi.waitFor(() => expect(router.state.location.search).toMatchObject({ board: "ops" }));
+    await expect.element(page.getByRole("heading", { level: 1, name: "Ops" })).toBeVisible();
+    await vi.waitFor(() => expect(shownIds()).toEqual(["o1", "o2"]));
+    expect(rememberedBoard(WORKSPACE_ID)).toBe("ops");
+
+    // A link without a board opens the remembered one; an unknown board falls back to it too.
+    await router.navigate({ to: "/board", search: { board: "gone" } } as never);
+    await vi.waitFor(() => expect(shownIds()).toEqual(["o1", "o2"]));
+  });
+
+  it("keeps the filters in the URL, so a link opens the board filtered", async () => {
+    localStorage.removeItem("banneret.board-choice.v1");
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openBoard(stack, "/board?q=guild");
+    await using _screen = screen;
+    await emit(state(["board"], boardRead(boardOf(CARDS()))));
+    await vi.waitFor(() => expect(shownIds()).toEqual(["2"]));
+    expect(summaryText()).toBe("1 task. 0 free to take, 1 taken, 0 stuck, 0 shipped");
+    await expect.element(page.getByLabelText("Filter tasks")).toHaveValue("guild");
+
+    // A person filter joins the text filter in the URL; nothing matches both.
+    await userEvent.click(page.getByLabelText("Filter by person"));
+    await userEvent.click(page.getByRole("option", { name: "Person: cy-example" }));
+    await vi.waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ q: "guild", person: "cy-example" }),
+    );
+    await expect.element(page.getByText("No tasks match these filters.")).toBeVisible();
+
+    await userEvent.click(page.getByRole("button", { name: "Clear filters" }));
+    await vi.waitFor(() => expect(shownIds()).toHaveLength(7));
+    expect(router.state.location.search).toEqual({});
+
+    // Typing filters as it goes, and `/` in the box types a slash rather than opening search.
+    await userEvent.fill(page.getByLabelText("Filter tasks"), "example-app#3");
+    await vi.waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ q: "example-app#3" }),
+    );
+    await vi.waitFor(() => expect(shownIds()).toEqual(["3"]));
+    await userEvent.type(page.getByLabelText("Filter tasks"), "/");
+    expect(document.querySelector('[data-testid="company-search"]')).toBeNull();
+  });
+
+  it("opens / search, finds a card on a board that is not shown, and opens it with Enter", async () => {
+    localStorage.removeItem("banneret.board-choice.v1");
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    await emit(twoBoards(CARDS(), OPS()));
+    await vi.waitFor(() => expect(shownIds()).toHaveLength(7));
+    expect(cardOf("o1")).toBeNull();
+
+    // In a text field (the composer is content-editable) the key types a slash.
+    const editor = document.createElement("div");
+    editor.contentEditable = "true";
+    document.body.append(editor);
+    stack.defer(() => editor.remove());
+    editor.focus();
+    await userEvent.keyboard("/");
+    expect(document.querySelector('[data-testid="company-search"]')).toBeNull();
+    editor.blur();
+
+    await userEvent.keyboard("/");
+    const search = page.getByTestId("company-search");
+    await expect.element(search).toBeVisible();
+    await userEvent.keyboard("deploy");
+    const results = search.getByRole("group", { name: "Board cards" });
+    await expect.element(results.getByText("Deploy pipeline")).toBeVisible();
+    await expect.element(results.getByText("Ops · example-ops #11")).toBeVisible();
+    await userEvent.keyboard("{Enter}");
+
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="company-search"]')).toBeNull(),
+    );
+    await expect
+      .element(page.getByRole("dialog").getByRole("heading", { name: "Deploy pipeline" }))
+      .toBeVisible();
+    expect(document.querySelector('[data-task-panel="o1"]')).not.toBeNull();
+  });
+
+  it("keeps Mine when switching boards, showing my cards on each", async () => {
+    localStorage.removeItem("banneret.board-choice.v1");
+    using stack = new DisposableStack();
+    const { emit, screen } = await openBoard(stack);
+    await using _screen = screen;
+    await emit(
+      twoBoards(
+        [
+          ...CARDS(),
+          card("8", "My work", "taken", { lease: lease("ada-example", "active", MINUTE) }),
+        ],
+        OPS(),
+      ),
+    );
+    await vi.waitFor(() => expect(shownIds()).toHaveLength(8));
+    await userEvent.click(page.getByRole("button", { name: "Mine" }));
+    await vi.waitFor(() => expect(shownIds()).toEqual(["8"]));
+
+    await userEvent.click(switcher()!);
+    await userEvent.click(page.getByRole("option", { name: "Ops 2 tasks" }));
+    await vi.waitFor(() => expect(shownIds()).toEqual(["o2"]));
+    expect(summaryText()).toBe("1 assigned to you · 0 leases expired");
+    await expect
+      .element(page.getByRole("button", { name: "Mine" }))
+      .toHaveAttribute("aria-pressed", "true");
   });
 });

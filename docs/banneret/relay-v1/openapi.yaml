@@ -380,7 +380,7 @@ paths:
       summary: One task, with its preview and its checked sign-off.
       description: |
         Served by a relay that advertises the `task` section. Returns the board card for the task plus
-        `preview` and `checked` when they exist. The Hub uses it when the task is not in the `board` or `map` file
+        `preview` and `checked` when they exist. The Hub uses it when the task is not in a `board.<id>` or the `map` file
         it holds. A `taskId` that is malformed (not an `Id`) or unknown answers 404 `not_found`; this call never
         answers 400.
       parameters:
@@ -509,8 +509,8 @@ paths:
         "200":
           description: |
             The file. Its schema is the one its head key names: `needs` is SnapshotNeeds, `health` is HealthBlock,
-            `work` is SnapshotWork, `machines` is SnapshotMachines, `repositories` is SnapshotRepositories, `board` is
-            SnapshotBoard, `map` is SnapshotMap, `feed` is FeedPage, `graveyard` is GraveyardPage. The head key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
+            `work` is SnapshotWork, `machines` is SnapshotMachines, `repositories` is SnapshotRepositories, `boards` is
+            SnapshotBoards, each `board.<id>` is SnapshotBoard, `map` is SnapshotMap, `feed` is FeedPage, `graveyard` is GraveyardPage. The head key decides the schema, not the body (an empty list matches more than one branch, hence `anyOf`).
           headers:
             ETag:
               schema: { type: string, pattern: '^"sha256:[0-9a-f]{64}"$' }
@@ -525,6 +525,7 @@ paths:
                   - { $ref: "#/components/schemas/SnapshotWork" }
                   - { $ref: "#/components/schemas/SnapshotMachines" }
                   - { $ref: "#/components/schemas/SnapshotRepositories" }
+                  - { $ref: "#/components/schemas/SnapshotBoards" }
                   - { $ref: "#/components/schemas/SnapshotBoard" }
                   - { $ref: "#/components/schemas/SnapshotMap" }
                   - { $ref: "#/components/schemas/FeedPage" }
@@ -1267,8 +1268,10 @@ components:
             repositories:
               description: Present when the relay serves `GET /repositories`.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
-            board:
-              description: Present when the relay advertises the `board` section.
+            boards:
+              description: |
+                Present when the relay advertises the `board` section. The index of every board (SnapshotBoards).
+                Each board in it has its own key `board.<id>` below.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
             map:
               description: Present when the relay advertises the `map` section, that is, when a stage plan is configured.
@@ -1278,6 +1281,12 @@ components:
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
             graveyard:
               description: Present when the `feed` section carries the flag `graveyard`. The latest 100 entries.
+              allOf: [{ $ref: "#/components/schemas/FileRef" }]
+          patternProperties:
+            "^board\\.[A-Za-z0-9_-]{1,64}$":
+              description: |
+                One board (SnapshotBoard), named by the `id` it has in the `boards` index. One key per board in the
+                index, and no key for a board the index does not list.
               allOf: [{ $ref: "#/components/schemas/FileRef" }]
     SnapshotNeeds:
       description: |
@@ -1294,13 +1303,58 @@ components:
       properties:
         working: { $ref: "#/components/schemas/WorkingBlock" }
         stuck: { $ref: "#/components/schemas/StuckBlock" }
+    SnapshotBoards:
+      description: |
+        The index of the relay's boards, relay-wide, in display order (README, "Board and leases"). The board list is
+        data, not capabilities: it changes with the relay's config, without a deploy. Each board's cards are in the
+        head key `board.<id>`. Closed.
+      type: object
+      additionalProperties: false
+      required: [boards]
+      properties:
+        boards:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/BoardIndexEntry" }
+    BoardIndexEntry:
+      type: object
+      additionalProperties: false
+      required: [id, title, mode, source, counts]
+      properties:
+        id:
+          description: Unique in the index. The board's file is the head key `board.<id>`.
+          allOf: [{ $ref: "#/components/schemas/Id" }]
+        title: { type: string, minLength: 1, maxLength: 60 }
+        mode:
+          description: |
+            How the relay builds the columns. Open token; known value `dev` (the five dev columns, with leases). A
+            client draws a board with an unknown mode as plain columns.
+          allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+        source:
+          type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              description: |
+                Where the cards come from. Open token; known value `filter` (repositories and labels from the relay's
+                config).
+              allOf: [{ $ref: "#/components/schemas/OpenToken" }]
+            url: { description: "A page that shows the source, when there is one.", type: string, format: uri }
+        counts:
+          description: Cards per column id of this board's file, after every column rule. A column with no cards may be left out.
+          type: object
+          maxProperties: 51
+          propertyNames: { $ref: "#/components/schemas/OpenToken" }
+          additionalProperties: { type: integer, minimum: 0, maximum: 1000 }
     SnapshotBoard:
       description: |
-        The task board with leases, relay-wide. The relay computes every status, column and lease
+        One task board with leases. The relay computes every status, column and lease
         state; the Hub only draws them. `state` and `notMeasured` say when a source (for example the claims) could not
         be read, so a partial board is never shown as complete. A card with no `lease` and no `assignees` is Free; a
         card with a `lease` or an assignee is Taken, unless Validating, Stuck or Shipped applies. The "agent at work"
-        ring is not here: the Hub derives it from the `work` file, joined by task id.
+        ring is not here: the Hub derives it from the `work` file, joined by task id. A task id is relay-wide, so a
+        task that two boards show is the same task on both.
       type: object
       additionalProperties: false
       required: [state, notMeasured, columns, cards]
@@ -1309,10 +1363,10 @@ components:
         notMeasured: { type: array, items: { $ref: "#/components/schemas/NotMeasured" } }
         columns:
           description: |
-            The relay's five, in display order: `free` (Free), `taken` (Taken), `validating` (Validating), `stuck`
-            (Stuck) and `shipped` (Shipped). Ids are open strings with these known values.
+            In display order. A `dev` board has the relay's five: `free` (Free), `taken` (Taken), `validating`
+            (Validating), `stuck` (Stuck) and `shipped` (Shipped). Ids are open strings with these known values.
           type: array
-          maxItems: 16
+          maxItems: 51
           items: { $ref: "#/components/schemas/BoardColumn" }
         cards:
           type: array
@@ -1335,9 +1389,10 @@ components:
         version of this schema.
       type: object
       additionalProperties: false
-      required: [task, column, status, statusWhy, assignees, prs, restsOn]
+      required: [task, kind, column, status, statusWhy, assignees, prs, restsOn]
       properties:
         task: { $ref: "#/components/schemas/BoardTask" }
+        kind: { $ref: "#/components/schemas/BoardCardKind" }
         column: { description: "A `columns[].id`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
         status:
           description: |
@@ -1355,6 +1410,11 @@ components:
           type: array
           maxItems: 100
           items: { $ref: "#/components/schemas/Id" }
+    BoardCardKind:
+      description: |
+        What the card is in its tracker. Open token; known values `issue`, `pull_request` and `draft` (a tracker item
+        that belongs to no repository yet). A client shows an unknown kind like `issue`.
+      allOf: [{ $ref: "#/components/schemas/OpenToken" }]
     BoardAssignees:
       description: |
         Everyone the tracker names as assigned to the task, in the tracker's order; empty when nobody is. An
@@ -1634,9 +1694,10 @@ components:
         when they exist. Closed.
       type: object
       additionalProperties: false
-      required: [task, column, status, statusWhy, assignees, prs, restsOn]
+      required: [task, kind, column, status, statusWhy, assignees, prs, restsOn]
       properties:
         task: { $ref: "#/components/schemas/BoardTask" }
+        kind: { $ref: "#/components/schemas/BoardCardKind" }
         column: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
         status: { allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
         statusWhy: { type: string, minLength: 1, maxLength: 240 }

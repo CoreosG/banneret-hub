@@ -49,6 +49,7 @@ describe("Task tab words", () => {
   it("titles what a task rests on from the board where it can", () => {
     const card = {
       task,
+      kind: "issue",
       column: "free",
       status: "planned",
       statusWhy: "Open.",

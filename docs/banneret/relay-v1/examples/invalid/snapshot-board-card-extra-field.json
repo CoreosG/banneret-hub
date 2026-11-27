@@ -37,6 +37,7 @@
         "openedAt": "2026-11-20T09:00:00Z",
         "closedAt": null
       },
+      "kind": "issue",
       "column": "free",
       "status": "planned",
       "statusWhy": "Open and nobody has taken it yet.",
@@ -60,6 +61,7 @@
         "openedAt": "2026-11-20T09:00:00Z",
         "closedAt": null
       },
+      "kind": "issue",
       "column": "taken",
       "status": "planned",
       "statusWhy": "Open and ada-example is working on it.",

@@ -130,6 +130,24 @@ const call = (machine: Enrolled, method: string, target: string, body?: unknown)
     ...(body === undefined ? {} : { body }),
   });
 
+/** The head's `boards` index, read and validated; undefined when the head names none. */
+const readBoardsIndex = async (machine: Enrolled, files: Readonly<Record<string, string>>) => {
+  const ref = files.boards;
+  if (ref === undefined) return undefined;
+  const reply = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
+  expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+  expectSchema("SnapshotBoards", reply.body);
+  return reply.body as {
+    boards: Array<{ id: string; title: string; mode: string; counts: Record<string, number> }>;
+  };
+};
+
+/** The head ref of the first board in the index: a `board/seed` without `boards` lands there. */
+const firstBoardRef = async (machine: Enrolled, files: Readonly<Record<string, string>>) => {
+  const first = (await readBoardsIndex(machine, files))?.boards[0];
+  return first === undefined ? undefined : files[`board.${first.id}`];
+};
+
 interface ListedMachine {
   readonly id: string;
   readonly connected: boolean;
@@ -1307,7 +1325,10 @@ describe("board and leases", () => {
   const readBoard = async (machine: Enrolled): Promise<Board | undefined> => {
     const head = await call(machine, "GET", "/relay/v1/snapshot/head");
     expect(head.status, JSON.stringify(head.body)).toBe(200);
-    const ref = (head.body as { files: Record<string, string> }).files.board;
+    const ref = await firstBoardRef(
+      machine,
+      (head.body as { files: Record<string, string> }).files,
+    );
     if (ref === undefined) return undefined;
     const file = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
     expect(file.status, JSON.stringify(file.body)).toBe(200);
@@ -1333,8 +1354,12 @@ describe("board and leases", () => {
       sections: Array<{ kind: string; flags: string[] }>;
       me: { login: string };
     };
-    const board = body.sections.find((section) => section.kind === "board");
+    const board = body.sections.find((section) => section.kind === "board") as
+      | { kind: string; version: number; flags: string[] }
+      | undefined;
     expect(board?.flags).toContain("leases");
+    expect(board?.flags).toContain("boards");
+    expect(board?.version).toBe(2);
     expect(body.snapshot?.head).toBe("/relay/v1/snapshot/head");
     expect(body.me.login).toBe(machine.login);
     for (const kind of ["today", "needs", "machines"]) {
@@ -1375,6 +1400,56 @@ describe("board and leases", () => {
     expect(takenCard?.lease?.holder.login).toBe("bo-example");
   });
 
+  it("publishes each board in its own file, with an index whose counts match its cards", async () => {
+    const machine = await enrol();
+    const [a, b, c] = [id(), id(), id()];
+    await client.control("/board/seed", {
+      boards: [
+        { id: "platform", title: "Platform" },
+        { id: "ops", title: "Ops" },
+      ],
+      tasks: [
+        { id: a, title: "Platform task" },
+        { id: b, title: "Ops task", board: "ops" },
+        { id: c, title: "Ops taken", board: "ops", column: "taken", holder: "bo-example" },
+      ],
+    });
+    await client.rebuildSnapshot(machine.login);
+    const head = await call(machine, "GET", "/relay/v1/snapshot/head");
+    const files = (head.body as { files: Record<string, string> }).files;
+    expect(files.board).toBeUndefined();
+    const index = await readBoardsIndex(machine, files);
+    expect(index?.boards.map((board) => [board.id, board.title])).toEqual([
+      ["platform", "Platform"],
+      ["ops", "Ops"],
+    ]);
+    const boardKeys = Object.keys(files).filter((key) => key.startsWith("board."));
+    expect(boardKeys.toSorted()).toEqual(["board.ops", "board.platform"]);
+    const seen = new Map<string, string>();
+    for (const entry of index?.boards ?? []) {
+      expect(entry.mode).toBe("dev");
+      const file = await call(
+        machine,
+        "GET",
+        `/relay/v1/snapshot/files/${(files[`board.${entry.id}`] ?? "").slice(7)}`,
+      );
+      expectSchema("SnapshotBoard", file.body);
+      const cards = (file.body as Board).cards;
+      const tally: Record<string, number> = {};
+      for (const card of cards) {
+        tally[card.column] = (tally[card.column] ?? 0) + 1;
+        // README, "Several boards": a task id is relay-wide; this seed puts each task on one board.
+        expect(seen.has(card.task.id), `${card.task.id} on two boards`).toBe(false);
+        seen.set(card.task.id, entry.id);
+      }
+      const counted = Object.fromEntries(Object.entries(entry.counts).filter(([, n]) => n > 0));
+      expect(counted).toEqual(tally);
+    }
+    expect(seen.get(a)).toBe("platform");
+    expect(seen.get(b)).toBe("ops");
+    expect(seen.get(c)).toBe("ops");
+  });
+
   it("lists every linked pull request in prs, with per-PR checks, and no card-level pr or checks", async () => {
     const machine = await enrol();
     const many = id();
@@ -1392,7 +1467,8 @@ describe("board and leases", () => {
     ]);
     await client.rebuildSnapshot(machine.login);
     const head = await call(machine, "GET", "/relay/v1/snapshot/head");
-    const ref = (head.body as { files: Record<string, string> }).files.board ?? "";
+    const ref =
+      (await firstBoardRef(machine, (head.body as { files: Record<string, string> }).files)) ?? "";
     const file = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
     expectSchema("SnapshotBoard", file.body);
     const cards = (
@@ -1764,7 +1840,9 @@ describe("feed, graveyard, tasks and checked", () => {
       expectSchema("TaskRead", reply.body);
       await client.rebuildSnapshot(machine.login);
       const head = await call(machine, "GET", "/relay/v1/snapshot/head");
-      const ref = (head.body as { files: Record<string, string> }).files.board ?? "";
+      const ref =
+        (await firstBoardRef(machine, (head.body as { files: Record<string, string> }).files)) ??
+        "";
       const board = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
       expectSchema("SnapshotBoard", board.body);
       const card = (
@@ -1835,7 +1913,8 @@ describe("lease protocol", () => {
     await client.rebuildSnapshot(machine.login);
     const head = await call(machine, "GET", "/relay/v1/snapshot/head");
     expect(head.status, JSON.stringify(head.body)).toBe(200);
-    const ref = (head.body as { files: Record<string, string> }).files[kind] ?? "";
+    const files = (head.body as { files: Record<string, string> }).files;
+    const ref = (kind === "board" ? await firstBoardRef(machine, files) : files[kind]) ?? "";
     const file = await call(machine, "GET", `/relay/v1/snapshot/files/${ref.slice(7)}`);
     expect(file.status, JSON.stringify(file.body)).toBe(200);
     expectSchema(schema, file.body);
@@ -2096,7 +2175,11 @@ describe("map and the stage plan", () => {
   const seedBoard = async (machine: Enrolled, tasks: ReadonlyArray<Record<string, unknown>>) => {
     await client.control("/board/seed", { tasks });
     const files = await headFiles(machine);
-    const board = (await readFile(machine, files.board ?? "", "SnapshotBoard")) as BoardFile;
+    const board = (await readFile(
+      machine,
+      (await firstBoardRef(machine, files)) ?? "",
+      "SnapshotBoard",
+    )) as BoardFile;
     return (taskId: string) => {
       const card = board.cards.find((candidate) => candidate.task.id === taskId);
       expect(card, `board holds ${taskId}`).toBeDefined();
