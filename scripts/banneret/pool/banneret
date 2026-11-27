@@ -29,6 +29,7 @@ def main():
     seat.add_argument("person")
     seat.add_argument("login")
     seat.add_argument("uid", type=int)
+    seat.add_argument("port", type=int)
     for cmd in commands.choices.values():
         cmd.add_argument("--root", type=Path, default=Path("/"))
         cmd.add_argument("--apply", action="store_true")
@@ -37,7 +38,7 @@ def main():
     if not args.apply:
         plans = {
             "filesystem": f"Allocate {getattr(args, 'size', '')} at {IMAGE} if absent and mount XFS with project quotas at {HOMES}.",
-            "seat": f"Reserve {getattr(args, 'login', '')} for {getattr(args, 'person', '')}, apply its home quota and user slice, and create its account.",
+            "seat": f"Reserve {getattr(args, 'login', '')} for {getattr(args, 'person', '')}, apply its home quota and user slice, create its account and start its Hub on loopback port {getattr(args, 'port', '')}.",
             "join": "Generate a host key and request founder confirmation from the configured relay.",
             "agent": "Read host pressure and seat quotas, post signed facts and cache the effective policy.",
         }
@@ -62,7 +63,7 @@ def main():
             raise ValueError("Configuration and host credential disagree")
         policy = directory / "policy.json"
         if args.command == "seat":
-            return provision(root, directory, args.person, args.login, args.uid, json.loads(policy.read_text()))
+            return provision(root, directory, args.person, args.login, args.uid, args.port, json.loads(policy.read_text()))
         history = {}
         while True:
             warnings = json.loads(policy.read_text())["warnings"] if policy.exists() else config["warnings"]

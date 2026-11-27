@@ -45,7 +45,7 @@ export function usePoolResources(target: RelayTarget | null, enabled: boolean) {
     read,
   );
 }
-const bytes = (v: number) =>
+export const bytes = (v: number) =>
   v < 1024
     ? v + " B"
     : v < 2 ** 20
@@ -54,7 +54,7 @@ const bytes = (v: number) =>
         ? (v / 2 ** 30).toFixed(1) + " GiB"
         : (v / 2 ** 20).toFixed(1) + " MiB";
 type Meter = NonNullable<ResourceReport["own"]["disk"]>;
-function Bar({
+export function ResourceBar({
   name,
   meter,
   format = String,
@@ -189,13 +189,13 @@ function ResourceSummary({
       {mine && (own || quota) && (
         <>
           <span className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
-            <Bar
+            <ResourceBar
               name={quota?.disk ? "Storage quota" : "Home storage"}
               meter={disk}
               format={bytes}
             />
-            <Bar name="Memory" meter={own?.memory ?? null} format={bytes} />
-            <Bar
+            <ResourceBar name="Memory" meter={own?.memory ?? null} format={bytes} />
+            <ResourceBar
               name="CPU cores"
               meter={
                 report?.cpuCores == null
@@ -208,8 +208,8 @@ function ResourceSummary({
               }
               format={(v) => v.toFixed(2)}
             />
-            <Bar name="Processes" meter={own?.pids ?? null} />
-            <Bar name="Inodes" meter={inodes} />
+            <ResourceBar name="Processes" meter={own?.pids ?? null} />
+            <ResourceBar name="Inodes" meter={inodes} />
           </span>
           <span className="text-muted-foreground">
             {own?.cpu

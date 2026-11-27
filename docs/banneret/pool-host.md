@@ -5,7 +5,7 @@ Run these commands from a root administrator shell on the approved shared machin
 The kit has its own executable under /opt so the member's Banneret Hub launcher stays available.
 Each subcommand previews its action by default. Add `--apply` to execute it.
 
-1. Install the distro packages for Python 3, python3-cryptography, xfsprogs and util-linux.
+1. Install the distro packages for Python 3, python3-cryptography, xfsprogs, curl and util-linux.
    From the repository root install the kit and configure its host ID, installed Hub version,
    relay origin, local capacity and initial warning thresholds. For example, using jq and
    the example configuration for the staff host named dev:
@@ -47,12 +47,20 @@ Each subcommand previews its action by default. Add `--apply` to execute it.
    /proc/meminfo and user.slice. A workspace row contains quota meters and warning flags.
    The agent advertises zero free sandbox slots until a sandbox runner is available.
 
-5. After the founder approves a workspace request, select an unused login and numeric UID.
-   For example, run `./banneret pool seat p_alice alice 24001`, then
-   `./banneret pool seat p_alice alice 24001 --apply`. The UID doubles as the project number
+5. After the founder approves a workspace request, install the verified Banneret Hub runtime for this host's architecture
+   in a root-owned directory under /opt and link its executable (t3 in the release archive)
+   as /usr/local/bin/banneret. Verify that an ordinary account can run its --version command.
+   Reserve an unused login, UID and loopback TCP port in the site's seat range (20000 to 29999).
+   Keep these ports reserved for seat services. Each seat slice can bind only its own
+   TCP port within this range. Other ports remain available for member development servers.
+   For example, run `./banneret pool seat p_alice alice 24001 24101`, then
+   `./banneret pool seat p_alice alice 24001 24101 --apply`. The UID doubles as the project number
    on this dedicated image. The command applies the returned workspace ceilings, including
-   the disk hard limit, creates the OS account, and marks the seat ready to join.
-   Give the member access using the site's normal OS login procedure. The member signs
+   the disk hard limit, creates the OS account, and starts banneret-seat-24001.service in user-24001.slice.
+   The service has the member's UID, home and relay identity. Its poolHostId is the
+   host ID from the policy. Check the unit with `systemctl status banneret-seat-24001.service`.
+   Once it starts, the next host report publishes the seat as ready to join.
+   Give the member their SSH login, host address and assigned port. The member signs
    into Claude, Codex and Banneret Hub from their own account.
 
 To exercise the kit in a checkout, install workspace dependencies and run

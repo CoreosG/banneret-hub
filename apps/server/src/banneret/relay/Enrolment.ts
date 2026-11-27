@@ -33,6 +33,7 @@ import {
   BANNERET_MACHINE_LABEL_PATTERN,
   BANNERET_RELAY_WS_METHODS,
   PoolResources,
+  WorkspaceReceipt,
   type WarningPolicy,
   BanneretMachineKind,
   BanneretRelayError,
@@ -330,6 +331,9 @@ export interface RelayEnrolment {
     path: string,
     body?: unknown,
   ) => Effect.Effect<RelayReply, RelayCallError>;
+  readonly requestWorkspace: (
+    hostId: string,
+  ) => Effect.Effect<typeof WorkspaceReceipt.Type, BanneretRelayError>;
   readonly signedGet: (
     target: string,
     options?: { readonly ifNoneMatch?: string; readonly maxResponseBytes?: number },
@@ -1473,6 +1477,14 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           body,
         ),
       ),
+    requestWorkspace: (hostId) =>
+      configuredNow.pipe(
+        Effect.flatMap((from) =>
+          signedCall(from, "POST", "/relay/v1/pool/workspaces", undefined, { hostId }),
+        ),
+        Effect.flatMap((reply) => decodeReply(WorkspaceReceipt, reply)),
+        Effect.mapError((error) => new BanneretRelayError({ message: error.message })),
+      ),
     signedGet: (target, options = {}) =>
       Effect.flatMap(configuredNow, (from) =>
         signedCall(from, "GET", target, options.ifNoneMatch, undefined, options.maxResponseBytes),
@@ -1650,6 +1662,14 @@ export const rpcHandlers = {
       try: biggestFolders,
       catch: () => new BanneretRelayError({ message: "Home folder sizes could not be read." }),
     }),
+  [BANNERET_RELAY_WS_METHODS.requestWorkspace]: Effect.fn("BanneretEnrolment.requestWorkspace")(
+    function* (input: { relayOrigin: string; hostId: string }) {
+      const service = yield* BanneretEnrolment;
+      const relay = yield* service.relay(input.relayOrigin);
+      if (!relay) return yield* fail("This machine has not joined the company.");
+      return yield* relay.requestWorkspace(input.hostId);
+    },
+  ),
   [BANNERET_RELAY_WS_METHODS.pool]: Effect.fn("BanneretEnrolment.pool")(function* (input: {
     readonly relayOrigin: string;
   }) {

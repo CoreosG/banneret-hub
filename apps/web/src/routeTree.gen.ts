@@ -24,6 +24,7 @@ import { Route as ChatTodayRouteImport } from './routes/_chat.today'
 import { Route as ChatTeamRouteImport } from './routes/_chat.team'
 import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
+import { Route as ChatPoolRouteImport } from './routes/_chat.pool'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatNeedsRouteImport } from './routes/_chat.needs'
 import { Route as ChatMapRouteImport } from './routes/_chat.map'
@@ -135,6 +136,11 @@ const ChatSettingsRoute = ChatSettingsRouteImport.update({
 const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   id: '/pull-requests',
   path: '/pull-requests',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatPoolRoute = ChatPoolRouteImport.update({
+  id: '/pool',
+  path: '/pool',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatNewRoute = ChatNewRouteImport.update({
@@ -351,6 +357,7 @@ export interface FileRoutesByFullPath {
   '/map': typeof ChatMapRoute
   '/needs': typeof ChatNeedsRoute
   '/new': typeof ChatNewRoute
+  '/pool': typeof ChatPoolRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
   '/team': typeof ChatTeamRoute
@@ -404,6 +411,7 @@ export interface FileRoutesByTo {
   '/map': typeof ChatMapRoute
   '/needs': typeof ChatNeedsRoute
   '/new': typeof ChatNewRoute
+  '/pool': typeof ChatPoolRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
   '/team': typeof ChatTeamRoute
@@ -460,6 +468,7 @@ export interface FileRoutesById {
   '/_chat/map': typeof ChatMapRoute
   '/_chat/needs': typeof ChatNeedsRoute
   '/_chat/new': typeof ChatNewRoute
+  '/_chat/pool': typeof ChatPoolRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/settings': typeof ChatSettingsRouteWithChildren
   '/_chat/team': typeof ChatTeamRoute
@@ -517,6 +526,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/needs'
     | '/new'
+    | '/pool'
     | '/pull-requests'
     | '/settings'
     | '/team'
@@ -570,6 +580,7 @@ export interface FileRouteTypes {
     | '/map'
     | '/needs'
     | '/new'
+    | '/pool'
     | '/pull-requests'
     | '/settings'
     | '/team'
@@ -625,6 +636,7 @@ export interface FileRouteTypes {
     | '/_chat/map'
     | '/_chat/needs'
     | '/_chat/new'
+    | '/_chat/pool'
     | '/_chat/pull-requests'
     | '/_chat/settings'
     | '/_chat/team'
@@ -784,6 +796,13 @@ declare module '@tanstack/react-router' {
       path: '/pull-requests'
       fullPath: '/pull-requests'
       preLoaderRoute: typeof ChatPullRequestsRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/pool': {
+      id: '/_chat/pool'
+      path: '/pool'
+      fullPath: '/pool'
+      preLoaderRoute: typeof ChatPoolRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/new': {
@@ -1126,6 +1145,7 @@ interface ChatRouteChildren {
   ChatMapRoute: typeof ChatMapRoute
   ChatNeedsRoute: typeof ChatNeedsRoute
   ChatNewRoute: typeof ChatNewRoute
+  ChatPoolRoute: typeof ChatPoolRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatSettingsRoute: typeof ChatSettingsRouteWithChildren
   ChatTeamRoute: typeof ChatTeamRoute
@@ -1146,6 +1166,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatMapRoute: ChatMapRoute,
   ChatNeedsRoute: ChatNeedsRoute,
   ChatNewRoute: ChatNewRoute,
+  ChatPoolRoute: ChatPoolRoute,
   ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatSettingsRoute: ChatSettingsRouteWithChildren,
   ChatTeamRoute: ChatTeamRoute,
