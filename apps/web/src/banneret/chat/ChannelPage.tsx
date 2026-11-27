@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { LegendList } from "@legendapp/list/react";
 import type { ChatConversation, ChatMember, ChatMessage, ChannelAction } from "@t3tools/contracts";
-import { HashIcon, SendIcon, XIcon, UsersIcon } from "lucide-react";
+import { HashIcon, LockIcon, SendIcon, XIcon, UsersIcon } from "lucide-react";
 import { SidebarInset } from "../../components/ui/sidebar";
 import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { isElectron } from "../../env";
@@ -14,11 +14,18 @@ import { QuietLine } from "../ui/QuietLine";
 import { RelativeTime } from "../ui/RelativeTime";
 import { useEnterpriseFeed, type EnterpriseFeed } from "../useEnterpriseFeed";
 import { useTabsStore, keep } from "../tabs/tabsStore";
-import { channels, members, history, replyAuthors, chatRpc, useChatRead } from "./client";
+import {
+  conversations,
+  conversationTitle,
+  members,
+  history,
+  replyAuthors,
+  chatRpc,
+  useChatRead,
+} from "./client";
 import { chatHref } from "./ChannelRows";
 import { Markdown } from "./Markdown";
 
-type Channel = Extract<ChatConversation, { kind: "channel" }>;
 type Person = Extract<ChatMember, { kind: "person" }>;
 const day = new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric" });
 const time = new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" });
@@ -44,12 +51,13 @@ export function ChannelPage({ id, root }: Omit<View, "enterprise">) {
 }
 function ChannelView({ enterprise, id, root }: View) {
   const { environmentId, relayOrigin } = enterprise.target;
-  const load = () => channels({ environmentId, relayOrigin });
+  const load = () => conversations({ environmentId, relayOrigin });
   const loadPeople = () => members({ environmentId, relayOrigin }, id);
   const revision = enterprise.feed.chatRevision ?? 0;
   const rows = useChatRead(load, revision);
   const people = useChatRead(loadPeople, revision);
   const channel = rows.value?.find((c) => c.id === id);
+  const title = channel ? conversationTitle(channel, enterprise.enrolment.me?.login) : "";
   const router = useRouter();
   const [q, setQ] = useState("");
   const [showMembers, setMembers] = useState(false);
@@ -62,7 +70,9 @@ function ChannelView({ enterprise, id, root }: View) {
   return (
     <SidebarInset data-chat-shell role="main">
       <WorkspacePageHeader electron={isElectron} className="border-b">
-        <span className="text-sm">{enterprise.workspace.name} / Channels</span>
+        <span className="text-sm">
+          {enterprise.workspace.name} / {channel?.kind === "dm" ? "Direct messages" : "Channels"}
+        </span>
       </WorkspacePageHeader>
       {rows.error && <p role="alert">{rows.error}</p>}
       {channel ? (
@@ -71,40 +81,83 @@ function ChannelView({ enterprise, id, root }: View) {
             <header data-chat-heading>
               <div>
                 <h1>
-                  <HashIcon size={20} />
-                  {channel.name}
+                  {channel.kind === "dm" ? <LockIcon size={20} /> : <HashIcon size={20} />}
+                  {channel.kind === "channel" ? channel.name : title}
                 </h1>
-                <p>{channel.purpose}</p>
+                {channel.kind === "dm" ? (
+                  <>
+                    <p>
+                      {channel.members.length === 2
+                        ? "Private to you and " + title + "."
+                        : "Private to the " + channel.members.length + " participants."}{" "}
+                      The relay's operator can read it.
+                    </p>
+                    {channel.agentReaders.map((p) => (
+                      <p key={p.personId}>{p.login}'s agents can read this conversation.</p>
+                    ))}
+                  </>
+                ) : (
+                  <p>{channel.purpose}</p>
+                )}
               </div>
               <button onClick={() => setMembers(!showMembers)}>
                 <UsersIcon size={15} />
                 {channel.memberCount.people} people · {channel.memberCount.agents} agents
               </button>
+              {channel.kind === "channel" && channel.me.member && (
+                <label data-chat-notifications>
+                  Notifications{" "}
+                  <select
+                    aria-label="Channel notifications"
+                    value={channel.me.notify}
+                    onChange={async (e) => {
+                      const level = e.target.value;
+                      if (level !== "all" && level !== "mentions" && level !== "nothing") return;
+                      try {
+                        await chatRpc.run(enterprise.target, {
+                          kind: "notifications",
+                          id,
+                          settings: { notify: level, muted: false },
+                        });
+                        setError("");
+                      } catch (e) {
+                        setError(String(e));
+                      }
+                    }}
+                  >
+                    <option value="all">All</option>
+                    <option value="mentions">Mentions</option>
+                    <option value="nothing">Nothing</option>
+                  </select>
+                </label>
+              )}
               <FilterBox
                 value={q}
                 onChange={setQ}
-                label="Search channel"
-                placeholder={"Search #" + channel.name}
+                label="Search conversation"
+                placeholder={"Search " + title}
               />
             </header>
             {showMembers && (
               <section data-chat-members>
                 <b>Members</b> {people.value?.map((p) => p.login).join(", ")} {people.error}
-                <button
-                  onClick={async () => {
-                    try {
-                      await chatRpc.run(enterprise.target, {
-                        kind: channel.me.member ? "leave" : "join",
-                        id,
-                      });
-                      setMembers(false);
-                    } catch (e) {
-                      setError(String(e));
-                    }
-                  }}
-                >
-                  {channel.me.member ? "Leave channel" : "Join channel"}
-                </button>
+                {channel.kind === "channel" && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await chatRpc.run(enterprise.target, {
+                          kind: channel.me.member ? "leave" : "join",
+                          id,
+                        });
+                        setMembers(false);
+                      } catch (e) {
+                        setError(String(e));
+                      }
+                    }}
+                  >
+                    {channel.me.member ? "Leave channel" : "Join channel"}
+                  </button>
+                )}
               </section>
             )}
             {error && <p role="alert">{error}</p>}
@@ -213,7 +266,7 @@ function Timeline({
   tabId,
 }: {
   enterprise: EnterpriseFeed;
-  channel: Channel;
+  channel: ChatConversation;
   root: string | undefined;
   people: Person[];
   query: string;
@@ -485,8 +538,14 @@ function Timeline({
             ref={input}
             disabled={busy}
             value={draft}
-            aria-label={root ? "Thread reply" : "Channel message"}
-            placeholder={root ? "Reply in thread" : "Message #" + channel.name}
+            aria-label={
+              root ? "Thread reply" : channel.kind === "dm" ? "Direct message" : "Channel message"
+            }
+            placeholder={
+              root
+                ? "Reply in thread"
+                : "Message " + conversationTitle(channel, enterprise.enrolment.me?.login)
+            }
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;

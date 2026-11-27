@@ -3,6 +3,7 @@
 import { InboxIcon } from "lucide-react";
 import { useState } from "react";
 
+import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import { Button } from "../components/ui/button";
 import { FeedStatus } from "./FeedParts";
 import { offersSection } from "./relayFeed.logic";
@@ -14,7 +15,14 @@ import { QuietLine } from "./ui/QuietLine";
 import { Section, SectionEmpty } from "./ui/Section";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
+const groups = {
+  Questions: ["chat_ask", "thread_question", "founder_question", "persona_ask"],
+  Mentions: ["mention", "agent_message"],
+  Reviews: ["thread_approval", "pr_approval", "waiting_for_approver", "pull_request", "promotion"],
+};
+const filters = ["All", "Questions", "Mentions", "Reviews"] as const;
 export function NeedsPage() {
+  const [filter, setFilter] = useState<(typeof filters)[number]>("All");
   const enterprise = useEnterpriseFeed();
   const [loading, setLoading] = useState(false);
   if (enterprise === null) {
@@ -37,7 +45,10 @@ export function NeedsPage() {
       </FeedFrame>
     );
   }
-  const items = feed.needs;
+  const items =
+    filter === "All"
+      ? feed.needs
+      : (feed.needs?.filter((i) => groups[filter].includes(i.kind)) ?? null);
   const count = items === null && feed.needsCount === null ? null : needsFigure(feed, null);
   return (
     <FeedFrame title="Needs you" company={workspace.name}>
@@ -60,6 +71,20 @@ export function NeedsPage() {
         fetchedAt={feed.needsFetchedAt}
         problem={feed.needsProblem}
       />
+      <ToggleGroup
+        aria-label="Needs you filters"
+        value={[filter]}
+        onValueChange={(values) => {
+          const next = filters.find((f) => f === values[0]);
+          if (next) setFilter(next);
+        }}
+      >
+        {filters.map((f) => (
+          <Toggle key={f} value={f}>
+            {f}
+          </Toggle>
+        ))}
+      </ToggleGroup>
       {items === null ? (
         feed.needsProblem === null && !feed.unreachable ? (
           <QuietLine fact="Loading…" />
@@ -69,13 +94,17 @@ export function NeedsPage() {
           {items.length === 0 ? (
             <SectionEmpty
               icon={InboxIcon}
-              title="Nobody needs you right now."
+              title={
+                filter === "All"
+                  ? "Nobody needs you right now."
+                  : "No " + filter.toLowerCase() + " in this list."
+              }
               description="Questions, reviews and approvals that wait on you show here."
             />
           ) : (
             <ul aria-label="Needs you items">
               {items.map((item) => (
-                <NeedsRow key={item.id} item={item} />
+                <NeedsRow key={item.id} item={item} target={target} />
               ))}
             </ul>
           )}

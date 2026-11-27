@@ -14,7 +14,7 @@ have. Threads, drafts and the command palette follow the active workspace.
 
 - **Solo**: plain T3 Code. The default workspace is called "Personal". A Solo workspace never contacts a relay.
 - **Enterprise**: joined to a **relay** that your company runs. It adds the team screens below. A section
-  appears only when the relay offers it. When the relay offers chat, open **Channels** to join a channel, write a message, or reply in its thread. Sending keeps the tab open. The unread line follows your own read position across machines.
+  appears only when the relay offers it. When the relay offers chat, open **Channels** to join a channel, write a message, or reply in its thread. Use the plus beside **Direct messages** to choose recipients. A group can include eight people, including you. In a channel, choose All, Mentions or Nothing for desktop alerts. DMs always notify. Filter Needs you by Questions, Mentions or Reviews. Sending keeps the tab open. The unread line follows your own read position across machines.
 
 ## Joining a relay
 

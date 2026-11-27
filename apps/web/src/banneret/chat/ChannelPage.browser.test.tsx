@@ -2,6 +2,7 @@ import appCss from "../../index.css?inline";
 import {
   EnvironmentId,
   type BanneretFeedState,
+  type BanneretTeamPerson,
   type ChannelAction,
   type ChannelResult,
 } from "@t3tools/contracts";
@@ -28,7 +29,7 @@ import { chatRpc } from "./client";
 declare module "vite-plus/test/browser" {
   interface BrowserCommands {
     companyChat: {
-      (op: "start"): Promise<{ id: string; root: string }>;
+      (op: "start"): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
       (op: "call", arg: ChannelAction): Promise<ChannelResult>;
       (op: "stop"): Promise<void>;
     };
@@ -36,7 +37,7 @@ declare module "vite-plus/test/browser" {
 }
 vi.mock("../../state/environments", { spy: true });
 it("opens only when offered, reads the channel, posts, replies, edits and deletes through the fake relay", async () => {
-  const { id, root: message } = await commands.companyChat("start");
+  const { root: message, people } = await commands.companyChat("start");
   await using resources = new AsyncDisposableStack();
   resources.defer(() => commands.companyChat("stop"));
   const env = EnvironmentId.make("local"),
@@ -75,7 +76,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     publish?.({
       sections: ["today", "needs", "board", "map", "feed", "team", ...sections],
       sectionsKnown: true,
-      chatFlags: ["channels", "threads", "private_channels", "reactions"],
+      chatFlags: ["channels", "threads", "private_channels", "reactions", "dms", "group_dms"],
       chatRevision: ++revision,
       revision: 1,
       joined: true,
@@ -86,12 +87,13 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       map: null,
       feed: null,
       graveyard: null,
-      team: null,
+      team: { value: { people }, fetchedAt: null },
     } as BanneretFeedState);
   vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => {
     const result = await commands.companyChat("call", action);
     if (!result.ok) throw new Error(result.message);
-    if (["post", "edit", "delete", "read"].includes(action.kind)) emit(["chat"]);
+    if (["post", "edit", "delete", "read", "dm", "notifications"].includes(action.kind))
+      emit(["chat"]);
     return result.value;
   });
   const style = document.createElement("style");
@@ -114,7 +116,12 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     path: "/channels/$channelId",
     component: () => {
       const search = route.useSearch() as { thread?: string };
-      return <ChannelPage id={id} root={search.thread} />;
+      return (
+        <ChannelPage
+          id={(route.useParams() as { channelId: string }).channelId}
+          root={search.thread}
+        />
+      );
     },
   });
   const router = createRouter({
@@ -149,6 +156,9 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   }
   expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: false });
   await proof("channel");
+  const level = screen.getByRole("combobox", { name: "Channel notifications" });
+  await level.selectOptions("all");
+  await expect.element(level).toHaveValue("all");
   const input = screen.getByRole("textbox", { name: "Channel message" });
   await input.fill("Upload flow checked.");
   await screen.getByRole("button", { name: "Send message" }).click();
@@ -175,6 +185,17 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     .getByRole("button", { name: "Delete", exact: true })
     .click({ force: true });
   await expect.element(screen.getByText("Message deleted")).toBeVisible();
+  await screen.getByRole("button", { name: "Start direct message" }).click();
+  await screen.getByRole("checkbox", { name: "kim" }).click();
+  await screen.getByRole("checkbox", { name: "leo" }).click();
+  await screen.getByRole("button", { name: "Open conversation" }).click();
+  await expect.element(screen.getByText(/The relay's operator can read it/)).toBeVisible();
+  await expect.element(screen.getByText("kim's agents can read this conversation.")).toBeVisible();
+  const dm = screen.getByRole("textbox", { name: "Direct message" });
+  await dm.fill("Can we review the release together?");
+  await screen.getByRole("button", { name: "Send message" }).click();
+  await expect.element(screen.getByText("Can we review the release together?")).toBeVisible();
+  await proof("group-dm");
   await act(() => useWorkspacesStore.setState({ activeId: null }));
   await expect.element(screen.getByText("Channels", { exact: true })).not.toBeInTheDocument();
 });

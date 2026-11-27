@@ -2915,6 +2915,77 @@ describe("opt-in health", () => {
 });
 
 describe("chat contract", () => {
+  it("opens the same private DM for either participant and resolves its inbox item on read", async () => {
+    const sender = await enrol(),
+      recipient = await enrol(),
+      outsider = await enrol();
+    const idOf = async (machine: Enrolled) =>
+      ((await call(machine, "GET", "/relay/v1/capabilities")).body as { me: { id: string } }).me.id;
+    const open = (caller: Enrolled, id: string) =>
+      call(caller, "POST", "/relay/v1/chat/conversations", { kind: "dm", members: [id] });
+    const dm = await open(sender, await idOf(recipient));
+    expectSchema("ChatConversation", dm.body);
+    const { id } = dm.body as { id: string };
+    expect(dm.body).toMatchObject({ kind: "dm", private: true, agentReaders: [] });
+    expect((await open(recipient, await idOf(sender))).body).toMatchObject({ id });
+    const path = "/relay/v1/chat/conversations/" + id;
+    expect((await call(outsider, "GET", path + "/messages")).status).toBe(404);
+    const posted = await call(sender, "POST", "/relay/v1/chat/messages", {
+      conversationId: id,
+      key: randomText(5),
+      text: "Ready to review",
+    });
+    const m = posted.body as { seq: number; id: string };
+    const read = { conversationId: id, seq: m.seq };
+    expect((await call(recipient, "GET", "/relay/v1/needs")).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: m.id, kind: "agent_message", chatRead: read }),
+      ]),
+    });
+    await call(recipient, "POST", "/relay/v1/chat/read", read);
+    expect((await call(recipient, "GET", "/relay/v1/needs")).body).toMatchObject({
+      items: expect.not.arrayContaining([expect.objectContaining({ id: m.id })]),
+    });
+  });
+  it("delivers a mention alert only to the mentioned person's machines", async () => {
+    const sender = await enrol(),
+      second = await enrol({ login: sender.login }),
+      recipient = await enrol();
+    const id = (
+      (
+        await call(sender, "POST", "/relay/v1/chat/conversations", {
+          kind: "channel",
+          name: "f2-" + randomText(4),
+          private: false,
+          agents: "off",
+        })
+      ).body as { id: string }
+    ).id;
+    const path = "/relay/v1/chat/conversations/" + id;
+    const person = (
+      (await call(recipient, "GET", "/relay/v1/capabilities")).body as { me: { id: string } }
+    ).me;
+    await call(recipient, "PUT", path + "/members/" + person.id);
+    const settings = { notify: "mentions", muted: false };
+    expect((await call(recipient, "PUT", path + "/settings", settings)).body).toEqual(settings);
+    const theirs = await openEvents(recipient),
+      mine = await openEvents(second);
+    try {
+      const text = "@" + recipient.login + " please review";
+      await call(sender, "POST", "/relay/v1/chat/messages", {
+        conversationId: id,
+        key: randomText(5),
+        text,
+      });
+      expect((await nextEvent(theirs)).data).toMatchObject({
+        notice: { author: sender.login, text },
+      });
+      expect((await nextEvent(mine)).data).not.toHaveProperty("notice");
+    } finally {
+      await theirs.cancel();
+      await mine.cancel();
+    }
+  });
   it("creates a channel, syncs edits, and keeps each person's read position private", async () => {
     const owner = await enrol();
     const otherMachine = await enrol({ login: owner.login });

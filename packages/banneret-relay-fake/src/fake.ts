@@ -17,8 +17,10 @@ import type {
   ChatEdit,
   ChatMessage,
   ChatPatch,
+  ChatNotifications,
   ChatPost,
   ChatRead,
+  ChatSettings,
   PoolConfig,
   PoolHostFacts,
   PoolNextRequest,
@@ -1218,6 +1220,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const critical = recipient ? activeAlarms().filter((a) => a.severity === "critical") : [];
     return byUrgency([
       ...(needs.get(person.id) ?? []),
+      ...chatNeeds(person),
       ...approvalNeeds(person),
       ...(person.role === "founder" ? pool.needs().map((need, seq) => ({ ...need, seq })) : []),
       ...critical.map((a, seq) => ({
@@ -1997,8 +2000,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const publishBundle = (bundleSha: string) =>
     emit("bundle.changed", "BundleChangedEvent", { at: iso(Date.now()), bundleSha }, null);
 
-  // The fake starts with an empty change log. Only channel data is enabled in F0.
+  const ownersAllowingDmReads = new Set<string>();
+  const preferences = new Map<string, ChatNotifications>();
   type Channel = {
+    dmKey?: string;
     id: string;
     name: string;
     purpose: string;
@@ -2066,10 +2071,59 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           "message" in value
             ? { ...value, message: messageView(value.message, stream.personId) }
             : value;
-        const inline = { seq: value.seq, change };
-        const event =
-          Buffer.byteLength(JSON.stringify(inline)) <= 8192 ? inline : { seq: value.seq };
+        const m =
+          value.kind === "message.created" && "message" in value ? value.message : undefined;
+        const prefs = preferences.get(cursorKey(stream.personId, channel.id));
+        const eligible =
+          m &&
+          m.author.kind !== "system" &&
+          m.kind !== "progress" &&
+          !(m.author.kind === "person" && m.author.id === stream.personId) &&
+          (channel.dmKey ||
+            m.ask?.to.id === stream.personId ||
+            (channel.members.has(stream.personId) &&
+              !prefs?.muted &&
+              prefs?.notify !== "nothing" &&
+              (prefs?.notify === "all" ||
+                m.mentions.some((t) => t.id === stream.personId) ||
+                (m.threadRootId && follows.get(m.threadRootId)?.has(stream.personId)))));
+        const hint = {
+          seq: value.seq,
+          ...(eligible
+            ? {
+                notice: {
+                  messageId: m.id,
+                  author: m.author.kind === "person" ? m.author.login : m.author.handle,
+                  text: m.text.slice(0, 240),
+                },
+              }
+            : {}),
+        };
+        const inline = { ...hint, change };
+        const event = Buffer.byteLength(JSON.stringify(inline)) <= 8192 ? inline : hint;
         stream.response.write(`event: chat.changed\ndata: ${JSON.stringify(event)}\n\n`);
+      }
+    }
+    if ("message" in value || value.kind === "read.moved") {
+      for (const p of people.values()) {
+        if (p.removed || !visible(channel, p.id) || (person && person !== p.id)) continue;
+        if (
+          "message" in value &&
+          !channel.dmKey &&
+          !value.message.mentions.some((t) => t.id === p.id) &&
+          value.kind === "message.created"
+        )
+          continue;
+        const items = personalNeeds(p);
+        const item = "message" in value && items.find((i) => i.id === value.message.id);
+        if (item && value.kind === "message.created")
+          emit("mention", "MentionEvent", { at: value.message.createdAt, item }, p.id);
+        emit(
+          "needs.changed",
+          "NeedsChangedEvent",
+          { at: iso(Date.now()), count: items.length },
+          p.id,
+        );
       }
     }
   };
@@ -2084,18 +2138,31 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     );
     return {
       id: channel.id,
-      kind: "channel",
-      name: channel.name,
+      ...(channel.dmKey
+        ? {
+            kind: "dm" as const,
+            private: true as const,
+            agentReaders: [...channel.members]
+              .filter((id) => ownersAllowingDmReads.has(id))
+              .map((personId) => ({ personId, login: people.get(personId)!.login })),
+            members: [...channel.members].map((id) => ({
+              kind: "person" as const,
+              id,
+              login: people.get(id)!.login,
+            })),
+          }
+        : { kind: "channel" as const, private: channel.private, name: channel.name }),
       purpose: channel.purpose,
-      private: channel.private,
       agents: channel.agents,
       archived: channel.archived,
       memberCount: { people: channel.members.size, agents: 0 },
       lastSeq: roots.at(-1)?.seq ?? 0,
       me: {
         member: channel.members.has(person.id),
-        notify: "mentions",
-        muted: false,
+        ...(preferences.get(cursorKey(person.id, channel.id)) ?? {
+          notify: "mentions",
+          muted: false,
+        }),
         readSeq,
         unread: unread.length,
         mentions: unread.filter((m) => m.mentions.some((t) => t.id === person.id)).length,
@@ -2103,10 +2170,40 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     };
   };
 
+  function chatNeeds(person: Person) {
+    return [...messages.values()].flatMap((m) => {
+      const c = channels.get(m.conversationId);
+      if (
+        !c ||
+        !visible(c, person.id) ||
+        m.deleted ||
+        m.author.kind === "system" ||
+        (m.author.kind === "person" && m.author.id === person.id) ||
+        (!c.dmKey && !m.mentions.some((t) => t.id === person.id)) ||
+        m.seq <= (cursors.get(cursorKey(person.id, c.id, m.threadRootId)) ?? 0)
+      )
+        return [];
+      return [
+        {
+          seq: m.seq,
+          id: m.id,
+          createdAt: m.createdAt,
+          title: m.text.slice(0, 300),
+          kind: c.dmKey ? "agent_message" : "mention",
+          chatRead: {
+            conversationId: c.id,
+            ...(m.threadRootId ? { threadRootId: m.threadRootId } : {}),
+            seq: m.seq,
+          },
+        },
+      ];
+    });
+  }
   const removeStaff = (login: string) => {
     const person = peopleByLogin.get(login);
     if (!person || person.removed) throw new RelayError("not_found", "No such person.");
     person.removed = true;
+    ownersAllowingDmReads.delete(person.id);
     snapshotHeads.delete(person.id);
     for (const machine of machines.values())
       if (machine.personId === person.id && machine.revokedAt === null) revokeMachine(machine);
@@ -2295,7 +2392,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     id: "chat",
                     kind: "chat",
                     version: 1,
-                    flags: ["channels", "private_channels", "threads", "reactions"],
+                    flags: [
+                      "channels",
+                      "private_channels",
+                      "threads",
+                      "reactions",
+                      "dms",
+                      "group_dms",
+                    ],
                   },
                 ]
               : []),
@@ -2494,6 +2598,26 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         return mentions;
       };
       if (query.has("asHandle")) throw new RelayError("forbidden", "Unknown agent handle.");
+      if (resource === "me" && id === "settings" && !action) {
+        if (method === "GET")
+          return send("ChatSettings", { agentsReadMyDms: ownersAllowingDmReads.has(person.id) });
+        if (method === "PUT") {
+          const settings = parseJson(body, "ChatSettings") as ChatSettings;
+          if (settings.agentsReadMyDms !== ownersAllowingDmReads.has(person.id)) {
+            if (settings.agentsReadMyDms) ownersAllowingDmReads.add(person.id);
+            else ownersAllowingDmReads.delete(person.id);
+            for (const c of channels.values())
+              if (c.dmKey && c.members.has(person.id))
+                chatChange(c, {
+                  kind: "conversation.updated",
+                  seq: ++chatSeq,
+                  refId: c.id,
+                  conversationId: c.id,
+                });
+          }
+          return send("ChatSettings", settings);
+        }
+      }
       if (resource === "changes" && method === "GET" && !id) {
         const after = query.get("after") ?? "";
         if (!/^\d+$/.test(after) || !Number.isSafeInteger(Number(after)))
@@ -2532,8 +2656,38 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           );
         if (method === "POST") {
           const input = parseJson(body, "ChatCreate") as ChatCreate;
+          if (input.kind === "dm") {
+            const members = new Set([person.id, ...input.members]);
+            if (
+              members.size < 2 ||
+              members.size > 8 ||
+              [...members].some((id) => !people.has(id) || people.get(id)?.removed)
+            )
+              throw new RelayError("malformed", "Choose two to eight staff members.");
+            const dmKey = JSON.stringify([...members].sort());
+            const existing = [...channels.values()].find((c) => c.dmKey === dmKey);
+            if (existing) return send("ChatConversation", channelView(existing, person));
+            const c: Channel = {
+              dmKey,
+              id: randomId("c"),
+              name: "",
+              purpose: "",
+              private: true,
+              agents: "off",
+              archived: false,
+              members,
+              creator: person.id,
+            };
+            channels.set(c.id, c);
+            chatChange(c, {
+              kind: "conversation.updated",
+              seq: ++chatSeq,
+              refId: c.id,
+              conversationId: c.id,
+            });
+            return send("ChatConversation", channelView(c, person));
+          }
           if (channels.size >= 500) throw new RelayError("malformed", "Channel limit reached.");
-          if (input.kind !== "channel") throw new RelayError("forbidden", "DMs are disabled.");
           if ([...channels.values()].some((c) => c.name === input.name))
             throw new RelayError("malformed", "This channel name is taken.");
           const c: Channel = {
@@ -2556,6 +2710,20 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       }
       if (resource === "conversations" && id) {
         const c = channelFor(id);
+        if (c.dmKey && method !== "GET")
+          throw new RelayError("forbidden", "DM participants are fixed.");
+        if (action === "settings" && method === "PUT") {
+          if (!c.members.has(person.id))
+            throw new RelayError("forbidden", "Join the channel first.");
+          const settings = parseJson(body, "ChatNotifications") as ChatNotifications;
+          preferences.set(cursorKey(person.id, c.id), settings);
+          chatChange(
+            c,
+            { kind: "settings.updated", seq: ++chatSeq, refId: id, conversationId: id },
+            person.id,
+          );
+          return send("ChatNotifications", settings);
+        }
         if (!action && method === "PATCH") {
           if (c.creator !== person.id && person.role !== "founder")
             throw new RelayError(

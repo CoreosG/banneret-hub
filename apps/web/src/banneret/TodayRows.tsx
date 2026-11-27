@@ -25,7 +25,10 @@ import {
   ShieldCheckIcon,
   UserRoundIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { chatHref } from "./chat/ChannelRows";
+import { chatRpc } from "./chat/client";
+import type { RelayTarget } from "./enrolmentStore";
+import { useState, type ReactNode } from "react";
 
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { isElectron } from "../env";
@@ -157,6 +160,7 @@ function TitleLink(props: { readonly title: string; readonly url: string | undef
 }
 
 const NEEDS_ICONS: Readonly<Record<string, LucideIcon>> = {
+  chat_ask: MessageCircleQuestionIcon,
   thread_question: MessageCircleQuestionIcon,
   thread_approval: ShieldCheckIcon,
   pull_request: PullRequestGlyph.pullRequest,
@@ -170,8 +174,11 @@ const NEEDS_ICONS: Readonly<Record<string, LucideIcon>> = {
 };
 
 /** One thing that needs the person: kind icon, the subject, who asks and when, and where it opens. */
-export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem }) {
+export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem; target: RelayTarget }) {
   const { item } = props;
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+  const read = item.chatRead;
   const Icon = NEEDS_ICONS[item.kind] ?? CircleDotIcon;
   return (
     <li data-kind={item.kind} className="min-w-0">
@@ -185,7 +192,7 @@ export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem }) {
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn(TYPE.cardTitle, "break-words")}>{item.title}</span>
           <span className={TYPE.meta}>
-            {needsKindLabel(item.kind)}
+            {read && item.kind === "agent_message" ? "Direct message" : needsKindLabel(item.kind)}
             {item.from === undefined ? null : loginSuffix("from", item.from.login)}
             {" · "}
             <RelativeTime at={item.createdAt} />
@@ -194,7 +201,31 @@ export function NeedsRow(props: { readonly item: BanneretFeedNeedsItem }) {
             <span className={cn(TYPE.meta, "break-words")}>Recommended: {item.recommendation}</span>
           )}
         </div>
-        <OpenTarget deepLink={item.deepLink} url={item.url} />
+        {read ? (
+          <>
+            <button
+              className={OPEN_LOOK}
+              onClick={() =>
+                void navigate({ href: chatHref(read.conversationId, read.threadRootId) })
+              }
+            >
+              Open conversation
+            </button>
+            <button
+              className={OPEN_LOOK}
+              onClick={() =>
+                void chatRpc
+                  .run(props.target, { kind: "read", read })
+                  .catch((e) => setError(String(e)))
+              }
+            >
+              Mark read
+            </button>
+            {error && <span role="alert">{error}</span>}
+          </>
+        ) : (
+          <OpenTarget deepLink={item.deepLink} url={item.url} />
+        )}
       </SectionRow>
     </li>
   );

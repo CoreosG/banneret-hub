@@ -9,6 +9,8 @@
 // task for the Task tab, are read on request.
 import {
   BANNERET_RELAY_FEED_WS_METHODS,
+  ChatNotice,
+  ChatRead,
   type ChannelAction,
   type ChannelResult,
   type BanneretEnrolmentView,
@@ -39,6 +41,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -240,6 +243,8 @@ const deepLink = (value: unknown, labelFor: LabelFor): BanneretFeedDeepLink | un
   };
 };
 
+const isChatRead = Schema.is(ChatRead);
+const isChatNotice = Schema.is(ChatNotice);
 const needsItem = (value: unknown, labelFor: LabelFor): BanneretFeedNeedsItem | undefined => {
   const source = fields(value);
   const id = text(source?.id, 64);
@@ -254,6 +259,7 @@ const needsItem = (value: unknown, labelFor: LabelFor): BanneretFeedNeedsItem | 
     kind,
     title,
     createdAt,
+    ...(isChatRead(source?.chatRead) ? { chatRead: source.chatRead } : {}),
     ...optional("recommendation", text(source?.recommendation, 500)),
     ...optional("from", person(source?.from)),
     ...optional("url", text(source?.url, 2048)),
@@ -826,7 +832,10 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     if (message.id !== undefined && message.id !== "") lastEventId = message.id;
     const data = parseData(message.data);
     switch (message.event) {
+      // Live eligible create -> one transient notice; subscribe, reconnect, restart -> snapshot without notices.
       case "chat.changed":
+        if (sections.includes("chat") && typeof data?.seq === "number" && isChatNotice(data.notice))
+          yield* PubSub.publish(changes, { ...snapshot(), chatNotice: data.notice });
         yield* syncChat(key, typeof data?.seq === "number" && data.change ? data.seq : undefined);
         return;
       case "needs.changed": {

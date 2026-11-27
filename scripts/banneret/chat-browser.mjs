@@ -38,7 +38,7 @@ async function enrol(relay, login) {
     return result;
   };
   const me = (await call("GET", "capabilities")).body.me;
-  return async (action) => {
+  const run = async (action) => {
     try {
       const result = await callChannel(action, (method, path, body) =>
         call(method, "chat/" + path.replace(/\/members\/@me$/, "/members/" + me.id), body),
@@ -48,6 +48,7 @@ async function enrol(relay, login) {
       return { ok: false, message: error.message };
     }
   };
+  return Object.assign(run, { me, call });
 }
 export async function command(op, arg) {
   if (op === "start") {
@@ -87,7 +88,19 @@ export async function command(op, arg) {
         key: "mention",
         text: "@ada could you check the upload flow before we release?",
       });
-      return { id: c.id, root: root.id };
+      const kim = await enrol(relay, "kim");
+      await kim.call("PUT", "chat/me/settings", { agentsReadMyDms: true });
+      return {
+        id: c.id,
+        root: root.id,
+        people: [ada.me, leo.me, kim.me].map(({ id, login }) => ({
+          id,
+          login,
+          role: "founder",
+          machines: [],
+          sessions: [],
+        })),
+      };
     } catch (e) {
       await relay.close();
       throw e;
