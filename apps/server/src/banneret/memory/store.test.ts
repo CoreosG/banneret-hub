@@ -94,3 +94,50 @@ it("reviews only the displayed version and updates search across edit, dispute a
     expect(s.list(false)).toEqual([]);
   });
 });
+
+it("round trips note files and imports Claude notes and rules as proposals", () => {
+  withNotes(fixture(), "project", 123, (s) => {
+    s.propose({ ...proposal, text: "First line\n\n## Details\nSecond line\n" });
+    const version = s.list(true)[0]!.version;
+    s.review(proposal.key, version, { kind: "confirm" });
+    const file = s.exportFiles()[0]!;
+    expect(file.content).toContain("confirmedAt: 123");
+    expect(s.importFile(file.name, file.content, "first")).toMatchObject({ skipped: 1 });
+    withNotes(fixture(), "other", 456, (target) => {
+      expect(target.importFile(file.name, file.content, "first")).toMatchObject({ proposed: 1 });
+      expect(target.read(proposal.key)).toMatchObject({
+        text: "First line\n\n## Details\nSecond line\n",
+        trust: "proposed",
+        confirmedAt: null,
+        createdAt: 456,
+      });
+      expect(
+        target.importFile(
+          "style.md",
+          "---\nname: Review style\ndescription: team style\ntype: feedback\n---\nSmall patches.",
+          "second",
+        ),
+      ).toMatchObject({ proposed: 1 });
+      expect(target.importFile("AGENTS.md", "Read the glossary.", "second")).toMatchObject({
+        proposed: 1,
+      });
+      expect(target.importFile("CLAUDE.md", "Detailed rules.\n".repeat(400), "long")).toMatchObject(
+        { proposed: 2 },
+      );
+      const second = target.list(true).filter((n) => n.batch === "second");
+      expect(second).toHaveLength(2);
+      target.confirmImport("second", second);
+      expect(target.list(true).map((n) => n.batch)).not.toContain("second");
+      expect(target.read(proposal.key).trust).toBe("proposed");
+    });
+  });
+});
+
+it("refuses secrets on import and propose without storing or echoing them", () => {
+  const token = "ghp_" + "a".repeat(36);
+  withNotes(fixture(), "project", 1, (s) => {
+    expect(() => s.propose({ ...proposal, why: token })).toThrow("token, password or private key");
+    expect(s.importFile("rules.md", token, "batch").reason).toMatch(/^Refused:/);
+    expect(s.counts().total).toBe(0);
+  });
+});

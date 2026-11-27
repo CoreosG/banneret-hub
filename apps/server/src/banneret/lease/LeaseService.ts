@@ -1,4 +1,5 @@
 import { pluginHandlers } from "../plugins/registry.ts";
+import { readDesignations } from "../OrchestratorState.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { memorySettingsHandlers } from "../memory/providerMemoryPolicy.ts";
 import type { memoryReviewInput } from "@t3tools/contracts";
@@ -705,6 +706,12 @@ export const layer = layerWith({}).pipe(
 );
 
 /** Handlers for the lease RPCs, spread into the WebSocket handler group. */
+const reviewAccess = Effect.fn("BanneretMemory.reviewAccess")(function* (threadId: ThreadId) {
+  const access = yield* memoryAccess(threadId, yield* (yield* ServerEnvironment).getEnvironmentId);
+  if (!access.orchestrator) return yield* unavailable();
+  return access;
+});
+
 export const rpcHandlers = {
   [TASK_LEASE_WS_METHODS.sandboxHandoff]: Effect.fn("LeaseService.rpc.sandboxHandoff")(
     function* (input: { relayOrigin: string; taskId: string; requestId: string }) {
@@ -745,24 +752,68 @@ export const rpcHandlers = {
     },
   ),
   ...memorySettingsHandlers,
+  "memory.targets": Effect.fn("BanneretMemory.targets")(
+    function* () {
+      const roles = Object.values(yield* readDesignations);
+      return [
+        ...new Set(
+          roles.flatMap((r) => [...(r.main ? [r.main] : []), ...Object.values(r.projects)]),
+        ),
+      ];
+    },
+    Effect.mapError(
+      () => new TaskLeaseError({ reason: "unavailable", detail: "Could not load orchestrators." }),
+    ),
+  ),
+  "memory.confirmImport": Effect.fn("BanneretMemory.confirmImport")(
+    function* ({
+      threadId,
+      batch,
+      notes,
+    }: {
+      threadId: ThreadId;
+      batch: string;
+      notes: readonly { key: string; version: string }[];
+    }) {
+      const access = yield* reviewAccess(threadId);
+      return yield* access.open((s) => s.confirmImport(batch, notes));
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
+  "memory.importFile": Effect.fn("BanneretMemory.importFile")(
+    function* ({
+      threadId,
+      name,
+      content,
+      batch,
+    }: {
+      threadId: ThreadId;
+      name: string;
+      content: string;
+      batch: string;
+    }) {
+      const access = yield* reviewAccess(threadId);
+      return yield* access.open((s) => s.importFile(name, content, batch));
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
+  "memory.exportFiles": Effect.fn("BanneretMemory.exportFiles")(
+    function* ({ threadId }: { threadId: ThreadId }) {
+      const access = yield* reviewAccess(threadId);
+      return yield* access.open((s) => s.exportFiles());
+    },
+    Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
+  ),
   "memory.list": Effect.fn("BanneretMemory.list")(
     function* ({ threadId, pendingOnly }: { threadId: ThreadId; pendingOnly: boolean }) {
-      const access = yield* memoryAccess(
-        threadId,
-        yield* (yield* ServerEnvironment).getEnvironmentId,
-      );
-      if (!access.orchestrator) return yield* unavailable();
+      const access = yield* reviewAccess(threadId);
       return yield* access.open((s) => s.list(pendingOnly));
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
   ),
   "memory.review": Effect.fn("BanneretMemory.review")(
     function* ({ threadId, key, version, action }: typeof memoryReviewInput.Type) {
-      const access = yield* memoryAccess(
-        threadId,
-        yield* (yield* ServerEnvironment).getEnvironmentId,
-      );
-      if (!access.orchestrator) return yield* unavailable();
+      const access = yield* reviewAccess(threadId);
       return yield* access.open((s) => s.review(key, version, action));
     },
     Effect.mapError((e) => new TaskLeaseError({ reason: "unavailable", detail: e.message })),
