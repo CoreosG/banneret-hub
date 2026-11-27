@@ -90,6 +90,14 @@ interface RelayFeedInstance {
   /** One task with its preview and sign-off; `notFound` when the relay does not know it. */
   readonly task: (taskId: string) => Effect.Effect<BanneretTaskRead>;
   readonly events: Stream.Stream<BanneretFeedState>;
+  /** The capabilities `mcpTools`, as last read; null until capabilities have been read. */
+  readonly mcpTools: Effect.Effect<ReadonlyArray<RelayMcpTool> | null>;
+}
+
+/** One capabilities `mcpTools` entry as the Hub keeps it: the name and the lowest role that may call it. */
+export interface RelayMcpTool {
+  readonly name: string;
+  readonly role: string;
 }
 
 /** Every call names its relay; a relay this environment has no enrolment with answers as not joined. */
@@ -109,6 +117,8 @@ interface FeedService {
   ) => Effect.Effect<BanneretGraveyardPageRead>;
   readonly task: (relayOrigin: string, taskId: string) => Effect.Effect<BanneretTaskRead>;
   readonly events: (relayOrigin: string) => Stream.Stream<BanneretFeedState>;
+  /** Server only, for the agent toolkit; null for a relay not joined or whose capabilities are unread. */
+  readonly mcpTools: (relayOrigin: string) => Effect.Effect<ReadonlyArray<RelayMcpTool> | null>;
 }
 
 const NOT_JOINED = { joined: false, value: null, fetchedAt: null } as const;
@@ -137,6 +147,7 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
       graveyardPage: () => Effect.succeed(NOT_JOINED),
       task: () => Effect.succeed(NOT_JOINED),
       events: () => Stream.concat(Stream.make(NOT_JOINED_SNAPSHOT), Stream.never),
+      mcpTools: () => Effect.succeed(null),
     }),
   },
 ) {}
@@ -377,6 +388,15 @@ const linkedEnvironments = (body: unknown): Set<string> => {
 const sectionKinds = (body: unknown): ReadonlyArray<string> =>
   defined(list(fields(body)?.sections, 64).map((section) => text(fields(section)?.kind, 32)));
 
+const mcpToolsOf = (body: unknown): ReadonlyArray<RelayMcpTool> =>
+  defined(
+    list(fields(body)?.mcpTools, 256).map((entry) => {
+      const name = text(fields(entry)?.name, 64);
+      const role = text(fields(entry)?.role, 64);
+      return name === undefined || role === undefined ? undefined : { name, role };
+    }),
+  );
+
 /** The flags of the first section of `kind`, or null when the relay does not advertise one. */
 const sectionFlags = (body: unknown, kind: string): ReadonlyArray<string> | null => {
   const section = list(fields(body)?.sections, 64)
@@ -472,6 +492,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   let since: string | null = null;
   let sections: ReadonlyArray<string> = [];
   let sectionsKnown = false;
+  let mcpTools: ReadonlyArray<RelayMcpTool> = [];
   // Never reset, so a client can tell any two states apart.
   let revision = 0;
   let needsCount: number | null = null;
@@ -654,6 +675,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           if (!stillJoined(key)) return Effect.void;
           sections = sectionKinds(reply.body);
           sectionsKnown = true;
+          mcpTools = mcpToolsOf(reply.body);
           boardFlags = sectionFlags(reply.body, "board");
           mapFlags = sectionFlags(reply.body, "map");
           feedFlags = sectionFlags(reply.body, "feed");
@@ -1126,6 +1148,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         since = null;
         sections = [];
         sectionsKnown = false;
+        mcpTools = [];
         needsCount = null;
         today = null;
         needsFirst = null;
@@ -1179,6 +1202,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     graveyardPage: readGraveyardPage,
     task: readTask,
     events,
+    mcpTools: Effect.sync(() => (sectionsKnown ? mcpTools : null)),
   };
   return service;
 });
@@ -1245,6 +1269,10 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     graveyardPage: (relayOrigin, cursor) =>
       notJoined(relayOrigin, (feed) => feed.graveyardPage(cursor)),
     task: (relayOrigin, taskId) => notJoined(relayOrigin, (feed) => feed.task(taskId)),
+    mcpTools: (relayOrigin) =>
+      Effect.flatMap(feedFor(relayOrigin), (feed) =>
+        feed === undefined ? Effect.succeed(null) : feed.mcpTools,
+      ),
     events: (relayOrigin) =>
       Stream.unwrap(
         Effect.map(feedFor(relayOrigin), (feed) =>

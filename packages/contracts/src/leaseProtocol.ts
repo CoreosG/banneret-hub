@@ -23,6 +23,21 @@ export type LeaseReleaseReason = (typeof LEASE_RELEASE_REASONS)[number];
 const LEASE_SYSTEM_REASONS = ["lost_claim", "take_failed"] as const;
 export type LeaseSystemReason = (typeof LEASE_SYSTEM_REASONS)[number];
 
+/**
+ * The agent tools the Hub serves over MCP (docs/banneret/agents.md). A relay enables each one by naming it in
+ * its capabilities `mcpTools`; the Hub keeps its own description and schema.
+ */
+export const BANNERET_AGENT_TOOLS = [
+  "banneret_board",
+  "banneret_needs",
+  "banneret_task",
+  "banneret_lease_check",
+  "banneret_lease_take",
+  "banneret_lease_release",
+  "banneret_lease_withdraw",
+] as const;
+export type BanneretAgentToolName = (typeof BANNERET_AGENT_TOOLS)[number];
+
 export const LEASE_LABEL_CLAIMED = "claimed";
 export const LEASE_LABEL_PAUSED = "paused";
 /** How long tracker state may disagree with the comments before the lease reads as `incomplete`. */

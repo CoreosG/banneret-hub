@@ -576,7 +576,9 @@ the person's last choice per repository, in the browser:
 - **Default machine:** the one this window took the task on, then the last choice for the repository, then the
   last machine used, then the page's own machine, then the first by name.
 - **The server refuses** a lease call that names a relay it has not joined, before reading the tracker.
-- **The claim** names the machine: `claim: <login>/<machine label>`, with the label made to fit `<agent>`.
+- **The claim** names the machine: `claim: <login>/<machine label>`, with the label made to fit `<agent>`. An agent
+  that takes a task through the agent toolkit writes from its own machine and names its session instead:
+  `claim: <login>/<provider>-<start of the thread id>`, such as `claim: ada-example/claude-1a2b3c4d`.
 
 A second operation on a task while one runs is refused as busy. After a restart nothing is remembered: every task
 is what the tracker says, folded as above.
@@ -770,7 +772,10 @@ thread when the environment is its own, and otherwise says which machine holds i
   - `me {id, login, role}`, so no separate identity call is needed. `role` is an open set (`founder`,
     `limited_staff` today); a client treats an unknown role as `limited_staff`;
   - `sections[] {id, kind, version, flags}`. The Hub renders only these, and ignores kinds it does not know;
-  - `mcpTools[] {name, description, role, inputSchema?}`. `role` is the lowest role that may call the tool;
+  - `mcpTools[] {name, description, role, inputSchema?}`. `role` is the lowest role that may call the tool.
+    The Hub offers its agents exactly the tools named here that it implements, today the `banneret_*` agent
+    toolkit (the Hub's `docs/banneret/agents.md`). For those, an entry only switches the tool on and sets its role; the
+    Hub keeps its own description and schema. The Hub ignores a name it does not implement;
   - `adapters[] {role, kind, version?}`, for the work tracker, staff directory, knowledge and health.
 - **Refetching.** The facts response carries `capabilitiesVersion`, and the `capabilities.changed` event says when
   to refetch. The `GET /capabilities` `ETag` is the same value in double quotes: `capabilitiesVersion` `c-7f3a`
