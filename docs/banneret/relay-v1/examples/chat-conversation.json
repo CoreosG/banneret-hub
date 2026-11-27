@@ -1,7 +1,6 @@
 {
   "kind": "channel",
   "name": "example",
-  "private": false,
   "id": "example_1",
   "purpose": "example",
   "agents": "allowed",
@@ -17,6 +16,25 @@
     "muted": false,
     "readSeq": 1,
     "unread": 1,
-    "mentions": 1
-  }
+    "mentions": 1,
+    "can": {
+      "read": true,
+      "post": false,
+      "reply": false,
+      "join": false,
+      "request": false,
+      "invite": false,
+      "manage": false,
+      "openToOutside": false
+    }
+  },
+  "access": {
+    "visibility": "public",
+    "join": "open",
+    "outsiders": "none",
+    "post": "everyone",
+    "replies": "everyone",
+    "invite": "members"
+  },
+  "managers": []
 }

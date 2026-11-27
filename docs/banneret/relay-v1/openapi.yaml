@@ -29,6 +29,337 @@ tags:
   - name: snapshot
   - name: pool
 paths:
+  /roles:
+    get:
+      operationId: listRoles
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Roles'
+        default:
+          $ref: '#/components/responses/Error'
+  /roles/{id}:
+    put:
+      operationId: putRole
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/RoleId'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleDetail'
+        default:
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleWrite'
+    delete:
+      operationId: deleteRole
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/RoleId'
+      responses:
+        '204':
+          description: Success.
+        default:
+          $ref: '#/components/responses/Error'
+  /roles/{id}/reset:
+    post:
+      operationId: resetRole
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/RoleId'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleDetail'
+        default:
+          $ref: '#/components/responses/Error'
+  /staff/{personId}/role:
+    put:
+      operationId: assignRole
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: personId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Success.
+        default:
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleAssignment'
+  /chat/directory:
+    get:
+      operationId: chatDirectory
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatConversations'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/conversations/{id}/managers/{personId}:
+    put:
+      operationId: addManager
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: path
+        name: personId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Success.
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: removeManager
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      - in: path
+        name: personId
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '204':
+          description: Success.
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/conversations/{id}/requests:
+    post:
+      operationId: requestToJoin
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatJoinRequest'
+        default:
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequestInput'
+    get:
+      operationId: listJoinRequests
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatJoinRequests'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/requests/{id}/approve:
+    post:
+      operationId: approveJoinRequest
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatJoinRequest'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/requests/{id}/decline:
+    post:
+      operationId: declineJoinRequest
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatJoinRequest'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/requests/{id}:
+    delete:
+      operationId: cancelJoinRequest
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatJoinRequest'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/me/agents/wake:
+    put:
+      operationId: setAllAgentWake
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      responses:
+        '204':
+          description: Success.
+        default:
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatWakeSetting'
+  /chat/inbox:
+    post:
+      operationId: consumeAgentInbox
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      responses:
+        '200':
+          description: Success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatDeliveries'
+        default:
+          $ref: '#/components/responses/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatAct'
   /pool/founder:
     get:
       tags:
@@ -275,7 +606,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EnrolPollResponse'
+                $ref: '#/components/schemas/PoolPollResponse'
         default:
           $ref: '#/components/responses/Error'
   /pool/hosts/facts:
@@ -504,8 +835,9 @@ paths:
         schema:
           $ref: '#/components/schemas/Id'
       responses:
-        '204':
-          description: Updated.
+        '200':
+          description: Membership.
+          content: {application/json: {schema: {$ref: '#/components/schemas/ChatMembership'}}}
         default:
           $ref: '#/components/responses/Error'
     delete:
@@ -2002,6 +2334,7 @@ paths:
           schema: { type: string, maxLength: 128 }
       x-sse-events:
         chat.changed: { $ref: "#/components/schemas/ChatChangedEvent" }
+        roles.changed: {$ref: "#/components/schemas/RolesChangedEvent"}
         chat.delivery: { $ref: "#/components/schemas/ChatDeliveryEvent" }
         needs.changed: { $ref: "#/components/schemas/NeedsChangedEvent" }
         mention: { $ref: "#/components/schemas/MentionEvent" }
@@ -2788,6 +3121,364 @@ components:
           $ref: '#/components/schemas/Id'
         login:
           $ref: '#/components/schemas/Login'
+    RolesChangedEvent: {type: object, additionalProperties: false}
+    ChatCan:
+      type: object
+      additionalProperties: false
+      required:
+      - read
+      - post
+      - reply
+      - join
+      - request
+      - invite
+      - manage
+      - openToOutside
+      properties:
+        read:
+          type: boolean
+        post:
+          type: boolean
+        reply:
+          type: boolean
+        join:
+          type: boolean
+        request:
+          type: boolean
+        invite:
+          type: boolean
+        manage:
+          type: boolean
+        openToOutside:
+          type: boolean
+    ChatAccess:
+      type: object
+      additionalProperties: false
+      required:
+      - visibility
+      - join
+      - outsiders
+      - post
+      - replies
+      - invite
+      properties:
+        visibility:
+          type: string
+          enum:
+          - public
+          - private
+        join:
+          type: string
+          enum:
+          - open
+          - request
+          - invite
+        outsiders:
+          type: string
+          enum:
+          - none
+          - invited
+          - listed
+        post:
+          type: string
+          enum:
+          - everyone
+          - roles
+          - managers
+        postRoles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleId'
+        replies:
+          type: string
+          enum:
+          - everyone
+          - same_as_post
+        invite:
+          type: string
+          enum:
+          - members
+          - managers
+      allOf:
+      - if:
+          properties:
+            visibility:
+              const: private
+        then:
+          properties:
+            join:
+              const: invite
+            outsiders:
+              type: string
+              enum:
+              - none
+              - invited
+      - if:
+          properties:
+            post:
+              const: roles
+        then:
+          required:
+          - postRoles
+          properties:
+            postRoles:
+              minItems: 1
+        else:
+          not:
+            required:
+            - postRoles
+    RoleId:
+      type: string
+      pattern: ^[a-z][a-z0-9_]{0,31}$
+    RoleRef:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      properties:
+        id:
+          $ref: '#/components/schemas/RoleId'
+        name:
+          type: string
+          minLength: 1
+    Admission:
+      type: string
+      enum:
+      - member
+      - outside
+    RolePermissions:
+      type: object
+      additionalProperties: false
+      properties:
+        channels.seePublic:
+          const: true
+        channels.createPublic:
+          const: true
+        channels.createPrivate:
+          const: true
+        channels.invite:
+          const: true
+        channels.manageAll:
+          const: true
+        channels.openToOutside:
+          const: true
+        channels.directoryAll:
+          const: true
+        dm.group:
+          const: true
+        dm.outsiders:
+          const: true
+        agents.mention:
+          const: true
+        agents.dm:
+          const: true
+        agents.wakeOthers:
+          const: true
+        hub.team:
+          const: true
+        hub.health:
+          const: true
+        hub.pool:
+          const: true
+        hub.machinesAll:
+          const: true
+        relay.admin:
+          const: true
+        dm.start:
+          type: string
+          enum:
+          - anyone
+          - shared_channel
+          - nobody
+        scope.people:
+          type: string
+          enum:
+          - all
+          - shared_channels
+        scope.boards:
+          oneOf:
+          - const: all
+          - type: array
+            items:
+              $ref: '#/components/schemas/Id'
+    RoleWrite:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - forOutside
+      - permissions
+      properties:
+        name:
+          type: string
+          minLength: 1
+        forOutside:
+          type: boolean
+        permissions:
+          $ref: '#/components/schemas/RolePermissions'
+      allOf:
+      - if:
+          properties:
+            forOutside:
+              const: true
+        then:
+          properties:
+            permissions:
+              not:
+                anyOf:
+                - required:
+                  - relay.admin
+                - required:
+                  - channels.manageAll
+                - required:
+                  - channels.openToOutside
+                - required:
+                  - channels.directoryAll
+    RoleDetail:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - forOutside
+      - permissions
+      - memberCount
+      properties:
+        id:
+          $ref: '#/components/schemas/RoleId'
+        name:
+          type: string
+          minLength: 1
+        forOutside:
+          type: boolean
+        permissions:
+          $ref: '#/components/schemas/RolePermissions'
+        template:
+          type: string
+          enum:
+          - founder
+          - staff
+          - contractor
+          - outside
+        memberCount:
+          type: integer
+          minimum: 0
+      allOf:
+      - if:
+          properties:
+            forOutside:
+              const: true
+        then:
+          properties:
+            permissions:
+              not:
+                anyOf:
+                - required:
+                  - relay.admin
+                - required:
+                  - channels.manageAll
+                - required:
+                  - channels.openToOutside
+                - required:
+                  - channels.directoryAll
+    Roles:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleDetail'
+    RoleAssignment:
+      type: object
+      additionalProperties: false
+      required:
+      - roleId
+      properties:
+        roleId:
+          $ref: '#/components/schemas/RoleId'
+    ChatWake:
+      type: string
+      enum:
+      - everyone
+      - owner
+      - nobody
+    ChatWakeSetting:
+      type: object
+      additionalProperties: false
+      required:
+      - wake
+      properties:
+        wake:
+          $ref: '#/components/schemas/ChatWake'
+    ChatRequestInput:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        note:
+          type: string
+          x-maxBytes: 200
+    ChatJoinRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - conversationId
+      - requester
+      - state
+      - createdAt
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        conversationId:
+          $ref: '#/components/schemas/Id'
+        requester:
+          $ref: '#/components/schemas/PersonRef'
+        note:
+          type: string
+        state:
+          type: string
+          enum:
+          - pending
+          - approved
+          - declined
+          - cancelled
+          - expired
+          - void
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        closedBy:
+          $ref: '#/components/schemas/PersonRef'
+    ChatJoinRequests:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatJoinRequest'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatMembership:
+      type: object
+      additionalProperties: false
+      required:
+      - addedBy
+      - member
+      properties:
+        addedBy:
+          $ref: '#/components/schemas/PersonRef'
+        member:
+          $ref: '#/components/schemas/ChatMember'
     ChatMember:
       oneOf:
       - type: object
@@ -2796,6 +3487,8 @@ components:
         - kind
         - id
         - login
+        - role
+        - admission
         properties:
           kind:
             type: string
@@ -2803,6 +3496,8 @@ components:
             - person
           id:
             $ref: '#/components/schemas/Id'
+          role: {$ref: "#/components/schemas/RoleRef"}
+          admission: {$ref: "#/components/schemas/Admission"}
           login:
             $ref: '#/components/schemas/Login'
       - type: object
@@ -2827,6 +3522,7 @@ components:
       type: object
       additionalProperties: false
       required:
+      - can
       - member
       - notify
       - muted
@@ -2834,6 +3530,8 @@ components:
       - unread
       - mentions
       properties:
+        can: {$ref: "#/components/schemas/ChatCan"}
+        request: {"type": "object", "additionalProperties": false, "required": ["id", "createdAt"], "properties": {"id": {"$ref": "#/components/schemas/Id"}, "createdAt": {"$ref": "#/components/schemas/Timestamp"}}}
         member:
           type: boolean
         notify:
@@ -2854,7 +3552,7 @@ components:
           type: integer
           minimum: 0
     ChatDefaultChannels:
-      description: Relay config chat.defaultChannels. Create these public channels and automatically include every staff member.
+      description: Relay config chat.defaultChannels. Create these public channels and auto-add members with channels.seePublic, never outside admissions.
       type: array
       uniqueItems: true
       default: [general]
@@ -2866,7 +3564,8 @@ components:
         required:
         - kind
         - name
-        - private
+        - access
+        - managers
         - id
         - purpose
         - agents
@@ -2882,9 +3581,9 @@ components:
           name:
             type: string
             pattern: ^[a-z0-9][a-z0-9-]{0,39}$
-          defaultChannel: { const: true, description: Every staff member belongs to this channel. }
-          private:
-            type: boolean
+          defaultChannel: { const: true, description: Automatically joined by eligible org members. }
+          access: {$ref: "#/components/schemas/ChatAccess"}
+          managers: {type: array, items: {$ref: "#/components/schemas/PersonRef"}}
           id:
             $ref: '#/components/schemas/Id'
           purpose:
@@ -3287,7 +3986,8 @@ components:
           type: string
           enum:
           - everyone
-          - owner_only
+          - owner
+          - nobody
     ChatActiveProgress:
       type: object
       additionalProperties: false
@@ -3309,6 +4009,7 @@ components:
       additionalProperties: false
       required:
       - threadRef
+      - wakes
       - wake
       - message
       - id
@@ -3321,7 +4022,8 @@ components:
       - expiresAt
       properties:
         threadRef: {type: string}
-        wake: {type: string, enum: [everyone, owner_only]}
+        wakes: {type: boolean}
+        wake: {type: string, enum: [everyone, owner, nobody]}
         message: {$ref: '#/components/schemas/ChatMessage'}
         id:
           $ref: '#/components/schemas/Id'
@@ -3417,6 +4119,8 @@ components:
             - member.added
             - member.removed
             - conversation.updated
+            - request.updated
+            - access.updated
             - settings.updated
             - ask.updated
             - task_thread.linked
@@ -3608,8 +4312,7 @@ components:
         required:
         - kind
         - name
-        - private
-        - agents
+        oneOf: [{required: [template]}, {required: [access]}]
         properties:
           kind:
             type: string
@@ -3621,8 +4324,9 @@ components:
           purpose:
             type: string
             maxLength: 250
-          private:
-            type: boolean
+          template: {enum: [general, team, private, announcement, shared, community]}
+          access: {$ref: "#/components/schemas/ChatAccess"}
+          managers: {type: array, items: {$ref: "#/components/schemas/PersonRef"}}
           agents:
             type: string
             enum:
@@ -3656,8 +4360,8 @@ components:
         purpose:
           type: string
           maxLength: 250
-        private:
-          type: boolean
+        access: {$ref: "#/components/schemas/ChatAccess"}
+        managers: {type: array, items: {$ref: "#/components/schemas/PersonRef"}}
         agents:
           type: string
           enum:
@@ -3671,8 +4375,10 @@ components:
       type: object
       additionalProperties: false
       required:
+      - agentWakeDefault
       - agentsReadMyDms
       properties:
+        agentWakeDefault: {$ref: "#/components/schemas/ChatWake"}
         agentsReadMyDms:
           type: boolean
     ChatNotifications:
@@ -3842,7 +4548,8 @@ components:
           type: string
           enum:
           - everyone
-          - owner_only
+          - owner
+          - nobody
     ChatAct:
       type: object
       additionalProperties: false
@@ -3954,12 +4661,6 @@ components:
       description: A display login (the person's GitHub login with the default staff directory). Display only, never a key.
       type: string
       pattern: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
-    Role:
-      description: |
-        Open set. Known values: `founder`, `limited_staff`. Not a closed enum:
-        clients treat an unknown role as `limited_staff` and never fail on it.
-      type: string
-      pattern: "^[a-z][a-z0-9_]{0,31}$"
     Error:
       type: object
       required: [error]
@@ -3967,12 +4668,41 @@ components:
         error:
           type: object
           required: [code, message, retryable]
+          allOf:
+            - if: {properties: {code: {enum: [role_permission_missing, chat_post_restricted, chat_not_member, chat_invite_restricted, chat_outsiders_not_allowed, chat_manage_restricted, chat_dm_restricted, chat_agent_capped]}}}
+              then:
+                required: [details]
+                properties:
+                  details:
+                    type: object
+                    required: [account, rule]
+                    properties:
+                      account:
+                        type: object
+                        required: [id, login, role, admission]
+                        properties:
+                          id: {$ref: '#/components/schemas/Id'}
+                          login: {$ref: '#/components/schemas/Login'}
+                          role: {$ref: '#/components/schemas/RoleRef'}
+                          admission: {$ref: '#/components/schemas/Admission'}
+                      rule: {type: string}
+                      asHandle: {$ref: '#/components/schemas/Id'}
+                      owner: {$ref: '#/components/schemas/PersonRef'}
+                      conversationId: {$ref: '#/components/schemas/Id'}
+            - if: {required: [details], properties: {details: {required: [reason], properties: {reason: {const: outside_check_pending}}}}}
+              then: {properties: {code: {const: unavailable}, retryable: {const: true}}}
+            - if: {required: [details], properties: {details: {required: [reason], properties: {reason: {enum: [outside_grant_lost, outside_entry_removed, outside_2fa_off, outside_identity_mismatch]}}}}}
+              then: {properties: {code: {const: token_revoked}, retryable: {const: false}}}
           properties:
             code:
               description: |
                 Open set. Known values: `malformed`, `too_large`, `unauthenticated`, `token_revoked`,
                 `bad_signature`, `signature_invalid`, `clock_skew`, `counter_reused`, `forbidden`,
                 `network_identity_mismatch`, `not_found`, `rate_limited`, `capacity`, `unavailable`, `internal`.
+                Role and chat codes: role_permission_missing, role_in_use, role_not_for_outside, chat_outsiders_not_allowed,
+                chat_request_closed, chat_manage_restricted, chat_dm_restricted, chat_agent_capped, chat_post_restricted, chat_invite_restricted, chat_not_member.
+                Outside token_revoked reasons: outside_grant_lost, outside_entry_removed, outside_2fa_off, outside_identity_mismatch.
+                A retryable unavailable response uses outside_check_pending.
                 Not a closed enum: a client treats an unknown code by its
                 HTTP status and never fails on it.
               type: string
@@ -3996,6 +4726,17 @@ components:
               description: {type: string, minLength: 1}
               text: {type: string, description: "Complete SKILL.md with matching name and description."}
               locked: {type: boolean}
+    Me:
+      description: The caller. Present only for an authenticated caller.
+      type: object
+      required: [id, login, role, admission, permissions]
+      properties:
+        id: { $ref: "#/components/schemas/Id" }
+        login: { $ref: "#/components/schemas/Login" }
+        role: { $ref: "#/components/schemas/RoleRef" }
+        admission: { $ref: "#/components/schemas/Admission" }
+        permissions: {type: array, uniqueItems: true, items: {type: string}}
+        machineId: { $ref: "#/components/schemas/Id" }
     Capabilities:
       allOf:
         - if: { required: [sections], properties: { sections: { contains: { properties: { kind: { const: team } } } } } }
@@ -4027,15 +4768,7 @@ components:
               description: Path on the relay's origin of the page where a person confirms enrolment after signing in through the staff directory.
               type: string
               pattern: "^/"
-        me:
-          description: The caller. Present only for an authenticated caller.
-          type: object
-          required: [id, login, role]
-          properties:
-            id: { $ref: "#/components/schemas/Id" }
-            login: { $ref: "#/components/schemas/Login" }
-            role: { $ref: "#/components/schemas/Role" }
-            machineId: { $ref: "#/components/schemas/Id" }
+        me: {$ref: "#/components/schemas/Me"}
         sections:
           description: Present only for an authenticated caller. The client renders only these.
           type: array
@@ -4048,7 +4781,7 @@ components:
           description: |
             Present only for an authenticated caller. The Hub offers its agents exactly the tools named here that it
             implements (the `banneret_*` agent toolkit); for those it keeps its own description and schema, and the
-            entry only switches the tool on and sets its role. A name the Hub does not implement is ignored.
+            entry enables the tool and may require one permission. A name the Hub does not implement is ignored.
           type: array
           maxItems: 256
           items: { $ref: "#/components/schemas/McpTool" }
@@ -4102,7 +4835,7 @@ components:
           then:
             properties:
               version: { const: 1 }
-              flags: { type: array, uniqueItems: true, items: { enum: [channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, asks, task_links, reactions, search, promote] } }
+              flags: { type: array, uniqueItems: true, items: { enum: [channel_access, join_requests, agent_inbox, channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, asks, task_links, reactions, search, promote] } }
         - if: { properties: { kind: { const: team } } }
           then:
             properties:
@@ -4118,7 +4851,7 @@ components:
         kind:
           description: |
             One of the fixed section types: today, needs, machines, health, board, map, feed, task, chat, team,
-            knowledge, pool. Clients ignore kinds they do not know.
+            knowledge, pool, roles. Clients ignore kinds they do not know.
           not: { const: channel }
           type: string
           pattern: "^[a-z][a-z0-9_]{0,31}$"
@@ -4129,13 +4862,12 @@ components:
           items: { type: string, pattern: "^[a-z][a-z0-9_.]{0,63}$" }
     McpTool:
       type: object
-      required: [name, description, role]
+      additionalProperties: false
+      required: [name, description]
       properties:
         name: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$" }
         description: { type: string, minLength: 1, maxLength: 500 }
-        role:
-          description: The lowest role that may call the tool.
-          allOf: [{ $ref: "#/components/schemas/Role" }]
+        requires: {type: string, description: Required permission name. Omit for everyone.}
         inputSchema:
           description: JSON Schema (2020-12) for the tool's arguments.
           type: object
@@ -4213,6 +4945,11 @@ components:
       properties:
         pairingId: { $ref: "#/components/schemas/Id" }
     EnrolPollResponse:
+      allOf:
+        - {$ref: '#/components/schemas/PoolPollResponse'}
+        - if: {properties: {state: {const: refused}}}
+          then: {required: [account]}
+    PoolPollResponse:
       type: object
       required: [pairingId, state, expiresAt, retryAfterMs]
       properties:
@@ -4242,9 +4979,7 @@ components:
           type: string
           minLength: 32
           maxLength: 256
-        login:
-          description: The browser sign-in login when the relay knows which account it refused.
-          type: string
+        account: {"type": "object", "additionalProperties": false, "required": ["login"], "properties": {"login": {"$ref": "#/components/schemas/Login"}}}
         reason:
           description: |
             Why a pairing is `refused` (`declined`, `not_staff`, `network_identity_mismatch`,
@@ -4258,6 +4993,7 @@ components:
           then: { required: [reason] }
           else: { not: { required: [reason] } }
         - if: { properties: { state: { const: refused } } }
+          else: {not: {required: [account]}}
           then: { properties: { reason: { enum: [declined, not_staff, network_identity_mismatch, environment_enrolled] } } }
         - if: { properties: { state: { const: expired } } }
           then: { properties: { reason: { enum: [code_expired, too_many_attempts, approval_expired] } } }
@@ -4454,6 +5190,11 @@ components:
         id: { $ref: "#/components/schemas/Id" }
         login: { $ref: "#/components/schemas/Login" }
     NeedsItem:
+      allOf:
+        - if: {properties: {kind: {const: chat_join_requests}}}
+          then: {required: [conversationId, count]}
+        - if: {properties: {kind: {const: agent_inbox}}}
+          then: {required: [handleId, count]}
       if: { properties: { kind: { const: chat_ask } } }
       then: { required: [ask] }
       type: object
@@ -4470,6 +5211,9 @@ components:
           pattern: "^[a-z][a-z0-9_]{0,63}$"
         title: { type: string, maxLength: 300 }
         recommendation: { type: string, maxLength: 500 }
+        conversationId: {$ref: "#/components/schemas/Id"}
+        handleId: {$ref: "#/components/schemas/Id"}
+        count: {type: integer, minimum: 1}
         chatRead: { $ref: "#/components/schemas/ChatRead" }
         ask: { $ref: "#/components/schemas/ChatAsk" }
         from: { $ref: "#/components/schemas/PersonRef" }
@@ -4743,7 +5487,7 @@ components:
         stuck: { $ref: "#/components/schemas/StuckBlock" }
     SnapshotBoards:
       description: |
-        The index of the relay's boards, relay-wide, in display order (README, "Board and leases"). The board list is
+        The index of the caller's visible boards, in display order (README, "Board and leases"). The board list is
         data, not capabilities: it changes with the relay's config, without a deploy. Each board's cards are in the
         head key `board.<id>`. Closed.
       type: object
@@ -4947,7 +5691,7 @@ components:
         baseBranch: { type: string, minLength: 1, maxLength: 255 }
         approvals:
           oneOf: [{ $ref: "#/components/schemas/PrApprovals" }, { type: "null" }]
-        canApprove: { type: array, items: { $ref: "#/components/schemas/PersonRef" } }
+        canApprove: {type: array, items: {type: object, additionalProperties: false, required: [login], properties: {login: {$ref: "#/components/schemas/Login"}, id: {$ref: "#/components/schemas/Id"}}}}
         youCanApprove: { type: boolean }
         checks:
           description: The required checks on the pull request's head, when the relay has read them.
@@ -4977,7 +5721,7 @@ components:
         state: { description: "Open string; known: `passing`, `failing`, `pending`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
     SnapshotMap:
       description: |
-        The build map, relay-wide: the stages of a stage plan (README, "Stage plan file") with each
+        The caller's build map: the stages of a stage plan (README, "Stage plan file") with each
         item's status from the board vocabulary. The relay computes every status and counter; the Hub only draws
         them. When the plan is configured but cannot be read or is invalid, `state` is `not_measured`, `notMeasured`
         says why and `stages`, `items` and counters are empty, so a broken plan is never shown as an empty plan.
@@ -5327,6 +6071,7 @@ components:
       required:
       - id
       - login
+      - admission
       - role
       - presence
       properties:
@@ -5334,8 +6079,9 @@ components:
           $ref: '#/components/schemas/Id'
         login:
           $ref: '#/components/schemas/Login'
+        admission: {$ref: "#/components/schemas/Admission"}
         role:
-          $ref: '#/components/schemas/Role'
+          $ref: '#/components/schemas/RoleRef'
         displayName:
           type: string
           maxLength: 80

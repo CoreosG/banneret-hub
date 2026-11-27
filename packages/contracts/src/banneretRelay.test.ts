@@ -11,6 +11,7 @@ import {
 it("keeps activity timestamps out of Hub person and working row schemas", () => {
   expect(Object.keys(BanneretFeedPerson.fields).toSorted()).toEqual(["login"]);
   expect(Object.keys(BanneretTeamPerson.fields).toSorted()).toEqual([
+    "admission",
     "id",
     "login",
     "machines",

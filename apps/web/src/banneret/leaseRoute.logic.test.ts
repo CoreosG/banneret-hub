@@ -14,7 +14,13 @@ const joined = (origin: string, login: string, label: string) => ({
   relayOrigin: origin,
   displayName: "Example Company",
   label,
-  me: { login, role: "staff" },
+  me: {
+    login,
+    id: "p_me",
+    permissions: [],
+    role: { id: "staff", name: "Staff" },
+    admission: "member" as const,
+  },
 });
 
 describe("machineAgent", () => {

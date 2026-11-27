@@ -776,7 +776,8 @@ function Timeline({
       ) : (
         !channel.archived &&
         channel.kind === "channel" &&
-        !channel.private && (
+        channel.kind === "channel" &&
+        channel.access.visibility === "public" && (
           <div data-chat-composer>
             <span>Join #{channel.name} to post</span>
             <button disabled={busy} onClick={() => void write({ kind: "join", id: channel.id })}>

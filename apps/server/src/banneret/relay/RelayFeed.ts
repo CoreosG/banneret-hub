@@ -123,10 +123,10 @@ interface RelayFeedInstance {
   readonly mcpTools: Effect.Effect<ReadonlyArray<RelayMcpTool> | null>;
 }
 
-/** One capabilities `mcpTools` entry as the Hub keeps it: the name and the lowest role that may call it. */
+/** One capabilities `mcpTools` entry as the Hub keeps it: the name and optional permission for the caller. */
 export interface RelayMcpTool {
   readonly name: string;
-  readonly role: string;
+  readonly requires?: string;
 }
 
 /** Every call names its relay; a relay this environment has no enrolment with answers as not joined. */
@@ -286,6 +286,11 @@ const needsItem = (value: unknown, labelFor: LabelFor): BanneretFeedNeedsItem | 
     kind,
     title,
     createdAt,
+    ...(typeof source?.count === "number" &&
+      Number.isInteger(source.count) &&
+      source.count > 0 && { count: source.count }),
+    ...optional("conversationId", text(source?.conversationId, 64)),
+    ...optional("handleId", text(source?.handleId, 64)),
     ...(isChatAsk(source?.ask) ? { ask: source.ask } : {}),
     ...(isChatRead(source?.chatRead) ? { chatRead: source.chatRead } : {}),
     ...optional("recommendation", text(source?.recommendation, 500)),
@@ -491,8 +496,11 @@ const mcpToolsOf = (body: unknown): ReadonlyArray<RelayMcpTool> =>
   defined(
     list(fields(body)?.mcpTools, 256).map((entry) => {
       const name = text(fields(entry)?.name, 64);
-      const role = text(fields(entry)?.role, 64);
-      return name === undefined || role === undefined ? undefined : { name, role };
+      const required = fields(entry)?.requires;
+      const permission = text(required, 64);
+      return name === undefined || (required !== undefined && !permission)
+        ? undefined
+        : { name, ...(permission && { requires: permission }) };
     }),
   );
 
@@ -905,6 +913,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       case "mention":
         yield* bump;
         return;
+      case "roles.changed":
       case "capabilities.changed":
         yield* refreshSections(key);
         return;

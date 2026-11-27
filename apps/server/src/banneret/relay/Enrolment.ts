@@ -1,3 +1,4 @@
+import { RelayMe } from "@t3tools/contracts";
 // @effect-diagnostics nodeBuiltinImport:off - node:os machine facts and node:crypto seed and digest are synchronous.
 // Banneret Hub: this environment's enrolments in company relays. One enrolment per relay origin, so
 // a machine can join several companies; each relay is its own instance of the machine below, with
@@ -105,8 +106,6 @@ export const tokenSecret = (origin: string) => `banneret-relay-token-${relayHash
 /** A new pairing's key while the old enrolment's key must survive until `requested` is saved. */
 export const nextKeySecret = (origin: string) => `banneret-relay-key-next-${relayHash(origin)}`;
 
-const Me = Schema.Struct({ id: Schema.String, login: Schema.String, role: Schema.String });
-
 const Pending = {
   relayOrigin: Schema.String,
   displayName: Schema.String,
@@ -149,7 +148,7 @@ const Persisted = Schema.Union([
     kind: BanneretMachineKind,
     community: Schema.optional(Schema.Boolean),
     sharing: Schema.optional(OfficeSharing),
-    me: Me,
+    me: RelayMe,
     replacedLabel: Schema.optional(Schema.String),
     lastOkAt: Schema.optional(Schema.String),
     counterMark: Schema.optional(Schema.String),
@@ -185,7 +184,7 @@ const PollReply = Schema.Struct({
   retryAfterMs: Schema.Number,
   machineId: Schema.optional(Schema.String),
   token: Schema.optional(Schema.String),
-  login: Schema.optional(Schema.String),
+  account: Schema.optional(Schema.Struct({ login: Schema.String })),
   reason: Schema.optional(Schema.String),
 });
 const PublicCapabilities = Schema.Struct({
@@ -193,7 +192,7 @@ const PublicCapabilities = Schema.Struct({
   enrolment: Schema.Struct({ start: Schema.String, browser: Schema.String }),
 });
 const EnrolledCapabilities = Schema.Struct({
-  me: Me,
+  me: RelayMe,
   team: Schema.optional(Schema.Struct({ preset: Schema.Literals(["company", "community"]) })),
 });
 const MachinesReply = Schema.Struct({
@@ -945,7 +944,10 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       }
       case "refused":
       case "expired":
-        yield* whileStill(from, toNone(reply.reason ?? reply.state, undefined, reply.login));
+        yield* whileStill(
+          from,
+          toNone(reply.reason ?? reply.state, undefined, reply.account?.login),
+        );
         return 0;
     }
   });
@@ -1003,7 +1005,10 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       }
       case "refused":
       case "expired":
-        yield* whileStill(from, toNone(reply.reason ?? reply.state, undefined, reply.login));
+        yield* whileStill(
+          from,
+          toNone(reply.reason ?? reply.state, undefined, reply.account?.login),
+        );
         return 0;
       case "pending":
       case "awaiting_approval":
@@ -1091,7 +1096,11 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     if (
       community !== Boolean(from.community) ||
       me.login !== from.me.login ||
-      me.role !== from.me.role
+      me.id !== from.me.id ||
+      me.role.id !== from.me.role.id ||
+      me.role.name !== from.me.role.name ||
+      me.admission !== from.me.admission ||
+      me.permissions.join(",") !== from.me.permissions.join(",")
     ) {
       yield* whileStill(
         from,
@@ -1230,7 +1239,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           machineId: state.machineId,
           label: state.label,
           ...(state.sharing && { sharing: state.sharing }),
-          me: { login: state.me.login, role: state.me.role },
+          me: state.me,
           ...(state.replacedLabel === undefined ? {} : { replacedLabel: state.replacedLabel }),
           ...(health === undefined ? {} : { health }),
           ...(state.lastOkAt === undefined ? {} : { lastOkAt: state.lastOkAt }),
@@ -1552,7 +1561,8 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       let path = "/relay/v1/team/me";
       let body;
       if (action.kind === "meeting") {
-        if (from.me.role !== "founder") return yield* fail("Only founders can edit meeting links.");
+        if (!from.me.permissions.includes("relay.admin"))
+          return yield* fail("Only founders can edit meeting links.");
         if (action.meetingUrl !== null && !officeMeetingUrlValid(action.meetingUrl))
           return yield* fail("Enter a valid HTTPS meeting link.");
         if (action.board !== null && !/^[a-zA-Z0-9_-]{1,64}$/.test(action.board))

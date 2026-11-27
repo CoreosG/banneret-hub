@@ -19,7 +19,13 @@ describe("human GitHub promotion", () => {
           state: "configured" as const,
           workspaceId: "ent",
           relayOrigin: "https://relay.example",
-          me: { role: "staff", login: "ada" },
+          me: {
+            id: "p_me",
+            permissions: [],
+            role: { id: "staff", name: "Staff" },
+            admission: "member" as const,
+            login: "ada",
+          },
         }),
         signedChat: () =>
           Effect.succeed({

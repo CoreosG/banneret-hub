@@ -5,7 +5,8 @@ const TEAM = {
     {
       id: "p_ada",
       login: "ada-example",
-      role: "founder",
+      role: { id: "founder", name: "Founder" },
+      admission: "member" as const,
       sessions: [],
       machines: [{ id: "m", label: "Ada server", connected: true, kind: "server" }],
     },

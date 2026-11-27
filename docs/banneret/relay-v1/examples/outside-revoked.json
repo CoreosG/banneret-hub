@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "token_revoked",
+    "message": "Your network login changed.",
+    "retryable": false,
+    "details": {
+      "reason": "outside_identity_mismatch"
+    }
+  }
+}

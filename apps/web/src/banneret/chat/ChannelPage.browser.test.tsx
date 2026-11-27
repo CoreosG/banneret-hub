@@ -93,7 +93,13 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     state: "configured",
     workspaceId: workspace,
     relayOrigin: origin,
-    me: { login: "ada", role: "founder" },
+    me: {
+      login: "ada",
+      id: "p_me",
+      permissions: ["relay.admin"],
+      role: { id: "founder", name: "Founder" },
+      admission: "member" as const,
+    },
   });
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(env);
   vi.mocked(useConnectedEnvironmentIds).mockReturnValue([]);

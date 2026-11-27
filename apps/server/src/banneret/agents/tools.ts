@@ -401,8 +401,8 @@ const ChatAskTool = writes(
 );
 const ChatInboxTool = reads(
   Tool.make("banneret_chat_inbox", {
-    description: "Read your unconsumed chat deliveries.",
-    parameters: Schema.Struct({ after: Schema.optional(Schema.String) }),
+    description: "Read and consume your waiting inbox deliveries. Call again until empty.",
+    parameters: Schema.Record(Schema.String, Schema.Never),
     success: Schema.Unknown,
     failure,
     failureMode: "return",

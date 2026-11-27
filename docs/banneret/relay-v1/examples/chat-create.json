@@ -1,6 +1,6 @@
 {
   "kind": "channel",
   "name": "example",
-  "private": false,
-  "agents": "allowed"
+  "agents": "allowed",
+  "template": "team"
 }

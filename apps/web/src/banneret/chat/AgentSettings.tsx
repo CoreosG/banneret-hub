@@ -29,7 +29,10 @@ export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
           try {
             await chatRpc.run(enterprise.target, {
               kind: "setDmSettings",
-              settings: { agentsReadMyDms: enabled },
+              settings: {
+                agentWakeDefault: setting.value?.agentWakeDefault ?? "everyone",
+                agentsReadMyDms: enabled,
+              },
             });
             refresh((n) => n + 1);
             setError("");
@@ -90,7 +93,12 @@ function ThreadSettings({ enterprise, thread }: { enterprise: EnterpriseFeed; th
               thread,
               settings: {
                 name: String(data.get("name") ?? ""),
-                wake: data.has("ownerOnly") ? "owner_only" : "everyone",
+                wake:
+                  data.get("wake") === "owner"
+                    ? "owner"
+                    : data.get("wake") === "nobody"
+                      ? "nobody"
+                      : "everyone",
               },
             });
             setSaved(Option.getOrThrow(decodeHandle(updated)));
@@ -111,8 +119,12 @@ function ThreadSettings({ enterprise, thread }: { enterprise: EnterpriseFeed; th
           />
         </label>
         <label>
-          <input name="ownerOnly" type="checkbox" defaultChecked={h?.wake === "owner_only"} /> Only
-          my messages wake it
+          Who can wake this agent{" "}
+          <select name="wake" defaultValue={h?.wake ?? "everyone"}>
+            <option value="everyone">Everyone</option>
+            <option value="owner">Only me</option>
+            <option value="nobody">Nobody</option>
+          </select>
         </label>
         <button disabled={pending}>Save</button>
         {error && <span role="alert">{error}</span>}

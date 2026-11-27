@@ -37,6 +37,7 @@ export function chatClient(
     );
   return {
     ensure: request("PUT", "handles/" + asHandle, { threadRef: thread, provider, machineId }),
+    consumeInbox: request("POST", "inbox", { asHandle }),
     read,
     root,
     asHandle,

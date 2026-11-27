@@ -26,7 +26,14 @@ it("keeps the 500-person, 50-room, 1500-agent office within the sprite and pixel
     Array.from({ length: 10 }, (_, i) => {
       const id = String(r * 10 + i);
       return {
-        person: { id, login: id, role: "staff", sessions: [], machines: [] },
+        person: {
+          id,
+          login: id,
+          role: { id: "staff", name: "Staff" },
+          admission: "member" as const,
+          sessions: [],
+          machines: [],
+        },
         seated: true,
         info: id,
         sessions: Array.from({ length: 3 }, (_, j) => ({

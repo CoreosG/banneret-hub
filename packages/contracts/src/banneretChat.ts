@@ -3,8 +3,33 @@ import * as Schema from "effect/Schema";
 export const ChatPerson = Schema.Struct({ id: Schema.String, login: Schema.String });
 export type ChatPerson = typeof ChatPerson.Type;
 
+const RoleId = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,31}$/));
+export const RoleRef = Schema.Struct({ id: RoleId, name: Schema.NonEmptyString });
+export const Admission = Schema.Literals(["member", "outside"]);
+export const ChatWake = Schema.Literals(["everyone", "owner", "nobody"]);
+export const ChatAccess = Schema.Struct({
+  visibility: Schema.Literals(["public", "private"]),
+  join: Schema.Literals(["open", "request", "invite"]),
+  outsiders: Schema.Literals(["none", "invited", "listed"]),
+  post: Schema.Literals(["everyone", "roles", "managers"]),
+  postRoles: Schema.optionalKey(Schema.Array(RoleId)),
+  replies: Schema.Literals(["everyone", "same_as_post"]),
+  invite: Schema.Literals(["members", "managers"]),
+}).check(
+  Schema.makeFilter(
+    (a) =>
+      (a.visibility === "public" || (a.join === "invite" && a.outsiders !== "listed")) &&
+      (a.post === "roles" ? !!a.postRoles?.length : a.postRoles === undefined),
+  ),
+);
 export const ChatMember = Schema.Union([
-  Schema.Struct({ kind: Schema.Literals(["person"]), id: Schema.String, login: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literals(["person"]),
+    id: Schema.String,
+    login: Schema.String,
+    role: RoleRef,
+    admission: Admission,
+  }),
   Schema.Struct({
     kind: Schema.Literals(["agent"]),
     id: Schema.String,
@@ -15,6 +40,17 @@ export const ChatMember = Schema.Union([
 export type ChatMember = typeof ChatMember.Type;
 
 export const ChatMe = Schema.Struct({
+  can: Schema.Struct({
+    read: Schema.Boolean,
+    post: Schema.Boolean,
+    reply: Schema.Boolean,
+    join: Schema.Boolean,
+    request: Schema.Boolean,
+    invite: Schema.Boolean,
+    manage: Schema.Boolean,
+    openToOutside: Schema.Boolean,
+  }),
+  request: Schema.optionalKey(Schema.Struct({ id: Schema.String, createdAt: Schema.String })),
   member: Schema.Boolean,
   notify: Schema.Literals(["all", "mentions", "nothing"]),
   muted: Schema.Boolean,
@@ -29,7 +65,8 @@ export const ChatConversation = Schema.Union([
     kind: Schema.Literals(["channel"]),
     name: Schema.String,
     defaultChannel: Schema.optionalKey(Schema.Literal(true)),
-    private: Schema.Boolean,
+    access: ChatAccess,
+    managers: Schema.Array(ChatPerson),
     id: Schema.String,
     purpose: Schema.String,
     agents: Schema.Literals(["allowed", "mentions_only", "off"]),
@@ -125,7 +162,7 @@ export const ChatHandle = Schema.Struct({
   provider: Schema.String,
   machine: Schema.Struct({ id: Schema.String, label: Schema.String }),
   reachable: Schema.Boolean,
-  wake: Schema.Literals(["everyone", "owner_only"]),
+  wake: ChatWake,
 });
 export type ChatHandle = typeof ChatHandle.Type;
 
@@ -138,7 +175,8 @@ export const ChatActiveProgress = Schema.Struct({
 
 export const ChatDelivery = Schema.Struct({
   threadRef: Schema.String,
-  wake: Schema.Literals(["everyone", "owner_only"]),
+  wake: ChatWake,
+  wakes: Schema.Boolean,
   message: ChatMessage,
   id: Schema.String,
   handleId: Schema.String,
@@ -173,6 +211,8 @@ export const ChatChange = Schema.Union([
       "member.removed",
       "conversation.updated",
       "settings.updated",
+      "request.updated",
+      "access.updated",
       "ask.updated",
       "task_thread.linked",
       "handle.updated",
@@ -268,9 +308,13 @@ export const ChatCreate = Schema.Union([
     kind: Schema.Literals(["channel"]),
     name: Schema.String,
     purpose: Schema.optionalKey(Schema.String),
-    private: Schema.Boolean,
-    agents: Schema.Literals(["allowed", "mentions_only", "off"]),
-  }),
+    template: Schema.optionalKey(
+      Schema.Literals(["general", "team", "private", "announcement", "shared", "community"]),
+    ),
+    access: Schema.optionalKey(ChatAccess),
+    managers: Schema.optionalKey(Schema.Array(ChatPerson)),
+    agents: Schema.optionalKey(Schema.Literals(["allowed", "mentions_only", "off"])),
+  }).check(Schema.makeFilter((c) => (c.access === undefined) !== (c.template === undefined))),
   Schema.Struct({ kind: Schema.Literals(["dm"]), members: Schema.Array(Schema.String) }),
 ]);
 export type ChatCreate = typeof ChatCreate.Type;
@@ -278,13 +322,17 @@ export type ChatCreate = typeof ChatCreate.Type;
 export const ChatPatch = Schema.Struct({
   name: Schema.optionalKey(Schema.String),
   purpose: Schema.optionalKey(Schema.String),
-  private: Schema.optionalKey(Schema.Boolean),
+  access: Schema.optionalKey(ChatAccess),
+  managers: Schema.optionalKey(Schema.Array(ChatPerson)),
   agents: Schema.optionalKey(Schema.Literals(["allowed", "mentions_only", "off"])),
   archived: Schema.optionalKey(Schema.Boolean),
 });
 export type ChatPatch = typeof ChatPatch.Type;
 
-export const ChatSettings = Schema.Struct({ agentsReadMyDms: Schema.Boolean });
+export const ChatSettings = Schema.Struct({
+  agentWakeDefault: ChatWake,
+  agentsReadMyDms: Schema.Boolean,
+});
 export type ChatSettings = typeof ChatSettings.Type;
 
 export const ChatNotifications = Schema.Struct({
@@ -351,7 +399,7 @@ export const ChatRegister = Schema.Struct({
   threadRef: Schema.String,
   provider: Schema.String,
   machineId: Schema.String,
-  wake: Schema.optionalKey(Schema.Literals(["everyone", "owner_only"])),
+  wake: Schema.optionalKey(ChatWake),
 });
 export type ChatRegister = typeof ChatRegister.Type;
 
@@ -383,9 +431,7 @@ const Page = { cursor: Schema.optionalKey(Schema.String) };
 export const ThreadChatAction = Schema.Struct({
   kind: Schema.Literal("threadChat"),
   thread: Schema.String,
-  settings: Schema.optionalKey(
-    Schema.Struct({ name: Schema.String, wake: Schema.Literals(["owner_only", "everyone"]) }),
-  ),
+  settings: Schema.optionalKey(Schema.Struct({ name: Schema.String, wake: ChatWake })),
 });
 export const ChannelAction = Schema.Union([
   ThreadChatAction,
@@ -510,7 +556,7 @@ export function callChannel<A>(
         kind: "channel",
         name: action.name,
         purpose: action.purpose,
-        private: action.private,
+        template: action.private ? "private" : "team",
         agents: "allowed",
       });
     case "answer":

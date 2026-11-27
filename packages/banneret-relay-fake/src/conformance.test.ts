@@ -139,14 +139,21 @@ interface Enrolled {
 const enrol = async (
   options: {
     login?: string;
-    role?: "founder" | "limited_staff";
+    role?: string;
+    admission?: "member" | "outside";
+    repoKeys?: readonly string[];
     environmentId?: string;
     poolHostId?: string;
   } = {},
 ): Promise<Enrolled> => {
   const login = options.login ?? newLogin();
   const started = await startPairing(options.environmentId, options.poolHostId);
-  await confirm(started, { login, role: options.role ?? "founder" });
+  await confirm(started, {
+    login,
+    role: options.role ?? (options.admission === "outside" ? "outside" : "founder"),
+    admission: options.admission,
+    repoKeys: options.repoKeys,
+  });
   const approved = await poll(started);
   expect(approved.state).toBe("approved");
   if (approved.token === undefined || approved.machineId === undefined) {
@@ -390,9 +397,10 @@ describe("enrolment", () => {
 
   it.each(["declined", "not_staff"])("reports a %s refusal as a poll state", async (reason) => {
     const started = await startPairing();
-    await client.control(`/pairings/${started.pairingId}/refuse`, { reason });
+    const login = newLogin();
+    await client.control(`/pairings/${started.pairingId}/refuse`, { reason, login });
     const refused = await poll(started);
-    expect(refused).toMatchObject({ state: "refused", reason });
+    expect(refused).toMatchObject({ state: "refused", reason, account: { login } });
     expect(refused.token).toBeUndefined();
   });
 
@@ -971,8 +979,8 @@ describe("revocation", () => {
   });
 
   it("lets a founder revoke another's machine, answers 204 again, and forbids limited staff", async () => {
-    const target = await enrol({ role: "limited_staff" });
-    const staff = await enrol({ role: "limited_staff" });
+    const target = await enrol({ role: "staff" });
+    const staff = await enrol({ role: "staff" });
     expectError(
       await call(staff, "DELETE", `/relay/v1/machines/${target.machineId}`),
       404,
@@ -1007,10 +1015,10 @@ describe("revocation", () => {
 
 describe("machine visibility", () => {
   it("shows named machines to colleagues, and a revoked one only to its owner and founders", async () => {
-    const owner = await enrol({ role: "limited_staff" });
-    const ownerOther = await enrol({ login: owner.login, role: "limited_staff" });
+    const owner = await enrol({ role: "staff" });
+    const ownerOther = await enrol({ login: owner.login, role: "staff" });
     const founderMachine = await enrol({ role: "founder" });
-    const staff = await enrol({ role: "limited_staff" });
+    const staff = await enrol({ role: "staff" });
 
     expect((await listMachines(staff)).map((m) => m.id)).not.toContain(owner.machineId);
     const facts = factsFor(owner);
@@ -1018,13 +1026,11 @@ describe("machine visibility", () => {
       ...facts,
       machine: { ...facts.machine, share: "agents_and_name" },
     });
-    expect((await listMachines(staff)).find((m) => m.id === owner.machineId)).toMatchObject({
-      revocable: false,
-    });
+    expect((await listMachines(staff)).find((m) => m.id === owner.machineId)).toBeUndefined();
     expectError(
       await call(staff, "DELETE", `/relay/v1/machines/${owner.machineId}`),
-      403,
-      "forbidden",
+      404,
+      "not_found",
     );
     expect((await call(owner, "DELETE", `/relay/v1/machines/${owner.machineId}`)).status).toBe(204);
     expectError(
@@ -1891,7 +1897,7 @@ describe("feed, graveyard, tasks and checked", () => {
     });
 
     it("is invalid, with the reason, when the checker lacks the sign-off role", async () => {
-      const checker = await enrol({ role: "limited_staff" });
+      const checker = await enrol({ role: "staff" });
       const { task, boardStatus } = await checkedFor(checker);
       expect(task.checked?.valid).toBe(false);
       expect(task.checked?.ignoredReason).toMatch(/sign-off role/);
@@ -2570,7 +2576,7 @@ describe("team", () => {
     expect(sections.some((section) => section.kind === "team")).toBe(true);
     const team = await readTeam(machine);
     const me = team.people.find((person) => person.login === machine.login);
-    expect(me?.role).toBe("founder");
+    expect(me?.role).toEqual({ id: "founder", name: "Founder" });
     expect(me?.presence).toBe("off");
   });
 
@@ -2607,7 +2613,7 @@ describe("team", () => {
 
   it("counts a waiting helper under its lead and filters names and usage on each heartbeat", async () => {
     const owner = await enrol();
-    const viewer = await enrol({ role: "limited_staff" });
+    const viewer = await enrol({ role: "staff" });
     const id = "task_" + randomText(5);
     await client.control("/board/seed", {
       tasks: [{ id, title: "Room task", holder: owner.login }],
@@ -2762,7 +2768,7 @@ describe("team", () => {
 
   it("restricts meeting writes and serves scoped agent heartbeats", async () => {
     const founder = await enrol();
-    const staff = await enrol({ role: "limited_staff" });
+    const staff = await enrol({ role: "staff" });
     for (const path of ["office", "rooms/platform"]) {
       const target = "/relay/v1/team/" + path;
       expect((await call(staff, "PUT", target, { meetingUrl: null })).status).toBe(403);
@@ -2792,7 +2798,7 @@ describe("team", () => {
   it("includes a directory member before their first sign-in", async () => {
     const reader = await enrol();
     const person = (await readTeam(reader)).people.find((entry) => entry.login === "cy-example");
-    expect(person).toMatchObject({ role: "limited_staff", presence: "off" });
+    expect(person).toMatchObject({ role: { id: "staff", name: "Staff" }, presence: "off" });
     expect((await listMachines(reader)).map((machine) => machine.ownerId)).not.toContain(
       person?.id,
     );
@@ -2800,7 +2806,7 @@ describe("team", () => {
 
   it("lists every live session with its parent, retains stopped sessions, and carries no titles or branches", async () => {
     const machine = await enrol();
-    const other = await enrol({ role: "limited_staff" });
+    const other = await enrol({ role: "staff" });
     await sendFacts(machine, exampleActivity());
     const sessions = await sessionsOf(machine, other);
     expect(sessions?.map((session) => [session.id, session.state])).toEqual([
@@ -3171,6 +3177,148 @@ describe("opt-in health", () => {
   });
 });
 
+describe("chat access and role administration", () => {
+  const base = "/relay/v1";
+  const me = async (machine: Enrolled) =>
+    (await call(machine, "GET", base + "/capabilities")).body as {
+      me: { id: string; role: { id: string }; permissions: string[] };
+    };
+  it("applies role edits to existing sessions and serves private metadata until a manager joins", async () => {
+    const founder = await enrol(),
+      worker = await enrol({ role: "staff" }),
+      other = await enrol();
+    const workerId = (await me(worker)).me.id,
+      adminId = (await me(other)).me.id;
+    const id = "policy_" + randomText(6).toLowerCase();
+    const path = base + "/roles/" + id;
+    const input = {
+      name: "Review staff",
+      forOutside: false,
+      permissions: { "scope.boards": [], "scope.people": "shared_channels" },
+    };
+    expectError(await call(worker, "GET", base + "/roles"), 403, "role_permission_missing");
+    expectSchema("RoleDetail", (await call(founder, "PUT", path, input)).body);
+    expect(
+      (await call(founder, "PUT", base + "/staff/" + workerId + "/role", { roleId: id })).status,
+    ).toBe(204);
+    expect((await me(worker)).me.role.id).toBe(id);
+    expectError(await call(founder, "DELETE", path), 409, "role_in_use");
+    const head = (await call(worker, "GET", base + "/snapshot/head")).body as {
+      files: Record<string, string>;
+    };
+    expect(head.files).not.toHaveProperty("team");
+    expect(Object.keys(head.files).some((k) => k.startsWith("board."))).toBe(false);
+    expect(
+      (await call(founder, "PUT", path, { ...input, permissions: { "hub.team": true } })).status,
+    ).toBe(200);
+    expect((await me(worker)).me.permissions).toContain("hub.team");
+    const created = await call(founder, "POST", base + "/chat/conversations", {
+      kind: "channel",
+      name: "private-" + randomText(6),
+      template: "private",
+    });
+    expectSchema("ChatConversation", created.body);
+    const channel = (created.body as { id: string }).id,
+      route = base + "/chat/conversations/" + channel;
+    expectError(await call(other, "GET", route + "/messages"), 404, "not_found");
+    expect((await call(other, "GET", base + "/chat/directory?limit=100")).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: channel,
+          me: expect.objectContaining({ can: expect.objectContaining({ read: false }) }),
+        }),
+      ]),
+    });
+    expect((await call(other, "PUT", route + "/members/" + adminId)).body).toMatchObject({
+      addedBy: { id: adminId },
+    });
+    expect((await call(other, "GET", route + "/messages")).body).toMatchObject({
+      items: [expect.objectContaining({ kind: "system" })],
+    });
+    expect(
+      (await call(founder, "PUT", base + "/staff/" + workerId + "/role", { roleId: "staff" }))
+        .status,
+    ).toBe(204);
+    expect((await call(founder, "DELETE", path)).status).toBe(204);
+  });
+  it("admits an outside requester, delivers their mention to the inbox and keeps it out of the wake queue", async () => {
+    const creator = await enrol(),
+      guest = await enrol({ admission: "outside" });
+    const guestId = (await me(guest)).me.id,
+      chat = base + "/chat/";
+    expectError(
+      await call(creator, "PUT", base + "/staff/" + guestId + "/role", { roleId: "staff" }),
+      409,
+      "role_not_for_outside",
+    );
+    const created = await call(creator, "POST", chat + "conversations", {
+      kind: "channel",
+      name: "community-" + randomText(6),
+      template: "community",
+    });
+    const channel = (created.body as { id: string }).id,
+      path = chat + "conversations/" + channel;
+    const requested = await call(guest, "POST", path + "/requests", {
+      note: "I maintain this repo.",
+    });
+    expectSchema("ChatJoinRequest", requested.body);
+    const request = chat + "requests/" + (requested.body as { id: string }).id;
+    expect((await call(creator, "GET", base + "/needs")).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ kind: "chat_join_requests", conversationId: channel, count: 1 }),
+      ]),
+    });
+    expect((await call(creator, "POST", request + "/approve")).body).toMatchObject({
+      state: "approved",
+    });
+    expectError(await call(creator, "POST", request + "/decline"), 409, "chat_request_closed");
+    const handle = "h_" + randomText(6);
+    await call(creator, "PUT", chat + "me/settings", {
+      agentWakeDefault: "owner",
+      agentsReadMyDms: false,
+    });
+    expect(
+      (
+        await call(creator, "PUT", chat + "handles/" + handle, {
+          threadRef: "thread1",
+          provider: "codex",
+          name: "reviewer",
+          machineId: creator.machineId,
+        })
+      ).body,
+    ).toMatchObject({ wake: "owner" });
+    expect((await call(creator, "PUT", chat + "me/agents/wake", { wake: "everyone" })).status).toBe(
+      204,
+    );
+    expect(
+      (
+        await call(guest, "POST", chat + "messages", {
+          conversationId: channel,
+          text: "@" + creator.login + "/reviewer release notes",
+          key: randomText(6),
+        })
+      ).status,
+    ).toBe(200);
+    expect((await call(creator, "GET", chat + "deliveries")).body).toMatchObject({ items: [] });
+    expectError(await call(guest, "POST", chat + "inbox", { asHandle: handle }), 403, "forbidden");
+    const inbox = () => call(creator, "POST", chat + "inbox", { asHandle: handle });
+    expect((await inbox()).body).toMatchObject({
+      items: [expect.objectContaining({ state: "consumed", wakes: false })],
+    });
+    expect((await inbox()).body).toMatchObject({ items: [] });
+    await client.control("/outside/check", { login: guest.login, reason: "outside_check_pending" });
+    expect((await call(guest, "GET", base + "/capabilities")).body).toMatchObject({
+      error: { code: "unavailable", retryable: true, details: { reason: "outside_check_pending" } },
+    });
+    await client.control("/outside/check", { login: guest.login, reason: null });
+    expect((await call(guest, "GET", path + "/members")).status).toBe(200);
+    await client.control("/outside/check", { login: guest.login, reason: "outside_grant_lost" });
+    expect((await call(guest, "GET", base + "/capabilities")).body).toMatchObject({
+      error: { code: "token_revoked", details: { reason: "outside_grant_lost" } },
+    });
+  });
+});
+
 describe("chat contract", () => {
   it("delivers a non-owner agent DM only to its machine and coalesces progress", async () => {
     const owner = await enrol(),
@@ -3258,7 +3406,10 @@ describe("chat contract", () => {
     expect((await searchDm()).body).toMatchObject({ items: [] });
     expect((await read()).status).toBe(404);
     for (const enabled of [true, false]) {
-      await call(owner, "PUT", path + "me/settings", { agentsReadMyDms: enabled });
+      await call(owner, "PUT", path + "me/settings", {
+        agentsReadMyDms: enabled,
+        agentWakeDefault: "everyone",
+      });
       expect((await searchDm()).body).toMatchObject({
         items: enabled ? [{ conversationId: dm.id }] : [],
       });
@@ -3268,10 +3419,14 @@ describe("chat contract", () => {
       await call(colleague, "POST", path + "conversations", {
         kind: "channel",
         name: "agents-" + randomText(6),
-        private: false,
+        template: "team",
         agents: "allowed",
       })
     ).body as { id: string };
+    const ownerId = (
+      (await call(owner, "GET", "/relay/v1/capabilities")).body as { me: { id: string } }
+    ).me.id;
+    await call(owner, "PUT", path + "conversations/" + c.id + "/members/" + ownerId);
     const root = (
       await call(colleague, "POST", path + "messages", {
         conversationId: c.id,
@@ -3379,7 +3534,7 @@ describe("chat contract", () => {
     expect(
       (await call(member, "PUT", path + "conversations/" + conversationId + "/members/" + personId))
         .status,
-    ).toBe(204);
+    ).toBe(200);
     const other = await call(member, "POST", path + "messages", {
       conversationId,
       text: "Another root",
@@ -3508,7 +3663,7 @@ describe("chat contract", () => {
         await call(sender, "POST", "/relay/v1/chat/conversations", {
           kind: "channel",
           name: "f2-" + randomText(4),
-          private: false,
+          template: "team",
           agents: "off",
         })
       ).body as { id: string }
@@ -3556,7 +3711,7 @@ describe("chat contract", () => {
     const create = await call(owner, "POST", path + "/conversations", {
       kind: "channel",
       name: "test-" + randomText(5),
-      private: true,
+      template: "private",
       agents: "off",
     });
     expectSchema("ChatConversation", create.body);
@@ -3579,7 +3734,7 @@ describe("chat contract", () => {
     const self = (members.body as { items: { id: string }[] }).items[0]!.id;
     expect(
       (await call(owner, "PUT", path + "/conversations/" + id + "/members/" + self)).status,
-    ).toBe(204);
+    ).toBe(200);
     expect((await call(owner, "DELETE", path + "/threads/" + message.id + "/follow")).status).toBe(
       204,
     );
@@ -3653,7 +3808,7 @@ describe("chat contract", () => {
 describe("shared machines", () => {
   it("binds host facts and sandbox offers to host credentials and serves quota only to its owner", async () => {
     const owner = await enrol({ poolHostId: "dev" });
-    const colleague = await enrol({ role: "limited_staff" });
+    const colleague = await enrol({ role: "staff" });
     expect((await call(owner, "GET", "/relay/v1/machines")).body).toMatchObject({
       items: expect.arrayContaining([
         expect.objectContaining({ id: owner.machineId, poolHostId: "dev" }),

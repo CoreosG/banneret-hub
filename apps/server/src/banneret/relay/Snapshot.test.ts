@@ -1375,7 +1375,7 @@ describe("BanneretRelayFeed team from the snapshot", () => {
           expect(state.sections).toContain("team");
           expect(state.team!.problem).toBeUndefined();
           const person = state.team!.value!.people[0]!;
-          expect(person.role).toBe("founder");
+          expect(person.role).toEqual({ id: "founder", name: "Founder" });
           expect(person.machines).toHaveLength(0);
           expect(person.sessions).toHaveLength(0);
           const feed = yield* RelayFeed.BanneretRelayFeed;

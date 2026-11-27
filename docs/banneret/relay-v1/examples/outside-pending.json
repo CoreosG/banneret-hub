@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "unavailable",
+    "message": "GitHub access could not be checked.",
+    "retryable": true,
+    "details": {
+      "reason": "outside_check_pending"
+    }
+  }
+}

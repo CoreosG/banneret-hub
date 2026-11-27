@@ -411,7 +411,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
         {flags.includes("meeting_links") && (
           <>
             <Meeting url={summary.office.meetingUrl} />
-            {enterprise.enrolment.me?.role === "founder" && (
+            {enterprise.enrolment.me?.permissions.includes("relay.admin") && (
               <MeetingEditor
                 target={enterprise.target}
                 board={null}
@@ -538,7 +538,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
           )}
           {roomList.map((room) => (
             <Room
-              founder={enterprise.enrolment.me?.role === "founder"}
+              founder={enterprise.enrolment.me?.permissions.includes("relay.admin") ?? false}
               pool={pool}
               key={room.board}
               revision={office.files["team.room." + room.board]}

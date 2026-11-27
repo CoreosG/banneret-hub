@@ -31,7 +31,6 @@ import {
   enrolmentLine,
   type EnrolmentTone,
   joinLine,
-  roleLabel,
   pendingJoins,
 } from "./enterprise.logic";
 import { useEnrolmentViews } from "./enrolmentStore";
@@ -265,7 +264,7 @@ function WorkspaceRadioItem(props: {
                 {props.enrolment?.health === "healthy" && props.enrolment.me?.login.trim() ? (
                   <>
                     Signed in as <strong>{props.enrolment.me.login.trim()}</strong>
-                    {props.enrolment.me.role.trim() && ` · ${roleLabel(props.enrolment.me.role)}`}
+                    {props.enrolment.me.role.name.trim() && ` · ${props.enrolment.me.role.name}`}
                   </>
                 ) : (
                   line.text

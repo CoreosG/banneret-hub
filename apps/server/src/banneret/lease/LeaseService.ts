@@ -210,7 +210,7 @@ const make = Effect.fn("LeaseService.make")(function* (options: Partial<LeaseSer
       assignees: detail.assignees.map((actor) => actor.login),
       labels: detail.labels.map((label) => label.name),
       // The Hub knows only its own person's role, so it sees no other founder's release.
-      founders: me !== undefined && me.role === "founder" ? [me.login] : [],
+      founders: me !== undefined && me.permissions.includes("relay.admin") ? [me.login] : [],
       now: DateTime.formatIso(now),
     });
     const viewer = detail.viewer;
@@ -722,7 +722,7 @@ export const rpcHandlers = {
       const view = yield* (yield* BanneretEnrolment.BanneretEnrolment).status(input.relayOrigin);
       const tools = offeredTools(
         (yield* feed.mcpTools(input.relayOrigin)) ?? [],
-        view.me?.role ?? "",
+        view.me?.permissions ?? [],
       );
       if (
         view.state !== "configured" ||

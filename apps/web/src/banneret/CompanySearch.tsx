@@ -20,7 +20,6 @@ import { mergeFeedEntries } from "./feed.logic";
 import { neighbourhoodSearch } from "./mapGraph.logic";
 import { safeLinkOut } from "./relayFeed.logic";
 import { StatusMark } from "./StatusLegend";
-import { roleLabel } from "./enterprise.logic";
 import { nameRank, searchPeople } from "./team.logic";
 import {
   closeCompanySearch,
@@ -113,7 +112,7 @@ const people: CompanySearchSource = ({ query, enterprise, navigate }) =>
     key: `person:${person.id}`,
     group: nameRank(person.login, query) < 2 ? "Matching people" : "People",
     title: person.login,
-    detail: `Team · ${roleLabel(person.role)}`,
+    detail: `Team · ${person.role.name}`,
     open: () => void navigate({ to: "/team", search: { person: person.login } } as never),
   }));
 

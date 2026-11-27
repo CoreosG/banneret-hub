@@ -388,7 +388,13 @@ describe("EnterpriseWizard", () => {
       displayName: "Example Company",
       machineId: "m_1",
       label: "Ada laptop",
-      me: { login: "ada-example", role: "founder" },
+      me: {
+        login: "ada-example",
+        id: "p_me",
+        permissions: ["relay.admin"],
+        role: { id: "founder", name: "Founder" },
+        admission: "member" as const,
+      },
       replacedLabel: "Old laptop",
       health: "healthy",
     });
@@ -495,7 +501,13 @@ describe("EnterpriseWizard", () => {
       displayName: HOSTILE,
       machineId: "m_1",
       label: "Ada laptop",
-      me: { login: "ada-example", role: "founder" },
+      me: {
+        login: "ada-example",
+        id: "p_me",
+        permissions: ["relay.admin"],
+        role: { id: "founder", name: "Founder" },
+        admission: "member" as const,
+      },
       health: "healthy",
     });
     await act(() => openWorkspaceDialog({ kind: "machines", origin: ORIGIN }));
@@ -572,7 +584,13 @@ describe("EnterpriseWizard", () => {
       displayName: "Example Company",
       machineId: "m_1",
       label: "Ada laptop",
-      me: { login: "ada-example", role: "founder" },
+      me: {
+        login: "ada-example",
+        id: "p_me",
+        permissions: ["relay.admin"],
+        role: { id: "founder", name: "Founder" },
+        admission: "member" as const,
+      },
       health: "refused",
     };
     await server.setView(refused);
@@ -630,7 +648,13 @@ describe("EnterpriseWizard", () => {
       displayName: "Example Company",
       machineId: "m_1",
       label: "Ada laptop",
-      me: { login: "ada-example", role: "founder" },
+      me: {
+        login: "ada-example",
+        id: "p_me",
+        permissions: ["relay.admin"],
+        role: { id: "founder", name: "Founder" },
+        admission: "member" as const,
+      },
       health: "healthy",
     };
     await server.setView(configured);
@@ -756,7 +780,13 @@ describe("EnterpriseWizard", () => {
       displayName: "Example Company",
       machineId: "m_1",
       label: "Ada laptop",
-      me: { login: "ada-example", role: "founder" },
+      me: {
+        login: "ada-example",
+        id: "p_me",
+        permissions: ["relay.admin"],
+        role: { id: "founder", name: "Founder" },
+        admission: "member" as const,
+      },
       health: "healthy",
     });
     await act(async () => {

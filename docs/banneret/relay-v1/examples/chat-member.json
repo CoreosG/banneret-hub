@@ -1,5 +1,10 @@
 {
   "kind": "person",
   "id": "example_1",
-  "login": "ada"
+  "login": "ada",
+  "role": {
+    "id": "staff",
+    "name": "Staff"
+  },
+  "admission": "member"
 }

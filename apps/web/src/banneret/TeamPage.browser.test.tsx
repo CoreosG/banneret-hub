@@ -71,7 +71,13 @@ const configured: BanneretEnrolmentView = {
   displayName: "Example Company",
   machineId: "m_ada_server",
   label: "Ada server",
-  me: { login: "ada-example", role: "founder" },
+  me: {
+    login: "ada-example",
+    id: "p_me",
+    permissions: ["relay.admin"],
+    role: { id: "founder", name: "Founder" },
+    admission: "member" as const,
+  },
 };
 
 const card = (id: string, key: string, title: string, holder?: string): BanneretBoardCard => ({
@@ -143,7 +149,8 @@ const TEAM = (): BanneretTeam => ({
     {
       id: "p_ada",
       login: "ada-example",
-      role: "founder",
+      role: { id: "founder", name: "Founder" },
+      admission: "member" as const,
       machines: [
         { id: "m_ada_server", label: "Ada server", kind: "server", connected: true },
         { id: "m_ada_laptop", label: "Ada laptop", kind: "laptop", connected: true },
@@ -197,7 +204,8 @@ const TEAM = (): BanneretTeam => ({
     {
       id: "p_bo",
       login: "bo-example",
-      role: "limited_staff",
+      role: { id: "staff", name: "Staff" },
+      admission: "member" as const,
       machines: [
         { id: "m_bo_laptop", label: "Bo laptop", kind: "laptop", connected: true },
         { id: "m_bo_server", label: "Bo server", kind: "server", connected: false },
@@ -222,7 +230,14 @@ const TEAM = (): BanneretTeam => ({
         },
       ],
     },
-    { id: "p_cy", login: "cy-example", role: "limited_staff", machines: [], sessions: [] },
+    {
+      id: "p_cy",
+      login: "cy-example",
+      role: { id: "staff", name: "Staff" },
+      admission: "member" as const,
+      machines: [],
+      sessions: [],
+    },
   ],
 });
 
@@ -387,7 +402,16 @@ describe("Team page", () => {
       )
       .toBeVisible();
     await act(() =>
-      storeEnrolmentView(LOCAL, { ...configured, me: { login: "member", role: "limited_staff" } }),
+      storeEnrolmentView(LOCAL, {
+        ...configured,
+        me: {
+          login: "member",
+          id: "p_me",
+          permissions: [],
+          role: { id: "staff", name: "Staff" },
+          admission: "member" as const,
+        },
+      }),
     );
     await expect
       .element(page.getByRole("button", { name: "Offer a machine" }))
@@ -543,7 +567,8 @@ describe("Team page", () => {
       .map((line, i) => ({
         id: line.split(",")[0]!,
         login: line.split(",")[1]!,
-        role: "limited_staff",
+        role: { id: "staff", name: "Staff" },
+        admission: "member" as const,
         presence: i === 0 ? "away" : "off",
         machines: [],
         sessions: [],
@@ -651,7 +676,8 @@ describe("Team page", () => {
     const people = Array.from({ length: 100 }, (_, i) => ({
       id: "p" + String(i).padStart(3, "0"),
       login: "worker" + i,
-      role: "staff",
+      role: { id: "staff", name: "Staff" },
+      admission: "member" as const,
       presence: "available",
       machines: [],
       sessions: [],
@@ -782,9 +808,34 @@ describe("Team page", () => {
       agents: "off",
       memberCount: { people: 1, agents: 0 },
       archived: false,
-      private: false,
+      access: {
+        visibility: "public",
+        join: "open",
+        outsiders: "none",
+        post: "everyone",
+        invite: "members",
+        replies: "everyone",
+      },
+      managers: [],
       lastSeq: 0,
-      me: { member: true, notify: "all", muted: false, readSeq: 0, unread: 0, mentions: 0 },
+      me: {
+        can: {
+          read: true,
+          post: true,
+          reply: true,
+          join: false,
+          request: false,
+          manage: false,
+          invite: true,
+          openToOutside: false,
+        },
+        member: true,
+        notify: "all",
+        muted: false,
+        readSeq: 0,
+        unread: 0,
+        mentions: 0,
+      },
     }));
     vi.spyOn(chatRpc, "run").mockResolvedValue({ items, nextCursor: null });
     const base = state([...ALL, "chat"], teamRead(TEAM()));
@@ -893,7 +944,8 @@ it("opens the company office, reads only visible rooms and makes zero frame requ
   const people = Array.from({ length: 500 }, (_, i) => ({
     id: "p" + String(i).padStart(3, "0"),
     login: "builder-" + String(i).padStart(3, "0"),
-    role: "limited_staff",
+    role: { id: "staff", name: "Staff" },
+    admission: "member" as const,
     presence: "available",
     machines: [],
     sessions: [],

@@ -4,5 +4,15 @@
   "muted": false,
   "readSeq": 1,
   "unread": 1,
-  "mentions": 1
+  "mentions": 1,
+  "can": {
+    "read": true,
+    "post": false,
+    "reply": false,
+    "join": false,
+    "request": false,
+    "invite": false,
+    "manage": false,
+    "openToOutside": false
+  }
 }

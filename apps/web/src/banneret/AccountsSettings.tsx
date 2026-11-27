@@ -5,7 +5,6 @@ import { Button } from "../components/ui/button";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { accountMatch, useGitHubLogin } from "./accountIdentity";
 import { enrolmentRpc, useEnrolmentViews } from "./enrolmentStore";
-import { roleLabel } from "./enterprise.logic";
 import { openWorkspaceDialog } from "./workspacesStore";
 
 function TailscaleLogin({ environmentId }: { environmentId: EnvironmentId }) {
@@ -48,8 +47,8 @@ function MachineAccounts({
           <div key={view.relayOrigin} className="mt-2">
             <p>
               {view.displayName ?? view.relayOrigin} · Relay:{" "}
-              {view.me ? `${view.me.login} · ${roleLabel(view.me.role)}` : "Not available"} ·
-              Machine: {view.label ?? "Not available"}
+              {view.me ? `${view.me.login} · ${view.me.role.name}` : "Not available"} · Machine:{" "}
+              {view.label ?? "Not available"}
             </p>
             <p className={match === false ? "text-warning" : "text-muted-foreground"}>
               {match === null
