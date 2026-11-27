@@ -130,6 +130,12 @@ const startForwarder = async (target: string): Promise<Forwarder> => {
   });
 };
 
+/**
+ * The relay of the innermost `withFake` that started last. Most tests use one relay, and their
+ * helpers read its origin here; tests with two relays pass each origin explicitly.
+ */
+export const focus = { origin: "" };
+
 export const withFake = <A, E, R>(
   body: (fake: FakeRelay, relay: Forwarder) => Effect.Effect<A, E, R>,
   options: Parameters<typeof startFakeRelay>[0] = {},
@@ -147,6 +153,9 @@ export const withFake = <A, E, R>(
     }),
     ({ fake, relay }) => Effect.promise(() => Promise.all([relay.close(), fake.close()])),
   ).pipe(
-    Effect.flatMap(({ fake, relay }) => body(fake, relay)),
+    Effect.flatMap(({ fake, relay }) => {
+      focus.origin = relay.origin;
+      return body(fake, relay);
+    }),
     Effect.scoped,
   );

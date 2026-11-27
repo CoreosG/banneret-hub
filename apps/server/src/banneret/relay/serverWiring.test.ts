@@ -180,7 +180,10 @@ it.live(
         // The fake approves at once; the server finishes setup on its own schedule.
         yield* client[BANNERET_RELAY_WS_METHODS.status]({}).pipe(
           Effect.repeat({
-            until: (view) => view.state === "configured",
+            until: (list) =>
+              list.enrolments.some(
+                (view) => view.relayOrigin === new URL(fake.url).origin && view.state === "configured",
+              ),
             // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- the server is a subprocess and /ws has no enrolment change stream; status is a local read.
             schedule: Schedule.spaced("100 millis"),
           }),
@@ -189,7 +192,9 @@ it.live(
             orElse: () => Effect.die(new Error("the machine never finished joining")),
           }),
         );
-        return yield* client[BANNERET_RELAY_FEED_WS_METHODS.today]({});
+        return yield* client[BANNERET_RELAY_FEED_WS_METHODS.today]({
+          relayOrigin: fake.url,
+        });
       }).pipe(Effect.provide(protocol));
       expect(today.joined).toBe(true);
       expect(today.value?.needsYou.items).toEqual([]);

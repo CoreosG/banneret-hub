@@ -30,7 +30,7 @@ import * as Workspaces from "../Workspaces.ts";
 import * as Enrolment from "./Enrolment.ts";
 import * as Facts from "./Facts.ts";
 import * as RelayFeed from "./RelayFeed.ts";
-import { type Forwarder, withFake } from "./relayHarness.testkit.ts";
+import { focus, type Forwarder, withFake } from "./relayHarness.testkit.ts";
 import { liveTaskIds, reshapeBoard, reshapeMap, reshapeTask, taskIdForLinks } from "./Snapshot.ts";
 
 const ENVIRONMENT = "env-board-1";
@@ -185,6 +185,16 @@ const control = (fake: FakeRelay, path: string, body: unknown) =>
     return (await response.json()) as Record<string, unknown>;
   });
 
+/** The feed of the relay under test (the one `withFake` started last). */
+const focusedFeed = Effect.map(RelayFeed.BanneretRelayFeed, (service) => ({
+  today: (visit: boolean) => service.today(focus.origin, visit),
+  needs: (cursor: string | undefined) => service.needs(focus.origin, cursor),
+  feedPage: (cursor: string) => service.feedPage(focus.origin, cursor),
+  graveyardPage: (cursor: string) => service.graveyardPage(focus.origin, cursor),
+  task: (taskId: string) => service.task(focus.origin, taskId),
+  events: Stream.suspend(() => service.events(focus.origin)),
+}));
+
 const join = (fake: FakeRelay, relay: Forwarder) =>
   Effect.gen(function* () {
     const enrolment = yield* Enrolment.BanneretEnrolment;
@@ -196,7 +206,7 @@ const join = (fake: FakeRelay, relay: Forwarder) =>
     fake.approve(view.confirmCode!, { login: "ada-example", role: "founder" });
     for (;;) {
       const changed = yield* enrolment.nextChange;
-      const current = yield* enrolment.status;
+      const current = yield* enrolment.status(focus.origin);
       if (current.state === "configured") return current;
       yield* changed;
     }
@@ -227,7 +237,7 @@ const assignProject = (workspaceId: string) =>
 /** Every feed state the server publishes, and a way to wait for one. */
 const subscribe = Effect.gen(function* () {
   const queue = yield* Queue.unbounded<BanneretFeedState>();
-  const feed = yield* RelayFeed.BanneretRelayFeed;
+  const feed = yield* focusedFeed;
   yield* feed.events.pipe(
     Stream.runForEach((event) => Queue.offer(queue, event)),
     Effect.forkScoped,
@@ -430,7 +440,7 @@ describe("BanneretRelayFeed board from the snapshot", () => {
           "the relay away",
         );
         expect(away.board!.problem!.message).toBe(
-          `Cannot reach ${(yield* (yield* Enrolment.BanneretEnrolment).status).displayName}.`,
+          `Cannot reach ${(yield* (yield* Enrolment.BanneretEnrolment).status(focus.origin)).displayName}.`,
         );
         expect(away.board!.value).toEqual(good.board!.value);
         expect(away.board!.fetchedAt).not.toBeNull();
@@ -527,7 +537,7 @@ describe("BanneretRelayFeed feed and graveyard", () => {
   it.live("an environment that has not joined pages nothing and calls no relay", () =>
     withFake((_fake, relay) =>
       Effect.gen(function* () {
-        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const feed = yield* focusedFeed;
         const events = yield* subscribe;
         const first = yield* events.next(() => true, "the first state");
         expect(first.feed).toBeNull();
@@ -552,7 +562,7 @@ describe("BanneretRelayFeed feed and graveyard", () => {
   it.live("reads both files from the snapshot and pages older entries by cursor", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {
-        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const feed = yield* focusedFeed;
         const events = yield* subscribe;
         yield* join(fake, relay);
         yield* control(fake, "/board/seed", SEED);
@@ -687,7 +697,7 @@ describe("BanneretRelayFeed task read", () => {
   it.live("an environment that has not joined reads no task and calls no relay", () =>
     withFake((_fake, relay) =>
       Effect.gen(function* () {
-        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const feed = yield* focusedFeed;
         expect(yield* feed.task("t_active")).toEqual({
           joined: false,
           value: null,
@@ -710,7 +720,7 @@ describe("BanneretRelayFeed task read", () => {
           }
           return body;
         };
-        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const feed = yield* focusedFeed;
         const events = yield* subscribe;
         yield* join(fake, relay);
         yield* events.next((event) => event.sectionsKnown, "the capabilities");
@@ -796,7 +806,7 @@ describe("BanneretRelayFeed task read", () => {
   it.live("a relay that cannot be reached is a problem on the read, not not-found", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {
-        const feed = yield* RelayFeed.BanneretRelayFeed;
+        const feed = yield* focusedFeed;
         yield* join(fake, relay);
         yield* control(fake, "/board/seed", SEED);
         relay.intercept = (request) =>

@@ -234,7 +234,13 @@ const commentEdits = (tracker: FakeTracker) =>
 const enrolledAs = (login: string, role = "limited_staff") =>
   Layer.succeed(BanneretEnrolment.BanneretEnrolment, {
     ...BanneretEnrolment.BanneretEnrolment.defaultValue(),
-    status: Effect.succeed({ state: "configured" as const, me: { login, role } }),
+    status: (relayOrigin: string) =>
+      Effect.succeed({
+        state: "configured" as const,
+        workspaceId: "ent-0000000000000000",
+        relayOrigin,
+        me: { login, role },
+      }),
   });
 
 const leases = (
@@ -338,10 +344,14 @@ describe("LeaseService take", () => {
 
       const wrongAccount = newTracker();
       const wrong = yield* leases(wrongAccount, enrolledAs(OTHER));
-      expect(yield* failureOf(wrong.take({ ...ref }))).toEqual({
+      expect(
+        yield* failureOf(wrong.take({ ...ref, relayOrigin: "https://relay.example" })),
+      ).toEqual({
         reason: "unavailable",
         detail: `The tracker is signed in as ${ME}, but the relay knows you as ${OTHER}.`,
       });
+      // Without a relay (a Personal workspace) no relay's person is checked.
+      expect((yield* wrong.check(ref)).availability).toBe("available");
 
       const noLabels = newTracker({
         capabilities: { comment: true, labels: false, assignees: true },
