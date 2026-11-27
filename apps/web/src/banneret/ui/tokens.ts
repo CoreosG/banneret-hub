@@ -7,9 +7,10 @@ export type Tone = "ok" | "info" | "warn" | "error" | "muted";
 
 /**
  * How an element wears its tone: `tint` the pill background (8% light, 16% dark), `soft` half of
- * that, `fg` text and icon, `edge` a 40% border, `solid` the full colour.
+ * that, `fg` text and icon, `edge` a 40% border, `solid` the full colour. In SVG, `fill` and `stroke`
+ * paint a shape with the full colour.
  */
-export type ToneLook = "tint" | "soft" | "fg" | "edge" | "solid";
+export type ToneLook = "tint" | "soft" | "fg" | "edge" | "solid" | "fill" | "stroke";
 
 /** Spread onto an element to give it a tone: `<span {...toneProps("ok", "tint", "fg")} />`. */
 export function toneProps(tone: Tone, ...looks: ReadonlyArray<ToneLook>) {
@@ -46,8 +47,9 @@ export const LAYOUT_PROGRESS_BAR = { "data-layout": "progress-bar" } as const;
 export const LAYOUT_TODAY_COLUMNS = { "data-layout": "today-columns" } as const;
 /** A grid of health tiles, each at least 168px wide. */
 export const LAYOUT_HEALTH_TILES = { "data-layout": "health-tiles" } as const;
-/** The Rests-on view's three columns with arrows between them. */
-export const LAYOUT_RESTS_ON = { "data-layout": "rests-on" } as const;
+/** The Stages view's bubble canvas and the Neighbourhood view's graph canvas. */
+export const LAYOUT_STAGE_BUBBLES = { "data-layout": "stage-bubbles" } as const;
+export const LAYOUT_NEIGHBOURHOOD = { "data-layout": "neighbourhood" } as const;
 
 // Spacing uses only Tailwind steps 1, 2, 3, 4, 6, 8 (4 to 32 px): 4 inside chips; 8 between chips,
 // rows and cards; 12 card padding and column gaps; 16 header to content and between sections; 24

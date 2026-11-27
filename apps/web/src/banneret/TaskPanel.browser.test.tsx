@@ -390,6 +390,50 @@ describe("Task tab", () => {
     );
   });
 
+  it("opens the map neighbourhood from the Rests on and Stage facts", async () => {
+    const { emit, read } = setup();
+    read.mockResolvedValue({ joined: true, value: null, fetchedAt: null, notFound: false });
+    const shown = card("2", "Guild invites", { restsOn: ["t_1", "t_gone"] });
+    const blocker = card("1", "Rate limits");
+    await using panel = await openPanel(taskSurface(RELAY, shown.task));
+    await emit(
+      withMap(
+        state(["board", "map"], [shown, blocker]),
+        {
+          id: "i_2",
+          stageId: "s_1",
+          title: "Guild invites",
+          status: "needs_you",
+          statusWhy: "Open.",
+          task: shown.task,
+          restsOn: ["i_1"],
+          blockedBy: [],
+        },
+        [
+          {
+            id: "i_1",
+            stageId: "s_1",
+            title: "Rate limits",
+            status: "planned",
+            statusWhy: "Open.",
+            task: blocker.task,
+            restsOn: [],
+            blockedBy: [],
+          },
+        ],
+      ),
+    );
+    const link = () => header().querySelector<HTMLButtonElement>('[data-map-link="i_1"]');
+    await vi.waitFor(() => expect(link()?.textContent).toBe("Rate limits"));
+    // A task the map lacks stays text.
+    expect(header().querySelector('[data-rests-on="t_gone"] button')).toBeNull();
+    expect(header().querySelector('[data-map-link="i_2"]')?.textContent).toBe("Stage one");
+    await userEvent.click(link()!);
+    const router = panel.screen.router!;
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/map"));
+    expect(router.state.location.search).toEqual({ view: "neighbourhood", item: "i_1" });
+  });
+
   it("does not read a relay that does not offer the task section", async () => {
     const { emit, read } = setup();
     const shown = card("2", "Guild invites");

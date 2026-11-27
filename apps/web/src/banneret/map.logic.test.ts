@@ -1,7 +1,7 @@
 import type { BanneretMap, BanneretMapItem } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { blockedByLabel, mapStages, restsOnView, spineStates, stageProgress } from "./map.logic";
+import { blockedByLabel, mapStages, spineStates, stageProgress } from "./map.logic";
 
 const item = (id: string, stageId: string, restsOn: string[] = []): BanneretMapItem => ({
   id,
@@ -39,17 +39,6 @@ describe("map shape", () => {
     expect(stages[1]!.counts).toEqual({});
     expect(stages[3]!.items.map((entry) => entry.id)).toEqual(["c"]);
     expect(stages[3]!.counts).toEqual({ planned: 1 });
-  });
-
-  it("lists both directions of rests-on, keeping an unknown id as a bare entry", () => {
-    const b = restsOnView(MAP, "b");
-    expect(b.restsOn.map((entry) => [entry.id, entry.item?.id ?? null])).toEqual([
-      ["a", "a"],
-      ["ghost", null],
-    ]);
-    expect(b.dependants.map((entry) => entry.id)).toEqual(["d"]);
-    expect(restsOnView(MAP, "a").dependants.map((entry) => entry.id)).toEqual(["b", "c"]);
-    expect(restsOnView(MAP, "d").restsOn.map((entry) => entry.id)).toEqual(["b"]);
   });
 
   it("counts built and checked out of every item that is not dropped", () => {
