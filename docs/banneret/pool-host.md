@@ -1,0 +1,60 @@
+# Join a Linux pool host
+
+The host kit uses a dedicated ext4 data disk, XFS project quotas, cgroup v2 and systemd.
+Run these commands from a root administrator shell on the approved shared machine.
+The kit has its own executable under /opt so the member's Banneret Hub launcher stays available.
+Each subcommand previews its action by default. Add `--apply` to execute it.
+
+1. Install the distro packages for Python 3, python3-cryptography, xfsprogs and util-linux.
+   From the repository root install the kit and configure its host ID, installed Hub version,
+   relay origin, local capacity and initial warning thresholds. For example, using jq and
+   the example configuration for the staff host named dev:
+
+   ```sh
+   install -d /opt/banneret-pool
+   install -m 755 scripts/banneret/pool/banneret /opt/banneret-pool/
+   install -m 644 scripts/banneret/pool/{facts,provision,relay}.py /opt/banneret-pool/
+   install -m 644 scripts/banneret/pool/banneret-pool.service /etc/systemd/system/
+   jq --arg origin https://relay.example.org --arg host dev --arg version 0.1.1300 \
+     '{origin:$origin,hubVersion:$version,limits:(.hosts[]|select(.id==$host)),sizes:.sandboxes.sizes,warnings}' \
+     docs/banneret/relay-v1/examples/pool-config.json > /etc/banneret-pool.json
+   cd /opt/banneret-pool
+   ```
+
+2. Mount the dedicated ext4 data volume at /srv/banneret-data and configure that volume to mount at boot.
+   Choose an image size that fits its available space. For a 256 GiB image:
+
+   ```sh
+   ./banneret pool filesystem 256G
+   ./banneret pool filesystem 256G --apply
+   ```
+
+   For boot persistence add the following entry once to /etc/fstab. Verify it with
+   `findmnt --verify` and reload systemd. The kit checks the backing image and quota
+   mount options before provisioning a seat.
+
+   ```fstab
+   /srv/banneret-data/member-homes.xfs /srv/banneret-homes xfs loop,prjquota,nodev,nosuid,x-systemd.requires-mounts-for=/srv/banneret-data 0 0
+   ```
+
+3. Run `./banneret pool join --apply`. Give the displayed pairing URL and code to the
+   founder. The command polls until confirmation and saves the host credential in
+   /var/lib/banneret-pool. An interrupted join resumes with the same key.
+
+4. Run `./banneret pool agent --once --apply` and inspect /var/lib/banneret-pool/policy.json.
+   Then run `systemctl daemon-reload` and `systemctl enable --now banneret-pool.service`.
+   The agent sends full snapshots every 30 seconds. Host memory totals come from
+   /proc/meminfo and user.slice. A workspace row contains quota meters and warning flags.
+   The agent advertises zero free sandbox slots until a sandbox runner is available.
+
+5. After the founder approves a workspace request, select an unused login and numeric UID.
+   For example, run `./banneret pool seat p_alice alice 24001`, then
+   `./banneret pool seat p_alice alice 24001 --apply`. The UID doubles as the project number
+   on this dedicated image. The command applies the returned workspace ceilings, including
+   the disk hard limit, creates the OS account, and marks the seat ready to join.
+   Give the member access using the site's normal OS login procedure. The member signs
+   into Claude, Codex and Banneret Hub from their own account.
+
+To exercise the kit in a checkout, install workspace dependencies and run
+`/usr/bin/python3 scripts/banneret/pool/test_pool.py`. The tests inject the OS command runner,
+use temporary Linux fixture trees and enrol against the loopback fake relay.

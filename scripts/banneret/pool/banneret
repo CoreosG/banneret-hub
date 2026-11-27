@@ -1,0 +1,96 @@
+#!/usr/bin/python3
+"""Pool administration entry point."""
+import argparse
+import fcntl
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from urllib.error import URLError
+
+sys.dont_write_bytecode = True
+
+from facts import collect, quota_rows
+from provision import HOMES, IMAGE, filesystem, mounted, provision, run
+from relay import join, post, save, utc
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="banneret")
+    pool = parser.add_subparsers(required=True).add_parser("pool")
+    commands = pool.add_subparsers(dest="command", required=True)
+    fs = commands.add_parser("filesystem")
+    fs.add_argument("size")
+    commands.add_parser("join")
+    agent = commands.add_parser("agent")
+    agent.add_argument("--once", action="store_true")
+    seat = commands.add_parser("seat")
+    seat.add_argument("person")
+    seat.add_argument("login")
+    seat.add_argument("uid", type=int)
+    for cmd in commands.choices.values():
+        cmd.add_argument("--root", type=Path, default=Path("/"))
+        cmd.add_argument("--apply", action="store_true")
+    args = parser.parse_args()
+    root = args.root.resolve()
+    if not args.apply:
+        plans = {
+            "filesystem": f"Allocate {getattr(args, 'size', '')} at {IMAGE} if absent and mount XFS with project quotas at {HOMES}.",
+            "seat": f"Reserve {getattr(args, 'login', '')} for {getattr(args, 'person', '')}, apply its home quota and user slice, and create its account.",
+            "join": "Generate a host key and request founder confirmation from the configured relay.",
+            "agent": "Read host pressure and seat quotas, post signed facts and cache the effective policy.",
+        }
+        print("Dry run under", root, plans[args.command])
+        return
+    if root != Path("/") and args.command in ("seat", "filesystem"):
+        raise ValueError("Fixture roots use the injected command runner")
+    directory = root / "var/lib/banneret-pool"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if directory.stat().st_uid != os.geteuid() or directory.stat().st_mode & 0o077:
+        raise ValueError("Host state must be owner-only")
+    with (directory / ("agent.lock" if args.command == "agent" else "admin.lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if args.command == "filesystem":
+            return filesystem(root, args.size)
+        config = json.loads((root / "etc/banneret-pool.json").read_text())
+        credentials = directory / "credential.json"
+        if args.command == "join":
+            return join(credentials, config["origin"], config["limits"]["id"], config["hubVersion"])
+        state = json.loads(credentials.read_text())
+        if (state["host"], state["origin"]) != (config["limits"]["id"], config["origin"]):
+            raise ValueError("Configuration and host credential disagree")
+        policy = directory / "policy.json"
+        if args.command == "seat":
+            return provision(root, directory, args.person, args.login, args.uid, json.loads(policy.read_text()))
+        history = {}
+        while True:
+            warnings = json.loads(policy.read_text())["warnings"] if policy.exists() else config["warnings"]
+            seats_path = directory / "seats.json"
+            seats = [s for s in json.loads(seats_path.read_text()) if s["ready"]] if seats_path.exists() else []
+            quotas = []
+            for flag, scale in (("-b", 1024), ("-i", 1)):
+                report = ""
+                if seats and root == Path("/") and mounted(run, Path(IMAGE), Path(HOMES)):
+                    report = run("xfs_quota", "-x", "-c", f"report -p -n -N {flag}", HOMES)
+                elif root != Path("/"):
+                    path = root / ("quota" + flag)
+                    report = path.read_text() if path.exists() else ""
+                quotas.append(quota_rows(report, scale, warnings["quota_percent"]))
+            facts = collect(root, config, warnings, seats, quotas, history, utc())
+            try:
+                save(policy, post(state, "facts", facts, enrolled=True))
+            except (URLError, TimeoutError) as err:
+                if args.once:
+                    raise
+                print("Facts report failed:", err, file=sys.stderr, flush=True)
+            if args.once:
+                return
+            time.sleep(30)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, RuntimeError, OSError, KeyError) as error:
+        sys.exit(str(error))
