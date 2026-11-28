@@ -1766,6 +1766,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   // Start-up: one instance per state file whose name matches the origin inside it. Anything else
   // in the directory is ignored.
   const unreadable = new Set<string>();
+  const mismatched: Array<{ name: string; hash: string; origin: string }> = [];
   const names = yield* fs
     .readDirectory(relaysDir)
     .pipe(
@@ -1782,9 +1783,13 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
     const relayOrigin = Result.isSuccess(loaded)
       ? normalizeOrigin(loaded.success.relayOrigin)
       : null;
-    if (Result.isFailure(loaded) || relayOrigin === null || relayHash(relayOrigin) !== match[1]) {
+    if (relayOrigin !== null && relayHash(relayOrigin) !== match[1]) {
+      mismatched.push({ name, hash: match[1]!, origin: relayOrigin });
+      continue;
+    }
+    if (Result.isFailure(loaded) || relayOrigin === null) {
       const detail = Result.isSuccess(loaded)
-        ? "Relay origin does not match the file name"
+        ? "Invalid relay origin"
         : Schema.isSchemaError(loaded.failure)
           ? PersistenceDecodeError.fromSchemaError(name, loaded.failure).message
           : loaded.failure.message;
@@ -1793,6 +1798,24 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       continue;
     }
     relays.set(relayOrigin, yield* makeRelay(shared, relayOrigin, loaded.success));
+  }
+
+  // Only the canonical hash addresses this relay's credentials. Inspect siblings after all
+  // canonical joins have loaded so directory order cannot turn a duplicate into a re-join prompt.
+  for (const { name, hash, origin } of mismatched) {
+    const canonical = relays.get(origin);
+    if (canonical && (yield* canonical.status).state === "configured") {
+      yield* Effect.logWarning("Ignoring duplicate saved company join", {
+        file: name,
+        selected: relayHash(origin) + ".json",
+      });
+    } else {
+      yield* Effect.logWarning("Could not read saved company join", {
+        file: name,
+        detail: "Relay origin does not match the file name",
+      });
+      unreadable.add("ent-" + hash);
+    }
   }
 
   const lookup = (input: string) =>

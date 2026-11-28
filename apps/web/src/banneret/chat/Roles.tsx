@@ -2,6 +2,9 @@ import { countLabel } from "../countLabel";
 import * as Schema from "effect/Schema";
 import { useState } from "react";
 import { AuthEnvironmentMaintainScope, RoleDetail, type ChannelAction } from "@t3tools/contracts";
+import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useEnrolmentViews } from "../enrolmentStore";
+import { openWorkspaceDialog, useWorkspaces, useWorkspacesStore } from "../workspacesStore";
 import { useEnvironmentScope } from "../../state/session";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -50,13 +53,41 @@ export function WorkspaceRoles() {
     enterprise?.environmentId ?? null,
     AuthEnvironmentMaintainScope,
   );
+  if (!enterprise) return <JoinForRoles />;
   if (
     !maintain ||
-    !enterprise?.enrolment.me?.permissions.includes("relay.admin") ||
+    !enterprise.enrolment.me?.permissions.includes("relay.admin") ||
     !enterprise.feed.sections.includes("roles")
   )
     return null;
   return <Roles key={enterprise.workspace.id} enterprise={enterprise} />;
+}
+function JoinForRoles() {
+  const environmentId = usePrimaryEnvironmentId();
+  const views = useEnrolmentViews(environmentId);
+  const companies = useWorkspaces().filter((workspace) => workspace.relay);
+  const activeId = useWorkspacesStore((state) => state.activeId);
+  const active = companies.find((workspace) => workspace.id === activeId);
+  if (!active && views.some((view) => view.state === "configured")) return null;
+  const company = active ?? (companies.length === 1 ? companies[0] : undefined);
+  return (
+    <section className="flex items-center gap-3 px-4 py-3 text-sm">
+      <span>Join {company?.relay?.displayName ?? "a company"} to manage roles</span>
+      <Button
+        variant="outline"
+        disabled={environmentId === null}
+        onClick={() =>
+          openWorkspaceDialog({
+            kind: "enterprise",
+            ...(environmentId && { environmentId }),
+            ...(company?.relay && { origin: company.relay.origin }),
+          })
+        }
+      >
+        Join
+      </Button>
+    </section>
+  );
 }
 function Roles({ enterprise }: { enterprise: EnterpriseFeed }) {
   const [opened, setOpened] = useState(false);

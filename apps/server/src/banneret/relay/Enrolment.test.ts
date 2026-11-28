@@ -523,6 +523,65 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("keeps the canonical re-join when a 1301 sibling names the same relay", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const base = yield* makeBaseDir;
+        const fs = yield* FileSystem.FileSystem;
+        const dir = base + "/userdata/banneret/relays";
+        const sibling = Enrolment.relayHash(relay.origin + "/") + ".json";
+        const stale = JSON.stringify({
+          state: "configured",
+          relayOrigin: relay.origin,
+          label: "Old machine",
+          machineId: "old-machine",
+          displayName: "Example Company",
+          kind: "laptop",
+          me: { id: "old-account", login: "old-login", role: "founder" },
+        });
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(dir + "/" + sibling, stale);
+        const joined = yield* join(fake, relay).pipe(Effect.provide(hubLayer(base)));
+        const logs: Array<Logger.Options<unknown>> = [];
+        relay.requests.length = 0;
+        yield* Effect.gen(function* () {
+          const service = yield* Enrolment.BanneretEnrolment;
+          yield* waitFor(status, (view) => view.health === "healthy");
+          expect(yield* service.list).toEqual([
+            expect.objectContaining({
+              machineId: joined.machineId,
+              label: joined.label,
+              me: joined.me,
+            }),
+          ]);
+          expect(yield* service.unreadableWorkspaces).toEqual([]);
+          expect(
+            relay.requests.some(
+              (r) =>
+                r.url === "/relay/v1/facts" && r.headers["x-banneret-device"] === joined.machineId,
+            ),
+          ).toBe(true);
+        }).pipe(
+          Effect.provide(
+            hubLayer(base).pipe(
+              Layer.provideMerge(
+                Logger.layer([Logger.make((entry) => logs.push(entry))], {
+                  mergeWithExisting: false,
+                }),
+              ),
+            ),
+          ),
+        );
+        expect(yield* fs.readFileString(dir + "/" + sibling)).toBe(stale);
+        const warning = logs
+          .map((entry) => Logger.formatLogFmt.log(entry))
+          .find((line) => line.includes("duplicate saved company join"));
+        expect(warning).toContain(sibling);
+        expect(warning).toContain(Enrolment.relayHash(relay.origin) + ".json");
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
   it.live("reports an unreadable saved join and preserves it during recovery", () =>
     withFake((_fake, relay) =>
       Effect.gen(function* () {
