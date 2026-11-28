@@ -93,9 +93,7 @@ export function AskCard({
       <small>
         Expires <time dateTime={ask.expiresAt}>{new Date(ask.expiresAt).toLocaleString()}</time>
       </small>
-      {ask.reason === "auto_accepted" && (
-        <small>Auto-accepted by {ask.to.owner.login}’s rule</small>
-      )}
+      {ask.byRule && <small>Auto-accepted by {ask.to.owner.login}’s rule</small>}
       {ask.reason && ask.reason !== "auto_accepted" && <p>{ask.reason}</p>}
       {ask.state === "answered" && answer && (
         <section className="grid justify-items-start gap-1.5 border-t pt-2 text-sm">

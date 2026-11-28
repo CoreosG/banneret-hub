@@ -2,6 +2,9 @@ import { vi } from "vite-plus/test";
 import * as ReviewCheckout from "../chat/ReviewCheckout.ts";
 import { handleId } from "../chat/AgentChat.ts";
 import { makeAnswerRuns } from "../chat/AnswerRuns.ts";
+import { answeringAsk } from "../chat/AnswerTurn.ts";
+import { answerPolicy } from "../chat/turnPolicy.ts";
+import type { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import { approvalMachine } from "../plugins/approvals.ts";
 import * as Activity from "../../preview/PreviewAgentActivity.ts";
 import { setLevel, toolkitSource } from "../plugins/levels.ts";
@@ -40,6 +43,7 @@ import {
   type BanneretWorkspace,
   EnvironmentId,
   type OrchestrationProjectShell,
+  type OrchestrationV2Run,
   OrchestratorMcpFailure,
   ProjectId,
   RunId,
@@ -1714,6 +1718,233 @@ describe("agent lease tools against the fake relay", () => {
             expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
               items: [{ reason: "ask_result" }],
             });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
+
+  /** Joins, sets this agent to wake for nobody and asks itself, so the ask waits in its inbox. */
+  const askIntoInbox = (fake: FakeRelay, relay: Forwarder) =>
+    Effect.gen(function* () {
+      yield* joinWithBoard(fake, relay);
+      const device = (yield* (yield* Enrolment.BanneretEnrolment).relay(relay.origin))!;
+      const root = yield* call("banneret_chat_post", {
+        conversation: "c_general",
+        key: "root",
+        text: "Release checks",
+      });
+      yield* device.signedChat("PUT", "me/agents/wake", { wake: "nobody" });
+      const ask = askSelf(String(root.messageId), "Which private upload?", "first");
+      return { device, ask: yield* ask, threadRootId: String(root.messageId) };
+    });
+  const askSelf = (thread: string, question: string, key: string) =>
+    call("banneret_agent_ask", {
+      thread,
+      to: handleId(COMPANY_THREAD),
+      question,
+      context: "Upload release",
+      doneWhen: "Name a check.",
+      key,
+    }).pipe(Effect.map((r) => String(r.askId)));
+  const askStates = (device: Enrolment.RelayEnrolment) =>
+    device
+      .signedChat("GET", "asks?role=answerer")
+      .pipe(
+        Effect.map((r) =>
+          Object.fromEntries(
+            (r.body as { items: Array<{ id: string; state: string; reason?: string }> }).items.map(
+              (a) => [a.id, a.reason ? a.state + ":" + a.reason : a.state],
+            ),
+          ),
+        ),
+      );
+
+  /** Threads whose answer runs stay queued until `lose` drops them. */
+  const answerThreads = Effect.gen(function* () {
+    const service = yield* ThreadManagementService.ThreadManagementService;
+    const sent: ThreadManagementService.ThreadManagementSendInput[] = [];
+    const runs = new Map<string, OrchestrationV2Run>();
+    const threads: typeof service = {
+      ...service,
+      hasReceipt: () => Effect.succeed(false),
+      sendToThread: (input) =>
+        Effect.sync(() => {
+          sent.push(input);
+          const run = {
+            id: RunId.make("inbox-run-" + sent.length),
+            threadId: input.threadId,
+            userMessageId: input.messageId,
+            status: "queued",
+            activeAttemptId: null,
+            startedAt: null,
+            completedAt: null,
+          } as unknown as OrchestrationV2Run;
+          runs.set(run.id, run);
+          return { run } as ThreadManagementService.ThreadManagementSendResult;
+        }),
+      getThreadRecords: (id, kinds, options) =>
+        (kinds as ReadonlyArray<string>).includes("runs")
+          ? Effect.map(service.getThreadRecords(id, kinds, options), (records) => ({
+              ...records,
+              runs: (options?.runIds ?? []).flatMap((r) => runs.get(r) ?? []),
+            }))
+          : service.getThreadRecords(id, kinds, options),
+    };
+    return { threads, sent, lose: () => runs.clear() };
+  });
+
+  it.live("runs a question read from the inbox as its own capped answer turn", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            const { device, ask } = yield* askIntoInbox(fake, relay);
+            expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
+              items: [],
+            });
+            const { threads, sent } = yield* answerThreads;
+            const hub = Effect.provideService(
+              ThreadManagementService.ThreadManagementService,
+              threads,
+            );
+            const inbox = yield* call("banneret_chat_inbox", {}).pipe(hub);
+            expect(inbox).toMatchObject({ items: [], answerTurns: 1 });
+            expect(JSON.stringify(inbox)).not.toContain("Which private upload?");
+            expect(sent).toHaveLength(1);
+            const turn = sent[0]!;
+            expect(turn).toMatchObject({ threadId: COMPANY_THREAD, mode: "queue" });
+            expect(turn.text).toContain("Which private upload?");
+            // The message id is what makes the turn read only and limits its tools.
+            expect(answeringAsk(turn.messageId!)).toBe(ask);
+            expect(
+              answerPolicy(turn.messageId!, {
+                runtimeMode: "full-access",
+              } as ProviderAdapterV2RuntimePolicy).runtimePolicy,
+            ).toMatchObject({
+              runtimeMode: "approval-required",
+              sandboxPolicy: { type: "readOnly" },
+            });
+            expect(yield* (yield* makeAnswerRuns.pipe(hub)).rows(device)).toMatchObject([
+              {
+                ask,
+                handle: handleId(COMPANY_THREAD),
+                thread: COMPANY_THREAD,
+                run: "inbox-run-1",
+                maxTokens: 200000,
+                maxSeconds: 900,
+              },
+            ]);
+            // Inside that turn, the answer is the one result and carries the turn's receipt.
+            const answering = Effect.provideService(
+              ThreadManagementService.ThreadManagementService,
+              {
+                ...threads,
+                getThreadShell: (id) =>
+                  threads
+                    .getThreadShell(id)
+                    .pipe(Effect.map((t) => t && { ...t, activeRunId: RunId.make("inbox-run-1") })),
+              },
+            );
+            expect(
+              yield* call("banneret_agent_answer", { text: "The Linux one." }).pipe(answering),
+            ).toEqual({ askId: ask });
+            expect((yield* device.signedChat("GET", "asks?role=answerer")).body).toMatchObject({
+              items: [
+                {
+                  id: ask,
+                  state: "answered",
+                  receipts: expect.arrayContaining([
+                    expect.objectContaining({ handle: handleId(COMPANY_THREAD) }),
+                  ]),
+                },
+              ],
+            });
+            expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
+              items: [{ reason: "ask_result" }],
+            });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
+
+  it.live("after a restart, ends only the asks whose recorded answer run is gone", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            const { device, ask, threadRootId } = yield* askIntoInbox(fake, relay);
+            const { threads, lose } = yield* answerThreads;
+            const hub = Effect.provideService(
+              ThreadManagementService.ThreadManagementService,
+              threads,
+            );
+            expect(yield* call("banneret_chat_inbox", {}).pipe(hub)).toMatchObject({
+              answerTurns: 1,
+            });
+            // Read without a recorded run, as when the Hub stops right after the relay's read.
+            const untracked = yield* askSelf(threadRootId, "Which other upload?", "second");
+            yield* device.signedChat("POST", "inbox", { asHandle: handleId(COMPANY_THREAD) });
+            const restart = Effect.flatMap(makeAnswerRuns.pipe(hub), (runs) =>
+              runs.reconcile(device, true),
+            );
+            yield* restart;
+            expect(yield* askStates(device)).toMatchObject({ [ask]: "open", [untracked]: "open" });
+            lose();
+            yield* restart;
+            expect(yield* askStates(device)).toMatchObject({
+              [ask]: "unanswered:turn_ended",
+              [untracked]: "open",
+            });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
+
+  it.live("starts no turn for an inbox question while the Hub is paused", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            const { device, ask } = yield* askIntoInbox(fake, relay);
+            const { threads, sent } = yield* answerThreads;
+            yield* (yield* makePauseStore).set(true);
+            const inbox = yield* call("banneret_chat_inbox", {}).pipe(
+              Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+            );
+            expect(inbox).toMatchObject({ items: [], answerTurns: 0 });
+            expect(sent).toEqual([]);
+            expect(yield* askStates(device)).toMatchObject({ [ask]: "unanswered:paused" });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
+
+  it.live("keeps an unapproved question out of the turn that reads the inbox", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            yield* askIntoInbox(fake, relay);
+            // The relay's delivery for a question that still waits for the owner.
+            relay.rewrite = (request, body) =>
+              request.url.startsWith("/relay/v1/chat/inbox")
+                ? body.replaceAll('"state":"open"', '"state":"waiting_owner"')
+                : body;
+            const { threads, sent } = yield* answerThreads;
+            const inbox = yield* call("banneret_chat_inbox", {}).pipe(
+              Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+            );
+            expect(inbox).toMatchObject({ items: [], answerTurns: 0 });
+            expect(JSON.stringify(inbox)).not.toContain("Which private upload?");
+            expect(sent).toEqual([]);
           }),
         ),
       { chat: { agentAsks: { enabled: true } } },

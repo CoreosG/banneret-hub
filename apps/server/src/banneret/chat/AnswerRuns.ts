@@ -30,7 +30,8 @@ interface Row {
   expires: number;
 }
 
-// Relay open + pending delivery -> dispatch with a stable command id, save the run, consume.
+// Open ask, woken or read from the inbox -> dispatch with a stable command id, then save the run.
+// Only a saved run ends an ask here: a consumed delivery without one waits for the ask deadline.
 // The run projection owns queued/answering. A finished or missing run closes its open ask.
 // Closed remotely or over budget -> interrupt that exact run. Restart resumes from the saved row.
 export const makeAnswerRuns = Effect.gen(function* () {

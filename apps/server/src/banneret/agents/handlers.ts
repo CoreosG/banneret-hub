@@ -1,4 +1,6 @@
 import { currentReviewHead } from "../chat/ReviewCheckout.ts";
+import { answerInboxAsks } from "../chat/Deliveries.ts";
+import { makeAnswerRuns } from "../chat/AnswerRuns.ts";
 import {
   reviewThreadId,
   activeRun,
@@ -582,7 +584,34 @@ const make = Effect.gen(function* () {
     ),
     banneret_chat_inbox: McpToolAccess.actsAsCaller(() =>
       Effect.gen(function* () {
-        return yield* (yield* chat).consumeInbox;
+        const client = yield* chat;
+        const { thread, relay } = yield* requireRelay;
+        const device = yield* enrolment.relay(relay.relayOrigin);
+        if (!device || Option.isNone(pauseDatabase))
+          return yield* invalid("Cannot track questions from the inbox here.");
+        const threads = yield* ThreadManagementService;
+        const failed = () => invalid("Cannot start the answer turn for an inbox question.");
+        const shell = yield* threads.getThreadShell(thread.threadId).pipe(Effect.mapError(failed));
+        if (!shell) return yield* failed();
+        const services = {
+          threads,
+          providers: Option.isNone(providers) ? [] : yield* providers.value.getProviders,
+          answers: yield* makeAnswerRuns.pipe(
+            Effect.provideService(SqlClient.SqlClient, pauseDatabase.value),
+          ),
+        };
+        // Uninterruptible: the relay consumes on the read, so a stopped turn must not lose a question.
+        return yield* Effect.gen(function* () {
+          const inbox = yield* client.consumeInbox;
+          const answerTurns = yield* answerInboxAsks(services, device, shell, inbox.items).pipe(
+            Effect.provideService(SqlClient.SqlClient, pauseDatabase.value),
+          );
+          return {
+            ...inbox,
+            items: inbox.items.filter((d) => d.reason !== "ask"),
+            answerTurns,
+          };
+        }).pipe(Effect.uninterruptible);
       }),
     ),
     banneret_pool_status: McpToolAccess.readsAsCaller(() =>

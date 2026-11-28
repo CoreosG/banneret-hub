@@ -3756,28 +3756,20 @@ describe("chat contract", () => {
     ]);
   });
 
-  it("skips consent and pair caps between one owner's agents and keeps the loop limits", async () => {
-    const t = await sharedAskThread();
-    const own = async (name: string) => {
+  /** More agents of the asking owner, and thread helpers for them. */
+  const ownAgents = async (t: AskThread) => {
+    const own = async (name: string, wake?: "nobody") => {
       const id = "h_" + randomText(8);
-      await call(t.asker, "PUT", t.chat + "handles/" + id, {
+      const reply = await call(t.asker, "PUT", t.chat + "handles/" + id, {
         threadRef: id,
         name,
         provider: "codex",
         machineId: t.asker.machineId,
+        ...(wake && { wake }),
       });
+      expectSchema("ChatHandle", reply.body);
       return id;
     };
-    const helper = await own("helper"),
-      checker = await own("checker");
-    const toHelper = { to: { kind: "agent", handle: helper } };
-    // The same four asks across owners stop at the open pair cap.
-    for (const n of [1, 2, 3]) await postAsk(t, { question: n + "?", key: "cross" + n });
-    expectError(
-      await call(t.asker, "POST", t.chat + "asks", { ...t.newAsk, question: "4?", key: "cross4" }),
-      403,
-      "agent_ask_capped",
-    );
     const root = async () => {
       const reply = await call(t.asker, "POST", t.chat + "messages", {
         conversationId: t.conversationId,
@@ -3786,37 +3778,114 @@ describe("chat contract", () => {
       });
       return (reply.body as { id: string }).id;
     };
+    const personReplies = (threadRootId: string) =>
+      call(t.asker, "POST", t.chat + "messages", {
+        conversationId: t.conversationId,
+        threadRootId,
+        text: "Carry on.",
+        key: randomText(6),
+      });
     const cancel = (ask: AskRow) => call(t.asker, "POST", t.chat + "asks/" + ask.id + "/cancel");
-    for (const row of (
-      (await call(t.asker, "GET", t.chat + "asks?role=asker")).body as { items: AskRow[] }
-    ).items)
-      await cancel(row);
-    // Four open at once passes the pair cap of three. The thread hop cap stops the fifth.
+    const refused = (extra: Record<string, unknown>) =>
+      call(t.asker, "POST", t.chat + "asks", { ...t.newAsk, ...extra });
+    return { own, root, personReplies, cancel, refused };
+  };
+
+  it("skips consent and the pair caps between one owner's agents", async () => {
+    const t = await sharedAskThread();
+    const { own, root, cancel, refused } = await ownAgents(t);
+    const helper = await own("helper");
+    // Across owners the fourth open ask stops at the pair cap of three.
+    const cross: AskRow[] = [];
+    for (const n of [1, 2, 3])
+      cross.push(await postAsk(t, { question: n + "?", key: "cross" + n }));
+    expect(cross.map((a) => a.state)).toEqual(["waiting_owner", "waiting_owner", "waiting_owner"]);
+    expectError(await refused({ question: "4?", key: "cross4" }), 403, "agent_ask_capped");
+    for (const ask of cross) await cancel(ask);
     const threadRootId = await root();
     const mine: AskRow[] = [];
     for (const n of [1, 2, 3, 4])
-      mine.push(await postAsk(t, { ...toHelper, threadRootId, question: n + "?", key: "own" + n }));
+      mine.push(
+        await postAsk(t, {
+          to: { kind: "agent", handle: helper },
+          threadRootId,
+          question: n + "?",
+          key: "own" + n,
+        }),
+      );
     expect(mine.map((a) => a.state)).toEqual(["open", "open", "open", "open"]);
-    const fifth = { ...t.newAsk, ...toHelper, threadRootId, question: "5?", key: "own5" };
-    expectError(await call(t.asker, "POST", t.chat + "asks", fifth), 429, "rate_limited");
-    await call(t.asker, "POST", t.chat + "messages", {
-      conversationId: t.conversationId,
-      threadRootId,
-      text: "Carry on.",
-      key: randomText(6),
-    });
-    mine.push(await postAsk(t, fifth));
-    for (const ask of mine) await cancel(ask);
-    // The same question to the same agent in one thread stops at the fourth try.
-    const repeats = await root();
-    const same = { ...toHelper, threadRootId: repeats, question: "Same?" };
-    for (const n of [1, 2, 3]) await cancel(await postAsk(t, { ...same, key: "same" + n }));
+  });
+
+  it("counts asks toward the thread hop cap, and their results add no hop", async () => {
+    const t = await sharedAskThread();
+    const { own, root, personReplies, cancel, refused } = await ownAgents(t);
+    const to = { kind: "agent", handle: await own("helper") };
+    const threadRootId = await root();
+    const ask = (n: number) => ({ to, threadRootId, question: n + "?", key: "hop" + n });
+    const first = [await postAsk(t, ask(1)), await postAsk(t, ask(2))];
+    for (const row of first)
+      expect(
+        (
+          await call(t.asker, "POST", t.chat + "asks/" + row.id + "/answer", {
+            text: "Done.",
+            asHandle: to.handle,
+          })
+        ).body,
+      ).toMatchObject({ state: "answered" });
+    expect(
+      (await waking(t, t.asker)).filter(
+        (d) => d.reason === "ask_result" && first.some((a) => a.id === d.message.ask?.id),
+      ),
+    ).toHaveLength(2);
+    const third = await postAsk(t, ask(3));
+    await postAsk(t, ask(4));
+    expectError(await refused(ask(5)), 429, "rate_limited");
+    await cancel(third);
+    expectError(await refused(ask(5)), 429, "rate_limited");
+    await personReplies(threadRootId);
+    expect(await postAsk(t, ask(5))).toMatchObject({ state: "open" });
+  });
+
+  it("counts asks toward the per-minute limit for one pair of agents", async () => {
+    const t = await sharedAskThread();
+    const { own, root, personReplies, cancel, refused } = await ownAgents(t);
+    const to = { kind: "agent", handle: await own("helper") };
+    const threadRootId = await root();
+    const mention = async (asHandle: string, name: string) => {
+      const reply = await call(t.asker, "POST", t.chat + "messages", {
+        conversationId: t.conversationId,
+        threadRootId,
+        text: "@" + t.from.owner.login + "/" + name + " noted",
+        asHandle,
+        key: randomText(8),
+      });
+      expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    };
+    // Twenty writes between the two: six asks and four mentions one way, ten mentions back.
+    for (let n = 0; n < 20; n++) {
+      if (n % 4 === 0) await personReplies(threadRootId);
+      if (n < 6)
+        await cancel(await postAsk(t, { to, threadRootId, question: n + "?", key: "pair" + n }));
+      else if (n < 10) await mention(t.from.id, "helper");
+      else await mention(to.handle, "builder");
+    }
+    await personReplies(threadRootId);
     expectError(
-      await call(t.asker, "POST", t.chat + "asks", { ...t.newAsk, ...same, key: "same4" }),
-      403,
-      "agent_ask_circle",
+      await refused({ to, threadRootId, question: "One more?", key: "pair20" }),
+      429,
+      "rate_limited",
     );
-    // A chain stops at depth two.
+  });
+
+  it("keeps the repeat limit and the chain depth between one owner's agents", async () => {
+    const t = await sharedAskThread();
+    const { own, root, cancel, refused } = await ownAgents(t);
+    const helper = await own("helper"),
+      checker = await own("checker");
+    const toHelper = { to: { kind: "agent", handle: helper } };
+    const same = { ...toHelper, threadRootId: await root(), question: "Same?" };
+    for (const n of [1, 2, 3]) await cancel(await postAsk(t, { ...same, key: "same" + n }));
+    expectError(await refused({ ...same, key: "same4" }), 403, "agent_ask_circle");
     const chain = await root();
     const first = await postAsk(t, { ...toHelper, threadRootId: chain, key: "chain1" });
     const second = await postAsk(t, {
@@ -3827,8 +3896,7 @@ describe("chat contract", () => {
       key: "chain2",
     });
     expectError(
-      await call(t.asker, "POST", t.chat + "asks", {
-        ...t.newAsk,
+      await refused({
         to: { kind: "agent", handle: t.to.id },
         asHandle: checker,
         parentAskId: second.id,
@@ -3838,6 +3906,44 @@ describe("chat contract", () => {
       403,
       "agent_ask_depth",
     );
+  });
+
+  it("keeps a same-owner ask to a nobody agent in the inbox without any click", async () => {
+    const t = await sharedAskThread();
+    const { own } = await ownAgents(t);
+    const helper = await own("helper", "nobody");
+    const ask = await postAsk(t, { to: { kind: "agent", handle: helper } });
+    expect(ask.state).toBe("open");
+    expect((await waking(t, t.asker)).filter((d) => d.message.ask?.id === ask.id)).toEqual([]);
+    const inbox = await call(t.asker, "POST", t.chat + "inbox", { asHandle: helper });
+    expectSchema("ChatDeliveries", inbox.body);
+    expect(inbox.body).toMatchObject({
+      items: [{ reason: "ask", wakes: false, message: { ask: { id: ask.id, state: "open" } } }],
+    });
+  });
+
+  it("holds a result in the inbox while the asker's owner is paused", async () => {
+    const t = await sharedAskThread();
+    const ask = await postAsk(t);
+    const settings = (await call(t.asker, "GET", t.chat + "me/settings")).body as object;
+    expect(
+      (await call(t.asker, "PUT", t.chat + "me/settings", { ...settings, agentsPaused: true }))
+        .status,
+    ).toBe(200);
+    await call(t.answerer, "POST", t.chat + "asks/" + ask.id + "/decision", {
+      decline: true,
+      reason: "Later.",
+    });
+    expect(await waking(t, t.asker)).toEqual([]);
+    expect((await needs(t.asker)).filter((i) => i.kind === "agent_inbox")).toEqual([
+      expect.objectContaining({ handleId: t.from.id, count: 1 }),
+    ]);
+    const inbox = await call(t.asker, "POST", t.chat + "inbox", { asHandle: t.from.id });
+    expect(inbox.body).toMatchObject({
+      items: [
+        { reason: "ask_result", wakes: false, message: { ask: { id: ask.id, state: "declined" } } },
+      ],
+    });
   });
 
   it("checks the named hand-off rule again on the receiver machine and leaves a stalled take actionable", async () => {

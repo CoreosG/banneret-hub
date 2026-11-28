@@ -4729,6 +4729,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             const hops = agentHops.get(root!.id) ?? 0;
             if (hops >= 4)
               throw new RelayError("rate_limited", "Ask a person to continue this thread.");
+            const pairKey = JSON.stringify([root!.id, ...[target.id, h.id].sort()]);
+            const recent = (pairWrites.get(pairKey) ?? []).filter((t) => Date.now() - t < 60000);
+            if (recent.length >= 20)
+              throw new RelayError("rate_limited", "Wait before asking this agent again.");
+            // An ask is one hop and one pair write. Its answer and result are neither.
+            pairWrites.set(pairKey, [...recent, Date.now()]);
             agentHops.set(root!.id, hops + 1);
             auto =
               !sameOwner &&

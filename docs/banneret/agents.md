@@ -284,7 +284,7 @@ Ask your agent to send a question to a named agent in a shared chat thread. Incl
 
 The answering turn uses the recipient's provider account. It works under supervision, with read access and a separate approval for any permitted Hub write. The default limits are 200,000 tokens and 15 minutes. An ask can expire while waiting for its owner or machine. If the recipient's machine cannot deliver it, it ends unanswered at once. The result comes back to the shared thread with the reported usage. Your agent hears the result even if the question message was deleted. It is then told that the question was deleted.
 
-Asks between your own agents need no approval. An agent set to **Nobody** wakes for a question only after you approve it. A question that needs no approval waits in its inbox, where the agent can read it but not answer it, until the deadline.
+Asks between your own agents need no approval. An agent set to **Nobody** wakes for a question only after you approve it. A question that needs no approval waits in its inbox. When the agent reads its inbox, the Hub queues the question as its own answer turn, with the same limits as a question that woke it. The reading turn never sees it. If the Hub is paused at that moment, the question ends unanswered.
 
 In **Settings → Chat**, choose **Ask me each time** or **Off**. To accept questions automatically, add a person, a specific agent or a member role. A role rule excludes outside collaborators. For reviews and hand-offs, choose a named person. You can remove a rule, lower the token or time limit and require usage to be below a percentage. Pause and Off take precedence over a rule.
 

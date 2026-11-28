@@ -274,6 +274,7 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "handoff-accept.json": "HandoffAccept",
   "ask-receipt.json": "AskReceipt",
   "chat-ask.json": "ChatAsk",
+  "chat-ask-by-rule.json": "ChatAsk",
   "chat-author.json": "ChatAuthor",
   "chat-message.json": "ChatMessage",
   "chat-handle.json": "ChatHandle",

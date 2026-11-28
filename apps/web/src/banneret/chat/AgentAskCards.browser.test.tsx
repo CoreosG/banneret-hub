@@ -33,10 +33,16 @@ it("lets the owner allow a question, posts its receipt and auto-accepts the next
   await using card = await render(<AskCard ask={answer} />);
   await expect.element(card.getByText("upload.ts")).toBeVisible();
   await expect.element(card.getByText(/180 tokens · 3 s · read/)).toBeVisible();
-  expect((await commands.companyChat("h1:agentAsk", "second")).ask).toMatchObject({
-    state: "open",
-    reason: "auto_accepted",
-  });
+  const ruled: ChatAsk = (await commands.companyChat("h1:agentAsk", "second")).ask;
+  expect(ruled).toMatchObject({ state: "open", byRule: true });
+  const owner = ruled.to.kind === "agent" ? ruled.to.owner.login : "";
+  // The line stays after a later state replaces the reason.
+  await using accepted = await render(
+    <AskCard ask={{ ...ruled, state: "unanswered", reason: "turn_ended" }} />,
+  );
+  await expect.element(accepted.getByText("Auto-accepted by " + owner + "’s rule")).toBeVisible();
+  await expect.element(accepted.getByText("turn_ended")).toBeVisible();
+  expect(card.getByText(/Auto-accepted by/).elements()).toHaveLength(0);
 });
 
 it("shows the reviewed commit and findings and posts only on a person's click at the current head", async () => {
