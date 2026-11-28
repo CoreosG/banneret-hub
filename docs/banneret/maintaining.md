@@ -17,16 +17,17 @@ Banneret Hub is upstream T3 Code plus a thin layer of our own commits. Keep that
 ## Layout tests
 
 A browser test whose assertions depend on layout runs across the viewport matrix: 900×700,
-1920×1080, 2560×1080, 3440×1440 and 3840×2160 at scale 1, and 3840×2160 at scale 2. A narrow window
-or an ultrawide one breaks layouts that look right at one desktop size.
+1920×1080, 2560×1080, 3440×1440 and 3840×2160 at scale 1, and 1920×1080 at scale 2 (a 4K screen at
+200% OS scaling). A narrow window or an ultrawide one breaks layouts that look right at one desktop
+size.
 
 - Declare it with `forEachViewport` from `apps/web/src/banneret/test/viewports.ts`. That call is the
   layout tag: it names each case `[layout] … at <size>`. Every other browser test runs once, at its
   own size.
 - Mount at the size the matrix set. A shared harness must not resize the window for a layout test.
 - Use the helper's assertions for overlap, clipping, clickability, line length and centring.
-- Each case calls `at.screenshot()` while its UI is up. Capture once per case: a 4K capture at
-  scale 2 takes seconds, and the case has the usual test timeout.
+- Each case calls `at.screenshot()` while its UI is up. Capture once per case: a large capture
+  takes seconds on a loaded runner, and the case has the usual test timeout.
 - Captures are off unless `VITE_LAYOUT_SHOTS` is set, and need `--no-file-parallelism`: a capture
   takes focus from test files running beside it, which fails their keyboard tests. From `apps/web`:
   `VITE_LAYOUT_SHOTS=1 vp test run --project browser --no-file-parallelism -t '\[layout\]' <files>`.

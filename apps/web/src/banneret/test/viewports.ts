@@ -21,18 +21,17 @@ const size = (width: number, height: number, deviceScaleFactor: 1 | 2 = 1): Layo
 const LAYOUT_VIEWPORTS: readonly LayoutViewport[] = [
   size(900, 700),
   size(1920, 1080),
+  // A 4K screen at 200% OS scaling.
+  size(1920, 1080, 2),
   size(2560, 1080),
   size(3440, 1440),
+  // A 4K screen at 100%.
   size(3840, 2160),
-  size(3840, 2160, 2),
 ];
 
 export interface AtViewport extends LayoutViewport {
-  /**
-   * Marks the moment to capture and, with VITE_LAYOUT_SHOTS set, saves what the window shows.
-   * `part` tells a second capture of the same size apart.
-   */
-  readonly screenshot: (part?: string) => Promise<void>;
+  /** Marks the moment to capture and, with VITE_LAYOUT_SHOTS set, saves what the window shows. */
+  readonly screenshot: () => Promise<void>;
 }
 
 // Playwright sets a device scale factor per browser context, so one test changes it over the
@@ -112,8 +111,8 @@ export function forEachViewport(name: string, body: (at: AtViewport) => Promise<
     const captured: string[] = [];
     await body({
       ...viewport,
-      screenshot: async (part) => {
-        const path = `${slug(name)}/${viewport.id}${part ? `-${slug(part)}` : ""}.png`;
+      screenshot: async () => {
+        const path = `${slug(name)}/${viewport.id}.png`;
         // A DevTools capture takes focus from test files running in other pages, so captures
         // happen only in a pass that runs one file at a time.
         if (import.meta.env.VITE_LAYOUT_SHOTS) await capture(path);
