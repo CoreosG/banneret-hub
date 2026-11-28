@@ -9,7 +9,7 @@ import {
 import type { EnvironmentId, SignInAction, SourceSignIn, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Redacted from "effect/Redacted";
-import { KeyRoundIcon } from "lucide-react";
+import { KeyRoundIcon, TriangleAlertIcon } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
@@ -198,18 +198,48 @@ function SignInCard({
   );
 }
 
-/** What a thread shows: only the servers that wait on the person. */
+/** What this chat did about the person's own copies of company servers. Nothing is turned off silently. */
+function OwnCopyNotes({ rows }: { rows: readonly SourceSignIn[] }) {
+  const noted = rows.flatMap((row) => (row.ownCopy ? [{ ...row, ownCopy: row.ownCopy }] : []));
+  return noted.length ? (
+    <section
+      aria-label="Company servers"
+      className="my-2 grid min-w-0 gap-2 rounded-lg border bg-card p-3 text-sm"
+    >
+      <strong>Company servers</strong>
+      {noted.map(({ relayOrigin, sourceId, title, ownCopy: { settings, off } }) => (
+        <p
+          key={relayOrigin + sourceId}
+          data-slot="own-copy"
+          className={cn("min-w-0 break-words text-xs", !off && "flex items-start gap-2")}
+        >
+          {!off && <TriangleAlertIcon aria-hidden className="size-4 shrink-0 text-warning" />}
+          <span className="min-w-0">
+            {off
+              ? `Your own copy of ${title} is turned off in this chat; the company copy runs through the Hub. It is also in your ${settings} settings, which stay as they are.`
+              : `Your own copy of ${title} is also in your ${settings} settings and is still on in this chat. It skips the company's tool access and approvals. Remove it from your ${settings} settings, then start a new chat.`}
+          </span>
+        </p>
+      ))}
+    </section>
+  ) : null;
+}
+
+/** What a thread shows: notes about own copies, then only the servers that wait on the person. */
 export function SignInPrompts({ rows, act }: { rows: readonly SourceSignIn[]; act: SignInAct }) {
-  return rows
-    .filter(needsPerson)
-    .map((row) => (
-      <SignInCard
-        key={row.relayOrigin + row.sourceId}
-        row={row}
-        act={act}
-        heading={`${row.title} needs your sign-in`}
-      />
-    ));
+  return (
+    <>
+      <OwnCopyNotes rows={rows} />
+      {rows.filter(needsPerson).map((row) => (
+        <SignInCard
+          key={row.relayOrigin + row.sourceId}
+          row={row}
+          act={act}
+          heading={`${row.title} needs your sign-in`}
+        />
+      ))}
+    </>
+  );
 }
 
 const actOn =

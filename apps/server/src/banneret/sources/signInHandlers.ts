@@ -18,6 +18,7 @@ import { pluginsForThread } from "../plugins/session.ts";
 import { readForMemory } from "../Workspaces.ts";
 import { mayCarrySignIn } from "./addresses.ts";
 import { finishSignIn, saveSourceToken, signOut, startSignIn, waitingSignIn } from "./oauth.ts";
+import { ownCopyOf } from "./ownCopies.ts";
 import { sourcesFor, type ThreadSource } from "./ThreadSources.ts";
 import { readCredential, signInChanges, signInState } from "./tokens.ts";
 
@@ -35,7 +36,11 @@ const joinedRelays = Effect.map(readForMemory, (workspaces) =>
   ),
 );
 
-const row = Effect.fn("BanneretSignIn.row")(function* (source: ThreadSource, company: string) {
+const row = Effect.fn("BanneretSignIn.row")(function* (
+  source: ThreadSource,
+  company: string,
+  threadId: ThreadId | undefined,
+) {
   const { relayOrigin, company: published } = source;
   const { id, title, url, auth, help } = published;
   const now = yield* Clock.currentTimeMillis;
@@ -46,6 +51,7 @@ const row = Effect.fn("BanneretSignIn.row")(function* (source: ThreadSource, com
         ? ("refused" as const)
         : signInState(yield* readCredential(relayOrigin, id), published, now);
   const authorizationUrl = auth === "oauth" ? waitingSignIn(relayOrigin, id, now) : undefined;
+  const ownCopy = threadId ? ownCopyOf(threadId, id) : undefined;
   return {
     relayOrigin,
     company,
@@ -56,6 +62,7 @@ const row = Effect.fn("BanneretSignIn.row")(function* (source: ThreadSource, com
     state,
     ...(help ? { help } : {}),
     ...(authorizationUrl ? { authorizationUrl } : {}),
+    ...(ownCopy ? { ownCopy } : {}),
   } satisfies SourceSignIn;
 });
 
@@ -80,6 +87,7 @@ export const signInRows = Effect.fn("BanneretSignIn.rows")(function* (
     row(
       source,
       relays.find((relay) => relay.origin === source.relayOrigin)?.displayName ?? "Your company",
+      threadId,
     ),
   );
 });

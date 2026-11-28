@@ -38,6 +38,15 @@ export const CallApproval = Schema.Struct({
   reason: Schema.String,
 });
 export type CallApproval = typeof CallApproval.Type;
+/**
+ * A copy of a company server in the person's own agent settings, as a chat's latest agent session met
+ * it. `off` is false when the Hub could not turn it off.
+ */
+export const OwnCopy = Schema.Struct({
+  settings: Schema.Literals(["Claude", "Codex"]),
+  off: Schema.Boolean,
+});
+export type OwnCopy = typeof OwnCopy.Type;
 /** One company source and this machine's sign-in to it. No token is part of it. */
 export const SourceSignIn = Schema.Struct({
   relayOrigin: Schema.String,
@@ -52,6 +61,8 @@ export const SourceSignIn = Schema.Struct({
   help: Schema.optionalKey(Schema.String),
   /** The sign-in page, while one is waiting. */
   authorizationUrl: Schema.optionalKey(Schema.String),
+  /** Only in a thread's rows, and only when the person has such a copy. */
+  ownCopy: Schema.optionalKey(OwnCopy),
 });
 export type SourceSignIn = typeof SourceSignIn.Type;
 const signInTarget = { relayOrigin: Schema.NonEmptyString, sourceId: Schema.NonEmptyString };
