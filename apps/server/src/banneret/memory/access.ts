@@ -74,13 +74,15 @@ export const hubServes = Effect.fn("Banneret.serves")(function* (
   return capability !== "skills" || (yield* soloSkillsEnabled);
 });
 
-/** A skill proposal is reviewed as a note, so a Solo memory plugin also takes proposing. */
+/** A skill proposal is stored as a note, so it needs Banneret's memory as well as its skills. */
 export const offersSkillProposals = Effect.fn("Banneret.skillProposals")(function* (
   threadId: ThreadId,
   environment: EnvironmentId,
 ) {
-  if (!(yield* hubServes(threadId, environment, "skills"))) return false;
-  return !(yield* hasPluginCapability(yield* ownerOfThread(threadId, environment)));
+  return (
+    (yield* hubServes(threadId, environment, "skills")) &&
+    (yield* hubServes(threadId, environment, "memory"))
+  );
 });
 export const memoryAccess = Effect.fn("BanneretMemory.access")(
   function* (

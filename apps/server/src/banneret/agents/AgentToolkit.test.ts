@@ -843,6 +843,21 @@ describe("agent toolkit listing", () => {
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.live("before capabilities are read, offers the Hub's own tools and no relay tool", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* resetRelay;
+        relayTools = null;
+        const { setMemory } = yield* serveAgents({});
+        yield* setMemory(true);
+        const company = yield* (yield* mcpSessions)("company");
+        expect(yield* company.tools).toEqual(
+          [...memoryNames, ...skillNames, "upstream_tool"].sort(),
+        );
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   const matrix = (["tasks", "skills", "memory", "chat", "search"] as const).flatMap((capability) =>
     (["banneret", "external", "off"] as const).map((owner) => ({ capability, owner })),
   );
@@ -880,7 +895,8 @@ describe("agent toolkit listing", () => {
                 (name) =>
                   owner === "banneret" ||
                   (toolCapability(name) !== capability &&
-                    !(capability === "tasks" && name === "banneret_handoff_offer")),
+                    !(capability === "tasks" && name === "banneret_handoff_offer") &&
+                    !(capability === "memory" && name === "banneret_skills_propose")),
               )
               .sort(),
           );
@@ -888,6 +904,9 @@ describe("agent toolkit listing", () => {
           if (owner === "external") expect(read[0]!.text).toContain("co-acme");
           else if (owner === "off") expect(read[0]!.text).toContain("not used at Example Company");
           else expect(read[0]!.text).toBe(joinText({ company: "Example Company", login: ME }));
+          // The page never asks for a proposal the thread has no tool for.
+          if (capability === "memory" && owner !== "banneret")
+            expect(read[0]!.text).not.toContain("Submit your proposed SKILL.md");
         }),
       ).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -1175,7 +1194,7 @@ describe("agent toolkit listing", () => {
       Effect.gen(function* () {
         // The thread's session starts before the Hub has read the relay's capabilities.
         relayTools = null;
-        const { setMemory } = yield* serveAgents({ relistEvery: "20 millis" });
+        const { setMemory, setSoloSkills } = yield* serveAgents({ relistEvery: "20 millis" });
         yield* setMemory(true);
         const httpClient = yield* HttpClient.HttpClient;
         const post = (method: string, params: object) =>
@@ -1263,6 +1282,11 @@ describe("agent toolkit listing", () => {
           "notifications/tools/list_changed",
         );
         expect(yield* toolNames).not.toContain("banneret_memory_search");
+        // So does the Solo skills switch, which no relay input shows.
+        yield* setSoloSkills(false);
+        expect(yield* Queue.take(notices).pipe(Effect.timeout("5 seconds"))).toBe(
+          "notifications/tools/list_changed",
+        );
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

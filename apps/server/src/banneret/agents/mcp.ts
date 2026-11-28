@@ -8,7 +8,7 @@ import { mayPause } from "./pause.ts";
 import { defaults, skillCatalog } from "../skills/catalog.ts";
 import * as Schema from "effect/Schema";
 import { knowledgeRevision } from "../memory/KbIndex.ts";
-import { memoryEnabled } from "../memory/settings.ts";
+import { memoryEnabled, soloSkillsEnabled } from "../memory/settings.ts";
 import { hubServes, memoryAccess, offersSkillProposals } from "../memory/access.ts";
 import * as SandboxHandoff from "./SandboxHandoff.ts";
 import * as Context from "effect/Context";
@@ -267,17 +267,20 @@ const relistOnOfferChange = (every: Duration.Input) =>
       const server = yield* McpServer.McpServer;
       let last = yield* relays.offerInputs;
       let lastMemory = yield* memoryEnabled;
+      let lastSkills = yield* soloSkillsEnabled;
       let lastKnowledge = knowledgeRevision;
       yield* Effect.sleep(every).pipe(
-        Effect.andThen(Effect.all([relays.offerInputs, memoryEnabled])),
-        Effect.flatMap(([next, enabled]) => {
+        Effect.andThen(Effect.all([relays.offerInputs, memoryEnabled, soloSkillsEnabled])),
+        Effect.flatMap(([next, enabled, skills]) => {
           if (
             (next === undefined || next === last) &&
             lastKnowledge === knowledgeRevision &&
-            enabled === lastMemory
+            enabled === lastMemory &&
+            skills === lastSkills
           )
             return Effect.void;
           lastMemory = enabled;
+          lastSkills = skills;
           lastKnowledge = knowledgeRevision;
           last = next;
           // Forget kept offers first, so the list this notice prompts reads the new offer.

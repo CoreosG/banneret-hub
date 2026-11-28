@@ -37,14 +37,14 @@ A relay can say who owns each capability: Banneret, a company server (a "source"
 only offers what Banneret owns. See
 [capability owners](relay-v1/README.md#capability-owners-and-plugin-sources).
 
-| Owned elsewhere | What goes from the Hub                                                                                   | What the person sees                                                                        |
-| --------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `tasks`         | Board, task and lease tools, task prompts, hand-off offers, Take and Release. With `off`, the board too. | "Tasks: owned by Acme Jira." beside the Board                                               |
-| `skills`        | Skill tools, `skill://` resources, and Banneret's default and company skills                             | A note under Settings, Chat                                                                 |
-| `memory`        | Memory tools, the memory index, rule reminders, correction nudges and the weekly review                  | "Memory is managed by Acme." in the memory strip. Your notes stay readable on your machine. |
-| `chat`          | Chat tools, channels, DMs and agent deliveries                                                           | "Chat: owned by Acme Slack." where the channels were                                        |
-| `search`        | `banneret_kb_search`                                                                                     | A note beside the knowledge folders                                                         |
-| `health`        | With `off`, the health tiles. A company source can still send alarms to the relay.                       | A note on Today                                                                             |
+| Owned elsewhere | What goes from the Hub                                                                                                              | What the person sees                                                                        |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `tasks`         | Board, task and lease tools, task prompts, hand-off offers, Take and Release. With `off`, the board too.                            | "Tasks: owned by Acme Jira." beside the Board                                               |
+| `skills`        | Skill tools, `skill://` resources, and Banneret's default and company skills                                                        | A note under Settings, Chat                                                                 |
+| `memory`        | Memory tools, skill proposals (each is stored as a note), the memory index, rule reminders, correction nudges and the weekly review | "Memory is managed by Acme." in the memory strip. Your notes stay readable on your machine. |
+| `chat`          | Chat tools, channels, DMs and agent deliveries                                                                                      | "Chat: owned by Acme Slack." where the channels were                                        |
+| `search`        | `banneret_kb_search`                                                                                                                | A note beside the knowledge folders                                                         |
+| `health`        | With `off`, the health tiles. A company source can still send alarms to the relay.                                                  | A note on Today                                                                             |
 
 `banneret_needs` and `banneret_team` are views of the relay, so they stay while the relay offers them. A joined
 company thread always has `banneret://join`, even when Banneret owns nothing. The page names each owner and the
