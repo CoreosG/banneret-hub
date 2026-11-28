@@ -895,6 +895,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         yield* syncAgents;
         return;
       case "chat.changed":
+        if (agents && chatFlags.includes("agent_asks")) yield* agents.changed(enrolment);
         if (sections.includes("chat") && typeof data?.seq === "number" && isChatNotice(data.notice))
           yield* PubSub.publish(changes, { ...snapshot(), chatNotice: data.notice });
         yield* syncChat(key, typeof data?.seq === "number" && data.change ? data.seq : undefined);

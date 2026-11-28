@@ -34,6 +34,8 @@ const BANNERET_CHAT_TOOLS = [
   "banneret_chat_reply",
   "banneret_chat_progress",
   "banneret_chat_ask",
+  "banneret_agent_ask",
+  "banneret_agent_answer",
   "banneret_chat_inbox",
 ] as const;
 export const BANNERET_POOL_TOOLS = [

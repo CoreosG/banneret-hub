@@ -1,3 +1,4 @@
+import { AskSettings } from "./AskSettings";
 import { CallApprovals } from "../CallApprovals";
 import { ThreadToolLevels } from "../ThreadToolLevels";
 import { MemoryStrip } from "../MemoryStrip";
@@ -76,6 +77,15 @@ export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
             Apply to all my agents
           </button>
         </>
+      )}
+      {settings && enterprise.feed.chatFlags?.includes("agent_asks") && (
+        <AskSettings
+          enterprise={enterprise}
+          policy={settings.agentAsks}
+          save={(agentAsks) =>
+            void save({ kind: "setDmSettings", settings: { ...settings, agentAsks } })
+          }
+        />
       )}
       {(error || setting.error) && <span role="alert">{error || setting.error}</span>}
     </fieldset>

@@ -1,4 +1,6 @@
 // @effect-diagnostics globalFetch:off - Streamable HTTP responses pass through as Web streams with redirects disabled.
+import { activeRun, answeringAsk } from "../chat/AnswerTurn.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -61,6 +63,10 @@ const proxy = Effect.gen(function* () {
     if (!rpc) return refuse("Expected one MCP request.");
     const thread = invocation.thread.threadId;
     const key = pluginSource(plugin.manifest.source);
+    const isAnswering = Effect.gen(function* () {
+      const run = yield* activeRun(yield* ThreadManagementService, thread);
+      return !!run && !!answeringAsk(run.userMessageId);
+    });
     const level = () => levelFor(thread, key);
     const listing = (id: string | number | undefined, params: object) =>
       Effect.tryPromise({
@@ -84,13 +90,16 @@ const proxy = Effect.gen(function* () {
       const current = yield* level();
       const showMemory =
         !page.tools.some((tool) => isMemoryTool(tool.name)) || (yield* memoryEnabled);
+      const answering = yield* isAnswering;
       return reply({
         result: {
           ...page.result,
           tools: page.tools.filter(
             (tool) =>
               (showMemory || !isMemoryTool(tool.name)) &&
-              allows(current, tool, plugin.manifest.toolPrefix),
+              allows(current, tool, plugin.manifest.toolPrefix) &&
+              (!answering ||
+                (tool.annotations?.readOnlyHint === true && !tool.annotations.destructiveHint)),
           ),
         },
       });
@@ -119,7 +128,7 @@ const proxy = Effect.gen(function* () {
       if (!listed || !allows(initial, listed, plugin.manifest.toolPrefix))
         return refuse(denied(name, plugin.manifest.source, initial));
       const kind = classify(listed, plugin.manifest.toolPrefix);
-      if (kind !== "read") {
+      if (kind !== "read" || (listed.annotations?.readOnlyHint !== true && (yield* isAnswering))) {
         const machine = yield* approvalMachine(invocation.environmentId);
         const result = yield* machine.submit(
           invocation,
@@ -154,8 +163,9 @@ const proxy = Effect.gen(function* () {
 
 export const pluginRoute = HttpRouter.add("*", "/banneret/plugins/:source", proxy).pipe(
   HttpRouter.provideRequest(
-    Layer.merge(
+    Layer.mergeAll(
       Layer.effect(ProjectionStore.ProjectionStoreV2, ProjectionStore.ProjectionStoreV2),
+      Layer.effect(ThreadManagementService, ThreadManagementService),
       Layer.effect(PreviewAgentActivity, PreviewAgentActivity),
     ),
   ),

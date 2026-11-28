@@ -1,3 +1,5 @@
+import { activeRun, answeringAsk } from "../chat/AnswerTurn.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { approvalLifecycle } from "../plugins/approvals.ts";
 export { holdWrite } from "../plugins/approvals.ts";
 import { PreviewAgentActivity } from "../../preview/PreviewAgentActivity.ts";
@@ -27,6 +29,7 @@ import { AgentToolkit, memoryNames, skillNames } from "./tools.ts";
 const invalidParams = Schema.is(McpSchema.InvalidParams);
 const toolkitLevels = McpServer.visibility(
   Effect.gen(function* () {
+    const threads = yield* ThreadManagementService;
     const activity = yield* PreviewAgentActivity;
     const services = yield* Effect.context<Effect.Services<ReturnType<typeof levelFor>>>();
     const tools = new Map(Object.entries(AgentToolkit.tools));
@@ -40,13 +43,25 @@ const toolkitLevels = McpServer.visibility(
         const level = yield* levelFor(thread.threadId, toolkitSource).pipe(
           Effect.provideContext(services),
         );
-        const allowed = allows(level, {
-          name: target,
-          annotations: {
-            readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
-            destructiveHint: Context.get(tool.annotations, Tool.Destructive),
-          },
-        });
+        const lookup = activeRun(threads, thread.threadId);
+        // Discovery still works while a thread is unavailable. Invocations require its live state.
+        const run = yield* method === "tools/call"
+          ? lookup
+          : lookup.pipe(Effect.catchCause(() => Effect.undefined));
+        const answering = !!run && !!answeringAsk(run.userMessageId);
+        const answeringThisAsk =
+          answering && target === "banneret_agent_answer" && level !== "none";
+        const effective =
+          answering && level === "read_write" && method !== "tools/call" ? "read" : level;
+        const allowed =
+          answeringThisAsk ||
+          allows(effective, {
+            name: target,
+            annotations: {
+              readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
+              destructiveHint: Context.get(tool.annotations, Tool.Destructive),
+            },
+          });
         if (method !== "tools/call") return allowed;
         if (!allowed)
           return yield* new McpSchema.InvalidParams({

@@ -1,4 +1,5 @@
 import { countLabel } from "../countLabel";
+import { AskCard } from "./AgentAskCards";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { ChannelMembers } from "./ChannelMembers";
 import { RequestControl } from "./JoinRequests";
@@ -607,7 +608,16 @@ function Timeline({
                           <time dateTime={m.createdAt}>{time.format(date)}</time>
                         </div>
                       )}
-                      {m.deleted ? <i>Message deleted</i> : <Markdown text={m.text} />}
+                      {m.deleted ? (
+                        <i>Message deleted</i>
+                      ) : m.ask?.to.kind === "agent" && m.ask.kind === "question" ? (
+                        <AskCard
+                          ask={m.ask}
+                          names={new Map(people.map((person) => [person.id, person.login]))}
+                        />
+                      ) : (
+                        <Markdown text={m.text} />
+                      )}
                       {!m.deleted && flags.includes("task_links") && m.taskRef && (
                         <div className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
                           {task ? (

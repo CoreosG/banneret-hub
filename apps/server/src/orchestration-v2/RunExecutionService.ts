@@ -1,4 +1,4 @@
-import { promptReminders } from "../banneret/memory/promptHook.ts";
+import { promptReminders, answerPolicy } from "../banneret/chat/turnPolicy.ts";
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -2301,6 +2301,7 @@ export const layer: Layer.Layer<
           message: input.message,
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,
+          ...answerPolicy(input.message.messageId, input.runtimePolicy),
           ...(appContext.length === 0 ? {} : { appContext }),
         };
         // Check after the context read: ingestion can settle the run while
