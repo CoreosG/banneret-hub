@@ -27,6 +27,7 @@ import { McpSessionRegistry } from "../../mcp/McpSessionRegistry.ts";
 import { threadPlugins } from "./session.ts";
 import { isPersonTool, offeredToThread } from "../sources/filters.ts";
 import { sourceGate } from "../sources/proxyGate.ts";
+import { signInRoute } from "../sources/oauth.ts";
 
 const decodeEnvelope = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -82,6 +83,8 @@ const proxy = Effect.gen(function* () {
       return !!run && !!answeringAsk(run.userMessageId);
     });
     const level = () => levelFor(thread, key);
+    // Only a Solo plugin's token is here. A company source's requests go through the gate.
+    const soloToken = plugin.company ? "" : plugin.token;
     const listing = (id: string | number | undefined, params: object) =>
       Effect.tryPromise({
         try: async (signal) =>
@@ -89,7 +92,7 @@ const proxy = Effect.gen(function* () {
             await forward(
               web,
               plugin.endpoint,
-              plugin.token,
+              soloToken,
               signal,
               encodeEnvelope({ jsonrpc: "2.0", id, method: "tools/list", params }),
             ),
@@ -185,7 +188,7 @@ const proxy = Effect.gen(function* () {
       });
       // Local skills fill in for a Solo plugin only. A company's skills are what its server says.
       const result =
-        !company && plugin.manifest.capabilities.includes("skills")
+        !plugin.company && plugin.manifest.capabilities.includes("skills")
           ? yield* skillReply(web, plugin, invocation.thread, permission)
           : undefined;
       const reason = yield* permission(listed);
@@ -198,14 +201,15 @@ const proxy = Effect.gen(function* () {
       method === "initialize" ? yield* gate.initialize(web, body!) : yield* gate.send(web, body);
     return sent.response ? HttpServerResponse.fromWeb(sent.response) : unavailable(sent.message);
   }
+  const token = plugin.company ? "" : plugin.token;
   const response = yield* Effect.tryPromise({
-    try: (signal) => forward(web, plugin.endpoint, plugin.token, signal, body),
+    try: (signal) => forward(web, plugin.endpoint, token, signal, body),
     catch: () => "Plugin unavailable" as const,
   });
   return HttpServerResponse.fromWeb(response);
 }).pipe(Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 502 })));
 
-export const pluginRoute = HttpRouter.add("*", "/banneret/plugins/:source", proxy).pipe(
+const proxyRoute = HttpRouter.add("*", "/banneret/plugins/:source", proxy).pipe(
   HttpRouter.provideRequest(
     Layer.mergeAll(
       Layer.effect(ProjectionStore.ProjectionStoreV2, ProjectionStore.ProjectionStoreV2),
@@ -214,3 +218,4 @@ export const pluginRoute = HttpRouter.add("*", "/banneret/plugins/:source", prox
     ),
   ),
 );
+export const pluginRoute = Layer.merge(proxyRoute, signInRoute);

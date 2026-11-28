@@ -81,15 +81,17 @@ is never in the middle, and the thread's own Hub token is never sent on. Shared 
 - **Names decide what shows.** A tool is named `<prefix><capability>_<verb>`. If a source provides a
   capability but does not own it here, its tools for that capability are hidden. Other tools pass through. No
   agent ever sees a `memory_person_*` tool.
-- **Required tools.** A source that owns a capability must list these, with its prefix: tasks needs
+- **Required tools.** A source that owns a capability must list these, with its prefix. The names are the ones
+  the [plugin kit](plugins.md#serve-mcp-calls) publishes. Tasks needs `tasks_list_boards`, `tasks_list_tasks`,
   `tasks_read`, `tasks_claim` and `tasks_release`. Skills needs `skills_list` and `skills_get`. Memory needs
-  `memory_search`, `memory_read`, `memory_use`, `memory_propose` and `memory_flag` (the
-  `banneret_memory_` spelling counts too). Search needs `search_query`. If one is missing, the whole source is
-  unavailable and the message names the tool.
+  `banneret_memory_search`, `banneret_memory_read`, `banneret_memory_use`, `banneret_memory_propose` and
+  `banneret_memory_flag`. Search needs `search_query`, which the kit does not cover yet. If one is missing, the
+  whole source is unavailable and the message names the tool.
 - **Banneret's own switches do not apply.** The Banneret memory switch does not hide a company's memory, and the
   Hub adds no local skills to a company's skills.
-- **Sign-in is not built yet.** The Hub can connect only to sources whose `auth.kind` is `none`. For `oauth` and
-  `bearer_per_person` the server is listed, the Hub does not contact it, and its calls say that a sign-in is needed.
+- **Your own sign-in.** A source that asks for one is used with your own account, once you
+  [sign in](#signing-in-to-a-company-server). Until then the thread lists its server, the Hub does not contact
+  it, and its calls tell the agent to ask you.
 - **When a server joins a thread.** The list of servers is set when the thread's agent session starts. A source
   the relay adds reaches the next new session. A source that stops owning anything, or a tool that stops being
   offered, is gone on the next call.
@@ -98,22 +100,90 @@ is never in the middle, and the thread's own Hub token is never sent on. Shared 
 
 The Hub keeps one state for each thread and source, in memory only.
 
-| State                   | Event                                                       | Next state               |
-| ----------------------- | ----------------------------------------------------------- | ------------------------ |
-| None                    | A request in a thread whose source owns something           | Configured               |
-| Configured              | The Hub has the sign-in it needs, or the source needs none  | Connecting               |
-| Configured              | A sign-in is needed and missing                             | Sign-in needed           |
-| Connecting              | Tools listed, with every required tool                      | Connected                |
-| Connecting or connected | Tools listed, with a required tool missing                  | Failed (`shape_missing`) |
-| Connecting or connected | The server answers 401                                      | Sign-in needed           |
-| Connecting              | The server cannot be reached, or takes more than 10 seconds | Failed (`unreachable`)   |
-| Any                     | A new turn, or a new address or owner for the source        | Configured               |
-| Any                     | The source owns nothing here any more                       | Gone                     |
-| Any                     | The Hub restarts                                            | None                     |
+| State                   | Event                                                        | Next state               |
+| ----------------------- | ------------------------------------------------------------ | ------------------------ |
+| None                    | A request in a thread whose source owns something            | Configured               |
+| Configured              | The Hub has the sign-in it needs, or the source needs none   | Connecting               |
+| Configured              | A sign-in is needed and missing, expired or refused          | Sign-in needed           |
+| Connecting or connected | You sign out, or the sign-in goes away                       | Sign-in needed, at once  |
+| Connecting              | Tools listed, with every required tool                       | Connected                |
+| Connecting or connected | Tools listed, with a required tool missing                   | Failed (`shape_missing`) |
+| Connecting or connected | The server answers 401, or 403 to the first handshake        | Sign-in needed           |
+| Connecting              | The server cannot be reached, or takes more than 10 seconds  | Failed (`unreachable`)   |
+| Configured              | Your token has ended and the sign-in service does not answer | Failed (`unreachable`)   |
+| Any                     | A new turn, or a new address or owner for the source         | Configured               |
+| Any                     | The source owns nothing here any more                        | Gone                     |
+| Any                     | The Hub restarts                                             | None                     |
 
 In Sign-in needed and Failed, the Hub does not contact the server again in that turn. It answers with a message
-the agent can pass on to you. It never falls back to a Banneret tool. Claude and Codex list tools when their
-session starts, so after a failed start, use a new chat to try again.
+the agent can pass on to you. It never falls back to a Banneret tool. If you sign in during a turn, the next turn
+connects. Claude and Codex list tools when their session starts, so after a failed start, you may need a new chat.
+
+#### Signing in to a company server
+
+Each person signs in on their own machine. Sign in from the card a thread shows, or under **Settings → Chat →
+Company servers**. Each server shows **Signed in**, **Signed out**, **Expired**, **Refused** or **No sign-in
+needed**.
+
+| The relay says      | What you do                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| `oauth`             | Choose **Sign in**, then **Open sign-in page**, and sign in with your company account        |
+| `bearer_per_person` | Paste your personal token. The Hub checks it with the server and saves it only if it is good |
+| `none`              | Nothing. The server knows your machine by your company network                               |
+
+For `oauth`, the Hub is its own MCP OAuth client. It reads the server's protected-resource and
+authorization-server metadata, registers itself, and uses PKCE. The browser comes back to
+`http://127.0.0.1:<port>/banneret/sources/oauth/callback` on the Hub. If your browser is on another device, that
+page does not load. Copy its address and paste it into the Hub. The Hub asks for the scopes the server names, but
+never `memory.person`: that one is kept for your own button presses.
+
+**Where your sign-in goes.**
+
+- It is saved only in the Hub's secret store on that machine. It is in no thread, log, bundle or settings file.
+- Claude and Codex never get it. They call the Hub on the same machine with the thread's own token, and the Hub
+  adds your sign-in on the way to the company's server. An approved write goes out the same way, with the sign-in
+  you have at that moment.
+- It goes only to the address you signed in to, and to that server's own sign-in service, over HTTPS or a
+  private network. It never goes to the company relay. A source on the relay's own address cannot be signed in to.
+- Agents act as you. Each person's Hub holds only that person's sign-in.
+
+**Refresh and sign-out.** The Hub refreshes an `oauth` sign-in about a minute before it ends, when a call needs
+it. Only one refresh runs at a time. If the company's sign-in service does not answer, the Hub keeps your sign-in
+and uses the old token while it lasts. The Hub waits 5 seconds for it, inside the thread's 10-second start limit.
+Requests that waited share that answer. After a silence the Hub does not ask again for 30 seconds. This pause is
+kept in memory only, and any change to your sign-in ends it. **Sign out** removes the sign-in from this machine and stops the next call.
+It does not end your session at the company. The Hub also signs you out when the relay stops naming the server or
+moves it to another address, and when the machine leaves the relay.
+
+The Hub keeps one saved sign-in for each relay and server. Signed out means there is none.
+
+| Saved state                  | Event                                                         | Next state |
+| ---------------------------- | ------------------------------------------------------------- | ---------- |
+| Signed out, Expired, Refused | The sign-in finishes, or the server takes your token          | Signed in  |
+| Signed out, Expired, Refused | Registration, consent or your token is refused                | Refused    |
+| Signed in                    | A new attempt is refused                                      | Signed in  |
+| Signed in                    | A refresh works                                               | Signed in  |
+| Signed in                    | A refresh is refused, or the token ends with nothing to renew | Expired    |
+| Signed in                    | The sign-in service does not answer                           | Signed in  |
+| Signed in                    | The server answers 401. No retry and no refresh               | Expired    |
+| Signed in                    | The server answers 403 to the first handshake                 | Refused    |
+| Signed in                    | The server answers 403 to one call                            | Signed in  |
+| Any                          | Sign out, a new address, the server dropped, or leaving       | Signed out |
+| Any                          | The Hub restarts                                              | Unchanged  |
+
+When a sign-in becomes Expired or Refused, the Hub deletes its tokens. An answer about a token that has since
+been replaced changes nothing.
+
+A waiting `oauth` sign-in is kept in memory only.
+
+| Attempt   | Event                                            | Next                                  |
+| --------- | ------------------------------------------------ | ------------------------------------- |
+| None      | You choose Sign in                               | Waiting, for 10 minutes               |
+| Waiting   | You start again                                  | A new attempt. The old one is useless |
+| Waiting   | The browser comes back, or you paste its address | Finishing. It works once              |
+| Finishing | The company gives a token                        | None, and Signed in                   |
+| Finishing | The company refuses, or does not answer          | None, with the reason                 |
+| Any       | Sign out, 10 minutes, or the Hub restarts        | None                                  |
 
 ### Solo workspaces
 

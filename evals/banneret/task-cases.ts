@@ -1,5 +1,7 @@
 // Emit cases for the existing mcp-tool-use runner with the prompt actually offered by this checkout.
 import { taskPrompts } from "../../apps/server/src/banneret/agents/startTask.ts";
+import { joinText } from "../../apps/server/src/banneret/agents/join.ts";
+import { sourceNotice } from "../../apps/server/src/banneret/sources/ThreadSources.ts";
 
 const examples = [
   {
@@ -96,6 +98,43 @@ for (const [id, question, words] of [
       pattern: "Keep the holder's lease until a pushed offer is accepted.",
       setup: { role: "top" },
       prompt: "Available tool: banneret_handoff_offer. " + description + "\n" + question,
+      expect: { finalTextMust: words, maxCalls: { exec_command: 0 } },
+      maxSteps: 2,
+    }) + "\n",
+  );
+}
+
+// A company that owns tasks and memory itself: the join page and sign-in notice a thread gets.
+const owner = { owner: "external", source: "acme", title: "Acme", prefix: "" } as const;
+const page = joinText({
+  company: "Acme",
+  login: "ana",
+  elsewhere: { tasks: owner, memory: owner },
+});
+const notice = sourceNotice("Acme", "oauth", { state: "sign_in_needed" })!;
+for (const [id, request, words] of [
+  [
+    "source-find-work",
+    "I asked you to find free work. Name the co-acme tools you would call, in order.",
+    ["tasks_list_boards", "tasks_list_tasks"],
+  ],
+  [
+    "source-sign-in",
+    `You called co-acme tasks_read for task A-1. It answered: "${notice}" What do you do now?`,
+    ["sign in"],
+  ],
+] as const) {
+  process.stdout.write(
+    JSON.stringify({
+      id,
+      area: "company-tasks",
+      kind: "guard",
+      privacy: "commit-safe",
+      source: { report: "Enterprise company sources, sign-in slice" },
+      experience: "An agent works through a company's own server.",
+      pattern: "It uses the published tool names and asks its person to sign in.",
+      setup: { role: "top" },
+      prompt: page + "\n\n" + request,
       expect: { finalTextMust: words, maxCalls: { exec_command: 0 } },
       maxSteps: 2,
     }) + "\n",

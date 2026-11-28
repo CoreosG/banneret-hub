@@ -5,6 +5,7 @@ import { SettingsRow, SettingsSection } from "../../components/settings/settings
 import { AskSettings } from "./AskSettings";
 import { CallApprovals } from "../CallApprovals";
 import { ThreadToolLevels } from "../ThreadToolLevels";
+import { ThreadSignIns } from "../SourceSignIns";
 import { MemoryStrip } from "../MemoryStrip";
 import { ChatHandle, ChatSettings, type EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -360,6 +361,7 @@ export function ThreadTimeline(props: ComponentProps<typeof Timeline>) {
               <>
                 {props.footer}
                 {cards}
+                <ThreadSignIns {...thread} />
                 <CallApprovals {...thread} />
               </>
             }

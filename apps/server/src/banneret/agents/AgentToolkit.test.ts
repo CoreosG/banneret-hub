@@ -743,7 +743,7 @@ describe("agent toolkit listing", () => {
 
           Skills: Acme MCP gateway owns them. Use the co-acme-gw tools: skills_list, skills_get.
 
-          Memory: Acme MCP gateway owns it. Use the co-acme-gw tools: memory_search, memory_read, memory_propose.
+          Memory: Acme MCP gateway owns it. Use the co-acme-gw tools: banneret_memory_search, banneret_memory_read, banneret_memory_propose.
 
           Search: not used at Example Company.
 
@@ -799,7 +799,7 @@ describe("agent toolkit listing", () => {
 
           You work for ada-example at Example Company.
 
-          Tasks and claims: Acme Jira owns them. Use the co-acme-jira tools: tasks_list to find work, tasks_read to read a task, tasks_claim before you change anything, and tasks_release with a reason when you stop. Before you claim, check banneret_team for what other agents already work on, and banneret_needs for what waits on ada-example. Tell ada-example which task you are about to claim, unless ada-example already asked for it. If the task owner is unreachable, stop and tell ada-example. Do not edit without a claim.
+          Tasks and claims: Acme Jira owns them. Use the co-acme-jira tools: tasks_list_boards and then tasks_list_tasks to find work, tasks_read to read a task, tasks_claim before you change anything, and tasks_release with a reason when you stop. Before you claim, check banneret_team for what other agents already work on, and banneret_needs for what waits on ada-example. Tell ada-example which task you are about to claim, unless ada-example already asked for it. If the task owner is unreachable, stop and tell ada-example. Do not edit without a claim.
 
           Search: Acme MCP gateway owns it. Use the co-acme-gw tools: acme_search_query.
 

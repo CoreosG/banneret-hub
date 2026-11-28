@@ -6,6 +6,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { approvalHandlers } from "../plugins/approvalHandlers.ts";
 import { levelHandlers } from "../plugins/levelHandlers.ts";
 import { pluginHandlers } from "../plugins/registry.ts";
+import { signInHandlers } from "../sources/signInHandlers.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { memorySettingsHandlers } from "../memory/settings.ts";
@@ -941,6 +942,7 @@ export const rpcHandlers = {
   ...levelHandlers,
   ...pluginHandlers,
   "memory.switchNotice": switchNotice,
+  ...signInHandlers,
   "memory.summary": Effect.fn("BanneretMemory.summary")(
     function* ({ threadId }: { threadId: ThreadId }) {
       const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;

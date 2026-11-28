@@ -16,7 +16,7 @@ const CAPABILITIES: ReadonlyArray<RelayCapability> = [
 /** `memory_person_*` is the person's own button press. No agent gets it, whatever the prefix or owner. */
 export const isPersonTool = (name: string) => name.toLowerCase().includes("memory_person_");
 
-/** The capability a tool name belongs to; Banneret's own spelling `banneret_<capability>_` counts too. */
+/** The capability a tool name belongs to. A `banneret_<capability>_` name counts, as the kit's memory tools do. */
 const capabilityOfTool = (name: string, prefix: string) => {
   const bare = (prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name)
     .toLowerCase()
@@ -39,10 +39,16 @@ export const offeredToThread = (
 
 // The names the plugin kit (docs/banneret/plugins.md) and the join file agree on. The relay's own source
 // check is the full one. Chat has no tool contract, and agents never call health.
-const REQUIRED: Record<RelayCapability, ReadonlyArray<string>> = {
-  tasks: ["tasks_read", "tasks_claim", "tasks_release"],
+export const REQUIRED: Record<RelayCapability, ReadonlyArray<string>> = {
+  tasks: ["tasks_list_boards", "tasks_list_tasks", "tasks_read", "tasks_claim", "tasks_release"],
   skills: ["skills_list", "skills_get"],
-  memory: ["memory_search", "memory_read", "memory_use", "memory_propose", "memory_flag"],
+  memory: [
+    "banneret_memory_search",
+    "banneret_memory_read",
+    "banneret_memory_use",
+    "banneret_memory_propose",
+    "banneret_memory_flag",
+  ],
   chat: [],
   search: ["search_query"],
   health: [],
@@ -54,11 +60,5 @@ export const missingTools = (
   listed: ReadonlySet<string>,
 ) =>
   source.owns.flatMap((capability) =>
-    REQUIRED[capability]
-      .filter(
-        (tool) =>
-          !listed.has(source.prefix + tool) &&
-          !(capability === "memory" && listed.has(`${source.prefix}banneret_${tool}`)),
-      )
-      .map((tool) => source.prefix + tool),
+    REQUIRED[capability].map((tool) => source.prefix + tool).filter((name) => !listed.has(name)),
   );

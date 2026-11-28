@@ -1,8 +1,11 @@
 import { RunId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
-import { isPersonTool, missingTools, offeredToThread } from "./filters.ts";
-import { companySources, ownedSources, sourceUrlAllowed, type CompanySource } from "./ownership.ts";
+import { tools as kitTools } from "../../../../../packages/banneret-plugin-kit/src/index.ts";
+import { joinText } from "../agents/join.ts";
+import { isPersonTool, missingTools, offeredToThread, REQUIRED } from "./filters.ts";
+import { sourceUrlAllowed } from "./addresses.ts";
+import { companySources, ownedSources, type CompanySource } from "./ownership.ts";
 import {
   configured,
   makeSourceStates,
@@ -20,6 +23,11 @@ describe("thread source state table", () => {
   it.each<[SourceState, SourceEvent, SourceState]>([
     [configured, { type: "credential", present: true }, connecting],
     [configured, { type: "credential", present: false }, signIn],
+    // A sign-out, or a sign-in the source dropped, closes the source in the same turn.
+    [connecting, { type: "credential", present: false }, signIn],
+    [connected, { type: "credential", present: false }, signIn],
+    [connected, { type: "credential", present: true }, connected],
+    [failed, { type: "credential", present: false }, failed],
     [connecting, { type: "listed", missing: [] }, connected],
     [
       connecting,
@@ -120,20 +128,44 @@ describe("company source tool filters", () => {
   });
 
   it("names the required tools an owned capability lacks, with the source's prefix", () => {
-    const listed = new Set(["jira__tasks_read", "jira__tasks_release"]);
+    const listed = new Set(
+      ["list_boards", "list_tasks", "read", "release"].map((verb) => "jira__tasks_" + verb),
+    );
     expect(missingTools({ prefix: "jira__", owns: ["tasks"] }, listed)).toEqual([
       "jira__tasks_claim",
     ]);
     expect(missingTools({ prefix: "", owns: ["search"] }, new Set())).toEqual(["search_query"]);
     const memory = ["search", "read", "use", "propose", "flag"];
-    for (const spelling of ["memory_", "banneret_memory_"])
-      expect(
-        missingTools(
-          { prefix: "", owns: ["memory"] },
-          new Set(memory.map((verb) => spelling + verb)),
-        ),
-      ).toEqual([]);
+    const named = (spelling: string) =>
+      missingTools(
+        { prefix: "", owns: ["memory"] },
+        new Set(memory.map((verb) => spelling + verb)),
+      );
+    expect(named("banneret_memory_")).toEqual([]);
+    // The kit documents one spelling.
+    expect(named("memory_")).toHaveLength(5);
     expect(missingTools({ prefix: "", owns: ["chat", "health"] }, new Set())).toEqual([]);
+  });
+});
+
+describe("tool names", () => {
+  const published = Object.keys(kitTools);
+
+  it("requires exactly the tools the plugin kit publishes", () => {
+    const required = [...REQUIRED.tasks, ...REQUIRED.skills, ...REQUIRED.memory];
+    expect(required.toSorted()).toEqual(published.toSorted());
+  });
+
+  it("names only published tools in the join page", () => {
+    const owner = { owner: "external", source: "acme", title: "Acme", prefix: "zz_" } as const;
+    const page = joinText({
+      company: "Acme",
+      login: "ada",
+      elsewhere: { tasks: owner, skills: owner, memory: owner },
+    });
+    const named = [...page.matchAll(/\bzz_([a-z_]+)/g)].map((match) => match[1]!);
+    expect(named.length).toBeGreaterThan(8);
+    for (const name of named) expect(published).toContain(name);
   });
 });
 
