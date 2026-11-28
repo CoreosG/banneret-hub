@@ -3,12 +3,22 @@ import * as NodeUtil from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { z } from "zod";
 import { manifestSchema } from "../src/index.ts";
+import {
+  checkProviderProfile,
+  providerProfile,
+  providerProfileSchema,
+} from "../src/providerProfile/index.ts";
 import { check } from "./checks.mjs";
 
 const usage = `node banneret-plugin-check.mjs --manifest FILE [--json] [--task-id ID] (--url URL | -- COMMAND [ARG ...])
 For tasks, set BANNERET_CHECK_TOKEN and BANNERET_CHECK_PEER_TOKEN to distinct test credentials.
-HTTP sends a bearer token. Stdio supplies PLUGIN_TOKEN to each process.`;
+HTTP sends a bearer token. Stdio supplies PLUGIN_TOKEN to each process.
+
+Provider profiles (experimental):
+node banneret-plugin-check.mjs --profile FILE [--json]
+node banneret-plugin-check.mjs --print-profile claudeAgent|codex|DRIVER_ID|schema`;
 
 let json = false;
 let report;
@@ -20,6 +30,8 @@ try {
       manifest: { type: "string" },
       url: { type: "string" },
       "task-id": { type: "string" },
+      profile: { type: "string" },
+      "print-profile": { type: "string" },
       json: { type: "boolean" },
       help: { type: "boolean" },
     },
@@ -29,36 +41,53 @@ try {
     console.log(usage);
     process.exit(0);
   }
-  if (!values.manifest || Boolean(values.url) === Boolean(positionals.length))
-    throw new Error(usage);
-  const manifest = manifestSchema.parse(
-    JSON.parse(await NodeFSP.readFile(values.manifest, "utf8")),
-  );
-  async function connect(token) {
-    const transport = values.url
-      ? new StreamableHTTPClientTransport(new URL(values.url), {
-          requestInit: { headers: token ? { Authorization: "Bearer " + token } : {} },
-        })
-      : new StdioClientTransport({
-          command: positionals[0],
-          args: positionals.slice(1),
-          env: token ? { PLUGIN_TOKEN: token } : {},
-        });
-    const client = new Client({ name: "banneret-plugin-check", version: "1" });
-    connections.push({ client, transport });
-    await client.connect(transport);
-    return client;
+  const wanted = values["print-profile"];
+  if (wanted) {
+    // A driver id without a built-in profile prints an empty one to start from.
+    const document =
+      wanted === "schema"
+        ? z.toJSONSchema(providerProfileSchema, { io: "input", reused: "ref" })
+        : providerProfile(wanted);
+    // Exiting before the write drains would cut a piped document short.
+    await new Promise((done) =>
+      process.stdout.write(`${JSON.stringify(document, null, 2)}\n`, done),
+    );
+    process.exit(0);
   }
-  const token = process.env.BANNERET_CHECK_TOKEN;
-  const peerToken = process.env.BANNERET_CHECK_PEER_TOKEN;
-  if (
-    manifest.capabilities.includes("tasks") &&
-    (!token || !peerToken || token === peerToken || !values["task-id"])
-  )
-    throw new Error(usage);
-  const client = await connect(token);
-  const peer = manifest.capabilities.includes("tasks") ? await connect(peerToken) : undefined;
-  report = await check(manifest, client, { peer, taskId: values["task-id"] });
+  if (values.profile) {
+    report = checkProviderProfile(JSON.parse(await NodeFSP.readFile(values.profile, "utf8")));
+  } else {
+    if (!values.manifest || Boolean(values.url) === Boolean(positionals.length))
+      throw new Error(usage);
+    const manifest = manifestSchema.parse(
+      JSON.parse(await NodeFSP.readFile(values.manifest, "utf8")),
+    );
+    async function connect(token) {
+      const transport = values.url
+        ? new StreamableHTTPClientTransport(new URL(values.url), {
+            requestInit: { headers: token ? { Authorization: "Bearer " + token } : {} },
+          })
+        : new StdioClientTransport({
+            command: positionals[0],
+            args: positionals.slice(1),
+            env: token ? { PLUGIN_TOKEN: token } : {},
+          });
+      const client = new Client({ name: "banneret-plugin-check", version: "1" });
+      connections.push({ client, transport });
+      await client.connect(transport);
+      return client;
+    }
+    const token = process.env.BANNERET_CHECK_TOKEN;
+    const peerToken = process.env.BANNERET_CHECK_PEER_TOKEN;
+    if (
+      manifest.capabilities.includes("tasks") &&
+      (!token || !peerToken || token === peerToken || !values["task-id"])
+    )
+      throw new Error(usage);
+    const client = await connect(token);
+    const peer = manifest.capabilities.includes("tasks") ? await connect(peerToken) : undefined;
+    report = await check(manifest, client, { peer, taskId: values["task-id"] });
+  }
 } catch (error) {
   report = { passed: false, checks: [{ name: "setup", status: "fail", hint: error.message }] };
 } finally {

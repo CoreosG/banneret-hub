@@ -1,0 +1,184 @@
+{
+  "id": "unknown",
+  "name": "Unknown provider",
+  "sources": {},
+  "instructions": {
+    "agentsMd": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "nameSetting": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "homeFolder": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "managed": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "user": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "project": {
+      "walk": {
+        "unknown": "The Hub has no profile for this provider."
+      },
+      "root": {
+        "unknown": "The Hub has no profile for this provider."
+      },
+      "names": {
+        "unknown": "The Hub has no profile for this provider."
+      },
+      "fallback": {
+        "unknown": "The Hub has no profile for this provider."
+      }
+    },
+    "subdirectory": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "sizeCaps": {
+      "user": {
+        "limit": {
+          "unknown": "The Hub has no profile for this provider."
+        },
+        "counts": {
+          "unknown": "The Hub has no profile for this provider."
+        },
+        "over": {
+          "unknown": "The Hub has no profile for this provider."
+        }
+      },
+      "project": {
+        "limit": {
+          "unknown": "The Hub has no profile for this provider."
+        },
+        "counts": {
+          "unknown": "The Hub has no profile for this provider."
+        },
+        "over": {
+          "unknown": "The Hub has no profile for this provider."
+        }
+      },
+      "subdirectory": {
+        "limit": {
+          "unknown": "The Hub has no profile for this provider."
+        },
+        "counts": {
+          "unknown": "The Hub has no profile for this provider."
+        },
+        "over": {
+          "unknown": "The Hub has no profile for this provider."
+        }
+      }
+    },
+    "precedence": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "rules": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "imports": {
+      "unknown": "The Hub has no profile for this provider."
+    }
+  },
+  "memory": {
+    "learns": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "onByDefault": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "writesByItself": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "location": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "offAtLaunch": {
+      "unknown": "The Hub has no profile for this provider."
+    }
+  },
+  "hooks": {
+    "model": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "configFiles": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "handlers": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "events": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "tools": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "mcpToolName": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "inputFields": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "blocks": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "ask": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "whenHookFails": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "contextLimit": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "trust": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "cannotCarry": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "recordedInputs": {
+      "unknown": "The Hub has no profile for this provider."
+    }
+  },
+  "skills": {
+    "locations": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "entryFile": {
+      "unknown": "The Hub has no profile for this provider."
+    },
+    "sharedAgentsFolder": {
+      "unknown": "The Hub has no profile for this provider."
+    }
+  },
+  "agents": {
+    "locations": {
+      "unknown": "The Hub has no profile for this provider."
+    }
+  },
+  "mcp": {
+    "configs": {
+      "unknown": "The Hub has no profile for this provider."
+    }
+  },
+  "hubNotes": {
+    "unknown": "The Hub has no profile for this provider."
+  },
+  "conformance": {
+    "instructionLoads": {
+      "mixed": {
+        "atStart": [],
+        "onDemand": [],
+        "undetermined": [],
+        "unknownLevels": ["managed", "user", "project", "subdirectory"]
+      },
+      "agentsOnly": {
+        "atStart": [],
+        "onDemand": [],
+        "undetermined": [],
+        "unknownLevels": ["managed", "user", "project", "subdirectory"]
+      }
+    }
+  }
+}
