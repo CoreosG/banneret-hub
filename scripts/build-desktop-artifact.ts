@@ -2862,7 +2862,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (!isDesktopPreviewVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
-      buildConfig.publish = [publishConfig];
+      buildConfig.publish = [{ ...publishConfig, owner: "CoreosG", repo: "banneret-hub" }];
     } else if (mockUpdates) {
       buildConfig.publish = [
         {

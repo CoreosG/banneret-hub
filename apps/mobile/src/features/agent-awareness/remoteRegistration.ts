@@ -171,6 +171,7 @@ function mergeAgentAwarenessRegistrationPreferences(
 }
 
 function readRelayConfig(): { readonly url: string } | null {
+  if (process.env.EXPO_PUBLIC_BANNERET_MOBILE_PUSH !== "1") return null;
   const relayUrl = resolveCloudPublicConfig().relay.url;
   if (!relayUrl) {
     return null;

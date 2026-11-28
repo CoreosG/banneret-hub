@@ -124,6 +124,9 @@ jobs:
       - name: Build JS bundle
         run: vp run build:desktop:bundle
 
+      - name: Scan the release for upstream network destinations
+        run: node scripts/banneret/egress/bundles.mjs
+
       - name: Build plugin checker
         run: vp run --filter @t3tools/banneret-plugin-kit build:checker
 

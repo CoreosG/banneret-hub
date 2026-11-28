@@ -5,6 +5,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import { brandEgress } from "./egress/brand.mjs";
+
 export const OFFICIAL_NAME = "T3 Code";
 export const BRAND_NAME = "Banneret Hub";
 // Also Swedish genitive: "T3 Codes" becomes "Banneret Hubs".
@@ -18,6 +20,10 @@ const SOURCE_PATTERN = /\.(?:[cm]?[jt]sx?)$/;
  * shells, the WSL probe), since every producer and reader is in a rewritten bundle or installer.
  */
 export const ENV_RENAMES = Object.freeze({
+  T3CODE_RELAY_URL: "BANNERET_RELAY_URL",
+  T3CODE_HOSTED_APP_URL: "BANNERET_HOSTED_APP_URL",
+  T3CODE_CLERK_PUBLISHABLE_KEY: "BANNERET_CLERK_PUBLISHABLE_KEY",
+  T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: "BANNERET_CLERK_CLI_OAUTH_CLIENT_ID",
   T3CODE_HOME: "BANNERET_HOME",
   T3CODE_INSTALL_BIN_DIR: "BANNERET_INSTALL_BIN_DIR",
   T3CODE_CLI_PATH: "BANNERET_CLI_PATH",
@@ -264,7 +270,7 @@ export function banneretBrandPlugin({ vite = false, cli = false } = {}) {
     transform(code, id) {
       const file = id.split("?")[0];
       if (!SOURCE_PATTERN.test(file) || file.includes("node_modules")) return null;
-      const text = rebrandText(code, { cli });
+      const text = rebrandText(brandEgress(code, file), { cli });
       const rebranded = cli ? titleServerEntry(text, file) : text;
       return rebranded === code ? null : { code: rebranded, map: null };
     },

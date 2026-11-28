@@ -1,0 +1,22 @@
+name: Banneret release egress
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  egress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-pnpm-store: "false"
+      - run: vp run build:desktop:bundle
+      - run: node scripts/banneret/egress/bundles.mjs
+      - run: node apps/web/node_modules/playwright/cli.js install --only-shell --with-deps chromium
+      - run: node scripts/banneret/egress/runtime.mjs

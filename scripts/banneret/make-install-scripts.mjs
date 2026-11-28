@@ -21,6 +21,16 @@ const INSTALL_BASE = `https://github.com/${REPO}/releases/latest/download`;
 const shRules = [
   ["T3CODE_", "BANNERET_", 15],
   ["(default: ~/.t3)", "(default: ~/.banneret)", 1],
+  [
+    'base_url="${BANNERET_RELEASE_BASE_URL:-https://github.com/${repo}/releases/download}"',
+    'base_url="https://github.com/${repo}/releases/download"',
+    1,
+  ],
+  [
+    "BANNERET_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)",
+    "Updates use Banneret Hub releases on GitHub.",
+    1,
+  ],
   [`repo="pingdotgg/t3code"`, `repo="${REPO}"`, 1],
   [`$HOME/.t3}`, `$HOME/.banneret}`, 1],
   ["https://t3.codes/install.sh", `${INSTALL_BASE}/install.sh`, 1],
@@ -49,6 +59,16 @@ const shRules = [
 const ps1Rules = [
   ["T3CODE_", "BANNERET_", 15],
   ["(default: ~\\.t3)", "(default: ~\\.banneret)", 1],
+  [
+    '$baseUrl = if ($env:BANNERET_RELEASE_BASE_URL) { $env:BANNERET_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }',
+    '$baseUrl = "https://github.com/$repo/releases/download"',
+    1,
+  ],
+  [
+    "BANNERET_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)",
+    "Updates use Banneret Hub releases on GitHub.",
+    1,
+  ],
   [`$repo = "pingdotgg/t3code"`, `$repo = "${REPO}"`, 1],
   [`Join-Path $HOME ".t3"`, `Join-Path $HOME ".banneret"`, 1],
   ["https://t3.codes/install.ps1", `${INSTALL_BASE}/install.ps1`, 1],
