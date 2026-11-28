@@ -248,6 +248,7 @@ export const enrolmentRpc = {
 };
 
 interface EnrolmentState {
+  readonly unreadable: Readonly<Record<EnvironmentId, ReadonlyArray<string>>>;
   readonly missingStatusRpc: Readonly<Record<EnvironmentId, boolean>>;
   /** Per environment, its enrolment with each relay it has tried, in origin order. */
   readonly views: Readonly<Record<EnvironmentId, ReadonlyArray<BanneretEnrolmentView>>>;
@@ -256,6 +257,7 @@ interface EnrolmentState {
 }
 
 export const useEnrolmentStore = create<EnrolmentState>(() => ({
+  unreadable: {},
   views: {},
   machines: {},
   missingStatusRpc: {},
@@ -283,6 +285,7 @@ export async function refreshEnrolment(environmentId: EnvironmentId) {
   if (result.ok) {
     useEnrolmentStore.setState((state) => ({
       missingStatusRpc: { ...state.missingStatusRpc, [environmentId]: false },
+      unreadable: { ...state.unreadable, [environmentId]: result.value.unreadableWorkspaces ?? [] },
       views: { ...state.views, [environmentId]: result.value.enrolments },
       machines: { ...state.machines, [environmentId]: result.value.machine },
     }));

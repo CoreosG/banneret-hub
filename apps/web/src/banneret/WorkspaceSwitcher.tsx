@@ -33,7 +33,7 @@ import {
   joinLine,
   pendingJoins,
 } from "./enterprise.logic";
-import { useEnrolmentViews } from "./enrolmentStore";
+import { useEnrolmentStore, useEnrolmentViews } from "./enrolmentStore";
 import { useGitHubLogin, accountMatch } from "./accountIdentity";
 import { effectiveWorkspaceId } from "./workspaces.logic";
 import {
@@ -62,7 +62,9 @@ export function WorkspaceSwitcher(props: {
   const active = workspaces.find((workspace) => workspace.id === activeId) ?? null;
   const activeName = active?.name ?? null;
   // Each Enterprise workspace has its own relay, so its own enrolment on this machine.
-  const views = useEnrolmentViews(usePrimaryEnvironmentId());
+  const environment = usePrimaryEnvironmentId();
+  const views = useEnrolmentViews(environment);
+  const unreadable = useEnrolmentStore((state) => environment && state.unreadable[environment]);
   const viewOf = (workspace: BanneretWorkspace) =>
     views.find((view) => view.workspaceId === workspace.id) ?? null;
   const enrolment = active === null ? null : viewOf(active);
@@ -129,6 +131,24 @@ export function WorkspaceSwitcher(props: {
               />
             ))}
           </MenuRadioGroup>
+          {unreadable?.map((id) => {
+            const workspace = workspaces.find((entry) => entry.id === id);
+            return (
+              <MenuItem
+                key={id}
+                onClick={() =>
+                  openWorkspaceDialog({
+                    kind: "enterprise",
+                    ...(workspace?.relay && { origin: workspace.relay.origin }),
+                  })
+                }
+              >
+                <span>
+                  {workspace?.name ?? id} · This company's saved join could not be read · Re-join
+                </span>
+              </MenuItem>
+            );
+          })}
           {pending.map((view) => (
             <PendingJoinItem key={view.relayOrigin} view={view} />
           ))}

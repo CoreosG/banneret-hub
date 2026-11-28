@@ -37,6 +37,7 @@ import {
   remoteUrlsOf,
   revokedMessage,
   connectedLine,
+  staleIdentityLine,
   wizardStep,
 } from "./enterprise.logic";
 import {
@@ -467,7 +468,9 @@ function ProjectStep(props: {
         <div className="min-w-0">
           <p className="truncate font-medium text-sm">
             <span aria-hidden className="mr-1.5 inline-block size-2 rounded-full bg-success" />
-            {connectedLine(props.view.me)}
+            {props.view.staleLogin === undefined
+              ? connectedLine(props.view.me)
+              : staleIdentityLine(props.view.staleLogin)}
           </p>
           {props.view.replacedLabel !== undefined ? (
             <p className="truncate text-muted-foreground text-xs">

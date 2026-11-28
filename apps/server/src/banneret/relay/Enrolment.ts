@@ -75,6 +75,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ownResources, biggestFolders } from "../resources/OwnCgroup.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
+import { PersistenceDecodeError } from "../../persistence/Errors.ts";
 import * as ServerConfig from "../../config.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import * as Workspaces from "../Workspaces.ts";
@@ -120,6 +121,12 @@ const Pending = {
   startedAt: Schema.String,
 };
 
+// A stale identity retains only its display login. The next successful heartbeat refreshes it.
+const CachedMe = Schema.Union([RelayMe, Schema.Struct({ login: Schema.String })]).pipe(
+  Schema.catchDecoding(() => Effect.succeedSome({ login: "" })),
+  Schema.withDecodingDefaultKey(Effect.succeed({ login: "" })),
+);
+
 const Persisted = Schema.Union([
   Schema.Struct({
     state: Schema.Literal("none"),
@@ -139,7 +146,7 @@ const Persisted = Schema.Union([
     label: Schema.String,
     kind: BanneretMachineKind,
     startedAt: Schema.String,
-    counterMark: Schema.optional(Schema.String),
+    counterMark: Schema.optional(Schema.String.check(Schema.isPattern(/^[0-9]+$/))),
   }),
   Schema.Struct({
     state: Schema.Literal("configured"),
@@ -150,10 +157,10 @@ const Persisted = Schema.Union([
     kind: BanneretMachineKind,
     community: Schema.optional(Schema.Boolean),
     sharing: Schema.optional(OfficeSharing),
-    me: RelayMe,
+    me: CachedMe,
     replacedLabel: Schema.optional(Schema.String),
     lastOkAt: Schema.optional(Schema.String),
-    counterMark: Schema.optional(Schema.String),
+    counterMark: Schema.optional(Schema.String.check(Schema.isPattern(/^[0-9]+$/))),
   }),
   Schema.Struct({
     state: Schema.Literal("revoked"),
@@ -388,6 +395,7 @@ export interface RelayEnrolment {
 interface EnrolmentService {
   readonly probe: (origin: string) => Effect.Effect<BanneretRelayProbeResult, BanneretRelayError>;
   /** Every relay this environment has a state file for, in origin order. */
+  readonly unreadableWorkspaces: Effect.Effect<ReadonlyArray<string>>;
   readonly list: Effect.Effect<ReadonlyArray<BanneretEnrolmentView>>;
   /** What this machine tells every relay about itself, for support to match `pairings list`. */
   readonly machine: Effect.Effect<BanneretEnrolmentMachine>;
@@ -462,6 +470,7 @@ export class BanneretEnrolment extends Context.Reference<EnrolmentService>(
   {
     defaultValue: () => ({
       probe: () => notRunning,
+      unreadableWorkspaces: Effect.succeed([]),
       list: Effect.succeed([]),
       machine: Effect.sync(() => ({ environmentId: "", ...hostFacts() })),
       status: (relayOrigin) =>
@@ -543,6 +552,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
   shared: RelayShared,
   origin: string,
   loaded: Persisted | undefined,
+  unreadable?: Set<string>,
 ) {
   const { options, fs, path, secrets, environmentId, facts, context, clock } = shared;
   const stateFile = path.join(shared.relaysDir, `${relayHash(origin)}.json`);
@@ -591,7 +601,14 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     const staging = `${stateFile}.staging-${process.pid}`;
     yield* fs.makeDirectory(path.dirname(stateFile), { recursive: true }).pipe(Effect.orDie);
     yield* fs.writeFileString(staging, contents).pipe(Effect.orDie);
+    const workspaceId = enterpriseWorkspaceId(origin);
+    if (unreadable?.has(workspaceId)) {
+      yield* fs
+        .link(stateFile, stateFile + ".unreadable-" + NodeCrypto.randomUUID())
+        .pipe(Effect.orDie);
+    }
     yield* fs.rename(staging, stateFile).pipe(Effect.orDie);
+    unreadable?.delete(workspaceId);
     current = next;
     onDisk = true;
     yield* notify;
@@ -736,6 +753,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
   if (loaded !== undefined) current = loaded;
   yield* locked(
     Effect.gen(function* () {
+      if (unreadable?.has(enterpriseWorkspaceId(origin))) return;
       let hasKey = Option.isSome(yield* readSecret(KEY_SECRET));
       const hasToken = Option.isSome(yield* readSecret(TOKEN_SECRET));
       const nextKey = yield* readSecret(NEXT_KEY_SECRET);
@@ -1108,17 +1126,14 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     from: Configured,
     reply: RelayReply,
   ) {
-    if (reply.etag !== undefined) etag = reply.etag;
     const lastOkAt = yield* nowIso;
     const decoded = reply.status === 304 ? Option.none() : decodeEnrolledCapabilities(reply.body);
-    const me = Option.getOrElse(
-      Option.map(decoded, (body) => body.me),
-      () => from.me,
-    );
-    const community = Option.isSome(decoded)
-      ? decoded.value.team?.preset === "community"
-      : from.community === true;
+    if (Option.isNone(decoded)) return yield* touchLastOk(from);
+    if (reply.etag !== undefined) etag = reply.etag;
+    const me = decoded.value.me;
+    const community = decoded.value.team?.preset === "community";
     if (
+      !("role" in from.me) ||
       community !== Boolean(from.community) ||
       me.login !== from.me.login ||
       me.id !== from.me.id ||
@@ -1143,7 +1158,12 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
   const refreshCapabilities = Effect.fn("BanneretEnrolment.capabilities")(function* (
     from: Configured,
   ) {
-    yield* signedCall(from, "GET", "/relay/v1/capabilities", etag).pipe(
+    yield* signedCall(
+      from,
+      "GET",
+      "/relay/v1/capabilities",
+      "role" in from.me ? etag : undefined,
+    ).pipe(
       Effect.flatMap((reply) => applyCapabilities(from, reply)),
       Effect.ignore,
     );
@@ -1181,7 +1201,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     snapshotEtag = Option.getOrUndefined(reply)?.snapshotEtag;
     const version = Option.map(reply, (decoded) => decoded.capabilitiesVersion);
     capabilitiesVersion = Option.getOrUndefined(version);
-    if (Option.isSome(version) && `"${version.value}"` !== etag) {
+    if (!("role" in from.me) || (Option.isSome(version) && `"${version.value}"` !== etag)) {
       yield* refreshCapabilities(from).pipe(Effect.ignore);
     } else {
       yield* touchLastOk(from);
@@ -1273,7 +1293,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
           machineId: state.machineId,
           label: state.label,
           ...(state.sharing && { sharing: state.sharing }),
-          me: state.me,
+          ...("role" in state.me ? { me: state.me } : { staleLogin: state.me.login }),
           ...(state.replacedLabel === undefined ? {} : { replacedLabel: state.replacedLabel }),
           ...(health === undefined ? {} : { health }),
           ...(state.lastOkAt === undefined ? {} : { lastOkAt: state.lastOkAt }),
@@ -1349,7 +1369,14 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
         const replacing = before.state === "configured";
         // A relay that answered for the first time gets its state file before any secret exists,
         // so start-up always finds a state to match the secrets against.
-        if (!onDisk) yield* persist({ state: "none", relayOrigin: origin });
+        if (!onDisk) {
+          const recovering = unreadable?.has(enterpriseWorkspaceId(origin));
+          yield* persist({ state: "none", relayOrigin: origin });
+          if (recovering) {
+            yield* removeSecret(NEXT_KEY_SECRET);
+            yield* removeSecrets;
+          }
+        }
         yield* setSecret(replacing ? NEXT_KEY_SECRET : KEY_SECRET, seed);
         yield* persist({
           state: "requested",
@@ -1570,16 +1597,28 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
     matchProjects: matchRepositories,
     nextChange: Effect.sync(() => Deferred.await(changeSignal)),
     signedChat: (method, path, body, namespace) =>
-      Effect.flatMap(configuredNow, (from) =>
-        signedCall(
+      Effect.flatMap(configuredNow, (from) => {
+        let target = path;
+        if (path.endsWith("/members/@me")) {
+          if (!("id" in from.me))
+            return Effect.fail(
+              new RelayCallError({
+                status: 0,
+                code: "identity_pending",
+                message: "Waiting for the relay to refresh your account.",
+                retryable: true,
+              }),
+            );
+          target = path.replace(/\/members\/@me$/, "/members/" + encodeURIComponent(from.me.id));
+        }
+        return signedCall(
           from,
           method,
-          (namespace === "roles" ? "/relay/v1/" : "/relay/v1/chat/") +
-            path.replace(/\/members\/@me$/, "/members/" + encodeURIComponent(from.me.id)),
+          (namespace === "roles" ? "/relay/v1/" : "/relay/v1/chat/") + target,
           undefined,
           body,
-        ),
-      ),
+        );
+      }),
     officeHeard: Effect.fn("BanneretEnrolment.officeHeard")(function* (ids) {
       const from = yield* requireConfigured;
       if (!ids.length || ids.length > 50 || ids.some((id) => !/^[a-zA-Z0-9_-]{1,64}$/.test(id)))
@@ -1611,7 +1650,7 @@ const makeRelay = Effect.fn("BanneretEnrolment.makeRelay")(function* (
       let path = "/relay/v1/team/me";
       let body;
       if (action.kind === "meeting") {
-        if (!from.me.permissions.includes("relay.admin"))
+        if (!("role" in from.me) || !from.me.permissions.includes("relay.admin"))
           return yield* fail("Only founders can edit meeting links.");
         if (action.meetingUrl !== null && !officeMeetingUrlValid(action.meetingUrl))
           return yield* fail("Enter a valid HTTPS meeting link.");
@@ -1726,17 +1765,34 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
 
   // Start-up: one instance per state file whose name matches the origin inside it. Anything else
   // in the directory is ignored.
-  const names = yield* fs.readDirectory(relaysDir).pipe(Effect.orElseSucceed(() => []));
+  const unreadable = new Set<string>();
+  const names = yield* fs
+    .readDirectory(relaysDir)
+    .pipe(
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound" ? Effect.succeed([]) : Effect.die(error),
+      ),
+    );
   for (const name of [...names].toSorted()) {
     const match = /^([0-9a-f]{16})\.json$/.exec(name);
     if (match === null) continue;
     const loaded = yield* fs
       .readFileString(path.join(relaysDir, name))
-      .pipe(Effect.flatMap(decodePersisted), Effect.option);
-    if (Option.isNone(loaded)) continue;
-    const relayOrigin = normalizeOrigin(loaded.value.relayOrigin);
-    if (relayOrigin === null || relayHash(relayOrigin) !== match[1]) continue;
-    relays.set(relayOrigin, yield* makeRelay(shared, relayOrigin, loaded.value));
+      .pipe(Effect.flatMap(decodePersisted), Effect.result);
+    const relayOrigin = Result.isSuccess(loaded)
+      ? normalizeOrigin(loaded.success.relayOrigin)
+      : null;
+    if (Result.isFailure(loaded) || relayOrigin === null || relayHash(relayOrigin) !== match[1]) {
+      const detail = Result.isSuccess(loaded)
+        ? "Relay origin does not match the file name"
+        : Schema.isSchemaError(loaded.failure)
+          ? PersistenceDecodeError.fromSchemaError(name, loaded.failure).message
+          : loaded.failure.message;
+      yield* Effect.logWarning("Could not read saved company join", { file: name, detail });
+      unreadable.add("ent-" + match[1]);
+      continue;
+    }
+    relays.set(relayOrigin, yield* makeRelay(shared, relayOrigin, loaded.success));
   }
 
   const lookup = (input: string) =>
@@ -1763,7 +1819,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
       Effect.gen(function* () {
         const existing = relays.get(address.origin);
         if (existing !== undefined) return existing;
-        const added = yield* makeRelay(shared, address.origin, undefined);
+        const added = yield* makeRelay(shared, address.origin, undefined, unreadable);
         relays.set(address.origin, added);
         yield* changed;
         return added;
@@ -1773,6 +1829,7 @@ const make = Effect.fn("BanneretEnrolment.make")(function* (
   });
 
   const service: EnrolmentService = {
+    unreadableWorkspaces: Effect.sync(() => [...unreadable]),
     probe: probeRelay,
     list: Effect.suspend(() =>
       Effect.forEach(
@@ -1915,10 +1972,11 @@ export const rpcHandlers = {
     Effect.flatMap(BanneretEnrolment, (enrolment) => enrolment.probe(input.origin)),
   [BANNERET_RELAY_WS_METHODS.status]: () =>
     Effect.flatMap(BanneretEnrolment, (enrolment) =>
-      Effect.map(Effect.all([enrolment.list, enrolment.machine]), ([enrolments, machine]) => ({
-        enrolments,
-        machine,
-      })),
+      Effect.all({
+        enrolments: enrolment.list,
+        machine: enrolment.machine,
+        unreadableWorkspaces: enrolment.unreadableWorkspaces,
+      }),
     ),
   [BANNERET_RELAY_WS_METHODS.start]: (input: {
     readonly origin: string;

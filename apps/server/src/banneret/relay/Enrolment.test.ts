@@ -492,6 +492,62 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("refreshes a saved string-role identity after restart without rejoining", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const base = yield* makeBaseDir;
+        const joined = yield* join(fake, relay).pipe(Effect.provide(hubLayer(base)));
+        const fs = yield* FileSystem.FileSystem;
+        const file =
+          base + "/userdata/banneret/relays/" + Enrolment.relayHash(relay.origin) + ".json";
+        const saved = JSON.parse(yield* fs.readFileString(file));
+        yield* fs.writeFileString(
+          file,
+          JSON.stringify({
+            ...saved,
+            me: { login: joined.me!.login, id: joined.me!.id, role: "founder" },
+          }),
+        );
+        relay.requests.length = 0;
+        const refreshed = yield* waitFor(
+          status,
+          (view) => view.me?.role.name === joined.me!.role.name,
+        ).pipe(Effect.provide(hubLayer(base)));
+        expect(refreshed.machineId).toBe(joined.machineId);
+        expect(refreshed.label).toBe(joined.label);
+        expect(relay.requests.some((r) => r.url === "/relay/v1/facts" && r.status === 200)).toBe(
+          true,
+        );
+        expect(JSON.parse(yield* fs.readFileString(file)).me).toEqual(joined.me);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
+  it.live("reports an unreadable saved join and preserves it during recovery", () =>
+    withFake((_fake, relay) =>
+      Effect.gen(function* () {
+        const base = yield* makeBaseDir;
+        const fs = yield* FileSystem.FileSystem;
+        const dir = base + "/userdata/banneret/relays";
+        const hash = Enrolment.relayHash(relay.origin);
+        const file = dir + "/" + hash + ".json";
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(file, "{broken");
+        yield* Effect.gen(function* () {
+          const service = yield* Enrolment.BanneretEnrolment;
+          expect(yield* service.unreadableWorkspaces).toEqual(["ent-" + hash]);
+          expect(yield* fs.readFileString(file)).toBe("{broken");
+          yield* start(relay.origin);
+          expect(yield* service.unreadableWorkspaces).toEqual([]);
+          const backup = (yield* fs.readDirectory(dir)).find((name) =>
+            name.startsWith(hash + ".json.unreadable-"),
+          );
+          expect(yield* fs.readFileString(dir + "/" + backup)).toBe("{broken");
+        }).pipe(Effect.provide(hubLayer(base)));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
   it.live("resumes polling after a restart mid-request", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {

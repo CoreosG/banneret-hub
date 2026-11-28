@@ -203,6 +203,13 @@ export function joinLine(view: BanneretEnrolmentView): EnrolmentLine {
     case "revoked":
       return { tone: "error", text: revokedMessage(view) };
     case "configured":
+      if (view.staleLogin !== undefined) {
+        const identity = staleIdentityLine(view.staleLogin);
+        if (view.health === undefined || view.health === "healthy")
+          return { tone: "muted", text: identity };
+        const health = healthLine(view);
+        return { ...health, text: health.text + " · " + identity };
+      }
       return healthLine(view);
   }
 }
@@ -304,6 +311,9 @@ export function loginSuffix(label: string, login: string | undefined): string {
   const clean = cleanLogin(login);
   return clean === "" ? "" : ` \u00b7 ${label} ${clean}`;
 }
+
+export const staleIdentityLine = (login: string) =>
+  (cleanLogin(login) || "Account") + " · Role pending";
 
 /** "Signed in as ada · Founder"; drops the login or the role when the relay sent none. */
 export function connectedLine(
