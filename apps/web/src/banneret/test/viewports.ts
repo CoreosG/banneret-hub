@@ -81,7 +81,7 @@ const slug = (text: string) =>
     .replace(/^-|-$/g, "");
 
 // DevTools captures device pixels; Playwright's own screenshot ignores the scale set above.
-async function capture(path: string) {
+async function capture(path: string, viewport: LayoutViewport) {
   // An entrance caught half way through shows a faded page. Spinners never finish and are skipped.
   await Promise.allSettled(
     document
@@ -97,6 +97,15 @@ async function capture(path: string) {
     format: "png",
     optimizeForSpeed: true,
   });
+  // A smaller image would make the 4K and 200% captures look like the 1080p one. A PNG's first 24
+  // bytes (32 base64 characters) carry its pixel size.
+  const header = new DataView(
+    Uint8Array.from(atob(data.slice(0, 32)), (byte) => byte.charCodeAt(0)).buffer,
+  );
+  expect([header.getUint32(16), header.getUint32(20)], `${path} is saved at full size`).toEqual([
+    viewport.width * viewport.deviceScaleFactor,
+    viewport.height * viewport.deviceScaleFactor,
+  ]);
   // Relative to apps/web. Vite refuses writes outside the repository.
   await commands.writeFile(`../../.vitest-viewports/${path}`, data, "base64");
 }
@@ -115,7 +124,7 @@ export function forEachViewport(name: string, body: (at: AtViewport) => Promise<
         const path = `${slug(name)}/${viewport.id}.png`;
         // A DevTools capture takes focus from test files running in other pages, so captures
         // happen only in a pass that runs one file at a time.
-        if (import.meta.env.VITE_LAYOUT_SHOTS) await capture(path);
+        if (import.meta.env.VITE_LAYOUT_SHOTS) await capture(path, viewport);
         captured.push(path);
       },
     });

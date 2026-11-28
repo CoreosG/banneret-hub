@@ -33,6 +33,9 @@ size.
   `VITE_LAYOUT_SHOTS=1 vp test run --project browser --no-file-parallelism -t '\[layout\]' <files>`.
 - Screenshots land in `.vitest-viewports/<test>/<size>.png` at the repository root. CI runs the
   matrix as its own step and uploads them as the `layout-screenshots` artifact.
+- Each is saved at the screen's own pixels, and the helper fails one that is not: both 4K cases are
+  3840×2160 images. A viewer that shrinks them to fit hides what differs, so compare them at full
+  size.
 - A PR that changes layout shows the per-size screenshots. Look at them: the assertions do not catch
   everything.
 

@@ -14,7 +14,7 @@ import { Directory } from "./chat/JoinRequests";
 import { WorkspaceRoles } from "./chat/Roles";
 import "./nativeSelect.css";
 import { usePause } from "./Pause";
-import { expectUnclipped, forEachViewport } from "./test/viewports";
+import { expectReadableLines, expectUnclipped, forEachViewport } from "./test/viewports";
 
 const { useEnterpriseFeed } = vi.hoisted(() => ({ useEnterpriseFeed: vi.fn() }));
 vi.mock(import("~/environments/primary/target"), async (original) => ({
@@ -232,24 +232,12 @@ function expectContained(root: Element, label: string) {
   }
 }
 
-/** No sideways scroll, and no sentence wider than 90 characters of its own font. */
+/** No sideways scroll, nothing spilling out of its box, and lines a person can read. */
 function expectReadable(root: Element, label: string, maxWidth: number) {
   expectContained(root, label);
   expect(box(root).width, `${label} width`).toBeLessThanOrEqual(maxWidth + 0.5);
   expect(root.scrollWidth, `${label} scrolls sideways`).toBeLessThanOrEqual(root.clientWidth + 1);
-  const context = document.createElement("canvas").getContext("2d")!;
-  for (const text of root.querySelectorAll("p, small")) {
-    if (!text.checkVisibility()) continue;
-    const style = getComputedStyle(text);
-    context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    const range = document.createRange();
-    range.selectNodeContents(text);
-    for (const line of range.getClientRects())
-      expect(
-        line.width / context.measureText("0").width,
-        `${label}: "${text.textContent?.slice(0, 50)}" line length in ch`,
-      ).toBeLessThanOrEqual(90);
-  }
+  expectReadableLines(root, label);
 }
 
 function styles() {
