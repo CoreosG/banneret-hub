@@ -27,6 +27,7 @@ import {
   forEachViewport,
   numbered,
   windowRect,
+  within,
 } from "../test/viewports";
 import { setActiveWorkspace, useWorkspacesStore } from "../workspacesStore";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
@@ -101,7 +102,7 @@ function draftIn(project: string, text = `Plan the ${project} work`, suffix = ""
 
 async function mountApp(path: string) {
   const router = getRouter(createMemoryHistory({ initialEntries: [path] }));
-  await router.load();
+  await within(router.load(), `loading ${path}`);
   const container = document.createElement("div");
   container.style.cssText = "height: 100vh; width: 100vw;";
   await render(<AppRoot router={router} />, { container, router: false });
@@ -140,7 +141,10 @@ async function expectSidebarLists(...projects: Array<"render" | "web" | "api">) 
 const router: AppRouter = await mountApp(threadPath(THREAD.id));
 
 async function go(to: string) {
-  await act(() => router.navigate({ href: to }));
+  await within(
+    act(() => router.navigate({ href: to })),
+    `navigating to ${to}`,
+  );
 }
 
 /** Chooses in Settings → Appearance → Tabs show, then leaves Settings. */
@@ -614,19 +618,30 @@ forEachViewport("workspace tabs, their menu and the workspace list fit", async (
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 });
 
-forEachViewport("the Tabs show setting fits Appearance settings", async (at) => {
+/** Appearance settings for one test. Leaving closes them, pass or fail, before the next size. */
+async function appearanceSettings(): Promise<AsyncDisposable> {
   await go("/settings/appearance");
+  return {
+    async [Symbol.asyncDispose]() {
+      await go(threadPath(THREAD.id));
+      await expect.element(page.getByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+    },
+  };
+}
+
+forEachViewport("the Tabs show setting fits Appearance settings", async (at) => {
+  await using _settings = await appearanceSettings();
   const select = page.getByRole("combobox", { name: "Tabs show" });
   await expect.element(select).toBeVisible();
   select.element().scrollIntoView({ block: "center" });
   await vi.waitFor(() => expectClickable(select.element(), "the Tabs show select"));
   await select.click();
   await vi.waitFor(() => {
-    for (const option of page.getByRole("option").elements()) {
-      expectClickable(option, `the ${option.textContent} option`);
-    }
+    const options = page.getByRole("option").elements();
+    expect(options.map((option) => option.textContent)).toEqual(["Chats", "Workspaces"]);
+    for (const option of options) expectClickable(option, `the ${option.textContent} option`);
   });
   await at.screenshot();
   await userEvent.keyboard("{Escape}");
-  await go(threadPath(THREAD.id));
+  await expect.element(page.getByRole("listbox")).not.toBeInTheDocument();
 });
