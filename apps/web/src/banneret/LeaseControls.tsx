@@ -308,6 +308,7 @@ function LeaseConfirmDialog() {
   const target = useLeaseConfirmStore((state) => state.target)!;
   const entry = useLeaseEntry(target.relay, target.taskId);
   const [machine, setMachine] = useState<LeaseMachine>(target.chosen);
+  const [newThread, setNewThread] = useState(false);
   const [justClaim, setJustClaim] = useState(false);
   const feed = useEnvironmentFeed(target.relay);
   const [requestId] = useState(randomUUID);
@@ -321,7 +322,7 @@ function LeaseConfirmDialog() {
       try {
         await chatRpc.run(
           { ...target.relay, environmentId: machine.environmentId },
-          { kind: "acceptHandoff", id: target.handoffId },
+          { kind: "acceptHandoff", id: target.handoffId, ...(newThread && { newThread: true }) },
         );
         chooseLeaseMachine(machine.ref, machine.environmentId);
         openLeaseConfirm(null);
@@ -363,6 +364,18 @@ function LeaseConfirmDialog() {
             onChange={setMachine}
           />
 
+          {target.handoffId && (
+            <label>
+              Where it continues{" "}
+              <select
+                value={newThread ? "new" : "orchestrator"}
+                onChange={(e) => setNewThread(e.target.value === "new")}
+              >
+                <option value="orchestrator">Project orchestrator</option>
+                <option value="new">A new thread</option>
+              </select>
+            </label>
+          )}
           {target.operation === "take" && !target.handoffId && (
             <label>
               <input

@@ -260,8 +260,8 @@ function HandoffCard({
         {error && <p role="alert">{error}</p>}
       </div>
       <aside className="grid content-start gap-2 rounded-md bg-muted p-3">
-        {h.receipts.map((r, i) => (
-          <small key={r.handle + i}>
+        {h.receipts.map((r) => (
+          <small key={r.handle}>
             {r.handle} · {r.tokens} tokens · {r.seconds}s
             {r.tools.length > 0 && " · " + r.tools.join(", ")}
           </small>

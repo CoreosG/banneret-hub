@@ -111,7 +111,8 @@ export function handoffsForMachine(
     } else if (take && current.actions.take && !current.lease) {
       const input = { ...ref, handoffTaskId: h.taskId };
       const result = yield* leases.take(input);
-      if (result.handoff) yield* dispatch(input, result.handoff);
+      if (result.handoff)
+        yield* dispatch(input, { ...result.handoff, ...(h.newThread && { newThread: true }) });
     }
   });
   const accept = Effect.fn("Handoffs.accept")(function* (
@@ -119,6 +120,7 @@ export function handoffsForMachine(
     read: ReadTask,
     h: Handoff,
     byRule: boolean,
+    newThread = false,
   ) {
     const { me, machineId } = yield* relay.status;
     if (h.state !== "offered" || !machineId || me?.id !== h.to.id)
@@ -136,6 +138,7 @@ export function handoffsForMachine(
     return (yield* relay.signedChat("POST", "handoffs/" + h.id + "/accept", {
       machineId,
       ...(byRule && { byRule: true }),
+      ...(newThread && { newThread: true }),
     })).body;
   });
   const reconcile = (relay: RelayEnrolment, read: ReadTask) =>
@@ -193,7 +196,13 @@ export function handoffsForMachine(
             yield* advance(relay, read, h);
             return h;
           }
-          return yield* accept(relay, read, h, false);
+          return yield* accept(
+            relay,
+            read,
+            h,
+            false,
+            action.kind === "acceptHandoff" && action.newThread === true,
+          );
         }),
       )
       .pipe(

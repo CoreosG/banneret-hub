@@ -84,6 +84,47 @@ it.effect(
             restsOn: [],
           },
         });
+      const writes: unknown[] = [];
+      const recipient = {
+        ...device(OTHER),
+        signedChat: (
+          method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH",
+          path: string,
+          body?: unknown,
+        ) =>
+          Effect.sync(() => {
+            if (method === "POST") writes.push(body);
+            const policy = {
+              agentWakeDefault: "owner",
+              agentsReadMyDms: false,
+              agentsPaused: false,
+              agentAsks: {
+                default: "approve",
+                maxSeconds: 90,
+                maxTokens: 1000,
+                auto: [{ from: { person: h.from }, kinds: ["handoff"] }],
+              },
+            };
+            return {
+              status: 200,
+              etag: undefined,
+              bytes: new Uint8Array(),
+              body:
+                path === "me/settings"
+                  ? policy
+                  : {
+                      items: path.includes("state=offered") ? [{ ...h, state: "offered" }] : [],
+                      nextCursor: null,
+                    },
+            };
+          }),
+      };
+      yield* receiver().reconcile(recipient, read);
+      expect(writes).toEqual([]);
+      tracker.viewer = OTHER;
+      yield* receiver().reconcile(recipient, read);
+      expect(writes).toEqual([{ machineId: "desk", byRule: true }]);
+      tracker.viewer = ME;
       const advance = { kind: "advanceHandoff", id: h.id } as const;
       yield* receiver().act(device(OTHER), read, advance);
       expect(tracker.comments).toHaveLength(1);

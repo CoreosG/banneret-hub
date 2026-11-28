@@ -348,8 +348,9 @@ describe("Take", () => {
     );
     await expect.element(screen.getByText("Unit tests pass")).toBeVisible();
     await userEvent.click(button("Accept"));
+    await page.getByLabelText("Where it continues").selectOptions("new");
     await userEvent.click(button("Accept and take on desk"));
-    expect(calls).toHaveBeenCalledWith(RELAY, { kind: "acceptHandoff", id: "h1" });
+    expect(calls).toHaveBeenCalledWith(RELAY, { kind: "acceptHandoff", id: "h1", newThread: true });
     expect(rpc.take).not.toHaveBeenCalled();
   });
   it("hands a new sandbox request to the orchestrator without writing a claim", async () => {

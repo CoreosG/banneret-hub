@@ -4240,6 +4240,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 h,
                 {
                   ...(input.machineId && { machineId: input.machineId }),
+                  ...(input.newThread && { newThread: true }),
                   receipts: input.receipt ? [...h.receipts, input.receipt] : h.receipts,
                   state: "accepted",
                   step: "waiting_release",

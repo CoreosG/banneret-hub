@@ -263,6 +263,7 @@ export const ChatNewHandoff = Schema.Struct({
 export type ChatNewHandoff = typeof ChatNewHandoff.Type;
 
 export const Handoff = Schema.Struct({
+  newThread: Schema.optionalKey(Schema.Literal(true)),
   fromMachineId: Schema.String,
   threadRootId: Schema.optionalKey(Schema.String),
   receipts: Schema.Array(AskReceipt),
@@ -299,6 +300,7 @@ export const Handoff = Schema.Struct({
 export type Handoff = typeof Handoff.Type;
 
 export const HandoffAccept = Schema.Struct({
+  newThread: Schema.optionalKey(Schema.Literal(true)),
   byRule: Schema.optionalKey(Schema.Literal(true)),
   receipt: Schema.optionalKey(AskReceipt),
   machineId: Schema.optionalKey(Schema.String),
@@ -739,7 +741,12 @@ export const ChatAction = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("handoffs"), ...Page }),
   Schema.Struct({ kind: Schema.Literal("offerHandoff"), offer: HandoffOfferInput }),
   Schema.Struct({
-    kind: Schema.Literals(["acceptHandoff", "advanceHandoff", "withdrawHandoff"]),
+    kind: Schema.Literal("acceptHandoff"),
+    id: Id,
+    newThread: Schema.optionalKey(Schema.Literal(true)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literals(["advanceHandoff", "withdrawHandoff"]),
     id: Id,
   }),
   Schema.Struct({ kind: Schema.Literal("declineHandoff"), id: Id, reason: Schema.NonEmptyString }),

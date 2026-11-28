@@ -3,6 +3,7 @@ import { nudge } from "./memory/nudge.ts";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
+  type ProjectId,
   MessageId,
   ThreadId,
   TaskLeaseError,
@@ -81,6 +82,35 @@ export const lifecycle = Layer.effectDiscard(
   }),
 );
 
+const launchThread = Effect.fn("BanneretOrchestrator.launchThread")(function* (
+  projectId: ProjectId,
+  title: string,
+  commandId: CommandId,
+) {
+  const settings = yield* (yield* ServerSettingsService).getSettings;
+  const { selection: modelSelection } = resolveNewThreadModelSelection({
+    defaultSelection: settings.defaultModelSelection,
+    fallbackSelection: settings.fallbackModelSelection,
+    providers: yield* (yield* ProviderRegistry).getProviders,
+    settings,
+    projectId,
+    now: DateTime.toEpochMillis(yield* DateTime.now),
+  });
+  if (!modelSelection)
+    return yield* unavailable("Choose a default provider and model on this machine.");
+  const thread = yield* (yield* ThreadLaunchService).launch({
+    commandId,
+    projectId,
+    title,
+    modelSelection,
+    runtimeMode: settings.defaultRuntimeMode,
+    interactionMode: "default",
+    workspaceStrategy: { type: "root" },
+    createdBy: "user",
+    creationSource: "web",
+  });
+  return thread;
+});
 const select = Effect.fn("BanneretOrchestrator.select")(function* (input: OrchestratorSelection) {
   const { relayOrigin } = input;
   const view = yield* (yield* BanneretEnrolment).status(relayOrigin);
@@ -135,29 +165,12 @@ const select = Effect.fn("BanneretOrchestrator.select")(function* (input: Orches
   }
   if (input.action === "ensure" && !main) {
     const { projectId } = yield* folders.ensureScratchProject;
-    const settings = yield* (yield* ServerSettingsService).getSettings;
-    const { selection: modelSelection } = resolveNewThreadModelSelection({
-      defaultSelection: settings.defaultModelSelection,
-      fallbackSelection: settings.fallbackModelSelection,
-      providers: yield* (yield* ProviderRegistry).getProviders,
-      settings,
-      projectId,
-      now: DateTime.toEpochMillis(yield* DateTime.now),
-    });
-    if (!modelSelection)
-      return yield* unavailable("Choose a default provider and model on this machine.");
     const commandId = CommandId.make(yield* (yield* SecureRandom.SecureRandom).uuidV4());
-    const thread = yield* (yield* ThreadLaunchService).launch({
-      commandId,
+    const thread = yield* launchThread(
       projectId,
-      title: `${view.displayName ?? "Company"} orchestrator`,
-      modelSelection,
-      runtimeMode: settings.defaultRuntimeMode,
-      interactionMode: "default",
-      workspaceStrategy: { type: "root" },
-      createdBy: "user",
-      creationSource: "web",
-    });
+      `${view.displayName ?? "Company"} orchestrator`,
+      commandId,
+    );
     main = thread.threadId;
   }
   const next = { main, projects: currentProjects };
@@ -176,6 +189,7 @@ export const selection = (input: OrchestratorSelection) =>
     .pipe(Effect.mapError((error) => unavailable(error.message)));
 
 export interface TaskHandoff {
+  readonly newThread?: true;
   readonly url: string;
   readonly title: string;
   readonly note: string | null;
@@ -198,13 +212,22 @@ export const sendTask = Effect.fn("BanneretOrchestrator.sendTask")(function* (
       repo &&
       projectKeyFromRemote(p.repositoryIdentity.locator.remoteUrl) === repo,
   );
-  const threadId = project
+  const parentId = project
     ? current.projects[project.id]
     : (current.main ?? (yield* selection({ relayOrigin, action: "ensure" })).main);
   const threads = yield* ThreadManagementService;
-  const thread = threadId && (yield* threads.getThreadShell(threadId));
-  if (!thread) return yield* unavailable("The orchestrator thread could not be opened.");
+  const parent = parentId && (yield* threads.getThreadShell(parentId));
+  if (!parent) return yield* unavailable("The orchestrator thread could not be opened.");
   const key = relayHash([input.relayOrigin, task.url, task.claim].join("\n"));
+  const thread = task.newThread
+    ? yield* launchThread(
+        parent.projectId,
+        task.title,
+        CommandId.make("handoff-thread-" + key),
+      ).pipe(
+        Effect.map((t) => ({ id: t.threadId, title: task.title, projectId: parent.projectId })),
+      )
+    : parent;
   const payload = yield* encodePayload({
     relayOrigin,
     task: input.handoffTaskId ?? input.key,
