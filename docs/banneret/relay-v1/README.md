@@ -1476,3 +1476,42 @@ PoolSandbox receipts include the board `taskId` from the signed request, or null
 for a standalone booking. With Pool enabled, advertise `banneret_pool_status`,
 `banneret_sandbox_request`, `banneret_sandbox_status` and `banneret_sandbox_cancel`
 in the signed capabilities for members allowed to use them.
+
+## Capability owners and plugin sources
+
+An enrolled capabilities response may include `owners` and `sources`. Older relays omit both.
+Anonymous responses omit both. Bump `capabilitiesVersion` when the published document changes.
+
+When present, `owners` names one owner for each of tasks, skills, memory, chat, search and health.
+Choose `banneret`, `off` or `external`. An external owner names a source whose `provides` includes the
+capability. Tasks owned by Banneret use `leases: banneret`. External tasks use `leases: provider`.
+Disabled tasks and the other five capabilities omit leases. New relays default tasks, skills, memory
+and search to Banneret, and chat and health to off. Banneret's own preset enables all six.
+
+Each source has a unique id, title, MCP URL, capabilities it provides, public authentication instructions
+and the last source check. Use HTTPS, or HTTP with a private IP, Tailscale IP or tailnet DNS name.
+Source ids cannot be `t3-code`, `t3-code-direct` or start with `banneret`. An optional tool prefix
+uses 1 to 32 lowercase ASCII letters, digits or underscores and ends with an underscore.
+A Hub connects directly with its user's OAuth or bearer credential, or uses the company's network
+identity (`none`). A source advertises no command, credentials or relay reader configuration.
+
+The relay filters `mcpTools` by owner. Board, task and lease tools follow tasks. Skills, memory,
+chat (including agent asks, answers and handoffs) and KB search follow their respective owners.
+Needs and Team remain relay views. When chat is external or off, omit the chat section and its limits
+and return HTTP 404 with code `not_found` on the chat routes.
+
+| Source check before | Event | Source check after |
+| --- | --- | --- |
+| Any | Config changes | unchecked |
+| unchecked or last result | Startup, check interval or manual check | checking |
+| checking | Required tools found | ok |
+| checking | Missing required tools | shape_missing |
+| checking | Read exceeds 5 seconds | degraded |
+| checking | Service identity refused | auth_failed |
+| checking | Anonymous check needs a login and there is no reader | reachable |
+| checking | Connection fails or times out | down |
+
+Persist the last result per source, including its check time and any tool shape found. The interval
+timer is in memory and starts again on restart. In each reported capability's shape, `required` is
+`complete` or a list of missing names. The `optional` list holds the optional tool names found.
+See [an external tracker](examples/capabilities-external.json).

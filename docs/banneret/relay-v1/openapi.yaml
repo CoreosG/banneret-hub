@@ -5664,8 +5664,109 @@ components:
         admission: { $ref: "#/components/schemas/Admission" }
         permissions: {type: array, uniqueItems: true, items: {type: string}}
         machineId: { $ref: "#/components/schemas/Id" }
-    Capabilities:
+    RelayCapability:
+      type: string
+      enum: [tasks, skills, memory, chat, search, health]
+    SourceId:
+      type: string
+      pattern: '^(?!banneret|t3-code(?:-direct)?$)[a-z0-9][a-z0-9_-]*$'
+    CapabilityOwner:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [owner]
+          properties: {owner: {enum: [banneret, 'off']}}
+        - type: object
+          additionalProperties: false
+          required: [owner, source]
+          properties: {owner: {const: external}, source: {$ref: '#/components/schemas/SourceId'}}
+    TasksOwner:
+      type: object
+      additionalProperties: false
+      required: [owner]
+      properties:
+        owner: {enum: [banneret, 'off', external]}
+        source: {$ref: '#/components/schemas/SourceId'}
+        leases: {enum: [banneret, provider]}
+      oneOf:
+        - properties: {owner: {const: 'off'}}
+          not: {anyOf: [{required: [leases]}, {required: [source]}]}
+        - properties: {owner: {const: banneret}, leases: {const: banneret}}
+          required: [leases]
+          not: {required: [source]}
+        - properties: {owner: {const: external}, leases: {const: provider}}
+          required: [source, leases]
+    CapabilityOwners:
+      type: object
+      additionalProperties: false
+      required: [tasks, skills, memory, chat, search, health]
+      properties:
+        tasks: {$ref: '#/components/schemas/TasksOwner'}
+        skills: {$ref: '#/components/schemas/CapabilityOwner'}
+        memory: {$ref: '#/components/schemas/CapabilityOwner'}
+        chat: {$ref: '#/components/schemas/CapabilityOwner'}
+        search: {$ref: '#/components/schemas/CapabilityOwner'}
+        health: {$ref: '#/components/schemas/CapabilityOwner'}
+    SourceAuth:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {enum: [none, oauth, bearer_per_person]}
+        help: {type: string}
+      if: {required: [help]}
+      then: {properties: {kind: {const: bearer_per_person}}}
+    SourceToolShape:
+      type: object
+      additionalProperties: false
+      required: [required, optional]
+      properties:
+        required:
+          oneOf:
+            - {const: complete}
+            - {type: array, minItems: 1, uniqueItems: true, items: {type: string, minLength: 1}}
+        optional: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
+    SourceCheck:
+      type: object
+      additionalProperties: false
+      required: [state]
       allOf:
+        - if: {properties: {state: {const: shape_missing}}}
+          then:
+            required: [shape]
+            properties:
+              shape:
+                not: {additionalProperties: {properties: {required: {const: complete}}}}
+        - if: {properties: {state: {const: ok}}}
+          then: {properties: {shape: {additionalProperties: {properties: {required: {const: complete}}}}}}
+      properties:
+        state: {enum: [unchecked, checking, ok, shape_missing, degraded, auth_failed, reachable, down]}
+        checkedAt: {$ref: '#/components/schemas/Timestamp'}
+        shape:
+          type: object
+          propertyNames: {$ref: '#/components/schemas/RelayCapability'}
+          additionalProperties: {$ref: '#/components/schemas/SourceToolShape'}
+    CapabilitySource:
+      type: object
+      additionalProperties: false
+      required: [id, title, url, provides, auth, check]
+      properties:
+        id: {$ref: '#/components/schemas/SourceId'}
+        title: {type: string, minLength: 1}
+        url: {type: string, format: uri, pattern: '^https?://', x-sourceUrl: true}
+        prefix: {type: string, pattern: '^[a-z0-9_]{0,31}_$'}
+        provides: {type: array, uniqueItems: true, minItems: 1, items: {$ref: '#/components/schemas/RelayCapability'}}
+        auth: {$ref: '#/components/schemas/SourceAuth'}
+        check: {$ref: '#/components/schemas/SourceCheck'}
+    Capabilities:
+      description: |
+        Source ids must be unique. Every external owner references a source providing that capability.
+        mcpTools omits tools for capabilities owned elsewhere (see README.md). When chat is external or off,
+        omit chat and its section, and return 404 not_found on all chat routes.
+      dependentRequired: {owners: [me], sources: [me]}
+      allOf:
+        - if: {required: [owners], properties: {owners: {properties: {chat: {properties: {owner: {enum: ['off', external]}}}}}}}
+          then: {not: {required: [chat]}}
         - if: { required: [sections], properties: { sections: { contains: { properties: { kind: { const: team } } } } } }
           then: { required: [team] }
           else: { not: { required: [team] } }
@@ -5678,6 +5779,8 @@ components:
       type: object
       required: [displayName, iconUrl, enrolment]
       properties:
+        owners: {$ref: '#/components/schemas/CapabilityOwners'}
+        sources: {type: array, items: {$ref: '#/components/schemas/CapabilitySource'}}
         skills:
           description: Present for enrolled callers when the company registry is enabled.
           type: object

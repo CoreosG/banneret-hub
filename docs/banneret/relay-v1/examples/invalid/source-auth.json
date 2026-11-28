@@ -1,0 +1,22 @@
+{
+  "id": "acme-jira",
+  "title": "Acme Jira",
+  "url": "https://mcp.example.test/jira",
+  "prefix": "jira__",
+  "provides": [
+    "tasks"
+  ],
+  "auth": {
+    "kind": "service"
+  },
+  "check": {
+    "state": "ok",
+    "checkedAt": "2026-11-27T10:42:00Z",
+    "shape": {
+      "tasks": {
+        "required": "complete",
+        "optional": []
+      }
+    }
+  }
+}

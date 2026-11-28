@@ -1,0 +1,23 @@
+{
+  "tasks": {
+    "owner": "external",
+    "source": "acme-jira",
+    "leases": "provider"
+  },
+  "skills": {
+    "owner": "banneret"
+  },
+  "memory": {
+    "owner": "banneret"
+  },
+  "chat": {
+    "owner": "banneret",
+    "leases": "banneret"
+  },
+  "search": {
+    "owner": "banneret"
+  },
+  "health": {
+    "owner": "off"
+  }
+}

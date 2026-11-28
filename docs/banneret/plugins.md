@@ -141,3 +141,9 @@ Use a disposable workspace. For skills, seed at least one entry. The checker com
 For tasks, seed an unclaimed task visible to two distinct actors and pass its ID with `--task-id T42`. Set `BANNERET_CHECK_TOKEN` and `BANNERET_CHECK_PEER_TOKEN` to their credentials. HTTP uses bearer authentication. For stdio the checker starts one process per actor with its credential in `PLUGIN_TOKEN`. Both processes must share the same test store. If your server needs additional environment configuration, launch it through a wrapper. The checker exercises discovery, reads, tool errors, holder retries and release permissions. It sends concurrent claims when the manifest declares atomic claims.
 
 A failing check prints a hint and exits with status 1. Use `--json` for a report with a `passed` boolean and individual check statuses. Capabilities without a published contract show as skipped. A pass requires at least one tested provider contract.
+
+## Before launch
+
+When Banneret opens to other companies, the external plugin manifest will gain a `contractVersion`.
+Banneret will publish a deprecation policy. Authors will receive notice, then the relay and conformance
+runner will warn with the removal date. Removal follows the notice window.

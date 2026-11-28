@@ -2,6 +2,8 @@
 import * as NodeCrypto from "node:crypto";
 
 import type {
+  RelayOwners,
+  RelaySource,
   PoolConfig,
   PoolHostFacts,
   PoolFounderView,
@@ -257,6 +259,59 @@ const nextEvent = async (reader: SseReader) => {
 };
 
 describe("capabilities", () => {
+  it("decodes the enrolled response served before capability ownership", () => {
+    const legacy = readExample("capabilities.json");
+    expect(legacy).toHaveProperty("me");
+    expect(legacy).not.toHaveProperty("owners");
+    expect(legacy).not.toHaveProperty("sources");
+    expectSchema("Capabilities", legacy);
+  });
+
+  it.each(["off", "external"] as const)(
+    "hides chat and task tools with chat owned by %s",
+    async (owner) => {
+      const example = readExample("capabilities-external.json") as {
+        owners: RelayOwners;
+        sources: RelaySource[];
+      };
+      const source = { ...example.sources[0]!, provides: ["tasks", "chat"] as const };
+      const owners: RelayOwners = {
+        ...example.owners,
+        chat: owner === "off" ? { owner } : { owner, source: source.id },
+      };
+      const relay = await startFakeRelay({ chat: true, owners, sources: [source] });
+      try {
+        const local = new RelayClient(relay.url);
+        const key = generateMachineKey();
+        const start = await local.send(key, "POST", "/relay/v1/enroll/start", {
+          body: { publicKey: key.publicKey, machine: machineFacts("env_" + randomText(12)) },
+        });
+        const { pairingId } = start.body as { pairingId: string };
+        const poll = await local.send(key, "POST", "/relay/v1/enroll/poll", {
+          body: { pairingId },
+        });
+        const { token, machineId } = poll.body as { token: string; machineId: string };
+        const read = (path: string) =>
+          local.send(key, "GET", "/relay/v1/" + path, { token, device: machineId });
+        const reply = await read("capabilities");
+        expectSchema("Capabilities", reply.body);
+        expect(reply.body).toMatchObject({ owners, sources: [source] });
+        expect(reply.body).not.toHaveProperty("chat");
+        const names = (reply.body as { mcpTools: { name: string }[] }).mcpTools.map(
+          (tool) => tool.name,
+        );
+        expect(names).toContain("banneret_needs");
+        expect(names).toContain("banneret_team");
+        expect(
+          names.filter((name) => /^banneret_(board|task|lease_|chat_|agent_|handoff_)/.test(name)),
+        ).toEqual([]);
+        expectError(await read("chat/conversations"), 404, "not_found");
+      } finally {
+        await relay.close();
+      }
+    },
+  );
+
   it("answers anyone with the public document only", async () => {
     const reply = await client.send(generateMachineKey(), "GET", "/relay/v1/capabilities", {
       unsigned: true,

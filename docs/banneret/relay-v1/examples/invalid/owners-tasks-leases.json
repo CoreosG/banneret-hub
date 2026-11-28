@@ -1,0 +1,21 @@
+{
+  "tasks": {
+    "owner": "banneret",
+    "leases": "provider"
+  },
+  "skills": {
+    "owner": "banneret"
+  },
+  "memory": {
+    "owner": "banneret"
+  },
+  "chat": {
+    "owner": "off"
+  },
+  "search": {
+    "owner": "banneret"
+  },
+  "health": {
+    "owner": "off"
+  }
+}
