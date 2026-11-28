@@ -51,3 +51,12 @@ it("changes only the selected environment and preserves its switch on a failed w
   await expect.element(screen.getByText("Could not save memory setting.")).toBeVisible();
   await expect.element(remote).toBeChecked();
 });
+
+it("renders the rows that settings search jumps to", async () => {
+  respond.mockResolvedValue({ _tag: "Success", value: false });
+  await using screen = await render(<MemorySettings />);
+  for (const id of ["automatic-work", "agent-wake"])
+    expect(document.getElementById(id)).not.toBeNull();
+  await expect.element(screen.getByRole("button", { name: "Stop all" }).first()).toBeVisible();
+  await expect.element(screen.getByText("Who can wake your agents")).toBeVisible();
+});

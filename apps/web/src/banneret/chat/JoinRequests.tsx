@@ -11,6 +11,7 @@ import {
 import type { RelayTarget } from "../enrolmentStore";
 import type { EnterpriseFeed } from "../useEnterpriseFeed";
 import { chatRpc, pageItems, useChatRead } from "./client";
+import { ArchiveChannel } from "./ArchiveChannel";
 
 const decodeDirectory = Schema.decodeUnknownSync(ChatConversations);
 const decodeRequests = Schema.decodeUnknownSync(
@@ -84,6 +85,7 @@ export function Directory({
   open: (id: string) => void;
 }) {
   const { change, busy, error, revision } = useChange(enterprise.target);
+  const [archives, setArchives] = useState(0);
   const rows = useChatRead(
     () =>
       pageItems(async (cursor) =>
@@ -94,10 +96,11 @@ export function Directory({
           }),
         ),
       ),
-    revision + ":" + enterprise.feed.chatRevision,
+    revision + ":" + archives + ":" + enterprise.feed.chatRevision,
   );
   return (
     <section className="grid gap-2 p-2 text-xs" aria-label="Channel directory">
+      <h3 className="font-semibold">Channels you haven't joined</h3>
       {rows.value?.map(
         (c) =>
           c.kind === "channel" && (
@@ -110,6 +113,7 @@ export function Directory({
               <span>{c.purpose}</span>
               <small>
                 {countLabel(c.memberCount.people, "person", "people")} · {c.access.join}
+                {c.archived && " · archived"}
               </small>
               {c.me.can.join && (
                 <button disabled={busy} onClick={() => void change({ kind: "join", id: c.id })}>
@@ -117,10 +121,18 @@ export function Directory({
                 </button>
               )}
               <RequestControl channel={c} busy={busy} change={change} />
+              {/* A listing-only channel has no settings sheet, so its managers archive it here. */}
+              {!c.me.can.read && (
+                <ArchiveChannel
+                  target={enterprise.target}
+                  channel={c}
+                  done={() => setArchives((n) => n + 1)}
+                />
+              )}
             </div>
           ),
       )}
-      {rows.value?.length === 0 && <p>No channels to browse.</p>}
+      {rows.value?.length === 0 && <p>You're in every channel you can see.</p>}
       {(error || rows.error) && <p role="alert">{error || rows.error}</p>}
     </section>
   );

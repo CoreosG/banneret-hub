@@ -23,6 +23,8 @@ import { SidebarProvider } from "../../components/ui/sidebar";
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../../state/environments";
 import { storeEnrolmentView } from "../enrolmentStore";
 import { ChannelRows } from "./ChannelRows";
+import { Directory } from "./JoinRequests";
+import type { EnterpriseFeed } from "../useEnterpriseFeed";
 import { useEnvironmentFeed, useRelayFeedStore, feedRpc } from "../relayFeedStore";
 import { useWorkspacesStore } from "../workspacesStore";
 import { EnterpriseSidebarRows } from "../EnterpriseSidebarRows";
@@ -190,9 +192,16 @@ async function setupChannel(resources: AsyncDisposableStack, scenario: ChatScena
     );
     if (!result.ok) throw new Error(result.message);
     if (
-      ["post", "edit", "delete", "read", "dm", "notifications", "setDmSettings"].includes(
-        action.kind,
-      )
+      [
+        "post",
+        "edit",
+        "delete",
+        "read",
+        "dm",
+        "notifications",
+        "setDmSettings",
+        "settings",
+      ].includes(action.kind)
     )
       emit(["chat"]);
     if (action.kind === "list" && access.rights !== "normal") {
@@ -550,4 +559,98 @@ it("offers an outsider only one DM recipient from their joined channels", async 
   expect(screen.getByRole("checkbox").elements()).toHaveLength(0);
   expect(screen.getByRole("button", { name: "Create channel" }).elements()).toHaveLength(0);
   expect(rpc).toHaveBeenCalledWith(target, expect.objectContaining({ kind: "members" }));
+});
+
+it("archives a channel after a confirm step and restores it from the settings sheet", async () => {
+  await using resources = new AsyncDisposableStack();
+  const { router, rpc, show } = await setupChannel(resources, "membership");
+  await using screen = await render(<RouterProvider router={router} />, { router: false });
+  await show(["chat"]);
+  const row = screen.getByRole("button", { name: /^platform\b/ });
+  await row.click();
+  await screen.getByRole("button", { name: "Channel settings" }).click();
+  const sheet = page.getByRole("dialog", { name: "#platform settings" });
+  await sheet.getByRole("button", { name: "Archive channel" }).click();
+  const confirm = sheet.getByRole("group", { name: "Archive #platform" });
+  await expect.element(confirm).toBeVisible();
+  await proof("archive-confirm");
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  expect(rpc.mock.calls.filter(([, action]) => action.kind === "settings")).toHaveLength(0);
+  await sheet.getByRole("button", { name: "Archive channel" }).click();
+  await sheet.getByRole("button", { name: "Confirm archive" }).click();
+  await expect.element(screen.getByText("This channel is archived.")).toBeVisible();
+  expect(rpc).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ kind: "settings", patch: { archived: true } }),
+  );
+  await expect.element(row).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "Show archived channels (1)" }).click();
+  await expect
+    .element(screen.getByRole("button", { name: /^platform \(archived\)/ }))
+    .toBeVisible();
+  await screen.getByRole("button", { name: "Channel settings" }).click();
+  await sheet.getByRole("button", { name: "Unarchive channel" }).click();
+  await expect.element(screen.getByRole("textbox", { name: "Channel message" })).toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: /archived channels/ }))
+    .not.toBeInTheDocument();
+});
+
+it("scopes Browse channels and lets a founder archive a private channel they only see listed", async () => {
+  await using resources = new AsyncDisposableStack();
+  const { origin, asLeo } = await setupChannel(resources, "membership");
+  const target = { environmentId: EnvironmentId.make("local"), relayOrigin: origin };
+  const enterprise = { target, feed: { chatRevision: 1 } } as EnterpriseFeed;
+  await using screen = await render(<Directory enterprise={enterprise} open={() => {}} />);
+  await expect.element(screen.getByText("Channels you haven't joined")).toBeVisible();
+  await expect.element(screen.getByText("You're in every channel you can see.")).toBeVisible();
+  const created = await asLeo({
+    kind: "create",
+    name: "secret-plans",
+    purpose: "",
+    template: "private",
+  });
+  if (!created.ok) throw new Error(created.message);
+  await screen.rerender(
+    <Directory
+      enterprise={{ ...enterprise, feed: { chatRevision: 2 } } as EnterpriseFeed}
+      open={() => {}}
+    />,
+  );
+  await expect.element(screen.getByText("#secret-plans")).toBeVisible();
+  await expect
+    .element(screen.getByText("You're in every channel you can see."))
+    .not.toBeInTheDocument();
+  await proof("browse-channels");
+  await screen.getByRole("button", { name: "Archive channel" }).click();
+  await screen.getByRole("button", { name: "Confirm archive" }).click();
+  await expect.element(screen.getByRole("button", { name: "Unarchive channel" })).toBeVisible();
+  await expect.element(screen.getByText(/· archived/)).toBeVisible();
+});
+
+it("offers Archive channel only to managers, never on a default channel", async () => {
+  const { ArchiveChannel } = await import("./ArchiveChannel");
+  const channel = {
+    id: "c_x",
+    kind: "channel",
+    name: "x",
+    archived: false,
+    me: { can: { manage: false } },
+  } as unknown as Parameters<typeof ArchiveChannel>[0]["channel"];
+  const target = { environmentId: EnvironmentId.make("local"), relayOrigin: "https://chat.test" };
+  await using screen = await render(
+    <>
+      <ArchiveChannel target={target} channel={channel} done={() => {}} />
+      <ArchiveChannel
+        target={target}
+        channel={{
+          ...channel,
+          defaultChannel: true,
+          me: { ...channel.me, can: { ...channel.me.can, manage: true } },
+        }}
+        done={() => {}}
+      />
+    </>,
+  );
+  expect(screen.getByRole("button").elements()).toHaveLength(0);
 });

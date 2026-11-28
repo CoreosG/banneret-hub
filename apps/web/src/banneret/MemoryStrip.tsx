@@ -1,4 +1,6 @@
-import { WorkflowReview } from "./WorkflowReview";
+import { WorkflowReview, workflowAction } from "./WorkflowReview";
+import { Button } from "../components/ui/button";
+import { toastManager } from "../components/ui/toast";
 import { MemoryContradictionCard } from "./MemoryContradictionCard";
 import { countLabel } from "./countLabel";
 import { MemoryPreferences } from "./MemoryPreferences";
@@ -90,6 +92,9 @@ export function MemoryStrip({
   const counts = state.value;
   const resolved = counts !== undefined;
   const visible = allowed && counts != null && !counts.cardsOnly;
+  // The server refuses a review when the company's memory belongs elsewhere.
+  const memoryElsewhere = useEnterpriseFeed()?.feed.elsewhere?.memory !== undefined;
+  const main = visible && Boolean(counts.main) && !memoryElsewhere;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- other chats can change these server counts while this thread is idle
   useEffect(() => {
     if (!visible) return;
@@ -121,14 +126,20 @@ export function MemoryStrip({
   useEffect(() => {
     if (!resolved || !allowed) return;
     const key = memoryThreadKey({ environmentId, threadId });
-    useMemoryAvailability.setState((state) => ({ threads: { ...state.threads, [key]: visible } }));
+    useMemoryAvailability.setState((state) => ({
+      threads: { ...state.threads, [key]: visible },
+      mains: { ...state.mains, [key]: main },
+    }));
     return () =>
       useMemoryAvailability.setState((state) => {
         const threads = { ...state.threads };
+        const mains = { ...state.mains };
         delete threads[key];
-        return { threads };
+        delete mains[key];
+        return { threads, mains };
       });
-  }, [allowed, resolved, visible, environmentId, threadId]);
+  }, [allowed, resolved, visible, main, environmentId, threadId]);
+  const [reviewing, setReviewing] = useState(false);
   const loadNotes =
     (allowed && counts?.cardsOnly) ||
     (visible && (query !== undefined || expanded || counts.proposed + counts.disputed > 0));
@@ -225,8 +236,9 @@ export function MemoryStrip({
             apply={(action) => apply(c.a, action)}
           />
         ))}
-      {visible && writable && counts.main && (
+      {main && writable && (
         <WorkflowReview
+          runInHeader
           key={memoryThreadKey(ref)}
           {...ref}
           revision={revision}
@@ -240,20 +252,45 @@ export function MemoryStrip({
     <>
       {visible && (
         <section className="shrink-0 border-b">
-          <button
-            type="button"
-            className="flex w-full flex-wrap items-center gap-x-2 px-4 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
-            aria-expanded={expanded}
-            onClick={() => setExpanded(!expanded)}
-          >
-            <span aria-hidden>{expanded ? "▾" : "▸"}</span>
-            <strong>Memory</strong>
-            <span>
-              {countLabel(counts.total, "note")} · {counts.proposed} proposed · {counts.disputed}{" "}
-              disputed
-            </span>
-            <span>Stored unencrypted on this machine</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex grow flex-wrap items-center gap-x-2 px-4 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
+            >
+              <span aria-hidden>{expanded ? "▾" : "▸"}</span>
+              <strong>Memory</strong>
+              <span>
+                {countLabel(counts.total, "note")} · {counts.proposed} proposed · {counts.disputed}{" "}
+                disputed
+              </span>
+              <span>Stored unencrypted on this machine</span>
+            </button>
+            {main && writable && (
+              <div className="shrink-0 py-1 pr-4">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={reviewing}
+                  onClick={async () => {
+                    setReviewing(true);
+                    try {
+                      await workflowAction(ref, "run");
+                    } catch {
+                      toastManager.add({
+                        type: "error",
+                        title: "Could not run the workflow review.",
+                      });
+                    }
+                    setReviewing(false);
+                  }}
+                >
+                  Review my workflow
+                </Button>
+              </div>
+            )}
+          </div>
           <MemoryOwnerLine />
           {counts.reminders && (
             <div className="px-4 text-xs">

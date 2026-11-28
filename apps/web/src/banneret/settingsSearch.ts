@@ -25,6 +25,28 @@ export const banneretSettings = [
     scope: "environment-defaults",
   },
   {
+    id: "automatic-work",
+    title: "Pause new work",
+    to: "/settings/chat",
+    scope: "environment-defaults",
+    searchTerms: ["pause agents", "pause everything", "resume", "automatic work"],
+  },
+  {
+    id: "stop-all",
+    title: "Stop all",
+    to: "/settings/chat",
+    scope: "environment-defaults",
+    targetId: "automatic-work",
+    searchTerms: ["stop all agents", "interrupt running turns"],
+  },
+  {
+    id: "agent-wake",
+    title: "Wake agents",
+    to: "/settings/chat",
+    scope: "environment-defaults",
+    searchTerms: ["wake", "wake agents", "who can wake"],
+  },
+  {
     id: "memory",
     title: "Memory and skills from Banneret Hub",
     to: "/settings/chat",

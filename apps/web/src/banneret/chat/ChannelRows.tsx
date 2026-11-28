@@ -39,6 +39,7 @@ export function ChannelRows({
   const [creating, setCreating] = useState<"channel" | "dm" | "directory" | null>(null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const rows = useChatRead(load, enterprise.feed.chatRevision ?? 0);
   const me = enterprise.enrolment.me;
   const outside = me?.admission === "outside";
@@ -89,6 +90,10 @@ export function ChannelRows({
     onOpen();
     void router.navigate({ href: chatHref(id) });
   }
+  const channels = (rows.value ?? []).filter(
+    (c) => c.kind === "channel" && offersConversation(c, flags),
+  );
+  const archived = channels.filter((c) => c.archived);
   return (
     <section data-chat-sidebar>
       {flags.includes("channels") && (
@@ -157,16 +162,28 @@ export function ChannelRows({
         </form>
       )}
       {(error || rows.error) && <p role="alert">{error || rows.error}</p>}
-      {rows.value
-        ?.filter((c) => offersConversation(c, flags))
-        .filter((c) => c.kind === "channel")
-        .map((c) => (
-          <SidebarMenuButton key={c.id} data-unread={c.me.unread > 0} onClick={() => open(c.id)}>
-            {c.access.visibility === "private" ? <LockIcon /> : <HashIcon />}
-            <span>{c.name}</span>
-            {c.me.mentions > 0 && <b>{c.me.mentions}</b>}
-          </SidebarMenuButton>
-        ))}
+      {[...channels.filter((c) => !c.archived), ...(showArchived ? archived : [])].map(
+        (c) =>
+          c.kind === "channel" && (
+            <SidebarMenuButton key={c.id} data-unread={c.me.unread > 0} onClick={() => open(c.id)}>
+              {c.access.visibility === "private" ? <LockIcon /> : <HashIcon />}
+              <span>
+                {c.name}
+                {c.archived && " (archived)"}
+              </span>
+              {c.me.mentions > 0 && <b>{c.me.mentions}</b>}
+            </SidebarMenuButton>
+          ),
+      )}
+      {archived.length > 0 && (
+        <button
+          className="px-2 py-1 text-left text-xs text-muted-foreground"
+          aria-expanded={showArchived}
+          onClick={() => setShowArchived(!showArchived)}
+        >
+          {showArchived ? "Hide" : "Show"} archived channels ({archived.length})
+        </button>
+      )}
       {enterprise.feed.chatFlags?.includes("dms") && (
         <>
           <header className="mt-3 flex items-center justify-between px-2 text-xs font-semibold text-muted-foreground">

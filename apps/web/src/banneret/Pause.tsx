@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, PauseAction, PauseStatus } from "@t3tools/contracts";
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { Button } from "../components/ui/button";
 import { SettingsRow } from "../components/settings/settingsLayout";
@@ -153,22 +153,70 @@ export function PauseHost() {
     </div>
   );
 }
-export function PauseSetting({ id, label }: { id: EnvironmentId; label: string }) {
+/** "Pause new work" and "Stop all" for one machine, for places outside the paused banner. */
+export function PauseControls({
+  id,
+  size = "default",
+}: {
+  id: EnvironmentId;
+  size?: "xs" | "default";
+}) {
   const entry = usePause((s) => s[id]);
   const writable = useAtomValue(change.permissionAtom(id));
+  // Stop all interrupts every running turn, so one click away from a chat asks first.
+  const [confirming, setConfirming] = useState(false);
+  const disabled = !writable || !!entry?.busy || !entry?.status;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="outline"
+        size={size}
+        disabled={disabled}
+        onClick={() => void changePause(id, { kind: entry?.status?.paused ? "resume" : "pause" })}
+      >
+        {entry?.status?.paused ? "Resume" : "Pause new work"}
+      </Button>
+      {confirming ? (
+        <div
+          role="group"
+          aria-label="Confirm stop all"
+          className="flex flex-wrap items-center gap-2"
+        >
+          <span>Pause new work and interrupt every running turn on this machine?</span>
+          <Button
+            variant="destructive"
+            size={size}
+            disabled={disabled}
+            onClick={() => {
+              setConfirming(false);
+              void changePause(id, { kind: "stopAll" });
+            }}
+          >
+            Stop everything
+          </Button>
+          <Button variant="ghost" size={size} onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+        </div>
+      ) : (
+        <Button
+          variant="outline"
+          size={size}
+          disabled={disabled}
+          onClick={() => setConfirming(true)}
+        >
+          Stop all
+        </Button>
+      )}
+    </div>
+  );
+}
+export function PauseSetting({ id, label }: { id: EnvironmentId; label: string }) {
   return (
     <SettingsRow
       title={label}
-      description="Pause automatic work. Running turns finish."
-      control={
-        <Button
-          variant="outline"
-          disabled={!writable || !!entry?.busy || !entry?.status}
-          onClick={() => void changePause(id, { kind: entry?.status?.paused ? "resume" : "pause" })}
-        >
-          {entry?.status?.paused ? "Resume" : "Pause new work"}
-        </Button>
-      }
+      description="Pause new work lets running turns finish. Stop all also interrupts them."
+      control={<PauseControls id={id} />}
     />
   );
 }

@@ -1,0 +1,11 @@
+/* A native option list takes the select's own colours. A transparent select in the dark theme drew
+   light text on the system's light list. `:root` beats the base reset's transparent background
+   whichever file loads first; utility classes still override it. */
+@layer base {
+  :root select,
+  :root select option,
+  :root select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
+}

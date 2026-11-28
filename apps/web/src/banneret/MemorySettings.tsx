@@ -1,4 +1,5 @@
 import { PauseSetting } from "./Pause";
+import { AgentWakeSetting } from "./chat/AgentSettings";
 import { useSearchableSetting } from "../components/settings/settingsSearch";
 import { MemoryImportSetting } from "./MemoryTransfer";
 import { OwnedElsewhere } from "./OwnedElsewhere";
@@ -156,6 +157,7 @@ export function MemorySettings() {
           <PauseSetting key={environmentId} id={environmentId} label={label} />
         ))}
       </SettingsSection>
+      <AgentWakeSetting />
       <SettingsSection {...setting("memory")}>
         <OwnedElsewhere capabilities={["memory", "skills", "search"]} className="m-3" />
         {connectedEnvironments.map(({ environmentId, label }, index) => (

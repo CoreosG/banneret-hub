@@ -45,6 +45,16 @@ const internal = new Set([
   "channels.directoryAll",
   "relay.admin",
 ]);
+/** The relay contract's `RoleId` rule, said in words under the field. */
+const ROLE_ID_RULE =
+  "Use lowercase letters, numbers and underscores (_). Start with a letter. 32 characters at most. No hyphens or spaces.";
+/** Names the accounts a change reaches; the count covers holders this viewer's team list omits. */
+function affected(names: readonly string[], count: number) {
+  const others = count - names.length;
+  if (!names.length) return countLabel(count, "person", "people");
+  const parts = others > 0 ? [...names, countLabel(others, "other")] : names;
+  return parts.length > 1 ? parts.slice(0, -1).join(", ") + " and " + parts.at(-1) : parts[0];
+}
 const blank: RoleDetail = { id: "", name: "", forOutside: false, permissions: {}, memberCount: 0 };
 type Operation = Extract<ChannelAction, { kind: "roles" }>["action"];
 export function WorkspaceRoles() {
@@ -243,15 +253,22 @@ function RoleEditor({
         }}
       >
         {creating && (
-          <label>
-            Role ID
-            <Input
-              required
-              pattern="[a-z][a-z0-9_]{0,31}"
-              value={id}
-              onChange={(e) => setId(e.target.value)}
-            />
-          </label>
+          <div className="grid gap-1">
+            <label>
+              Role ID
+              <Input
+                required
+                pattern="[a-z][a-z0-9_]{0,31}"
+                title={ROLE_ID_RULE}
+                aria-describedby="role-id-rule"
+                value={id}
+                onChange={(e) => setId(e.target.value)}
+              />
+            </label>
+            <p id="role-id-rule" className="text-xs text-muted-foreground">
+              {ROLE_ID_RULE}
+            </p>
+          </div>
         )}
         <label>
           Role name
@@ -329,8 +346,12 @@ function RoleEditor({
         </div>
         {role.memberCount > 0 && (
           <p>
-            Changes affect {countLabel(role.memberCount, "person", "people")}. They keep their
-            channel memberships.
+            Changes apply to{" "}
+            {affected(
+              people.filter((p) => p.role.id === role.id).map((p) => p.login),
+              role.memberCount,
+            )}
+            . Channel memberships stay as they are.
           </p>
         )}
         <div className="flex flex-wrap gap-2">

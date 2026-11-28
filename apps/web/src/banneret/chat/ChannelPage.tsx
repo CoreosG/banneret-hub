@@ -186,7 +186,12 @@ function ChannelView({ enterprise, id, root, focus }: View) {
               )}
               {settings && channel.kind === "channel" && (
                 <ChannelSettings
-                  key={JSON.stringify([channel.access, channel.managers, channel.agents])}
+                  key={JSON.stringify([
+                    channel.access,
+                    channel.managers,
+                    channel.agents,
+                    channel.archived,
+                  ])}
                   enterprise={enterprise}
                   channel={channel}
                   people={people}

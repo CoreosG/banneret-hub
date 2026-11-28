@@ -36,7 +36,14 @@ it("creates an outside role, assigns it, handles role_in_use, then deletes after
   const button = (name: string | RegExp) => screen.getByRole("button", { name });
   await button("Roles").click();
   await button("New role").click();
-  await screen.getByLabelText("Role ID").fill("reviewer");
+  const roleId = screen.getByLabelText("Role ID");
+  await expect
+    .element(screen.getByText(/lowercase letters, numbers and underscores/))
+    .toBeVisible();
+  await expect.element(roleId).toHaveAccessibleDescription(/No hyphens or spaces/);
+  await roleId.fill("release-manager");
+  expect((roleId.element() as HTMLInputElement).validity.patternMismatch).toBe(true);
+  await roleId.fill("reviewer");
   await screen.getByLabelText("Role name").fill("Reviewer");
   await screen.getByLabelText("For outside collaborators").click();
   await expect.element(screen.getByLabelText("Administer relay")).toBeDisabled();
@@ -46,6 +53,15 @@ it("creates an outside role, assigns it, handles role_in_use, then deletes after
   await screen.getByLabelText("Assign to person").fill(member.id);
   await button("Assign role").click();
   await expect.element(button("Reviewer (1)")).toBeVisible();
+  await button(/^Founder \(/).click();
+  const founders = people.filter((p) => p.role.id === "founder").map((p) => p.login);
+  expect(founders.length).toBeGreaterThan(1);
+  // Every holder by login, and no bare head count.
+  await expect.element(screen.getByText(/^Changes apply to /)).toBeVisible();
+  expect(screen.getByText(/^Changes apply to /).element().textContent).toBe(
+    `Changes apply to ${founders.slice(0, -1).join(", ")} and ${founders.at(-1)}. Channel memberships stay as they are.`,
+  );
+  await button("Reviewer (1)").click();
   await button("Delete role").click();
   await expect
     .element(screen.getByText("Move members first. Built-in templates cannot be removed."))

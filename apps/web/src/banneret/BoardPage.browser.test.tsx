@@ -333,12 +333,16 @@ describe("Enterprise board", () => {
     };
     await emit(base);
     await expect.element(page.getByText("Guild invites")).toBeVisible();
-    await expect
-      .element(page.getByRole("button", { name: "Actions for Guild invites" }))
-      .not.toBeInTheDocument();
+    // A relay that maps no channel to this board still shows the item, and says why it is off.
+    await page.getByRole("button", { name: "Actions for Guild invites" }).click();
+    const off = page.getByRole("menuitem", { name: /Open chat/ });
+    await expect.element(off).toHaveAttribute("aria-disabled", "true");
+    await expect.element(off.getByText("No channel for this board")).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(off).not.toBeInTheDocument();
     await emit({ ...base, boardChannels: { platform: "releases" } });
     await page.getByRole("button", { name: "Actions for Guild invites" }).click();
-    await page.getByRole("menuitem", { name: "Open chat" }).click();
+    await page.getByRole("menuitem", { name: "Open chat", exact: true }).click();
     expect(router.state.location.pathname).toBe("/channels/c_releases");
   });
   it("draws the relay's five columns in order, each card opening its Task tab", async () => {
