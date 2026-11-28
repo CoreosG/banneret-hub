@@ -1,3 +1,6 @@
+import { mayPause } from "./pause.ts";
+import { makePauseStore, admission } from "../PauseStore.ts";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as DateTime from "effect/DateTime";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { searchKnowledge, knowledgeLabel } from "../memory/KbIndex.ts";
@@ -237,6 +240,7 @@ const make = Effect.gen(function* () {
       action,
     }).pipe(Effect.provideService(BanneretEnrolment, enrolment), Effect.mapError(poolFailure));
   });
+  const pauseDatabase = yield* Effect.serviceOption(SqlClient.SqlClient);
   const memoryContext = yield* Effect.context<Effect.Services<ReturnType<typeof memoryAccess>>>();
   const accessForCaller = Effect.gen(function* () {
     const scope = yield* McpInvocationContext.McpInvocationContext;
@@ -297,6 +301,27 @@ const make = Effect.gen(function* () {
         yield* catalog;
         const key = yield* access.open((s) => String(s.proposeSkill(text, scope, why).key));
         return { key, status: "proposed" as const };
+      }),
+    ),
+    banneret_pause: McpToolAccess.actsAsCaller(() =>
+      Effect.gen(function* () {
+        const scope = yield* McpInvocationContext.McpInvocationContext;
+        if (
+          !scope.thread ||
+          Option.isNone(pauseDatabase) ||
+          !(yield* mayPause(scope.thread.threadId, scope.environmentId).pipe(
+            Effect.provideContext(memoryContext),
+          ))
+        )
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message: "Only a local orchestrator can pause this machine.",
+          });
+        const store = yield* makePauseStore.pipe(
+          Effect.provideService(SqlClient.SqlClient, pauseDatabase.value),
+        );
+        yield* admission(store.set(true));
+        return { paused: true as const };
       }),
     ),
     banneret_kb_search: McpToolAccess.readsAsCaller(({ query }) =>

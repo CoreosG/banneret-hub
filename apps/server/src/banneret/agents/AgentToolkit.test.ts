@@ -1,5 +1,6 @@
 import * as Activity from "../../preview/PreviewAgentActivity.ts";
 import { setLevel, toolkitSource } from "../plugins/levels.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { memoryAccess } from "../memory/access.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off globalJsonInEffect:off globalTimersInEffect:off globalFetch:off globalFetchInEffect:off - a real HTTP relay (the fake) behind a recording forwarder.
 import { NodeHttpServer } from "@effect/platform-node";
@@ -70,6 +71,7 @@ import * as Enrolment from "../relay/Enrolment.ts";
 import * as Facts from "../relay/Facts.ts";
 import * as RelayFeed from "../relay/RelayFeed.ts";
 import { type Forwarder, withFake } from "../relay/relayHarness.testkit.ts";
+import { makePauseStore } from "../PauseStore.ts";
 import { makeDeliveries } from "../chat/Deliveries.ts";
 import { saveDesignations } from "../OrchestratorState.ts";
 import * as Workspaces from "../Workspaces.ts";
@@ -176,6 +178,7 @@ const threadIssuesLayer = Layer.mock(ThreadIssueService.ThreadIssueService)({
 
 const localLayer = (baseDir: string) =>
   Layer.mergeAll(
+    NodeSqliteClient.layer({ filename: baseDir + "/pause.sqlite" }),
     Layer.mock(ManagedProjectFolders)({
       namedProjectsRoot: "/projects",
       isScratchProject: (id) => Effect.succeed(id === "scratch"),
@@ -691,6 +694,10 @@ describe("agent toolkit listing", () => {
               ?.structuredContent,
           ).toMatchObject({ data: expect.stringContaining('"key":"indent"') });
           const scratchMain = yield* session("scratch-main");
+          expect((yield* scratchMain.call("banneret_pause", {})).result?.structuredContent).toEqual(
+            { paused: true },
+          );
+          expect((yield* company.call("banneret_pause", {})).error).toBeDefined();
           expect(JSON.stringify((yield* scratchMain.read).result)).toContain("Private memory.");
           expect((yield* scratchMain.prompts).map((p) => p.name)).toContain("banneret_route_task");
           asked.length = 0;
@@ -1139,6 +1146,8 @@ describe("agent lease tools against the fake relay", () => {
               });
               expect(yield* call("banneret_chat_inbox", {})).toMatchObject({ items: [] });
               const receipts = new Set<string>();
+              const sent: string[] = [];
+              let simulateShutdown = true;
               const service = yield* ThreadManagementService.ThreadManagementService;
               let stopped = false;
               const build = makeDeliveries.pipe(
@@ -1157,9 +1166,11 @@ describe("agent lease tools against the fake relay", () => {
                     Effect.sync(() => {
                       expect(status.machineId).toBeDefined();
                       expect(input.mode).toBe("queue");
-                      expect(input.text).toContain("Which checks passed?");
                       receipts.add(input.commandId);
-                      throw new Error("Simulated shutdown after durable dispatch");
+                      sent.push(input.text);
+                      if (simulateShutdown)
+                        throw new Error("Simulated shutdown after durable dispatch");
+                      return {} as ThreadManagementService.ThreadManagementSendResult;
                     }),
                 }),
               );
@@ -1173,6 +1184,27 @@ describe("agent lease tools against the fake relay", () => {
               expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
                 items: [],
               });
+              expect(sent[0]).toContain("Which checks passed?");
+              simulateShutdown = false;
+              const pause = yield* makePauseStore;
+              yield* pause.set(true);
+              yield* device.signedChat("PUT", "me/agents/wake", { wake: "owner" });
+              for (const text of ["First held", "Second held"])
+                yield* device.signedChat("POST", "messages", {
+                  conversationId: "c_general",
+                  threadRootId: root,
+                  key: text.replace(" ", "-"),
+                  text,
+                });
+              yield* (yield* build).reconcile(device);
+              expect(sent).toHaveLength(1);
+              expect(yield* pause.held).toBe(2);
+              yield* pause.set(false);
+              yield* (yield* build).reconcile(device);
+              expect(sent.slice(1)).toEqual([
+                expect.stringContaining("First held"),
+                expect.stringContaining("Second held"),
+              ]);
               expect(yield* call("banneret_chat_read", { thread: root })).toMatchObject({
                 items: expect.arrayContaining([
                   expect.objectContaining({ progress: { state: "stopped", steps: [] } }),

@@ -439,6 +439,15 @@ export const memoryNames = [
   "banneret_memory_flag",
 ];
 export const AgentToolkit = Toolkit.make(
+  writes(
+    Tool.make("banneret_pause", {
+      ...poolOptions,
+      description:
+        "Pause new automatic work on this machine. Running turns finish. The user can resume in Settings.",
+      parameters: Schema.Record(Schema.String, Schema.Never),
+      success: Schema.Struct({ paused: Schema.Literal(true) }),
+    }),
+  ),
   reads(
     Tool.make("banneret_skills_list", {
       ...poolOptions,

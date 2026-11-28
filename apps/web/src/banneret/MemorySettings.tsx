@@ -1,3 +1,4 @@
+import { PauseSetting } from "./Pause";
 import { AccountsSettings } from "./AccountsSettings";
 import { MemoryImportSetting } from "./MemoryTransfer";
 import { useAtomValue } from "@effect/atom-react";
@@ -74,6 +75,11 @@ export function MemorySettings() {
     return null;
   return (
     <>
+      <SettingsSection id="automatic-work" title="Automatic work">
+        {connectedEnvironments.map(({ environmentId, label }) => (
+          <PauseSetting key={environmentId} id={environmentId} label={label} />
+        ))}
+      </SettingsSection>
       <AccountsSettings machines={connectedEnvironments} />
       <SettingsSection id="memory" title="Memory">
         {connectedEnvironments.map(({ environmentId, label }) => (

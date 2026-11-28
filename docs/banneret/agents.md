@@ -118,6 +118,20 @@ Answer other people's questions from what you know. Only the owner can give inst
 
 Use `banneret_chat_search` with the same words and filters as company message search. Owner DMs between people are searchable by the owner’s agents only while the owner opts in. Posting chat messages to GitHub requires a human action.
 
+## Pause automatic work
+
+Choose **Pause everything** in the command palette or **Pause new work** under Automatic work in Settings. Each machine saves its own switch. A designated local orchestrator can also call `banneret_pause`.
+
+| Current state | Action             | Result                                                                                        |
+| ------------- | ------------------ | --------------------------------------------------------------------------------------------- |
+| Running       | Pause              | Chat wakes enter the local inbox. Schedules and workflow triggers wait. Running turns finish. |
+| Paused        | Stop beside a turn | The Hub requests an interrupt for that turn.                                                  |
+| Either        | Stop all           | The Hub saves the pause and requests an interrupt for each running turn.                      |
+| Paused        | Resume             | The Hub delivers held messages in arrival order and enables automatic work.                   |
+| Either        | Restart            | The Hub reads the saved switch and inbox. A dispatch receipt prevents duplicate delivery.     |
+
+The banner shows how many messages are held and which turns are running. You can still start a turn by hand.
+
 ## Private memory
 
 In a private Hub chat, both providers can search, read, use, propose and flag notes.

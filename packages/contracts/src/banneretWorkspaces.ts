@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 
 import { EnvironmentAuthorizationError } from "./auth.ts";
 
+export { type PauseStatus, type PauseAction } from "./banneretPause.ts";
+
 export const BANNERET_WORKSPACES_WS_METHODS = {
   list: "banneretWorkspaces.list",
   put: "banneretWorkspaces.put",

@@ -1,3 +1,4 @@
+import { makePauseStore } from "../banneret/PauseStore.ts";
 import {
   CommandId,
   MessageId,
@@ -489,6 +490,7 @@ export const layer = Layer.effect(
   ScheduledTaskService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const pause = yield* makePauseStore;
     const random = yield* SecureRandom.SecureRandom;
     const digest = yield* Digest.Digest;
     const mac = yield* Mac.Mac;
@@ -1257,7 +1259,16 @@ export const layer = Layer.effect(
         }),
         (reserved) =>
           reserved
-            ? run
+            ? trigger === "manual"
+              ? run
+              : pause.whenRunning(
+                  run,
+                  webhook
+                    ? Effect.fail(
+                        new WebhookDeliverySkipped({ reason: "Automatic work is paused." }),
+                      )
+                    : Effect.succeed({ task, threadId: null, dispatchFailed: false }),
+                )
             : trigger !== "scheduled"
               ? Effect.fail(taskError("Schedule task is already running.", { taskId: task.id }))
               : Effect.succeed({ task, threadId: null, dispatchFailed: false }),
