@@ -4,6 +4,11 @@ import { render } from "../../test/render";
 import { AccountsSettings } from "./AccountsSettings";
 import { useEnrolmentStore, enrolmentRpc } from "./enrolmentStore";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../state/environments", async (load) => ({
   ...(await load<typeof import("../state/environments")>()),
   usePrimaryEnvironmentId: () => "desk",

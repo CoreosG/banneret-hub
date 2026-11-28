@@ -34,6 +34,11 @@ import { taskSurface } from "./taskSurface";
 import { useOpenTask } from "./useOpenTask";
 import { singleBoard } from "./boards.testkit";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../state/entities", { spy: true });
 // Upstream's issue panel needs a live tracker; the stub shows which issue the tab embedded.
 vi.mock("../components/issue/IssueDetailPanel", () => ({

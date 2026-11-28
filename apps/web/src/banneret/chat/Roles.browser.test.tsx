@@ -6,6 +6,11 @@ import { WorkspaceRoles } from "./Roles";
 import { chatRpc } from "./client";
 
 const { useEnterpriseFeed } = vi.hoisted(() => ({ useEnterpriseFeed: vi.fn() }));
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../../state/session", async (load) => ({
   ...(await load<typeof import("../../state/session")>()),
   useEnvironmentScope: () => true,

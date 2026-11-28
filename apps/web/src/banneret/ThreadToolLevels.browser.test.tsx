@@ -3,6 +3,11 @@ import { page } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { LevelsPanel } from "./ThreadToolLevels";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 it("edits one tool source and explains the CLI boundary", async () => {
   const change = vi.fn().mockResolvedValue([{ source: "banneret", level: "none" }]);
   await using _view = await render(

@@ -35,6 +35,11 @@ import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../state/environments", { spy: true });
 
 const LOCAL = EnvironmentId.make("local");

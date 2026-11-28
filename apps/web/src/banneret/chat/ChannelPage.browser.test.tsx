@@ -54,6 +54,11 @@ declare module "vite-plus/test/browser" {
     };
   }
 }
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../../state/environments", { spy: true });
 it("answers a named agent question from its Needs you row", async () => {
   await commands.companyChat("start");

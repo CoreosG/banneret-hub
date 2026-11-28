@@ -3,6 +3,11 @@ import { render } from "../../test/render";
 import { MemorySettings } from "./MemorySettings";
 import "~/index.css";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../components/settings/SettingsScopeContext", async (load) => ({
   ...(await load<typeof import("../components/settings/SettingsScopeContext")>()),
   useSettingsScope: () => ({

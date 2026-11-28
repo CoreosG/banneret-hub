@@ -1,3 +1,4 @@
+import { feedRpc } from "./relayFeedStore";
 import { useGitHubLogin } from "./accountIdentity";
 import appCss from "../index.css?inline";
 import {
@@ -36,6 +37,11 @@ import {
 } from "./workspacesStore";
 
 const state = vi.hoisted(() => ({ openExternal: vi.fn() }));
+
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
 
 vi.mock("./accountIdentity", async (load) => ({
   ...(await load<typeof import("./accountIdentity")>()),
@@ -94,6 +100,13 @@ const projects = [
 
 /** A stubbed environment: what the server would answer, driven by the test. */
 function setup(displayName = "Example Company") {
+  vi.spyOn(enrolmentRpc, "resources").mockResolvedValue({
+    ok: false,
+    message: "No resource sample",
+  });
+  const nothing = { joined: true, value: null, fetchedAt: null };
+  vi.spyOn(feedRpc, "today").mockResolvedValue(nothing);
+  vi.spyOn(feedRpc, "needs").mockResolvedValue(nothing);
   useWorkspacesStore.setState({
     byEnvironment: {},
     local: [],

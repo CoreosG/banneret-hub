@@ -33,6 +33,11 @@ import { taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
 import { singleBoard } from "./boards.testkit";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("./orchestratorStore", { spy: true });
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
@@ -173,6 +178,11 @@ const serverProject = {
 } as unknown as EnvironmentProject;
 
 function setup(options: { issues?: boolean; localRepo?: boolean; server?: LinkedServer } = {}) {
+  vi.spyOn(enrolmentRpc, "resources").mockResolvedValue({
+    ok: false,
+    message: "No resource sample",
+  });
+  vi.mocked(orchestrators.selectOrchestrator).mockResolvedValue(null);
   useRelayFeedStore.setState({ feeds: {} });
   useEnrolmentStore.setState({ views: {} });
   useLeaseStore.setState({ entries: {} });

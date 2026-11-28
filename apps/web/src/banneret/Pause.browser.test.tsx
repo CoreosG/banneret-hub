@@ -2,6 +2,11 @@ import { RunId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { render } from "../../test/render";
 import { PauseBanner } from "./Pause";
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 it("shows held work and targets the displayed run when stopped", async () => {
   const onAction = vi.fn();
   const run = { runId: RunId.make("running"), threadId: ThreadId.make("thread"), title: "Review" };

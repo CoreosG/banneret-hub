@@ -22,6 +22,11 @@ import { useUiStateStore } from "../uiStateStore";
 import { workspaceProjectKey, type ActiveWorkspaceId } from "./workspaces.logic";
 import { useWorkspacesStore } from "./workspacesStore";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
 vi.mock("../hooks/useHandleNewThread", { spy: true });

@@ -3,6 +3,11 @@ import { page } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
 import { SettingsSidebarNav } from "../components/settings/SettingsSidebarNav";
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../components/chat/GlobalVoiceInputIndicator", () => ({
   GlobalVoiceInputIndicator: () => null,
 }));
