@@ -141,3 +141,28 @@ process.stdout.write(
     maxSteps: 2,
   }) + "\n",
 );
+
+for (const [id, request, must] of [
+  [
+    "private-review",
+    "Review my workflow. Send any platform ideas for me.",
+    ["Review my workflow", "draft|click"],
+  ],
+  ["ordinary-note", "Which tool reads one Banneret note by key?", ["banneret_memory_read"]],
+] as const) {
+  process.stdout.write(
+    JSON.stringify({
+      id: "banneret-workflow-" + id,
+      area: "memory",
+      kind: "guard",
+      privacy: "commit-safe",
+      source: { report: "ME11 local workflow review" },
+      experience: request,
+      pattern: "Use the person-facing workflow review for review requests only.",
+      setup: { role: "top" },
+      prompt: indexHeader + "\n" + request,
+      expect: { finalTextMust: must, maxCalls: { exec_command: 0 } },
+      maxSteps: 2,
+    }) + "\n",
+  );
+}

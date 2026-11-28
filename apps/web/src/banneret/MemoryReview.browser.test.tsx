@@ -7,6 +7,12 @@ vi.mock(import("~/environments/primary/target"), async (original) => ({
   readPrimaryEnvironmentTarget: () => null,
 }));
 
+const feedback = vi.hoisted(() => ({ list: vi.fn(), send: vi.fn() }));
+vi.mock("./chat/client", async (load) => ({
+  ...(await load<typeof import("./chat/client")>()),
+  conversations: feedback.list,
+  chatRpc: { run: feedback.send },
+}));
 const note = {
   key: "Format",
   text: "Two spaces",
@@ -94,4 +100,67 @@ it("opens both citations and submits a scope decision only after Save", async ()
     scopeA: "editing JSON",
     scopeB: "running in CI",
   });
+});
+
+it("previews the exact public draft and only opens it on a click", async () => {
+  const { WorkflowResult } = await import("./WorkflowReview");
+  const { EnvironmentId } = await import("@t3tools/contracts");
+  const target = {
+    environmentId: EnvironmentId.make("local"),
+    relayOrigin: "https://example.test",
+  };
+  feedback.list.mockResolvedValue([
+    { kind: "channel", name: "feedback", id: "c1", archived: false, me: { can: { post: true } } },
+  ]);
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  try {
+    const act = vi.fn();
+    await using screen = await render(
+      <WorkflowResult
+        act={act}
+        target={target}
+        report={{
+          created: 1,
+          topRule: null,
+          topCount: 0,
+          proposalKey: null,
+          failures: 0,
+          waiting: 0,
+          disputed: 0,
+          corrections: 0,
+          pending: false,
+          retries: 2,
+          proposed: 0,
+          stale: 0,
+          contested: 0,
+          fired: 0,
+          acknowledged: 0,
+        }}
+      />,
+    );
+    await expect.element(screen.getByText("Explain agent retries")).toBeVisible();
+    expect(feedback.list).not.toHaveBeenCalled();
+    expect(feedback.send).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(act).not.toHaveBeenCalled();
+    await screen.getByRole("button", { name: "Open draft as a public issue" }).click();
+    const url = new URL(String(open.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("title")).toBe("Explain agent retries");
+    await expect
+      .element(screen.getByText(url.searchParams.get("body")!, { exact: true }))
+      .toBeVisible();
+    await screen.getByRole("button", { name: "Find company feedback channel" }).click();
+    expect(feedback.send).not.toHaveBeenCalled();
+    await screen.getByRole("button", { name: /Send draft to #feedback/ }).click();
+    expect(feedback.send).toHaveBeenCalledWith(
+      target,
+      expect.objectContaining({
+        kind: "post",
+        id: "c1",
+        text: url.searchParams.get("title") + "\n\n" + url.searchParams.get("body"),
+      }),
+    );
+  } finally {
+    open.mockRestore();
+  }
 });

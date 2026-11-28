@@ -1,3 +1,4 @@
+import { workflowHandlers } from "../memory/workflowHandlers.ts";
 import { knowledgeConfigured } from "../memory/KbIndex.ts";
 import * as Path from "effect/Path";
 import type { AuthSessionId } from "@t3tools/contracts";
@@ -759,6 +760,7 @@ export const rpcHandlers = {
     },
   ),
   ...memorySettingsHandlers,
+  ...workflowHandlers,
   "memory.repoSetting": Effect.fn("BanneretMemory.repoSetting")(
     function* ({ threadId }: { threadId: ThreadId }) {
       const access = yield* reviewAccess(threadId);
@@ -946,6 +948,7 @@ export const rpcHandlers = {
           const watcher = store.reminders(threadId);
           return {
             ...store.counts(access.main),
+            main: access.main,
             ...(watcher.setting()
               ? {
                   reminders: {

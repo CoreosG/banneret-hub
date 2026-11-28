@@ -129,6 +129,7 @@ export const memoryAccess = Effect.fn("BanneretMemory.access")(
     );
     return {
       open,
+      storeId: hash,
       root: thread.worktreePath ?? workspace.root,
       origin: login ? origin : undefined,
       orchestrator,

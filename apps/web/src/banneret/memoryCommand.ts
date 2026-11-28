@@ -1,5 +1,7 @@
 import type { ChatComposerProps } from "../components/chat/ChatComposer";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { workflowAction } from "./WorkflowReview";
+import { toastManager } from "../components/ui/toast";
 import { create } from "zustand";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 export const memoryThreadKey = (ref: ScopedThreadRef) =>
@@ -35,8 +37,15 @@ export function openMemoryCommand(
   detached = false,
 ) {
   const match = /^\/memory(?:\s+([\s\S]*))?$/i.exec(prompt.trim());
-  if (!match) return false;
-  setMemoryCard(routeThreadRef, match[1]?.trim() ?? "");
+  if (/^review my workflow[.!?]?$/i.test(prompt.trim())) {
+    void workflowAction(routeThreadRef, "run").catch(() =>
+      toastManager.add({
+        type: "error",
+        title: "Run workflow review in your private main orchestrator chat.",
+      }),
+    );
+  } else if (match) setMemoryCard(routeThreadRef, match[1]?.trim() ?? "");
+  else return false;
   const store = useComposerDraftStore.getState();
   if (store.getComposerDraft(composerDraftTarget)?.prompt === prompt)
     store.setPrompt(composerDraftTarget, "");

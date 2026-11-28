@@ -1,3 +1,4 @@
+import { WorkflowReview } from "./WorkflowReview";
 import { MemoryPreferences } from "./MemoryPreferences";
 import { MemoryRepo } from "./MemoryRepo";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
@@ -41,7 +42,7 @@ export function MemoryImportSetting({ environmentId }: { environmentId: Environm
             } else setError("Could not load orchestrators.");
           }}
         >
-          Import or sync memory
+          Manage memory and workflow reviews
         </button>
       ) : targets.length ? (
         <>
@@ -61,6 +62,14 @@ export function MemoryImportSetting({ environmentId }: { environmentId: Environm
               ))}
             </select>
           </label>
+          {selected && (
+            <WorkflowReview
+              key={"workflow-" + selected}
+              environmentId={environmentId}
+              threadId={selected}
+              settings
+            />
+          )}
           {selected && (
             <MemoryPreferences
               key={"preferences-" + selected}

@@ -160,3 +160,24 @@ it("keeps the confirmed skill active across restart until its owner accepts the 
     ]);
   });
 });
+
+it("runs a local review on demand and coalesces missed weekly reviews after restart", () => {
+  const file = fixture();
+  const provider = NodePath.join(NodePath.dirname(file), "CLAUDE.md");
+  NodeFS.writeFileSync(provider, "Private provider rule");
+  const read = (time: number, scheduled: boolean) =>
+    withNotes(file, "app", time, (s) => s.workflow("main").run(s, 2, scheduled));
+  expect(read(0, true)).toBeNull();
+  expect(read(0, false)?.retries).toBe(2);
+  withNotes(file, "app", 0, (s) => s.workflow("main").schedule(true));
+  expect(read(day, true)).toBeNull();
+  expect(read(day * 14, true)?.pending).toBe(true);
+  expect(read(day * 14, true)).toBeNull();
+  withNotes(file, "app", day * 14, (s) => {
+    expect(s.counts().total).toBe(0);
+    expect(s.workflow("main").current()?.pending).toBe(true);
+    s.workflow("main").schedule(false);
+  });
+  expect(read(day * 30, true)).toBeNull();
+  expect(NodeFS.readFileSync(provider, "utf8")).toBe("Private provider rule");
+});
