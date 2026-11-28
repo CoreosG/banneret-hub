@@ -1,4 +1,5 @@
-export { ToolLevel } from "./banneretPlugins.ts";
+export type BanneretSubscriptionTag = "banneretRelay.feed" | "plugins.approvals";
+export { ToolLevel, CallApproval } from "./banneretPlugins.ts";
 import { RoleRef, Admission } from "./banneretChat.ts";
 import { PLUGIN_RPCS, PLUGIN_SCOPES, PLUGIN_AGGREGATES } from "./banneretPlugins.ts";
 // Banneret Hub: enrolment of this server environment in a company relay (docs/banneret/relay-v1).

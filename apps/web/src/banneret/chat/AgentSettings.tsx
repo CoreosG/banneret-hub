@@ -1,3 +1,4 @@
+import { CallApprovals } from "../CallApprovals";
 import { ThreadToolLevels } from "../ThreadToolLevels";
 import { MemoryStrip } from "../MemoryStrip";
 import { ChatHandle, ChatSettings, type EnvironmentId } from "@t3tools/contracts";
@@ -223,14 +224,11 @@ export function ThreadTimeline(props: ComponentProps<typeof Timeline>) {
           <Timeline
             {...props}
             footer={
-              cards ? (
-                <>
-                  {props.footer}
-                  {cards}
-                </>
-              ) : (
-                props.footer
-              )
+              <>
+                {props.footer}
+                {cards}
+                <CallApprovals {...thread} />
+              </>
             }
           />
         </>

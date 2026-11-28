@@ -1,6 +1,7 @@
 import { JoinRequests } from "./chat/JoinRequests";
 // Banneret Hub: Needs you for an Enterprise workspace, from the relay's GET /needs in the order the
 // relay returns it (most urgent first). Pages load on request.
+import { LocalCallApprovals } from "./CallApprovals";
 import { InboxIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -37,6 +38,7 @@ export function NeedsPage() {
     return (
       <FeedFrame title="Needs you">
         <PageHeader title="Needs you" />
+        <LocalCallApprovals />
         <QuietLine
           fact="No company here yet."
           hint="Choose an Enterprise workspace that this machine has joined to see its company here."
@@ -49,6 +51,7 @@ export function NeedsPage() {
     return (
       <FeedFrame title="Needs you" company={workspace.name}>
         <PageHeader title="Needs you" />
+        <LocalCallApprovals />
         <QuietLine fact={`${workspace.name} does not offer Needs you.`} />
       </FeedFrame>
     );
@@ -73,6 +76,7 @@ export function NeedsPage() {
           )
         }
       />
+      {(filter === "All" || filter === "Reviews") && <LocalCallApprovals />}
       <FeedStatus
         feed={feed}
         company={workspace.name}

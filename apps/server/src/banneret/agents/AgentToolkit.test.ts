@@ -1,3 +1,4 @@
+import { approvalMachine } from "../plugins/approvals.ts";
 import * as Activity from "../../preview/PreviewAgentActivity.ts";
 import { setLevel, toolkitSource } from "../plugins/levels.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -25,6 +26,7 @@ import {
   type OrchestrationProjectShell,
   OrchestratorMcpFailure,
   ProjectId,
+  RunId,
   ProviderInstanceId,
   type ServerProvider,
   ThreadId,
@@ -152,7 +154,11 @@ const threadsLayer = Layer.mock(ThreadManagementService.ThreadManagementService)
     const projectId = THREAD_PROJECTS.get(threadId);
     return projectId === undefined
       ? Effect.die(new Error("the thread store is unavailable"))
-      : Effect.succeed({ ...liveThreadShell(threadId), projectId: ProjectId.make(projectId) });
+      : Effect.succeed({
+          ...liveThreadShell(threadId),
+          activeRunId: RunId.make("active"),
+          projectId: ProjectId.make(projectId),
+        });
   },
 });
 
@@ -638,6 +644,20 @@ describe("agent toolkit listing", () => {
           });
           const text =
             "---\nname: release-test\ndescription: Check a release.\n---\nCheck the tag.";
+          const approvals = yield* approvalMachine(EnvironmentId.make(ENVIRONMENT));
+          yield* approvals.updates.pipe(
+            Stream.runForEach(() =>
+              Effect.gen(function* () {
+                for (const call of yield* approvals.list()) {
+                  expect(call.threadId).toBe(
+                    call.name === "banneret_pause" ? "scratch-main" : "thread-solo",
+                  );
+                  yield* approvals.decide(call.id, "once", "Owner", "");
+                }
+              }),
+            ),
+            Effect.forkScoped,
+          );
           const proposedSkill = (yield* solo.call("banneret_skills_propose", {
             text,
             why: "Reuse the release check.",
