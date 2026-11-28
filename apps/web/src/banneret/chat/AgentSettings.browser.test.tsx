@@ -3,6 +3,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { commands } from "vite-plus/test/browser";
 import { render } from "../../../test/render";
 import { AgentThreadHeader, AgentWakeSetting } from "./AgentSettings";
+import { AskSettings } from "./AskSettings";
 import { chatRpc } from "./client";
 const { useEnterpriseFeed } = vi.hoisted(() => ({ useEnterpriseFeed: vi.fn() }));
 vi.mock(import("~/environments/primary/target"), async (original) => ({
@@ -76,4 +77,45 @@ it("sets the wake default in Settings and links to it from a thread when the rel
   await vi.waitFor(() =>
     expect(rpc).toHaveBeenCalledWith(expect.anything(), { kind: "applyWake", wake: "nobody" }),
   );
+});
+
+it("offers no outside collaborator or their agent as an auto-accept rule", async () => {
+  const handle = (id: string, login: string) => ({
+    id: "h_" + id,
+    owner: { id: "p_" + login, login },
+    claimName: id,
+    provider: "codex",
+    machine: { id: "m_1", label: "Desk" },
+    reachable: true,
+    wake: "everyone",
+    paused: false,
+  });
+  using _rpc = vi.spyOn(chatRpc, "run").mockImplementation(async () => ({
+    items: [handle("builder", "ada"), handle("visitor", "olivia")],
+    nextCursor: null,
+  }));
+  const env = EnvironmentId.make("desk");
+  const person = (login: string, admission: "member" | "outside") => ({
+    id: "p_" + login,
+    login,
+    admission,
+    role: { id: admission === "member" ? "staff" : "outside", name: admission },
+  });
+  const enterprise = {
+    environmentId: env,
+    target: { environmentId: env, relayOrigin: "https://relay.test" },
+    feed: { team: { value: { people: [person("ada", "member"), person("olivia", "outside")] } } },
+  } as unknown as Parameters<typeof AskSettings>[0]["enterprise"];
+  await using screen = await render(
+    <AskSettings
+      enterprise={enterprise}
+      policy={{ default: "approve", auto: [], maxTokens: 200000, maxSeconds: 900 }}
+      save={() => {}}
+    />,
+  );
+  const subjects = screen.getByLabelText("Rule subject").getByRole("option");
+  const labels = () => subjects.elements().map((option) => option.textContent);
+  await expect.poll(labels).toEqual(["ada"]);
+  await screen.getByRole("combobox", { name: /^From/ }).selectOptions("agent");
+  await expect.poll(labels).toEqual(["ada/builder"]);
 });

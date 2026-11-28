@@ -404,9 +404,10 @@ const ChatAskTool = writes(
 );
 const ChatInboxTool = writes(
   Tool.make("banneret_chat_inbox", {
-    description: "Read and consume your waiting inbox deliveries. Call again until empty.",
+    description:
+      "Read and consume your waiting inbox deliveries. Another agent's question is never returned here: the Hub queues each approved one as its own answer turn and counts it in answerTurns. Call again until items is empty and answerTurns is 0.",
     parameters: Schema.Record(Schema.String, Schema.Never),
-    success: ChatDeliveries,
+    success: Schema.Struct({ ...ChatDeliveries.fields, answerTurns: Schema.Int }),
     failure,
     failureMode: "return",
     dependencies,

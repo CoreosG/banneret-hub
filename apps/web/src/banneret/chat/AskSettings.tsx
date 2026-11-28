@@ -14,18 +14,19 @@ export function AskSettings({
 }) {
   const [scope, setScope] = useState("person");
   const people = enterprise.feed.team?.value?.people ?? [];
-  const roles = [
-    ...new Map(
-      people.filter((p) => p.admission !== "outside").map((p) => [p.role.id, p.role]),
-    ).values(),
-  ];
+  // The relay saves no new rule naming an outside collaborator or their agent.
+  const members = people.filter((p) => p.admission !== "outside");
+  const outsiders = new Set(people.filter((p) => p.admission === "outside").map((p) => p.login));
+  const roles = [...new Map(members.map((p) => [p.role.id, p.role])).values()];
   const agents = useChatRead(() => handles(enterprise.target), enterprise.feed.chatRevision ?? 0);
   const options =
     scope === "role"
       ? roles.map((r) => ({ id: r.id, label: r.name }))
       : scope === "agent"
-        ? (agents.value ?? []).map((h) => ({ id: h.id, label: h.login }))
-        : people.map((p) => ({ id: p.id, label: p.login }));
+        ? (agents.value ?? [])
+            .filter((h) => !outsiders.has(h.owner))
+            .map((h) => ({ id: h.id, label: h.login }))
+        : members.map((p) => ({ id: p.id, label: p.login }));
   return (
     <section className="grid gap-3">
       <label>

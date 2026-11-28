@@ -30,7 +30,8 @@ interface Row {
   expires: number;
 }
 
-// Relay open + pending delivery -> dispatch with a stable command id, save the run, consume.
+// Open ask, woken or read from the inbox -> dispatch with a stable command id, then save the run.
+// Only a saved run ends an ask here: a consumed delivery without one waits for the ask deadline.
 // The run projection owns queued/answering. A finished or missing run closes its open ask.
 // Closed remotely or over budget -> interrupt that exact run. Restart resumes from the saved row.
 export const makeAnswerRuns = Effect.gen(function* () {
@@ -39,11 +40,9 @@ export const makeAnswerRuns = Effect.gen(function* () {
   yield* sql`CREATE TABLE IF NOT EXISTS banneret_answer_runs (origin TEXT, ask TEXT, handle TEXT, thread TEXT, project TEXT, run TEXT, maxTokens INTEGER, maxSeconds INTEGER, expires INTEGER, PRIMARY KEY(origin,ask))`.pipe(
     Effect.orDie,
   );
-  const policy = (relay: RelayEnrolment) =>
-    relay.signedChat("GET", "me/settings").pipe(
-      Effect.flatMap((r) => decodeSettings(r.body)),
-      Effect.map((s) => s.agentAsks),
-    );
+  const settings = (relay: RelayEnrolment) =>
+    relay.signedChat("GET", "me/settings").pipe(Effect.flatMap((r) => decodeSettings(r.body)));
+  const policy = (relay: RelayEnrolment) => settings(relay).pipe(Effect.map((s) => s.agentAsks));
   const remember = (
     relay: RelayEnrolment,
     ask: string,
@@ -114,5 +113,5 @@ export const makeAnswerRuns = Effect.gen(function* () {
         Effect.catchCause((c) => Effect.logWarning("Could not reconcile an answer turn", c)),
       );
   });
-  return { remember, policy, reconcile, rows };
+  return { remember, settings, policy, reconcile, rows };
 });

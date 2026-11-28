@@ -2595,6 +2595,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
   const paused = new Set<string>();
   let companyPaused = false;
+  // Someone the relay does not know counts as outside.
+  const outside = (personId: string) => people.get(personId)?.admission !== "member";
+  const held = (ownerId: string) => companyPaused || paused.has(ownerId);
+  // An outside collaborator wakes only their own agents.
+  const mayWake = (fromId: string, ownerId: string) => fromId === ownerId || !outside(fromId);
   const askOwner = (ask: ChatAsk | undefined) =>
     ask?.to.kind === "agent" ? ask.to.owner.id : ask?.to.person.id;
   const activeAsk = (ask: ChatAsk) => ["waiting_owner", "open", "draft"].includes(ask.state);
@@ -2957,10 +2962,36 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         !!follows.get(rootId)?.has(handleId))
     );
   }
+  /** A pause also reaches wakes already queued. A claimed row keeps its wake until it returns. */
+  function holdQueued() {
+    const owners = new Set<string>();
+    for (const d of deliveries.values()) {
+      const owner = handles.get(d.row.handleId)?.view.owner.id;
+      if (!owner || !held(owner) || !d.row.wakes || d.row.state !== "pending") continue;
+      d.row = {
+        ...d.row,
+        wakes: false,
+        // Any other row was written to wake, so its inbox lifetime counts from that write.
+        expiresAt:
+          d.row.reason === "ask"
+            ? d.row.expiresAt
+            : iso(Date.parse(d.row.expiresAt) - deliveryLifetime + inboxLifetime),
+      };
+      owners.add(owner);
+    }
+    for (const owner of owners) notifyWork(owner);
+  }
   function askDelivery(message: ChatMessage, handleId: string, reason: "ask" | "ask_result") {
     const h = handles.get(handleId);
     const c = channels.get(message.conversationId)!;
     if (!h || !handleReadsHome(c, handleId, message.threadRootId ?? message.id)) return;
+    // A result wakes unless an outsider answered another person's agent. A nobody agent wakes
+    // for an ask only after its owner's click.
+    const wakes =
+      !held(h.view.owner.id) &&
+      (reason === "ask_result"
+        ? mayWake(askOwner(message.ask)!, h.view.owner.id)
+        : message.ask?.state === "open" && (h.view.wake !== "nobody" || !!message.ask.decidedBy));
     const row: ChatDelivery = {
       id: randomId("d"),
       handleId,
@@ -2970,13 +3001,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       machineId: h.view.machine.id,
       threadRef: h.threadRef,
       wake: h.view.wake,
-      wakes:
-        reason === "ask" && message.ask?.state !== "open"
-          ? false
-          : !companyPaused && !paused.has(h.view.owner.id),
+      wakes,
       fromOwner: false,
       state: "pending",
-      expiresAt: reason === "ask" ? message.ask!.expiresAt : iso(Date.now() + deliveryLifetime),
+      expiresAt:
+        reason === "ask"
+          ? message.ask!.expiresAt
+          : iso(Date.now() + (wakes ? deliveryLifetime : inboxLifetime)),
     };
     deliveries.set(row.id, { row, claimedAt: 0 });
     emit(
@@ -2987,7 +3018,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       row.machineId,
     );
   }
-  function changeAsk(message: ChatMessage, patch: Partial<ChatAsk>) {
+  // The actor names the thread line. It is not stored: decidedBy records only a person's click.
+  function changeAsk(
+    message: ChatMessage,
+    patch: Partial<ChatAsk>,
+    actor = patch.decidedBy?.login ?? "Relay",
+  ) {
     const ask = { ...message.ask!, ...patch };
     if (ask.kind === "review" && ask.state === "answered") ask.answerMessageId = message.id;
     const channel = channels.get(message.conversationId)!;
@@ -3017,7 +3053,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       askDelivery(updated, ask.to.handle, "ask");
     chatChange(channel, { kind: "message.edited", seq: ++chatSeq, message: updated });
     if (ask.to.kind === "agent") {
-      const actor = patch.decidedBy?.login ?? "Relay";
       const root = messages.get(message.threadRootId ?? "");
       if (root && !root.deleted)
         systemMessage(
@@ -3167,6 +3202,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       .filter(
         (d) =>
           !d.wakes &&
+          // An ask shows only as its agent_ask item.
+          d.reason !== "ask" &&
           d.state === "pending" &&
           Date.parse(d.expiresAt) > Date.now() &&
           handles.get(d.handleId)?.view.owner.id === person.id &&
@@ -3945,6 +3982,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           });
         const value = parseJson(body, "AgentPause") as { paused: boolean };
         companyPaused = value.paused;
+        holdQueued();
         return send("AgentPause", value);
       }
       const messageMentions = (text: string, card?: ChatMessage["card"]) => {
@@ -4015,9 +4053,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!activeAsk(a)) throw closed();
           const decidedBy = personRef(person);
           if (action === "cancel") {
-            if (query.has("asHandle") && owned(query.get("asHandle")!).view.id !== a.from.handle)
+            if (reader && reader.view.id !== a.from.handle)
               throw new RelayError("forbidden", "Only the asker can cancel.");
-            return send("ChatAsk", changeAsk(m, { state: "cancelled", decidedBy }));
+            return send(
+              "ChatAsk",
+              changeAsk(
+                m,
+                { state: "cancelled", ...(!reader && { decidedBy }) },
+                reader && label(reader.view),
+              ),
+            );
           }
           if (target && action === "decision") {
             if (a.state !== "waiting_owner") throw closed();
@@ -4036,6 +4081,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (a.kind === "review" && decision.allow === "draft")
               throw new RelayError("malformed", "Reviews return findings directly.");
             if (decision.allow === "always") {
+              if (outside(a.from.owner.id))
+                throw new RelayError(
+                  "auto_accept_scope",
+                  "An outside collaborator's ask needs your click each time.",
+                  { account: account(person), owner: personRef(person) },
+                );
               const policy = policyFor(person.id);
               policies.set(person.id, {
                 ...policy,
@@ -4080,11 +4131,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 throw new RelayError("forbidden", "Only the target handle may answer.");
               if (a.state !== "open") throw closed();
             } else if (a.state !== "waiting_owner") throw closed();
+            const agent = input.asHandle ? label(handles.get(input.asHandle)!.view) : undefined;
+            const move = (patch: Partial<ChatAsk>) =>
+              changeAsk(m, { ...patch, ...(!agent && { decidedBy }) }, agent);
             if ("none" in input)
-              return send(
-                "ChatAsk",
-                changeAsk(m, { state: "unanswered", reason: input.reason, decidedBy }),
-              );
+              return send("ChatAsk", move({ state: "unanswered", reason: input.reason }));
             if (input.choice && !a.choices.includes(input.choice))
               throw new RelayError("malformed", "Choose an offered answer.");
             if (a.kind === "review" && (!input.verdict || !input.headSha))
@@ -4096,10 +4147,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               a.kind === "review" &&
               (input.headSha !== a.pr?.headSha || (currentHead && currentHead !== a.pr?.headSha))
             )
-              return send(
-                "ChatAsk",
-                changeAsk(m, { state: "unanswered", reason: "head_moved", decidedBy }),
-              );
+              return send("ChatAsk", move({ state: "unanswered", reason: "head_moved" }));
             if (input.receipt && input.receipt.handle !== target.handle)
               throw new RelayError("malformed", "Receipt belongs to another handle.");
             const { text, choice, verdict, headSha } = input;
@@ -4114,12 +4162,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             const receipts = input.receipt ? [...a.receipts, input.receipt] : a.receipts;
             if (a.mode === "draft") {
               drafts.set(id, answer);
-              return send("ChatAsk", changeAsk(m, { state: "draft", receipts }));
+              return send("ChatAsk", move({ state: "draft", receipts }));
             }
-            return send(
-              "ChatAsk",
-              changeAsk(m, { state: "answered", answer, receipts, decidedBy }),
-            );
+            return send("ChatAsk", move({ state: "answered", answer, receipts }));
           }
         }
       }
@@ -4398,6 +4443,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           } else if (d.row.state === "claimed" && now - d.claimedAt >= 600000)
             d.row = { ...d.row, state: "pending" };
         }
+        holdQueued();
         if (resource === "inbox") {
           if (method !== "POST" || id) throw new RelayError("not_found", "Unknown inbox call.");
           const { asHandle } = parseJson(body, "ChatAct") as ChatAct;
@@ -4464,7 +4510,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!state) throw new RelayError("malformed", "This delivery has already closed.");
           d.row = { ...d.row, state };
           d.claimedAt = now;
-          if (state === "refused") notDelivered(d.row);
+          if (state === "refused") {
+            notDelivered(d.row);
+            const refused = messages.get(d.row.messageId)!;
+            if (d.row.reason === "ask" && refused.ask?.state === "open")
+              changeAsk(refused, { state: "unanswered", reason: "not_delivered" });
+          }
           return send("ChatDelivery", current(d.row));
         }
       }
@@ -4616,6 +4667,25 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             reject("agent_ask_cycle");
           const origin = parent?.onBehalfOf ?? from.owner;
           const depth = (parent?.depth ?? 0) + 1;
+          // What this owner's agents have spent on one person. For an outside collaborator it
+          // includes the questions put to that person.
+          const pair = all.filter(
+            (r) =>
+              r.ask.from.owner.id === person.id &&
+              askOwner(r.ask) === to.id &&
+              (r.ask.to.kind === "agent" || outside(person.id)),
+          );
+          const pairCapped = () =>
+            pair.filter((r) => activeAsk(r.ask)).length >= askLimits.pairOpen ||
+            pair.filter((r) => Date.now() - Date.parse(r.ask.createdAt) < 86400000).length >=
+              askLimits.pairPerDay;
+          const declinedRecently = () =>
+            pair.some(
+              (r) =>
+                r.ask.state === "declined" &&
+                r.ask.question === ask.question &&
+                Date.now() - Date.parse(r.ask.closedAt!) < askLimits.declineCooloffSeconds * 1000,
+            );
           let auto = false;
           if (target) {
             if (
@@ -4651,18 +4721,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (depth > askLimits.maxDepth) reject("agent_ask_depth");
             for (let a = parent; a; a = all.find((r) => r.ask.id === a?.parentAskId)?.ask)
               if (a.from.handle === target.id) reject("agent_ask_cycle");
-            const pair = all.filter(
-              (r) =>
-                r.ask.from.owner.id === person.id &&
-                r.ask.to.kind === "agent" &&
-                r.ask.to.owner.id === to.id,
-            );
-            if (
-              pair.filter((r) => activeAsk(r.ask)).length >= askLimits.pairOpen ||
-              pair.filter((r) => Date.now() - Date.parse(r.ask.createdAt) < 86400000).length >=
-                askLimits.pairPerDay
-            )
-              reject("agent_ask_capped");
+            const sameOwner = person.id === to.id;
+            if (!sameOwner && pairCapped()) reject("agent_ask_capped");
             if (
               all.filter(
                 (r) =>
@@ -4673,15 +4733,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               ).length >= askLimits.sameQuestion
             )
               reject("agent_ask_circle");
-            if (
-              pair.some(
-                (r) =>
-                  r.ask.state === "declined" &&
-                  r.ask.question === ask.question &&
-                  Date.now() - Date.parse(r.ask.closedAt!) < askLimits.declineCooloffSeconds * 1000,
-              )
-            )
-              reject("agent_ask_declined_recently");
+            if (declinedRecently()) reject("agent_ask_declined_recently");
             if (kind === "review") {
               const task = reviewTask(ask.pr);
               const pr = task?.prs.find((pr) => pr.number === ask.pr?.number);
@@ -4710,7 +4762,20 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               )
                 reject("agent_ask_capped");
             }
+            const hops = agentHops.get(root!.id) ?? 0;
+            if (hops >= 4)
+              throw new RelayError("rate_limited", "Ask a person to continue this thread.");
+            const pairKey = JSON.stringify([root!.id, ...[target.id, h.id].sort()]);
+            const recent = (pairWrites.get(pairKey) ?? []).filter((t) => Date.now() - t < 60000);
+            if (recent.length >= 20)
+              throw new RelayError("rate_limited", "Wait before asking this agent again.");
+            // An ask is one hop and one pair write. Its answer and result are neither.
+            pairWrites.set(pairKey, [...recent, Date.now()]);
+            agentHops.set(root!.id, hops + 1);
             auto =
+              !sameOwner &&
+              !outside(person.id) &&
+              !outside(origin.id) &&
               usageAllows(policy, target.machine.id, target.provider) &&
               policy.auto.some(
                 (r) =>
@@ -4719,11 +4784,32 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     ? r.from.person.id === person.id
                     : "agent" in r.from
                       ? r.from.agent === h.id
-                      : person.admission !== "outside" &&
-                        !roleOf(person).forOutside &&
-                        r.from.role.id === person.role),
+                      : !roleOf(person).forOutside && r.from.role.id === person.role),
               );
           } else if (kind === "review" || ask.parentAskId) reject("malformed");
+          else if (outside(person.id) && to.id !== person.id) {
+            // An outsider's agent asks only whom its owner could DM, within the ask limits.
+            if (!dmAllowed(person, new Set([person.id, to.id])))
+              throw new RelayError("chat_dm_restricted", "These participants cannot open a DM.", {
+                account: account(person),
+                rule: "dm.start",
+                asHandle: h.id,
+                owner: from.owner,
+              });
+            if (pairCapped()) reject("agent_ask_capped");
+            if (
+              all.filter(
+                (r) =>
+                  r.m.conversationId === c.id &&
+                  r.m.threadRootId === rootId &&
+                  r.ask.to.kind === "person" &&
+                  r.ask.to.person.id === to.id &&
+                  r.ask.question === ask.question,
+              ).length >= askLimits.sameQuestion
+            )
+              reject("agent_ask_circle");
+            if (declinedRecently()) reject("agent_ask_declined_recently");
+          }
           row = {
             id: randomId("a"),
             from,
@@ -4742,7 +4828,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 (ask.timeoutSeconds ?? (target ? askLimits.defaultTimeoutSeconds : 604800)) * 1000,
             ),
             state: target && person.id !== to.id && !auto ? "waiting_owner" : "open",
-            ...(auto ? { reason: "auto_accepted", mode: "answer" as const } : {}),
+            ...(auto
+              ? { reason: "auto_accepted", mode: "answer" as const, byRule: true as const }
+              : {}),
             ...(ask.context !== undefined && { context: ask.context }),
             ...(ask.doneWhen && { doneWhen: ask.doneWhen }),
             ...(ask.pr && { pr: ask.pr }),
@@ -4890,6 +4978,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         return send("ChatSearch", paged(results));
       }
       if (resource === "me" && id === "settings" && !action) {
+        const badSource = (): never => {
+          throw new RelayError("auto_accept_scope", "Choose a permitted source for this rule.", {
+            account: account(person),
+            owner: personRef(person),
+          });
+        };
         if (method === "GET")
           return send("ChatSettings", {
             agentAsks: policyFor(person.id),
@@ -4911,18 +5005,36 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 rule?.from &&
                 typeof rule.from === "object" &&
                 Array.isArray(rule.kinds) &&
-                ((!("person" in rule.from) && rule.kinds.some((k: unknown) => k !== "question")) ||
-                  ("role" in rule.from && roles.get(rule.from.role?.id)?.forOutside !== false)),
+                !("person" in rule.from) &&
+                rule.kinds.some((k: unknown) => k !== "question"),
             )
           )
-            throw new RelayError("auto_accept_scope", "Choose a permitted source for this rule.", {
-              account: account(person),
-              owner: personRef(person),
-            });
+            badSource();
           const settings = parseJson(body, "ChatSettings") as ChatSettings;
+          // Only a new source is checked: a stored one that has since gone must not block a save.
+          const sourceOf = ({ from }: AgentAskPolicy["auto"][number]) =>
+            "person" in from
+              ? "person:" + from.person.id
+              : "agent" in from
+                ? "agent:" + from.agent
+                : "role:" + from.role.id;
+          const stored = new Set(policyFor(person.id).auto.map(sourceOf));
+          for (const rule of settings.agentAsks.auto)
+            if (
+              !stored.has(sourceOf(rule)) &&
+              !("person" in rule.from
+                ? people.get(rule.from.person.id)?.removed === false &&
+                  !outside(rule.from.person.id)
+                : "agent" in rule.from
+                  ? handles.has(rule.from.agent) &&
+                    !outside(handles.get(rule.from.agent)!.view.owner.id)
+                  : roles.get(rule.from.role.id)?.forOutside === false)
+            )
+              badSource();
           policies.set(person.id, settings.agentAsks);
           if (settings.agentsPaused) paused.add(person.id);
           else paused.delete(person.id);
+          holdQueued();
           for (const h of handles.values())
             if (h.view.owner.id === person.id)
               h.view = { ...h.view, paused: settings.agentsPaused };
@@ -5603,14 +5715,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!reason) continue;
           const fromOwner = !h && target.view.owner.id === person.id;
           const wakes =
-            !companyPaused &&
-            !paused.has(target.view.owner.id) &&
-            (!h || target.view.owner.id === person.id) &&
-            target.view.wake !== "nobody" &&
-            (fromOwner ||
-              (target.view.wake === "everyone" &&
-                person.admission !== "outside" &&
-                has(person, "agents.wakeOthers")));
+            !held(target.view.owner.id) &&
+            // The agent asked and waits for this, so its wake setting does not apply.
+            (reason === "answer"
+              ? mayWake(person.id, target.view.owner.id)
+              : (!h || target.view.owner.id === person.id) &&
+                target.view.wake !== "nobody" &&
+                (fromOwner ||
+                  (target.view.wake === "everyone" &&
+                    person.admission !== "outside" &&
+                    has(person, "agents.wakeOthers"))));
           const row: ChatDelivery = {
             wakes,
             id: randomId("d"),

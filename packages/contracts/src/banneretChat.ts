@@ -192,6 +192,7 @@ export const ChatAsk = Schema.Struct({
   taskRef: Schema.optionalKey(Schema.String),
   mode: Schema.optionalKey(Schema.Literals(["answer", "draft"])),
   decidedBy: Schema.optionalKey(ChatPerson),
+  byRule: Schema.optionalKey(Schema.Boolean),
   reason: Schema.optionalKey(Schema.String),
   answer: Schema.optionalKey(
     Schema.Struct({
