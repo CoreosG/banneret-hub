@@ -14,23 +14,20 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-// By path: a package dependency would add a line to an upstream manifest.
-import {
-  builtInProviderProfileIds,
-  providerProfile,
-  unknownProviderProfile,
-  type ProviderProfile,
-} from "../../../../../packages/banneret-plugin-kit/src/providerProfile/index.ts";
+// By path: a package dependency would add a line to an upstream manifest. Only the data file:
+// the kit's other entry points load zod, which the server executable cannot.
+import { builtInProfileData } from "../../../../../packages/banneret-plugin-kit/src/providerProfile/builtIn.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { hubServes, memoryAccess } from "./access.ts";
 import type { PromptHook } from "./promptHook.ts";
 import { switchNoteText } from "./switchNote.ts";
 
-const profileOf = (driver: ProviderDriverKind): ProviderProfile =>
-  builtInProviderProfileIds.includes(driver)
-    ? providerProfile(driver)
-    : unknownProviderProfile(driver, PROVIDER_DISPLAY_NAMES[driver] ?? driver);
+const profileOf = (driver: ProviderDriverKind) =>
+  builtInProfileData.find((profile) => profile.id === driver);
+
+const nameOf = (driver: ProviderDriverKind) =>
+  profileOf(driver)?.name ?? PROVIDER_DISPLAY_NAMES[driver] ?? driver;
 
 const list = (names: ReadonlyArray<string>, last: "and" | "or") =>
   names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} ${last} ${names.at(-1)}`;
@@ -41,6 +38,9 @@ const rule = (names: ReadonlyArray<string>, take: "all" | "firstNonEmpty") =>
 /** The file names a profile says its provider looks for. A part that is not known stays null. */
 export function switchSide(driver: ProviderDriverKind): ProviderSwitchSide {
   const profile = profileOf(driver);
+  if (!profile) {
+    return { name: nameOf(driver), integrated: false, project: null, personal: null };
+  }
   const { instructions } = profile;
   const { names, fallback } = instructions.project;
   let project: string | null = null;
@@ -139,7 +139,7 @@ const switchContextNotes = (change: ReturnType<typeof runSwitch>, noteIndex: boo
           // One key for each switch: adapters skip a note they have already sent under a key.
           key: `banneret_switch_${change.item.ordinal}`,
           text: switchNoteText({
-            from: profileOf(change.from).name,
+            from: nameOf(change.from),
             resumed: change.resumed,
             noteIndex,
           }),

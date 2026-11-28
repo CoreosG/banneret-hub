@@ -1,7 +1,6 @@
 // Loads profile data. Nothing here reads the disk or a provider's files.
 import type { z } from "zod";
-import claudeAgent from "./profiles/claudeAgent.json" with { type: "json" };
-import codex from "./profiles/codex.json" with { type: "json" };
+import { builtInProfileData } from "./builtIn.ts";
 import unknown from "./profiles/unknown.json" with { type: "json" };
 import { providerProfileSchema, type ProviderProfile } from "./schema.ts";
 
@@ -62,7 +61,7 @@ export function parseProviderProfileText(json: string, origin = "profile"): Prov
 }
 
 const builtIn = new Map(
-  [claudeAgent, codex].map((data) => {
+  builtInProfileData.map((data) => {
     const profile = parseProviderProfile(data, `built-in ${data.id}`);
     return [profile.id, profile] as const;
   }),

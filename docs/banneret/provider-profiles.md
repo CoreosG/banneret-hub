@@ -30,6 +30,8 @@ The package `@t3tools/banneret-plugin-kit` exports the profile code as `@t3tools
 | The profile with nothing known      | [unknown.json](../../packages/banneret-plugin-kit/src/providerProfile/profiles/unknown.json)         |
 | The two fixed file trees            | [trees.ts](../../packages/banneret-plugin-kit/src/providerProfile/trees.ts)                          |
 
+The Hub itself imports only [builtIn.ts](../../packages/banneret-plugin-kit/src/providerProfile/builtIn.ts), the list of built-in profiles as plain data. The validator uses zod, which the Hub's single-executable server cannot load. A new built-in profile goes in that list, and the kit's tests check it.
+
 `providerProfile(driverId)` returns the built-in profile for a driver. Any other driver gets the unknown profile under its own id. It never gets another provider's facts.
 
 ## Every fact has a source
