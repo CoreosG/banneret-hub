@@ -99,7 +99,9 @@ export function ChannelSettings({
     >
       <SheetContent>
         <SheetHeader>
-          <SheetTitle>#{channel.name} settings</SheetTitle>
+          <SheetTitle>
+            <span className="wrap-anywhere">#{channel.name} settings</span>
+          </SheetTitle>
           <p className="text-xs text-muted-foreground">
             Managed by{" "}
             {channel.managers.map((m) => m.login).join(", ") || "workspace administrators"}

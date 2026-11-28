@@ -290,7 +290,8 @@ function RoleEditor({
           />{" "}
           For outside collaborators
         </label>
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* Columns follow the card's own width; a fieldset needs min-w-0 to shrink with it. */}
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))] [&>fieldset]:min-w-0">
           {Object.entries(groups).map(([group, entries]) => (
             <fieldset key={group}>
               <legend className="font-semibold">{group}</legend>
@@ -309,6 +310,7 @@ function RoleEditor({
                 <label>
                   Start messages with{" "}
                   <select
+                    className="max-w-full"
                     value={String(permissions["dm.start"] ?? "")}
                     onChange={(e) => set("dm.start", e.target.value || undefined)}
                   >

@@ -26,7 +26,7 @@ export function ArchiveChannel({
   // The relay refuses to archive a default channel.
   if (channel.defaultChannel)
     return (
-      <div className="grid justify-items-start gap-2">
+      <div className="grid justify-items-start gap-2 wrap-anywhere">
         <Button type="button" variant="destructive-outline" disabled aria-describedby={reason}>
           Archive channel
         </Button>
@@ -49,7 +49,7 @@ export function ArchiveChannel({
     }
   }
   return (
-    <div className="grid justify-items-start gap-2">
+    <div className="grid justify-items-start gap-2 wrap-anywhere">
       {channel.archived ? (
         <Button
           type="button"

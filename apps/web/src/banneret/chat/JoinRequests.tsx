@@ -104,7 +104,7 @@ export function Directory({
       {rows.value?.map(
         (c) =>
           c.kind === "channel" && (
-            <div key={c.id} className="grid gap-1 rounded border p-2">
+            <div key={c.id} className="grid gap-1 rounded border p-2 wrap-anywhere">
               {c.me.can.read ? (
                 <button onClick={() => open(c.id)}>#{c.name}</button>
               ) : (

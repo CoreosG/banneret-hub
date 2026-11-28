@@ -252,64 +252,66 @@ export function MemoryStrip({
     <>
       {visible && (
         <section className="shrink-0 border-b">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="flex grow flex-wrap items-center gap-x-2 px-4 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
-              aria-expanded={expanded}
-              onClick={() => setExpanded(!expanded)}
-            >
-              <span aria-hidden>{expanded ? "▾" : "▸"}</span>
-              <strong>Memory</strong>
-              <span>
-                {countLabel(counts.total, "note")} · {counts.proposed} proposed · {counts.disputed}{" "}
-                disputed
-              </span>
-              <span>Stored unencrypted on this machine</span>
-            </button>
-            {main && writable && (
-              <div className="shrink-0 py-1 pr-4">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={reviewing}
-                  onClick={async () => {
-                    setReviewing(true);
-                    try {
-                      await workflowAction(ref, "run");
-                    } catch {
-                      toastManager.add({
-                        type: "error",
-                        title: "Could not run the workflow review.",
-                      });
-                    }
-                    setReviewing(false);
-                  }}
-                >
-                  Review my workflow
-                </Button>
+          <div className="chat-content-lane">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="flex grow flex-wrap items-center gap-x-2 px-4 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
+                aria-expanded={expanded}
+                onClick={() => setExpanded(!expanded)}
+              >
+                <span aria-hidden>{expanded ? "▾" : "▸"}</span>
+                <strong>Memory</strong>
+                <span>
+                  {countLabel(counts.total, "note")} · {counts.proposed} proposed ·{" "}
+                  {counts.disputed} disputed
+                </span>
+                <span>Stored unencrypted on this machine</span>
+              </button>
+              {main && writable && (
+                <div className="shrink-0 py-1 pr-4">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={reviewing}
+                    onClick={async () => {
+                      setReviewing(true);
+                      try {
+                        await workflowAction(ref, "run");
+                      } catch {
+                        toastManager.add({
+                          type: "error",
+                          title: "Could not run the workflow review.",
+                        });
+                      }
+                      setReviewing(false);
+                    }}
+                  >
+                    Review my workflow
+                  </Button>
+                </div>
+              )}
+            </div>
+            <MemoryOwnerLine />
+            {counts.reminders && (
+              <div className="px-4 text-xs">
+                Rule reminders: {counts.reminders.fired} fired · {counts.reminders.acknowledged}{" "}
+                acknowledged · {counts.reminders.contested} contested
+                {counts.reminders.latest.map((note) => (
+                  <aside key={note.key} className="my-2 rounded border-l-2 bg-muted p-2">
+                    <strong>Rule reminder · {note.key}</strong>
+                    <blockquote className="whitespace-pre-wrap">{note.text}</blockquote>
+                    <span>Source: {note.source}</span>
+                  </aside>
+                ))}
               </div>
             )}
+            {loadNotes && notes.error && <p role="alert">{notes.error}</p>}
+            {expanded && writable && <MemoryPreferences key={memoryThreadKey(ref)} {...ref} />}
+            {expanded && notes.value && (
+              <MemoryNotes expanded notes={notes.value} writable={writable} apply={apply} />
+            )}
           </div>
-          <MemoryOwnerLine />
-          {counts.reminders && (
-            <div className="px-4 text-xs">
-              Rule reminders: {counts.reminders.fired} fired · {counts.reminders.acknowledged}{" "}
-              acknowledged · {counts.reminders.contested} contested
-              {counts.reminders.latest.map((note) => (
-                <aside key={note.key} className="my-2 rounded border-l-2 bg-muted p-2">
-                  <strong>Rule reminder · {note.key}</strong>
-                  <blockquote className="whitespace-pre-wrap">{note.text}</blockquote>
-                  <span>Source: {note.source}</span>
-                </aside>
-              ))}
-            </div>
-          )}
-          {loadNotes && notes.error && <p role="alert">{notes.error}</p>}
-          {expanded && writable && <MemoryPreferences key={memoryThreadKey(ref)} {...ref} />}
-          {expanded && notes.value && (
-            <MemoryNotes expanded notes={notes.value} writable={writable} apply={apply} />
-          )}
         </section>
       )}
       {renderTimeline ? renderTimeline(cards) : cards}

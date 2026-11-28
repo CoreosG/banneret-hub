@@ -345,11 +345,13 @@ export function ThreadTimeline(props: ComponentProps<typeof Timeline>) {
       working={props.isWorking}
       renderTimeline={(cards) => (
         <>
-          <header className="flex flex-wrap items-center gap-3 px-4 py-1 text-xs">
-            <ThreadToolLevels {...thread} />
-            <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
-            <div className="ml-auto">
-              <PauseControls key={thread.environmentId} id={thread.environmentId} size="xs" />
+          <header className="py-1 text-xs">
+            <div className="chat-content-lane flex flex-wrap items-center gap-3 px-4">
+              <ThreadToolLevels {...thread} />
+              <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
+              <div className="ml-auto">
+                <PauseControls key={thread.environmentId} id={thread.environmentId} size="xs" />
+              </div>
             </div>
           </header>
           <Timeline
