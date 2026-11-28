@@ -95,8 +95,7 @@ is never in the middle, and the thread's own Hub token is never sent on. Shared 
 - **When a server joins a thread.** The list of servers is set when the thread's agent session starts. A source
   the relay adds reaches the next new session. A source that stops owning anything, or a tool that stops being
   offered, is gone on the next call.
-- **Your own copy.** If your Claude or Codex settings also list a company server, the agent sees that copy too.
-  The Hub's filters, tool access and approvals do not cover it. Remove it from your settings.
+- **Your own copy** of a company server is [turned off in Hub chats](#your-own-copy-of-a-company-server).
 
 The Hub keeps one state for each thread and source, in memory only.
 
@@ -118,6 +117,43 @@ The Hub keeps one state for each thread and source, in memory only.
 In Sign-in needed and Failed, the Hub does not contact the server again in that turn. It answers with a message
 the agent can pass on to you. It never falls back to a Banneret tool. If you sign in during a turn, the next turn
 connects. Claude and Codex list tools when their session starts, so after a failed start, you may need a new chat.
+
+#### Your own copy of a company server
+
+Your Codex or Claude settings may list a company server too. The Hub's filters, tool access and approvals would
+not cover that copy. So a Claude or Codex chat in the Hub turns it off for its own session. The Hub only reads
+your settings. It never changes them, so your copy still works outside the Hub. The chat shows a **Company
+servers** card that says what happened.
+
+A server of yours counts as a copy when:
+
+- its address is the company server's address (a query, a trailing slash or capitals in the host do not matter),
+- or it is a command with that address as an argument, such as `mcp-remote`,
+- or it uses the Hub's own name for the server, `co-<source>`.
+
+Other servers stay on. A server with a similar name and another address is not a copy.
+
+| Agent  | How the copy is found and turned off                                                                                                                                                            |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex  | The Hub asks Codex which servers it loads for the folder, at each thread start, resume and fork. It sets `enabled = false` for that session. If Codex cannot answer, the thread does not start. |
+| Claude | The session's settings deny the company's address (`deniedMcpServers`). For the card, and to deny a copy by name, the Hub reads `.claude.json` and the folder's `.mcp.json` files.              |
+
+- **A Codex server named `co-<source>`.** Codex would mix your settings into the Hub's server, your token
+  included. So the Hub's copy is named `co-<source>-hub` in that chat, and yours is off.
+- **When a copy stays on.** The card tells you to remove it. This happens to a Codex server with a dot or `=`
+  in its name. In Claude, it happens when your launch arguments pass a settings file (`--settings <file>`).
+- **What the card cannot see.** Claude also denies the address for plugins and claude.ai connectors, but the
+  card does not name them. Servers that Codex plugins add are not checked. Other agents are not checked.
+
+The card shows what the chat's latest agent session did. It is kept in memory only.
+
+| Card    | Event                                                        | Next                                   |
+| ------- | ------------------------------------------------------------ | -------------------------------------- |
+| Nothing | A Codex or Claude session starts and meets a copy            | Turned off, or still on                |
+| Any     | A later start, resume or fork of the chat succeeds           | From that start. No copy means no card |
+| Any     | A start fails                                                | Unchanged                              |
+| Any     | The chat gets a new agent session, such as for another agent | Nothing, until that session starts     |
+| Any     | The Hub restarts                                             | Nothing                                |
 
 #### Signing in to a company server
 

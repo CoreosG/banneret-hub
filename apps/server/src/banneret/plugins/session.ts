@@ -9,6 +9,7 @@ import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { threadWorkspace } from "./workspace.ts";
 import { readPlugins } from "./registry.ts";
+import { forgetLaunch, markCompanyEntry } from "../sources/ownCopies.ts";
 import { sourcesFor, type ThreadSource } from "../sources/ThreadSources.ts";
 
 export const threadPlugins = Effect.fn("SoloPlugins.thread")(function* (
@@ -68,14 +69,24 @@ export const McpSessionRegistry = Effect.gen(function* () {
         Effect.provideContext(services),
         Effect.orElseSucceed(() => []),
       );
+      forgetLaunch(request.threadId);
       const servers = plugins.map(({ manifest, company }) => {
         const url = new URL("/banneret/plugins/" + manifest.source, session.endpoint).href;
         const headers = { Authorization: session.authorizationHeader };
+        /** Lets a launch find the person's own copies of this source (ownCopies.ts). */
+        const standsFor = <T extends object>(entry: T) =>
+          company
+            ? markCompanyEntry(entry, {
+                threadId: request.threadId,
+                sourceId: company.id,
+                url: company.url,
+              })
+            : entry;
         return {
           // A company source keeps the `co-<source>` name the join file and task linking use.
           name: company ? manifest.source : "banneret-plugin-" + manifest.source,
-          claude: { type: "http" as const, url, headers },
-          codex: { url, http_headers: headers },
+          claude: standsFor({ type: "http" as const, url, headers }),
+          codex: standsFor({ url, http_headers: headers }),
         };
       });
       return {

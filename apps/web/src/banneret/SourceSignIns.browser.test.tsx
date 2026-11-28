@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { SignInPrompts, SignInSettingsList } from "./SourceSignIns";
+import { keepBrowserStorage } from "./test/browserStorage";
 import { expectClickable, forEachViewport, windowRect } from "./test/viewports";
 import "~/index.css";
 
@@ -40,6 +41,19 @@ const EVERY_STATE: readonly SourceSignIn[] = [
 ];
 
 const card = (name: string) => page.getByRole("region", { name, exact: true });
+
+/** The person's own copies: off beside a signed-in and a network server, still on beside the rest. */
+const OWN_COPIES: readonly SourceSignIn[] = [
+  row({ sourceId: "tracker", state: "signed_in", ownCopy: { settings: "Codex", off: true } }),
+  row({
+    sourceId: "vpn",
+    title: "Acme platform engineering gateway for every internal service and long-lived tool",
+    auth: "none",
+    state: "network",
+    ownCopy: { settings: "Claude", off: true },
+  }),
+  row({ sourceId: "wiki", state: "signed_out", ownCopy: { settings: "Claude", off: false } }),
+];
 
 describe("company sign-ins", () => {
   it("says each state and offers only what fits it", async () => {
@@ -138,6 +152,35 @@ describe("company sign-ins", () => {
     expect(view.container.querySelectorAll("section")).toHaveLength(0);
   });
 
+  it("says in the thread what happened to the person's own copies, whatever the sign-in", async () => {
+    await using view = await render(<SignInPrompts rows={OWN_COPIES} act={vi.fn()} />);
+    const notes = card("Company servers");
+    await expect
+      .element(
+        notes.getByText(
+          "Your own copy of Acme tracker is turned off in this chat; the company copy runs through the Hub. It is also in your Codex settings, which stay as they are.",
+        ),
+      )
+      .toBeVisible();
+    await expect
+      .element(notes.getByText(/gateway .* is turned off in this chat.*your Claude settings/))
+      .toBeVisible();
+    await expect
+      .element(
+        notes.getByText(
+          "Your own copy of Acme wiki is also in your Claude settings and is still on in this chat. It skips the company's tool access and approvals. Remove it from your Claude settings, then start a new chat.",
+        ),
+      )
+      .toBeVisible();
+    // The one server that waits on the person still asks them to sign in.
+    await expect.element(card("Acme wiki needs your sign-in")).toBeVisible();
+    expect(view.container.querySelectorAll("[data-slot=own-copy]")).toHaveLength(3);
+
+    await view.rerender(<SignInPrompts rows={EVERY_STATE} act={vi.fn()} />);
+    expect(view.container.querySelector("[data-slot=own-copy]")).toBeNull();
+    expect(page.getByRole("region", { name: "Company servers" }).elements()).toHaveLength(0);
+  });
+
   it("shows nothing on a machine without company servers", async () => {
     await using view = await render(
       <SignInSettingsList label="this machine" rows={[]} act={vi.fn()} />,
@@ -185,3 +228,31 @@ for (const [surface, content] of [
     }
   });
 }
+
+forEachViewport("the own copy notes wrap inside the thread", async (at) => {
+  using _storage = keepBrowserStorage();
+  await using view = await render(
+    <main
+      data-testid="panel"
+      className="scrollbar-gutter-both h-dvh overflow-y-auto overflow-x-hidden bg-background p-4 text-foreground"
+    >
+      <div className="mx-auto w-full max-w-3xl">
+        <SignInPrompts rows={OWN_COPIES} act={vi.fn()} />
+      </div>
+    </main>,
+  );
+  await expect.element(card("Company servers")).toBeVisible();
+  await at.screenshot();
+  const panel = page.getByTestId("panel").element();
+  expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);
+  const notes = view.container.querySelectorAll("[data-slot=own-copy]");
+  expect(notes).toHaveLength(3);
+  for (const note of notes) {
+    note.scrollIntoView({ block: "center" });
+    const box = note.getBoundingClientRect();
+    expect(box.height).toBeGreaterThan(0);
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(windowRect().right);
+    expect(note.scrollWidth).toBeLessThanOrEqual(Math.ceil(box.width) + 1);
+  }
+});
