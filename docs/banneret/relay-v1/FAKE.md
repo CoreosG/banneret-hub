@@ -67,8 +67,8 @@ Host pairings always wait for founder confirmation, including on an auto-approvi
 That relay must run with the network identity check off, and it must expose the control surface below.
 Some tests run only against the fake. These need their own store, clock or switches: the empty-store start,
 the network identity check, the 24-hour event retention bound, the Team scale fixtures, the 30-day hand-off
-removal and the asks and hand-off switches. The tests named "pending relay slice" wait for CR5 (task threads) or CR6 (agent reads:
-owner-DM reads, search, promotion).
+removal, an unread task holder and the asks and hand-off switches. The tests named "pending relay slice" wait for CR5 (task
+threads) or CR6, "agent reads + progress" (owner-DM reads, progress, search, promotion).
 
 ## Control surface (tests only)
 
@@ -181,6 +181,10 @@ Board seed PRs accept `baseBranch`, `approvals` (the wire object or null), `auth
 `canApprove` (eligible logins) and `approvalOnly` (GitHub's only blocker is review).
 Omitting approvals seeds a measured branch with no approval rule. Personal reads resolve
 eligible logins against active company people. Reseeding replaces the prior review state.
+They also accept `headSha`, the current head commit. A PR seeded without `author` has an unknown opener. The fake
+alone accepts `leaseUnknown: true` on a task, for a holder that could not be read. The one case that seeds it
+skips other relays. Review asks follow the board as it was last read through a chat or Needs call, so read after
+each seed.
 
 Select `"officeFixture": "company"` in the JSON config for 500 people, 50 boards and 1,500 working agents. Select `"officeFixture": "community"` for a directory of 2,000 people. Sign in as the default founder to keep the directory count exact.
 

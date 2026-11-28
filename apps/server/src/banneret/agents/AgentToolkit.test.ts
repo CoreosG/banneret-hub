@@ -52,6 +52,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import type * as Duration from "effect/Duration";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -1867,6 +1868,107 @@ describe("agent lease tools against the fake relay", () => {
           }),
         ),
       { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
+
+  it.live("reports a moved head it sees itself, before the relay's board shows it", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            const pr = { repo: "example-org/example-app", number: 17, headSha: "b".repeat(40) };
+            using checkout = vi
+              .spyOn(ReviewCheckout, "reviewCheckout")
+              .mockRejectedValueOnce(new Error("head_moved"))
+              .mockResolvedValue("/tmp/test-review-checkout");
+            using currentHead = vi
+              .spyOn(ReviewCheckout, "currentReviewHead")
+              .mockResolvedValue("c".repeat(40));
+            yield* joinWithBoard(fake, relay);
+            // The board still shows the old head, so the relay cannot report these moves.
+            yield* control(fake, "/board/seed", {
+              tasks: [
+                {
+                  id: "t_free",
+                  title: "Review",
+                  projectKey: pr.repo,
+                  prs: [
+                    { ...pr, headSha: "a".repeat(40), state: "open", author: "another-person" },
+                  ],
+                },
+              ],
+            });
+            const root = yield* call("banneret_chat_post", {
+              conversation: "c_general",
+              key: "root",
+              text: "Please check the retry change.",
+            });
+            const request = (key: string) =>
+              call("banneret_agent_ask", {
+                pr,
+                to: handleId(COMPANY_THREAD),
+                thread: root.messageId,
+                question: "Check retries (" + key + ")",
+                context: "Review retry handling",
+                doneWhen: "List findings",
+                key,
+              }).pipe(Effect.map((r) => String(r.askId)));
+            const device = (yield* (yield* Enrolment.BanneretEnrolment).relay(relay.origin))!;
+            const { threads, sent } = yield* answerThreads;
+            const hub = Effect.provideService(ThreadManagementService.ThreadManagementService, {
+              ...threads,
+              dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [] }),
+            });
+            const deliveries = yield* makeDeliveries.pipe(hub);
+
+            const atCheckout = yield* request("checkout");
+            const queuedBehind = yield* askSelf(String(root.messageId), "Which file?", "behind");
+            yield* deliveries.reconcile(device);
+            expect(checkout).toHaveBeenCalledWith(pr);
+            // Reporting the move must not stop the rest of this delivery pass.
+            expect(sent.map((s) => answeringAsk(s.messageId!))).toEqual([queuedBehind]);
+            expect(yield* askStates(device)).toMatchObject({
+              [atCheckout]: "unanswered:head_moved",
+            });
+
+            const atAnswer = yield* request("answer");
+            yield* deliveries.reconcile(device);
+            const turn = sent.findIndex((s) => answeringAsk(s.messageId!) === atAnswer);
+            expect(turn).toBeGreaterThanOrEqual(0);
+            expect(yield* askStates(device)).toMatchObject({ [atAnswer]: "open" });
+            const answering = Effect.provideService(
+              ThreadManagementService.ThreadManagementService,
+              {
+                ...threads,
+                getThreadShell: (id) =>
+                  threads
+                    .getThreadShell(id)
+                    .pipe(
+                      Effect.map(
+                        (t) => t && { ...t, activeRunId: RunId.make("inbox-run-" + (turn + 1)) },
+                      ),
+                    ),
+                // The review thread is not in the mocked store; its run comes from the line above.
+                getThreadRecords: (_id, kinds, options) =>
+                  threads.getThreadRecords(COMPANY_THREAD, kinds, options),
+              },
+            );
+            const failure = yield* call("banneret_agent_answer", {
+              text: "No findings.",
+              verdict: "clean",
+            }).pipe(
+              answering,
+              Effect.catchCause((cause) => Effect.succeed(Cause.squash(cause))),
+            );
+            expect(failure).toMatchObject({ message: "The head moved. Request another review." });
+            expect(currentHead).toHaveBeenCalledWith(pr);
+            expect(yield* askStates(device)).toMatchObject({
+              [atAnswer]: "unanswered:head_moved",
+            });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true }, reviews: { enabled: true } } },
     ),
   );
 
