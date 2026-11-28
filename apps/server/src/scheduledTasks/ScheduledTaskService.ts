@@ -1259,16 +1259,7 @@ export const layer = Layer.effect(
         }),
         (reserved) =>
           reserved
-            ? trigger === "manual"
-              ? run
-              : pause.whenRunning(
-                  run,
-                  webhook
-                    ? Effect.fail(
-                        new WebhookDeliverySkipped({ reason: "Automatic work is paused." }),
-                      )
-                    : Effect.succeed({ task, threadId: null, dispatchFailed: false }),
-                )
+            ? pause.scheduledRun(trigger, run, task, webhook && WebhookDeliverySkipped)
             : trigger !== "scheduled"
               ? Effect.fail(taskError("Schedule task is already running.", { taskId: task.id }))
               : Effect.succeed({ task, threadId: null, dispatchFailed: false }),

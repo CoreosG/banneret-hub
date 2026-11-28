@@ -9,18 +9,14 @@ import type { DesktopCaptureHelperState } from "@t3tools/contracts";
 import type { LinuxWindowSnapshot } from "./LinuxSnapShot.ts";
 import { CaptureSetupRequiredError, readPortalPng } from "./linuxCaptureSession.ts";
 import { startNativeCaptureFeedback } from "./NativeCaptureFeedback.ts";
+import { DATA_DIR } from "../banneret/dataDir.ts";
 import { HYPRLAND_CAPTURE_ACTION } from "./linuxCaptureSession.ts";
 export { isHyprlandCaptureSession } from "./linuxCaptureSession.ts";
 
 export const HYPRLAND_CAPTURE_EXECUTABLE = "t3-hyprland-snap-shot";
 export type HyprlandCapturePaths = { readonly bundle: string; readonly dataHome: string };
 export function hyprlandCaptureExecutable(paths: HyprlandCapturePaths) {
-  return NodePath.join(
-    paths.dataHome,
-    "banneret-hub",
-    "hyprland-capture",
-    HYPRLAND_CAPTURE_EXECUTABLE,
-  );
+  return NodePath.join(paths.dataHome, DATA_DIR, "hyprland-capture", HYPRLAND_CAPTURE_EXECUTABLE);
 }
 
 function hyprlandCaptureBinding(appId: string, lua: boolean): string {

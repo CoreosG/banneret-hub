@@ -2,6 +2,7 @@ import { CommandId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
+import { WorkflowInputError } from "../workflows/Workflows.ts";
 import type { ThreadManagementServiceShape } from "../orchestration-v2/ThreadManagementService.ts";
 
 // Saved switch | pause / Stop all -> paused | resume -> running | restart -> saved value.
@@ -84,5 +85,26 @@ export const makePauseStore = Effect.gen(function* () {
         stopped ? skipped : work,
       ),
     );
-  return { paused, held, set, hold, drain, whenRunning };
+  const reason = "Automatic work is paused.";
+  const hookStart = <A, E, R>(start: Effect.Effect<A, E, R>) =>
+    whenRunning(start, Effect.fail(new WorkflowInputError({ problem: reason })));
+  // A manual run ignores the pause. A paused webhook delivery fails with the caller's skip error;
+  // any other paused trigger reports that it started nothing.
+  const scheduledRun = <A, E, R, T, F>(
+    trigger: string,
+    run: Effect.Effect<A, E, R>,
+    task: T,
+    WebhookSkip: (new (props: { reason: string }) => F) | undefined,
+  ) =>
+    trigger === "manual"
+      ? run
+      : whenRunning(
+          run,
+          Effect.suspend(() =>
+            WebhookSkip
+              ? Effect.fail(new WebhookSkip({ reason }))
+              : Effect.succeed({ task, threadId: null, dispatchFailed: false }),
+          ),
+        );
+  return { paused, held, set, hold, drain, whenRunning, hookStart, scheduledRun };
 });

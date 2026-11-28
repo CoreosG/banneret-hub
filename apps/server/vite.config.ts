@@ -8,7 +8,7 @@ import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 import { resolveTaggedSourceVersion } from "../../scripts/lib/tagged-source-version.ts";
 import rootPackageJson from "../../package.json" with { type: "json" };
 import packageJson from "./package.json" with { type: "json" };
-import { banneretBrandPlugin } from "../../scripts/banneret/brand.mjs";
+import { banneretServerPack } from "../../scripts/banneret/serverPack.ts";
 import { WeightedShardSequencer } from "./src/testUtils/weightedShardSequencer.ts";
 
 // NSIS install time tracks file count, not bytes.
@@ -74,9 +74,6 @@ const packExecutableTargets = packExecutableTarget
     ]
   : undefined;
 
-// SEA can't import zod from disk, so inline it there. Cursor's SDK still loads its own from disk.
-const inlinedZod = (id: string) => packExecutable && /^zod(\/|$)/.test(id);
-
 // The root config's `projects` route repo-root runs to package configs,
 // including this one. Inheriting them would make this config a container.
 const { projects: _rootTestProjects, ...baseTestConfig } = baseConfig.test ?? {};
@@ -100,9 +97,8 @@ export default mergeConfig(
         },
       },
     },
-    pack: {
+    pack: banneretServerPack(packExecutable, {
       plugins: [
-        banneretBrandPlugin({ cli: true }),
         {
           // Every server module reads its version from this manifest import.
           name: "t3code:build-version",
@@ -146,10 +142,9 @@ export default mergeConfig(
       alias: { "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
       deps: {
         // alwaysBundle=false has no opinion; neverBundle must retain transitive native acceleration.
-        alwaysBundle: (id: string) => inlinedZod(id) || shouldBundleCliDependency(id),
+        alwaysBundle: shouldBundleCliDependency,
         neverBundle: (id: string) =>
-          (packBootstrap && id === "./binMain.ts") ||
-          (isExternalCliDependency(id) && !inlinedZod(id)),
+          (packBootstrap && id === "./binMain.ts") || isExternalCliDependency(id),
         onlyBundle: false,
       },
       banner: {
@@ -175,7 +170,7 @@ export default mergeConfig(
           repoEnv.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() ?? "",
         ),
       },
-    },
+    }),
     test: {
       // Parallel sqlite/git/worktree/orchestration tests introduce load-sensitive flakes.
       fileParallelism: false,

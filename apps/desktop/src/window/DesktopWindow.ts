@@ -18,10 +18,7 @@ import {
   DEFAULT_CLIENT_SETTINGS,
 } from "@t3tools/contracts";
 
-import {
-  downloadInsteadOfNavigating,
-  installWorkspaceDownloadSaveDialog,
-} from "../banneret/downloadSaveDialog.ts";
+import * as BanneretDownloads from "../banneret/downloadSaveDialog.ts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopClerk from "../app/DesktopClerk.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -814,7 +811,7 @@ export const make = Effect.gen(function* () {
       }
 
       event.preventDefault();
-      if (downloadInsteadOfNavigating(window.webContents, url)) return;
+      if (BanneretDownloads.downloadInsteadOfNavigating(window.webContents, url)) return;
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
       }
@@ -1065,7 +1062,7 @@ export const make = Effect.gen(function* () {
     // Desktop IPC only answers the main window, so register it before its renderer can call in.
     yield* electronWindow.setMain(window);
     remoteRequestHeaderOwner = window;
-    installWorkspaceDownloadSaveDialog(window.webContents.session);
+    BanneretDownloads.installWorkspaceDownloadSaveDialog(window.webContents.session);
     const detachRemoteRequestHeaders = installMainWindowRemoteRequestHeaderPolicy(
       window.webContents.session,
       {

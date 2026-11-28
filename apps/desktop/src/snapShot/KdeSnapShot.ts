@@ -12,6 +12,7 @@ import { escapeDesktopEntryExecArgument } from "../app/DesktopLinuxUrlHandler.ts
 import type { LinuxWindowSnapshot } from "./LinuxSnapShot.ts";
 import { CaptureSetupRequiredError, readPortalPng } from "./linuxCaptureSession.ts";
 import { startNativeCaptureFeedback } from "./NativeCaptureFeedback.ts";
+import { DATA_DIR } from "../banneret/dataDir.ts";
 export { isKdeCaptureSession } from "./linuxCaptureSession.ts";
 
 export const KDE_CAPTURE_EXECUTABLE = "t3-kde-snap-shot";
@@ -24,12 +25,7 @@ export type KdeCapturePaths = { readonly bundle: string; readonly dataHome: stri
 
 export function kdeCapturePaths(paths: KdeCapturePaths) {
   return {
-    executable: NodePath.join(
-      paths.dataHome,
-      "banneret-hub",
-      "kde-capture",
-      KDE_CAPTURE_EXECUTABLE,
-    ),
+    executable: NodePath.join(paths.dataHome, DATA_DIR, "kde-capture", KDE_CAPTURE_EXECUTABLE),
     desktop: NodePath.join(paths.dataHome, "applications", DESKTOP_FILE),
   };
 }

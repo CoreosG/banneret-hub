@@ -1,4 +1,4 @@
-import { promptReminders, answerPolicy } from "../banneret/chat/turnPolicy.ts";
+import { turnReminders, answerPolicy } from "../banneret/chat/turnPolicy.ts";
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -2277,10 +2277,7 @@ export const layer: Layer.Layer<
           mcpAppModelContext,
           input.run.threadId,
         );
-        if (!input.resume)
-          appContext.push(
-            ...(yield* promptReminders(input.run.threadId, input.run.id, input.message.messageId)),
-          );
+        appContext.push(...(yield* turnReminders(input)));
         const turnInput = {
           appThread: input.appThread,
           threadId: input.run.threadId,

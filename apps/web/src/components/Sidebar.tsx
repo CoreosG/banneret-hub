@@ -289,13 +289,7 @@ import {
   SidebarSectionHeader,
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
-import { threadMenuFor } from "../banneret/orchestratorStore";
-import { WorkspaceNoThreads } from "../banneret/WorkspaceNoThreads";
-import { EnterpriseSidebarRows } from "../banneret/EnterpriseSidebarRows";
-import {
-  useWorkspaceScopedThreads,
-  useWorkspaceScopeProjectKeys,
-} from "../banneret/useWorkspaceScopedThreads";
+import * as Banneret from "../banneret/sidebarSeams";
 
 function sameSidebarProviderEntries(
   left: ReadonlyMap<string, SidebarProviderEntry>,
@@ -518,7 +512,7 @@ function useSidebarThreads(input: {
   const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
     partition;
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
-  const olderSettledProjectKeys = useWorkspaceScopeProjectKeys(scopedProjectKeys);
+  const olderSettledProjectKeys = Banneret.useWorkspaceScopeProjectKeys(scopedProjectKeys);
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], olderSettledProjectKeys),
     expanded: settledShelfExpanded,
@@ -1135,7 +1129,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ),
           ),
         );
-  const threads = useWorkspaceScopedThreads(useQuietThreadShells());
+  const threads = Banneret.useWorkspaceScopedThreads(useQuietThreadShells());
   const promotingDraftThreadKeys = usePromotingDraftThreadKeys();
   const listedThreads =
     promotingDraftThreadKeys.length === 0
@@ -1214,7 +1208,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const scopedProjectGroups = revealWidensScope ? [] : chosenProjectGroups;
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
   const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
-  const draftProjectKeys = useWorkspaceScopeProjectKeys(scopedProjectKeys);
+  const draftProjectKeys = Banneret.useWorkspaceScopeProjectKeys(scopedProjectKeys);
   const threadSearch = useThreadSearch(
     connectedEnvironmentIds,
     threadSearchQuery,
@@ -2728,7 +2722,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ),
           ) ?? null;
         const clicked = await settlePromise(() =>
-          threadMenuFor(api, threadRef, thread.projectId)(
+          Banneret.threadMenuFor(api, threadRef, thread.projectId)(
             buildThreadActionMenuItems({
               canOperate: readEnvironmentScope(
                 threadRef.environmentId,
@@ -3096,7 +3090,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   return (
     <SidebarFolderDrop>
       <SidebarChromeHeader isElectron={isElectron} />
-      <EnterpriseSidebarRows />
+      <Banneret.EnterpriseSidebarRows />
       <SidebarContent
         ref={sidebarContentRef}
         className="min-h-full"
@@ -3479,7 +3473,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   </button>
                 </>
               ) : (
-                <WorkspaceNoThreads fallback={<T>No threads yet</T>} />
+                <Banneret.WorkspaceNoThreads fallback={<T>No threads yet</T>} />
               )}
             </div>
           ) : null}
