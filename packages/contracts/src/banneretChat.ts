@@ -792,6 +792,11 @@ export const ChatAction = Schema.Union([
     thread: Schema.optionalKey(Id),
     key: Id,
   }),
+  Schema.Struct({
+    kind: Schema.Literal("officeAsks"),
+    state: Schema.Literals(["waiting_owner", "open", "draft"]),
+    ...Page,
+  }),
   Schema.Struct({ kind: Schema.Literal("reviewAsks"), ...Page }),
   Schema.Struct({ kind: Schema.Literal("postReview"), id: Id }),
   Schema.Struct({ kind: Schema.Literal("askDecision"), id: Id, decision: ChatDecision }),
@@ -928,6 +933,8 @@ export function callChannel<A>(
       return call("PUT", "conversations/" + action.id + "/members/" + action.member);
     case "applyWake":
       return call("PUT", "me/agents/wake", { wake: action.wake });
+    case "officeAsks":
+      return call("GET", "asks" + page + "&state=" + action.state);
     case "reviewAsks":
       return call("GET", "asks" + page);
     case "ownerAsks":

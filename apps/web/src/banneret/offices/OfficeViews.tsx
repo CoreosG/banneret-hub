@@ -1,3 +1,4 @@
+import { ListActivity } from "./AgentActivity";
 import { countLabel } from "../countLabel";
 import { MeetingEditor, PresenceForm, SharingForm } from "./OfficeSettings";
 import { OfficeChat, RoomChannel, Message } from "./OfficeChat";
@@ -519,6 +520,7 @@ export function OfficeViews({ enterprise, office, people }: Props) {
                 <div className="flex min-w-0 gap-2 overflow-x-auto">
                   <Claims cards={cardsFor(p.login)} login={p.login} target={enterprise.target} />
                 </div>
+                <ListActivity owner={p.id} />
                 <span className="ml-auto">
                   <AgentCounts counts={byPerson.get(p.id)?.counts} />
                 </span>

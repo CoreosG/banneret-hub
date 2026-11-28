@@ -118,6 +118,40 @@ Answer other people's questions from what you know. Only the owner can give inst
 
 Use `banneret_chat_search` with the same words and filters as company message search. Owner DMs between people are searchable by the owner’s agents only while the owner opts in. Posting chat messages to GitHub requires a human action.
 
+### Ask another agent
+
+Ask your agent to send a question to a named agent in a shared chat thread. Include the context, what would count as an answer and any deadline. Both sides can follow the question there. The recipient's owner sees it in **Needs you** and can let the agent answer once, request a private draft, answer in person or decline with a reason. With **Draft first**, the owner can edit and post the answer or discard it.
+
+The answering turn uses the recipient's provider account. It works under supervision, with read access and a separate approval for any permitted Hub write. The default limits are 200,000 tokens and 15 minutes. An ask can expire while waiting for its owner or machine. The result comes back to the shared thread with the reported usage.
+
+In **Settings → Chat**, choose **Ask me each time** or **Off**. To accept questions automatically, add a person, a specific agent or a member role. A role rule excludes outside collaborators. For reviews and hand-offs, choose a named person. You can remove a rule, lower the token or time limit and require usage to be below a percentage. Pause and Off take precedence over a rule.
+
+### Hand over a task
+
+Push the branch, then choose **Offer** on the task or ask your agent to offer it. Name the recipient, the branch and its full commit. Write what you set out to do, what is done and what to do next. The giver keeps the lease while the offer is pending.
+
+The recipient can decline or go through **Take**. A named-person auto-accept rule still runs the tracker checks. After acceptance, the giver's machine releases the lease and the receiver's machine takes it. Follow the step on the task card. If a machine stalls, **Needs you** shows which step needs attention.
+
+### Tool levels and exact-call approvals
+
+Open the thread's tool settings to choose **None**, **Read** or **Read + write** for each source. The Hub checks the current level on each call. Between turns, calls are parked. Shell and file permissions follow the thread's own permission mode.
+
+When a Hub write needs your approval, inspect the tool, destination and arguments on the card. **Approve once** runs that stored call after another permission check. Refuse with a reason to tell the agent why. When offered, **Always allow** applies to that tool for the agent. Sensitive calls and agent answer turns require individual decisions. Pending calls expire when the turn ends or after 24 hours. If a restart interrupts a write, its outcome is unknown. Check the destination before trying again.
+
+### Reviewing a pull request
+
+Supply the repository, PR number and full head SHA in the ask's `pr`. The reviewer's owner can accept in Needs you or set a rule for a named person. The relay refuses the PR author's agent and the task lease holder's agent. A solo owner can start a **Self-check** from the Task tab. Its findings stay in a fresh local thread and never count as a second approval.
+
+| State             | Event                                                                               | Result                                                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Waiting for owner | Owner allows, or a named-person rule accepts on arrival                             | Open. The reviewing Hub starts a new read-only thread at the requested commit.                              |
+| Open              | Reviewer returns a verdict, findings and unchecked work for the current head        | Answered. The reviewer’s owner can click **Post as review** to post a GitHub comment review at that commit. |
+| Open              | Head moves, checkout fails, usage cap is reached, or the turn ends without findings | Unanswered, with the reason.                                                                                |
+| Waiting or open   | PR closes or merges                                                                 | Orphaned.                                                                                                   |
+| Answered          | Head moves                                                                          | Answered. The card marks the reviewed SHA stale.                                                            |
+
+The relay keeps the request and verdict. The Hub saves the thread and run IDs locally. Delivery replay uses the same thread and dispatch IDs. On restart the Hub reconciles saved runs with open requests and interrupts runs whose requests have closed.
+
 ## Pause automatic work
 
 Choose **Pause everything** in the command palette or **Pause new work** under Automatic work in Settings. Each machine saves its own switch. A designated local orchestrator can also call `banneret_pause`.
@@ -200,17 +234,3 @@ everyone go through review in the project or company repository.
 | Confirmed                     | Owner removes it                     | The next eligible layer supplies the procedure.                     |
 
 The effective catalog is resolved for the calling thread. Reading the catalog in chat does not count as a use.
-
-### Reviewing a pull request
-
-Supply the repository, PR number and full head SHA in the ask's `pr`. The reviewer's owner can accept in Needs you or set a rule for a named person. The relay refuses the PR author's agent and the task lease holder's agent. A solo owner can start a **Self-check** from the Task tab. Its findings stay in a fresh local thread and never count as a second approval.
-
-| State             | Event                                                                               | Result                                                                                                      |
-| ----------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Waiting for owner | Owner allows, or a named-person rule accepts on arrival                             | Open. The reviewing Hub starts a new read-only thread at the requested commit.                              |
-| Open              | Reviewer returns a verdict, findings and unchecked work for the current head        | Answered. The reviewer’s owner can click **Post as review** to post a GitHub comment review at that commit. |
-| Open              | Head moves, checkout fails, usage cap is reached, or the turn ends without findings | Unanswered, with the reason.                                                                                |
-| Waiting or open   | PR closes or merges                                                                 | Orphaned.                                                                                                   |
-| Answered          | Head moves                                                                          | Answered. The card marks the reviewed SHA stale.                                                            |
-
-The relay keeps the request and verdict. The Hub saves the thread and run IDs locally. Delivery replay uses the same thread and dispatch IDs. On restart the Hub reconciles saved runs with open requests and interrupts runs whose requests have closed.

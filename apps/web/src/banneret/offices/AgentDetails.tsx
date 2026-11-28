@@ -1,3 +1,4 @@
+import { useAgentActivity, activityText } from "./AgentActivity";
 import { useEffect, useRef, useState } from "react";
 import type { OfficeRoomPage } from "@t3tools/contracts";
 import { enrolmentRpc, type RelayTarget } from "../enrolmentStore";
@@ -16,6 +17,7 @@ export function AgentDetails({
   target: RelayTarget;
 }) {
   const [open, setOpen] = useState(false);
+  const activity = useAgentActivity()(session);
   const [heard, setHeard] = useState("");
   const ref = useRef<HTMLDetailsElement>(null);
   const { environmentId, relayOrigin } = target;
@@ -60,6 +62,7 @@ export function AgentDetails({
     <details ref={ref} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
         {session.provider} · {session.state.replaceAll("_", " ")}
+        {activity && " · " + activityText(activity)}
       </summary>
       <p>
         {session.id}

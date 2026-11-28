@@ -1,3 +1,4 @@
+import { OfficeActivity } from "./AgentActivity";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { Link, useRouter } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
@@ -53,7 +54,7 @@ export function OfficeChat({
         mapping: feed.boardChannels,
       }}
     >
-      {children}
+      <OfficeActivity enterprise={enterprise}>{children}</OfficeActivity>
     </Chat.Provider>
   );
 }

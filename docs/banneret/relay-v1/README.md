@@ -1252,6 +1252,17 @@ Create an offer with `POST /chat/handoffs` and list by giver or receiver with `G
 | Accepted | A third party takes the released task | Closed with outcome lost |
 | Final | Repeated decision | 409 handoff_closed |
 
+The Office shows agent activity that your account can read. Floor and List show it as text. Select a robot to see its question and open the shared thread when available.
+
+| Agent indicator | Appears when | Clears when |
+| --- | --- | --- |
+| Asking | An agent question or review is waiting for a decision, open or awaiting draft confirmation | The ask closes |
+| Answering | The recipient has an open agent ask | An answer or draft is submitted, or the ask closes |
+| Pending hand-off | An agent offers a hand-off | The lease transfer finishes or the offer ends |
+| Paused | The handle reports Pause or its machine is paused locally | The corresponding pause is lifted |
+
+The Office rebuilds these indicators from current relay data and the machine's saved Pause setting when you reopen it. They add no activity history.
+
 Each offer records the signed giver device as `fromMachineId` and its resolved discussion as `threadRootId` when present. Only that giver device runs the release. Creation always leaves the offer pending. For automatic acceptance the receiver checks the tracker first, then sends `byRule: true` and its own `machineId` to `/accept`. The relay rechecks the named-person rule, usage and pause settings at that write. If the rule or its limits no longer allow the hand-off, return 403 `auto_accept_scope` and leave the offer open for a click. The signed receiver device must supply its own machine ID on rule acceptance. Persist `byRule: true` on the hand-off through all later transitions. Manual acceptances omit this audit field. A successful rule acceptance records “Auto-accepted by <login>'s rule.” in the thread.
 
 The receiver calls `/accept` with its selected machine (and `newThread: true` to start a new task thread there after take) or `/decline` with a reason. The giver calls `/withdraw`. Emit `handoff_declined` for decline and `handoff_closed` for other final outcomes. Keep the existing lease release event. Derive `waiting_release` while the giver holds the lease and `waiting_take` while the task is free. After 30 minutes in a step, derive class 2 `handoff_stalled` for the party that can advance it. Each Hub re-reads the fold before writing its release or claim. On restart, read accepted offers and recompute the step from the tracker.

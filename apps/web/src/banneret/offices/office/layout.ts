@@ -12,6 +12,8 @@ export type Desk = {
   info: string;
 };
 export type Item = {
+  machineId?: string | undefined;
+  handle?: string | undefined;
   personId?: string;
   presence?: string | undefined;
   id: string;
@@ -73,6 +75,8 @@ export function layout(desks: readonly Desk[], detail: Detail, viewer?: string) 
           {
             personId: p.id,
             id: "agent/" + s.id,
+            handle: s.handle,
+            machineId: s.machineId,
             label: s.provider + " · " + s.state,
             info: [p.login, s.id, s.taskId].filter(Boolean).join(" · "),
           },

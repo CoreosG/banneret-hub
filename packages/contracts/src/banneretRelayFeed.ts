@@ -473,6 +473,7 @@ export type BanneretTeamMachine = typeof BanneretTeamMachine.Type;
  * `not_heard_from` are known. `since` is when it entered that state. `parentId` names its orchestrator.
  */
 export const BanneretTeamSession = Schema.Struct({
+  handle: Schema.optional(Schema.String),
   stopReason: Schema.optional(Schema.String),
   id: Schema.String,
   parentId: Schema.optional(Schema.String),
