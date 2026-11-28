@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { PauseControls } from "../Pause";
+import { Button } from "../../components/ui/button";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { AskSettings } from "./AskSettings";
 import { CallApprovals } from "../CallApprovals";
@@ -65,13 +66,15 @@ function WakeDefault({
           <WakeOptions />
         </select>
       </label>
-      <button
+      <Button
+        size="xs"
+        variant="outline"
         onClick={() =>
           settings && void save({ kind: "applyWake", wake: settings.agentWakeDefault })
         }
       >
         Apply to all my agents
-      </button>
+      </Button>
     </>
   );
 }
@@ -104,7 +107,10 @@ function WakeDefaultRow({ enterprise }: { enterprise: EnterpriseFeed }) {
       }
       status={error}
       control={
-        <fieldset className="flex flex-wrap items-center gap-2" disabled={!settings || pending}>
+        <fieldset
+          className="flex flex-wrap items-center gap-2 text-xs"
+          disabled={!settings || pending}
+        >
           <WakeDefault settings={settings} save={save} />
         </fieldset>
       }
@@ -339,7 +345,7 @@ export function ThreadTimeline(props: ComponentProps<typeof Timeline>) {
       working={props.isWorking}
       renderTimeline={(cards) => (
         <>
-          <header className="flex flex-wrap items-center gap-3 text-xs">
+          <header className="flex flex-wrap items-center gap-3 px-4 py-1 text-xs">
             <ThreadToolLevels {...thread} />
             <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
             <div className="ml-auto">
