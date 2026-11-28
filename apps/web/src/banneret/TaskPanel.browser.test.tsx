@@ -31,6 +31,13 @@ import { TaskDialogHost } from "./TaskDialog";
 import { chatRpc } from "./chat/client";
 import { TaskPanel } from "./TaskPanel";
 import { openTaskDialog, taskRpc } from "./taskStore";
+import {
+  expectCentred,
+  expectClickable,
+  expectReadableLines,
+  expectUnclipped,
+  forEachViewport,
+} from "./test/viewports";
 import { taskSurface } from "./taskSurface";
 import { useOpenTask } from "./useOpenTask";
 import { singleBoard } from "./boards.testkit";
@@ -728,7 +735,6 @@ describe("Task tab in a thread's right panel", () => {
 describe("Task dialog", () => {
   async function openDialog(issues: boolean) {
     const { emit } = setup({ issues });
-    await page.viewport(1280, 800);
     const style = document.createElement("style");
     style.textContent = appCss;
     document.head.append(style);
@@ -739,6 +745,7 @@ describe("Task dialog", () => {
     await expect.element(page.getByRole("heading", { name: "Guild invites" })).toBeVisible();
     const popup = () => document.querySelector('[data-slot="dialog-popup"]') as HTMLElement;
     return {
+      popup,
       height: () => popup().getBoundingClientRect().height,
       [Symbol.asyncDispose]: async () => {
         await act(async () => openTaskDialog(null));
@@ -748,16 +755,34 @@ describe("Task dialog", () => {
     };
   }
 
-  it("fits its content when no issue thread is embedded, with the link out in the header", async () => {
+  /** The dialog sits in the middle of the window, whole, with its close button on top. */
+  async function expectDialogPlaced(popup: HTMLElement) {
+    await vi.waitFor(() => {
+      expectCentred(popup, document.documentElement, "the dialog", 2);
+      expectUnclipped(popup, "the dialog");
+      expectClickable(
+        page.getByRole("dialog").getByRole("button", { name: "Close" }).element(),
+        "the close button",
+      );
+    });
+    expectReadableLines(popup, "the dialog");
+  }
+
+  forEachViewport("the Task dialog fits its content without an issue thread", async (at) => {
     await using dialog = await openDialog(false);
     expect(linkOut()?.textContent).toBe("Open on GitHub");
     expect(headerLinkOut()?.getAttribute("aria-label")).toBe("Open on GitHub");
-    expect(dialog.height()).toBeLessThan(800 * 0.5);
+    await expectDialogPlaced(dialog.popup());
+    // Short content: it does not stretch toward the tall height an embedded thread takes.
+    expect(dialog.height()).toBeLessThan(Math.max(400, at.height * 0.5));
+    await at.screenshot();
   });
 
-  it("takes the tall height when it embeds the issue thread", async () => {
+  forEachViewport("the Task dialog takes the tall height with an issue thread", async (at) => {
     await using dialog = await openDialog(true);
     await expect.element(page.getByTestId("issue-thread")).toBeVisible();
-    expect(dialog.height()).toBeGreaterThan(800 * 0.7);
+    await expectDialogPlaced(dialog.popup());
+    expect(dialog.height()).toBeGreaterThan(at.height * 0.7);
+    await at.screenshot();
   });
 });
