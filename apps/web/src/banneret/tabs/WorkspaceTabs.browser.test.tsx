@@ -32,6 +32,7 @@ import { setActiveWorkspace, useWorkspacesStore } from "../workspacesStore";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
 import { __reloadTabsForTests, setTabsHidden, useTabsStore } from "./tabsStore";
 import { NO_PROJECT_KEY, WORKSPACE_TABS_STORAGE_KEY } from "./workspaceTabs.logic";
+import { showChatTabs } from "./workspaceTabsActions";
 import { __reloadWorkspaceTabsForTests, useWorkspaceTabsStore } from "./workspaceTabsStore";
 
 const LONG_NAMES = Array.from(
@@ -151,6 +152,33 @@ async function chooseTabsShow(label: "Chats" | "Workspaces") {
   await expect.element(page.getByRole("combobox", { name: "Tabs show" })).toHaveTextContent(label);
   await go(back);
   await expect.element(page.getByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+}
+
+/** Drops every unsent chat: the next test file shares this browser storage and would list them. */
+async function discardDrafts() {
+  await go(threadPath(THREAD.id));
+  await act(() => {
+    const store = useComposerDraftStore.getState();
+    for (const id of Object.keys(store.draftThreadsByThreadKey)) {
+      store.clearDraftThread(DraftId.make(id));
+    }
+  });
+}
+
+/**
+ * The web and api chats under Workspaces tabs, for one layout test: CI runs those without the tests
+ * above them. The next test file gets Chats tabs and no drafts back.
+ */
+async function workspacesFixture(): Promise<AsyncDisposable> {
+  draftIn("web");
+  draftIn("api");
+  await chooseTabsShow("Workspaces");
+  return {
+    async [Symbol.asyncDispose]() {
+      await act(() => showChatTabs());
+      await discardDrafts();
+    },
+  };
 }
 
 async function menuOn(title: string, item: string) {
@@ -506,9 +534,18 @@ describe("Workspaces tabs", () => {
       });
     }
   });
+
+  // Keep last: it also leaves this browser storage as the next test file expects it.
+  it("lists every chat again after switching back to Chats", async () => {
+    await chooseTabsShow("Chats");
+    await vi.waitFor(() => expect(tablist("Open tabs")).not.toBeNull());
+    await expectSidebarLists("render", "web", "api");
+    await discardDrafts();
+  });
 });
 
 forEachViewport("the sidebar lists only the shown workspace's chats", async (at) => {
+  await using _fixture = await workspacesFixture();
   await go(webDraft);
   await go(apiDraft);
   await pickWorkspace("render");
@@ -542,6 +579,7 @@ function expectBarLayout() {
 }
 
 forEachViewport("workspace tabs, their menu and the workspace list fit", async (at) => {
+  await using _fixture = await workspacesFixture();
   await go(webDraft);
   for (const name of ["render", "api", ...LONG_NAMES.slice(2)]) await pickWorkspace(name);
   await vi.waitFor(() => expect(tabs().length).toBeGreaterThanOrEqual(10));
@@ -577,7 +615,6 @@ forEachViewport("workspace tabs, their menu and the workspace list fit", async (
 });
 
 forEachViewport("the Tabs show setting fits Appearance settings", async (at) => {
-  await go(webDraft);
   await go("/settings/appearance");
   const select = page.getByRole("combobox", { name: "Tabs show" });
   await expect.element(select).toBeVisible();
@@ -591,5 +628,5 @@ forEachViewport("the Tabs show setting fits Appearance settings", async (at) => 
   });
   await at.screenshot();
   await userEvent.keyboard("{Escape}");
-  await go(webDraft);
+  await go(threadPath(THREAD.id));
 });
