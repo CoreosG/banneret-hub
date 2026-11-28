@@ -22,6 +22,23 @@ Open **Tool access** in a thread to set the Banneret toolkit and each available 
 | Active        | A turn starts                                         | List and call tools within the saved levels. Overlapping turns keep the thread active until the last one ends. |
 | Revoked       | The provider session ends or the Hub restarts         | The credential expires. The next session uses the levels already saved for the thread.                         |
 
+## Decide a write
+
+A write through a plugin endpoint or the built-in Banneret toolkit appears in the thread and in **Needs you** on the machine running it. Check the tool and arguments. **Approve once** runs that stored call. **Always allow** also saves a rule for that tool, thread and source. Destructive tools and turns started by another agent require a decision each time. **Refuse** sends your reason to the agent. The first decision records the client that made it.
+
+| State on disk | Event                                 | Result                                                                      |
+| ------------- | ------------------------------------- | --------------------------------------------------------------------------- |
+| New call      | Write access and no applicable rule   | Pending. The Hub saves the arguments and their hash.                        |
+| New call      | Matching refusal or always-allow rule | Return the earlier refusal reason, or run the permitted call.               |
+| Pending       | Approve once or always                | Running. The Hub checks the turn, source and current grant before dispatch. |
+| Pending       | Refuse                                | Refused. Identical retries in the thread receive the saved reason.          |
+| Pending       | Turn ends or the call is 24 hours old | Expired.                                                                    |
+| Pending       | Hub restarts                          | Keep the call and its deadline.                                             |
+| Running       | Dispatch returns                      | Ran or failed.                                                              |
+| Running       | Hub restarts                          | Unknown. The call may have run. The Hub leaves it there.                    |
+
+The live MCP connection receives the result while connected. The thread retains the recorded outcome after a disconnect.
+
 ## Declare what you provide
 
 For example, a tracker behind a gateway could ship this manifest:

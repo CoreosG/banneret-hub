@@ -13,10 +13,16 @@ import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
   ThreadId,
+  RunId,
   ProviderInstanceId,
   type OrchestrationProjectShell,
   type ServerProvider,
 } from "@t3tools/contracts";
+import { approvalLifecycle, approvalMachine } from "./approvals.ts";
+import { McpServer } from "effect/ai";
+import * as Fiber from "effect/Fiber";
+import * as Stream from "effect/Stream";
+import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -45,14 +51,16 @@ const manifest = {
 const environmentId = EnvironmentId.make("plugin-test");
 const threadId = ThreadId.make("test-chat");
 const providerInstanceId = ProviderInstanceId.make("codex");
-const thread = liveThreadShell(threadId);
+const thread = { ...liveThreadShell(threadId), activeRunId: RunId.make("turn") };
 const layers = Layer.mergeAll(
   Activity.layer,
+  Layer.succeed(ServerEnvironmentIdentity, { getEnvironmentId: Effect.succeed(environmentId) }),
   Layer.mock(ProjectionStoreV2)({
     getThreadShell: () => Effect.succeed(thread),
     getThread: () => Effect.succeed(idleThreadProjection(thread).thread),
   }),
   Layer.mock(ThreadManagementService)({
+    getThreadShell: () => Effect.succeed(thread),
     getThreadRecords: () => Effect.succeed(idleThreadProjection(thread)),
   }),
   Layer.mock(ProjectService)({
@@ -109,6 +117,7 @@ it.live(
   () =>
     Effect.gen(function* () {
       const headers: string[] = [];
+      const writes: unknown[] = [];
       const activity = yield* Activity.PreviewAgentActivity;
       const park = yield* activity.begin(threadId);
       const fixture = yield* Effect.acquireDisposable(
@@ -123,6 +132,8 @@ it.live(
                 const chunks = [];
                 for await (const chunk of request) chunks.push(chunk);
                 const rpc = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                if (rpc.method === "tools/call" && rpc.params.name === "delete_issue")
+                  writes.push(rpc);
                 response.end(
                   JSON.stringify({
                     jsonrpc: "2.0",
@@ -177,9 +188,10 @@ it.live(
         "mcp_servers.banneret-plugin-starter",
       ]);
       expect(JSON.stringify(config)).not.toContain("demo-alice");
-      yield* HttpRouter.serve(pluginRoute, { disableLogger: true, disableListenLog: true }).pipe(
-        Layer.build,
-      );
+      yield* HttpRouter.serve(Layer.merge(pluginRoute, approvalLifecycle(McpServer.McpServer)), {
+        disableLogger: true,
+        disableListenLog: true,
+      }).pipe(Layer.build);
       const http = yield* HttpClient.HttpClient;
       const server = config.soloPlugins?.pluginClaude?.["banneret-plugin-starter"];
       if (!server) throw new Error("Missing session plugin");
@@ -220,6 +232,51 @@ it.live(
       yield* setLevel(threadId, pluginSource("starter"), "none");
       expect(yield* (yield* call("skills_get")).text).toContain("is set to none");
       yield* setLevel(threadId, pluginSource("starter"), "read_write");
+      if (!templateEndpoint) {
+        const approvals = yield* approvalMachine(environmentId);
+        const nextCard = approvals.updates.pipe(
+          Stream.mapEffect(() => approvals.list()),
+          Stream.filter((rows) => rows.length > 0),
+          Stream.runHead,
+          Effect.flatMap(Effect.fromOption),
+          Effect.map((rows) => rows[0]!),
+        );
+        const request = {
+          jsonrpc: "2.0",
+          id: 74,
+          method: "tools/call",
+          params: { name: "delete_issue", arguments: { task: "T398" } },
+        };
+        const submit = (body: typeof request) =>
+          send(server.headers.Authorization!, JSON.stringify(body)).pipe(
+            Effect.flatMap((res) => res.json),
+          );
+        const held = yield* submit(request).pipe(Effect.forkChild);
+        const first = yield* nextCard;
+        expect(writes).toEqual([]);
+        expect(first.allowAlways).toBe(false);
+        yield* approvals.decide(first.id, "refuse", "Ana", "Use the hand-off.");
+        expect(JSON.stringify(yield* Fiber.join(held))).toContain("Use the hand-off.");
+        expect(JSON.stringify(yield* submit(request))).toContain("Use the hand-off.");
+        expect(yield* approvals.list()).toEqual([]);
+        const changed = { ...request, params: { ...request.params, arguments: { task: "T399" } } };
+        const approved = yield* submit(changed).pipe(Effect.forkChild);
+        const second = yield* nextCard;
+        expect(second.id).not.toBe(first.id);
+        yield* approvals.decide(second.id, "once", "Leo", "");
+        expect((yield* approvals.decide(second.id, "refuse", "Ana", "Too late")).actor).toBe("Leo");
+        expect(yield* Fiber.join(approved)).toMatchObject({ result: { content: [] } });
+        expect(writes).toEqual([changed]);
+        const denied = yield* submit({
+          ...request,
+          params: { ...request.params, arguments: { task: "T400" } },
+        }).pipe(Effect.forkChild);
+        const third = yield* nextCard;
+        yield* setLevel(threadId, pluginSource("starter"), "read");
+        yield* approvals.decide(third.id, "once", "Leo", "");
+        expect(yield* Fiber.join(denied)).toMatchObject({ result: { isError: true } });
+        expect(writes).toEqual([changed]);
+      }
       if (templateEndpoint) {
         const skills = yield* send(
           server.headers.Authorization!,

@@ -1366,6 +1366,7 @@ const withAdvertisedSchemas = Effect.fn("McpHttpServer.withAdvertisedSchemas")(f
           ? options
           : {
               ...options,
+              handle: BanneretAgentMcp.holdWrite(options),
               tool: new McpSchema.Tool({
                 ...options.tool,
                 inputSchema: advertisedJsonSchema(tool),

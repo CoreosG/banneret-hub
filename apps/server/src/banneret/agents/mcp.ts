@@ -1,3 +1,5 @@
+import { approvalLifecycle } from "../plugins/approvals.ts";
+export { holdWrite } from "../plugins/approvals.ts";
 import { PreviewAgentActivity } from "../../preview/PreviewAgentActivity.ts";
 import { levelFor, toolkitSource, parkedMessage, allows, denied } from "../plugins/levels.ts";
 import { mayPause } from "./pause.ts";
@@ -259,6 +261,7 @@ export const layer = (
 ) =>
   Layer.mergeAll(
     register(AgentToolkit, AgentHandlers.layer),
+    approvalLifecycle(McpServer.McpServer),
     joinResource,
     SandboxHandoff.lifecycle,
     relistOnOfferChange(options.relistEvery ?? "5 seconds"),

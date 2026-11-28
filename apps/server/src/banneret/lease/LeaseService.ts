@@ -1,5 +1,8 @@
 import { knowledgeConfigured } from "../memory/KbIndex.ts";
 import * as Path from "effect/Path";
+import type { AuthSessionId } from "@t3tools/contracts";
+import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import { approvalHandlers } from "../plugins/approvalHandlers.ts";
 import { levelHandlers } from "../plugins/levelHandlers.ts";
 import { pluginHandlers } from "../plugins/registry.ts";
 import { readDesignations } from "../OrchestratorState.ts";
@@ -995,3 +998,18 @@ export const rpcHandlers = {
     return yield* (yield* LeaseService).withdraw(input);
   }),
 };
+
+export const sessionHandlers = (
+  session: AuthSessionId,
+  auth: EnvironmentAuth.EnvironmentAuth["Service"],
+) => ({
+  ...rpcHandlers,
+  ...approvalHandlers(
+    auth.listClientSessions(session).pipe(
+      Effect.map((rows) =>
+        EnvironmentAuth.clientSessionLabel(rows.find((row) => row.current)?.client),
+      ),
+      Effect.orElseSucceed(() => "Local owner"),
+    ),
+  ),
+});

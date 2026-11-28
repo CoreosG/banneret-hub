@@ -2054,7 +2054,7 @@ export const layerWsRpc = (
         ...BanneretWorkspaces.rpcHandlers,
         ...BanneretEnrolment.rpcHandlers,
         ...BanneretRelayFeed.rpcHandlers,
-        ...LeaseService.rpcHandlers,
+        ...LeaseService.sessionHandlers(currentSessionId, serverAuth),
         [WS_METHODS.issuesList]: (input) => issues.list(input),
         [WS_METHODS.issuesDetail]: (input) => issues.detail(input),
         [WS_METHODS.issuesComments]: (input) => issues.comments(input),

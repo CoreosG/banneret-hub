@@ -24,7 +24,36 @@ const result = {
   success: Schema.Array(summary),
   error: Schema.Union([EnvironmentAuthorizationError, TaskLeaseError]),
 };
+export const CallApproval = Schema.Struct({
+  id: Schema.String,
+  threadId: Schema.String,
+  threadTitle: Schema.String,
+  sensitive: Schema.Boolean,
+  source: Schema.String,
+  name: Schema.String,
+  args: Schema.String,
+  allowAlways: Schema.Boolean,
+  state: Schema.Literals(["pending", "running", "ran", "failed", "refused", "expired", "unknown"]),
+  actor: Schema.String,
+  reason: Schema.String,
+});
+export type CallApproval = typeof CallApproval.Type;
 export const PLUGIN_RPCS = [
+  Rpc.make("plugins.approvals", {
+    stream: true,
+    payload: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+    success: Schema.Array(CallApproval),
+    error: levels.error,
+  }),
+  Rpc.make("plugins.decide", {
+    payload: Schema.Struct({
+      id: Schema.NonEmptyString,
+      choice: Schema.Literals(["once", "always", "refuse"]),
+      reason: Schema.String,
+    }),
+    success: CallApproval,
+    error: levels.error,
+  }),
   Rpc.make("plugins.levels", { payload: Schema.Struct(thread), ...levels }),
   Rpc.make("plugins.setLevel", {
     payload: Schema.Struct({ ...thread, source: Schema.NonEmptyString, level: ToolLevel }),
@@ -46,6 +75,8 @@ export const PLUGIN_RPCS = [
   }),
 ] as const;
 export const PLUGIN_SCOPES = {
+  "plugins.approvals": AuthEnvironmentMaintainScope,
+  "plugins.decide": AuthEnvironmentMaintainScope,
   "plugins.levels": AuthEnvironmentMaintainScope,
   "plugins.setLevel": AuthEnvironmentMaintainScope,
   "plugins.list": AuthEnvironmentMaintainScope,
@@ -53,6 +84,8 @@ export const PLUGIN_SCOPES = {
   "plugins.remove": AuthEnvironmentMaintainScope,
 } as const;
 export const PLUGIN_AGGREGATES = {
+  "plugins.approvals": "banneret-plugins",
+  "plugins.decide": "banneret-plugins",
   "plugins.levels": "banneret-plugins",
   "plugins.setLevel": "banneret-plugins",
   "plugins.list": "banneret-plugins",

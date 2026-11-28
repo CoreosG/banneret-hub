@@ -3,8 +3,11 @@ import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { PreviewAgentActivity } from "../../preview/PreviewAgentActivity.ts";
+import { approvalMachine } from "./approvals.ts";
+import { forward, storedTransport } from "./transport.ts";
 import { catalog } from "./catalog.ts";
 import {
+  classify,
   levelFor,
   pluginSource,
   parkedMessage,
@@ -91,38 +94,45 @@ const proxy = Effect.gen(function* () {
       if (!(yield* activity.active(thread))) return refuse(parkedMessage);
       const initial = yield* level();
       if (initial === "none") return refuse(denied(name, plugin.manifest.source, initial));
-      const permission = Effect.fn("ThreadTools.permission")(function* (tool?: ListedTool) {
+      let listed: ListedTool | undefined;
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const id = yield* (yield* SecureRandom.SecureRandom).uuidV4();
+        const page = yield* listing(id, cursor ? { cursor } : {});
+        listed = page.tools?.find((t) => t.name === name);
+        if (listed) break;
+        cursor = page.cursor;
+        if (!cursor || seen.has(cursor) || seen.size >= 100) break;
+        seen.add(cursor);
+      } while (true);
+      if (!listed || !allows(initial, listed, plugin.manifest.toolPrefix))
+        return refuse(denied(name, plugin.manifest.source, initial));
+      const kind = classify(listed, plugin.manifest.toolPrefix);
+      if (kind !== "read") {
+        const machine = yield* approvalMachine(invocation.environmentId);
+        const result = yield* machine.submit(
+          invocation,
+          key,
+          name,
+          rpc.params?.arguments,
+          kind === "sensitive",
+          storedTransport(web, plugin.endpoint, body!),
+        );
+        return reply({ result });
+      }
+      const permission = Effect.fn("ThreadTools.readPermission")(function* (tool: ListedTool) {
         const current = yield* level();
         if (!(yield* activity.active(thread))) return parkedMessage;
-        if (current === "read_write" || (tool && allows(current, tool, plugin.manifest.toolPrefix)))
-          return;
-        return denied(tool?.name ?? name, plugin.manifest.source, current);
+        if (current === "none" || classify(tool, plugin.manifest.toolPrefix) !== "read")
+          return denied(tool.name, plugin.manifest.source, current);
       });
-      let listed: ListedTool | undefined;
-      if (initial === "read") {
-        const seen = new Set<string>();
-        let cursor: string | undefined;
-        do {
-          const id = yield* (yield* SecureRandom.SecureRandom).uuidV4();
-          const page = yield* listing(id, cursor ? { cursor } : {});
-          listed = page.tools?.find((t) => t.name === name);
-          if (listed) break;
-          cursor = page.cursor;
-          if (!cursor || seen.has(cursor) || seen.size >= 100) break;
-          seen.add(cursor);
-        } while (true);
-        if (!listed || !allows(initial, listed, plugin.manifest.toolPrefix))
-          return refuse(denied(name, plugin.manifest.source, initial));
-      }
-      if (plugin.manifest.capabilities.includes("skills")) {
-        const result = yield* skillReply(web, plugin, invocation.thread, permission);
-        const reason = yield* permission(listed);
-        if (reason) return refuse(reason);
-        if (result) return result;
-      } else {
-        const reason = yield* permission(listed);
-        if (reason) return refuse(reason);
-      }
+      const result = plugin.manifest.capabilities.includes("skills")
+        ? yield* skillReply(web, plugin, invocation.thread, permission)
+        : undefined;
+      const reason = yield* permission(listed);
+      if (reason) return refuse(reason);
+      if (result) return result;
     }
   }
   const response = yield* Effect.tryPromise({
@@ -132,39 +142,6 @@ const proxy = Effect.gen(function* () {
   return HttpServerResponse.fromWeb(response);
 }).pipe(Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 502 })));
 
-async function forward(
-  request: Request,
-  endpoint: string,
-  token: string,
-  signal: AbortSignal,
-  body?: string,
-) {
-  const headers = new Headers();
-  for (const name of [
-    "accept",
-    "content-type",
-    "mcp-session-id",
-    "mcp-protocol-version",
-    "last-event-id",
-  ]) {
-    const value = request.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-  if (token) headers.set("Authorization", "Bearer " + token);
-  const response = await fetch(endpoint, {
-    method: request.method,
-    headers,
-    redirect: "error",
-    signal,
-    ...(request.method === "POST" ? { body: body ?? (await request.arrayBuffer()) } : {}),
-  });
-  const returned = new Headers();
-  for (const name of ["content-type", "mcp-session-id", "mcp-protocol-version"]) {
-    const value = response.headers.get(name);
-    if (value) returned.set(name, value);
-  }
-  return new Response(response.body, { status: response.status, headers: returned });
-}
 export const pluginRoute = HttpRouter.add("*", "/banneret/plugins/:source", proxy).pipe(
   HttpRouter.provideRequest(
     Layer.merge(
