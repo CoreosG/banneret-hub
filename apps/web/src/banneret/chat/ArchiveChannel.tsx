@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ChatConversation } from "@t3tools/contracts";
 import { Button } from "../../components/ui/button";
 import type { RelayTarget } from "../enrolmentStore";
@@ -21,8 +21,21 @@ export function ArchiveChannel({
 }) {
   const [step, setStep] = useState<"idle" | "confirm" | "saving">("idle");
   const [error, setError] = useState("");
-  // Default channels must stay available, so the relay refuses to archive them.
-  if (!channel.me.can.manage || channel.defaultChannel) return null;
+  const reason = useId();
+  if (!channel.me.can.manage) return null;
+  // The relay refuses to archive a default channel.
+  if (channel.defaultChannel)
+    return (
+      <div className="grid justify-items-start gap-2">
+        <Button type="button" variant="destructive-outline" disabled aria-describedby={reason}>
+          Archive channel
+        </Button>
+        <p id={reason} className="text-xs text-muted-foreground">
+          This is a default channel. People in your company are added to it automatically, so it
+          cannot be archived.
+        </p>
+      </div>
+    );
   async function apply(archived: boolean) {
     setStep("saving");
     setError("");

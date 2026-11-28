@@ -628,7 +628,7 @@ it("scopes Browse channels and lets a founder archive a private channel they onl
   await expect.element(screen.getByText(/· archived/)).toBeVisible();
 });
 
-it("offers Archive channel only to managers, never on a default channel", async () => {
+it("hides Archive channel from non-managers and explains why a default channel keeps it off", async () => {
   const { ArchiveChannel } = await import("./ArchiveChannel");
   const channel = {
     id: "c_x",
@@ -638,19 +638,21 @@ it("offers Archive channel only to managers, never on a default channel", async 
     me: { can: { manage: false } },
   } as unknown as Parameters<typeof ArchiveChannel>[0]["channel"];
   const target = { environmentId: EnvironmentId.make("local"), relayOrigin: "https://chat.test" };
+  const managed = { ...channel, me: { ...channel.me, can: { ...channel.me.can, manage: true } } };
+  {
+    await using screen = await render(
+      <ArchiveChannel target={target} channel={channel} done={() => {}} />,
+    );
+    expect(screen.getByRole("button").elements()).toHaveLength(0);
+  }
   await using screen = await render(
-    <>
-      <ArchiveChannel target={target} channel={channel} done={() => {}} />
-      <ArchiveChannel
-        target={target}
-        channel={{
-          ...channel,
-          defaultChannel: true,
-          me: { ...channel.me, can: { ...channel.me.can, manage: true } },
-        }}
-        done={() => {}}
-      />
-    </>,
+    <ArchiveChannel
+      target={target}
+      channel={{ ...managed, defaultChannel: true }}
+      done={() => {}}
+    />,
   );
-  expect(screen.getByRole("button").elements()).toHaveLength(0);
+  const button = screen.getByRole("button", { name: "Archive channel" });
+  await expect.element(button).toBeDisabled();
+  await expect.element(button).toHaveAccessibleDescription(/default channel.*cannot be archived/);
 });

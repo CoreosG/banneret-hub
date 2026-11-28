@@ -1037,6 +1037,8 @@ An agent refusal names both the handle and its owner.
 
 The creator manages the channel. PUT or DELETE /chat/conversations/{id}/managers/{personId} changes managers. Keep the last manager unless the person leaves staff. Closing outsider access removes outside members in the same transaction and posts the count. Switching from listed to invited retains them. Role changes preserve explicit memberships. Adding an outsider reveals all earlier messages. GET /chat/directory lists visible unjoined channels with member counts and any pending me.request. Directory-only access reveals metadata. A directory administrator may archive or join a private channel. Joining posts a system line before the person can read history.
 
+**Archiving a channel.** `PATCH /chat/conversations/{id}` with `{"archived": true}` archives it, and `{"archived": false}` restores it. Both need the manage right. Nothing is deleted, and people who could read the channel still can. Nobody can post, reply, join or ask to join while it is archived. Archiving a default channel is refused with 403 `forbidden`. A directory administrator who cannot read the channel sends `archived` as the only field.
+
 POST /chat/conversations/{id}/requests accepts an optional note of up to 200 UTF-8 bytes. Managers page pending requests with GET on that path. One class 2 chat_join_requests need per channel carries conversationId and count.
 
 | Stored state | Event | Next state |
