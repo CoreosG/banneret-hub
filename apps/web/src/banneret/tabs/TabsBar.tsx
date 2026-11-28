@@ -1,7 +1,7 @@
 // Banneret Hub: the open tabs bar. Click activates, double-click keeps, middle-click closes,
-// right-click (or Shift+F10) opens the tab menu, drag reorders with pointer events (dnd-kit), since HTML5 drag events miss the desktop window's drag
-// region on Windows. A thread tab reads its live title from the quiet shell (one subscription per
-// tab, at most MAX_TABS, on data the client already holds).
+// right-click (or Shift+F10) opens the tab menu. Drag reorders with pointer events (dnd-kit), since
+// HTML5 drag events miss the desktop window's drag region on Windows. A thread tab reads its live
+// title from the quiet shell (one subscription per tab, at most MAX_TABS, on data already held).
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
