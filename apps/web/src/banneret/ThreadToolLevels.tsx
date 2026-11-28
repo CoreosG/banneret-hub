@@ -66,12 +66,10 @@ export function ThreadToolLevels({
   threadId: ThreadId;
 }) {
   return (
-    // Padded off the breadcrumb above: flush against it, the bare label read as a stuck tooltip.
+    // Outlined and padded off the breadcrumb: bare text flush against it read as a stuck tooltip.
     <div className="ps-(--workspace-gutter-start) pt-1">
       <Popover>
-        <PopoverTrigger render={<Button variant="ghost-muted" size="xs" />}>
-          Tool access
-        </PopoverTrigger>
+        <PopoverTrigger render={<Button variant="outline" size="xs" />}>Tool access</PopoverTrigger>
         <PopoverPopup align="start" width="md">
           <LevelsPanel
             load={async () => {
