@@ -18,5 +18,9 @@
     "id": "p_ada",
     "login": "ada"
   },
-  "receipts": []
+  "receipts": [],
+  "fromMachineId": "m_ada",
+  "threadRootId": "root",
+  "machineId": "m_leo",
+  "byRule": true
 }

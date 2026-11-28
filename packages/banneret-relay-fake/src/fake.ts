@@ -4229,8 +4229,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 )
               ) {
                 throw new RelayError(
-                  "forbidden",
-                  "Automatic acceptance is unavailable. The offer still awaits your decision.",
+                  "auto_accept_scope",
+                  "Automatic acceptance requires a current rule naming the giver, an eligible machine, available usage and unpaused agents. You can still accept manually.",
+                  { account: account(person), owner: personRef(person) },
                 );
               }
             }
@@ -4241,6 +4242,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 {
                   ...(input.machineId && { machineId: input.machineId }),
                   ...(input.newThread && { newThread: true }),
+                  ...(input.byRule && { byRule: true }),
                   receipts: input.receipt ? [...h.receipts, input.receipt] : h.receipts,
                   state: "accepted",
                   step: "waiting_release",

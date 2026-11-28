@@ -263,6 +263,7 @@ export const ChatNewHandoff = Schema.Struct({
 export type ChatNewHandoff = typeof ChatNewHandoff.Type;
 
 export const Handoff = Schema.Struct({
+  byRule: Schema.optionalKey(Schema.Literal(true)),
   newThread: Schema.optionalKey(Schema.Literal(true)),
   fromMachineId: Schema.String,
   threadRootId: Schema.optionalKey(Schema.String),
@@ -296,15 +297,32 @@ export const Handoff = Schema.Struct({
   createdAt: Schema.String,
   expiresAt: Schema.String,
   closedAt: Schema.optionalKey(Schema.String),
-});
+}).check(
+  Schema.makeFilter(
+    (h) =>
+      !h.byRule ||
+      (!!h.machineId && ["accepted", "withdrawn", "void", "closed"].includes(h.state)) ||
+      "Rule acceptance requires a receiving machine and a prior acceptance.",
+  ),
+);
 export type Handoff = typeof Handoff.Type;
 
-export const HandoffAccept = Schema.Struct({
+const acceptOptions = {
   newThread: Schema.optionalKey(Schema.Literal(true)),
-  byRule: Schema.optionalKey(Schema.Literal(true)),
   receipt: Schema.optionalKey(AskReceipt),
-  machineId: Schema.optionalKey(Schema.String),
-});
+};
+export const HandoffAccept = Schema.Union([
+  Schema.Struct({
+    ...acceptOptions,
+    byRule: Schema.Literal(true),
+    machineId: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    ...acceptOptions,
+    byRule: Schema.optionalKey(Schema.Never),
+    machineId: Schema.optionalKey(Schema.String),
+  }),
+]);
 export type HandoffAccept = typeof HandoffAccept.Type;
 
 export const HandoffReason = Schema.Struct({

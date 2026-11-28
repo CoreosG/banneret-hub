@@ -3515,11 +3515,15 @@ describe("chat contract", () => {
         machineId: answerer.machineId,
       });
     await rule(false);
-    expectError(await accept(), 403, "forbidden");
+    expectError(await accept(), 403, "auto_accept_scope");
+    expect((await call(answerer, "GET", chat + "handoffs")).body).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id, state: "offered" })]),
+    });
     await rule(true);
     expect((await accept()).body).toMatchObject({
       state: "accepted",
       step: "waiting_release",
+      byRule: true,
       machineId: answerer.machineId,
     });
     expect(
@@ -3548,7 +3552,7 @@ describe("chat contract", () => {
     await seed(third.login);
     expect((await offers()).body).toMatchObject({
       items: expect.arrayContaining([
-        expect.objectContaining({ id, state: "closed", outcome: "lost" }),
+        expect.objectContaining({ id, state: "closed", outcome: "lost", byRule: true }),
       ]),
     });
   });
