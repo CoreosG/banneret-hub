@@ -307,6 +307,7 @@ const runBackgroundOperations = Effect.fn("TestRemoteRegistration.runBackgroundO
 
 describe("makeRelayDeviceRegistrationRequest", () => {
   beforeEach(() => {
+    vi.stubEnv("EXPO_PUBLIC_BANNERET_MOBILE_PUSH", "1");
     vi.restoreAllMocks();
     vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
       type: "ios",

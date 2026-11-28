@@ -5,7 +5,10 @@ import { Observe } from "expo-observe";
 const relayUrl: unknown = Constants.expoConfig?.extra?.relay?.url;
 const appVariant: unknown = Constants.expoConfig?.extra?.appVariant;
 
-export const crashReportingAvailable = typeof relayUrl === "string" && relayUrl.trim() !== "";
+export const crashReportingAvailable =
+  process.env.EXPO_PUBLIC_BANNERET_CRASH_REPORTS === "1" &&
+  typeof relayUrl === "string" &&
+  relayUrl.trim() !== "";
 
 interface PromiseRejectionTracker {
   readonly enablePromiseRejectionTracker?: (options: {
