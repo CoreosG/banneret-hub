@@ -1,10 +1,10 @@
 // Layout at every supported window size for the click-test surfaces: channel settings, Browse
-// channels, Roles and the thread header entry points. This loop is local until the shared viewport
-// helper lands. `VITE_LAYOUT_SHOTS=<folder inside apps/web>` also saves a capture of each surface.
+// channels, Roles and the thread header entry points. `VITE_LAYOUT_SHOTS=<folder in the repository>`
+// also saves a capture of each surface.
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
-import { cdp, commands, page } from "vite-plus/test/browser";
+import { cdp, commands, page, userEvent } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
 import appCss from "../index.css?inline";
@@ -15,6 +15,7 @@ import { Directory } from "./chat/JoinRequests";
 import { WorkspaceRoles } from "./chat/Roles";
 import "./nativeSelect.css";
 import { usePause } from "./Pause";
+import { showViewport, VIEWPORTS } from "./testViewports";
 
 const { useEnterpriseFeed } = vi.hoisted(() => ({ useEnterpriseFeed: vi.fn() }));
 vi.mock(import("~/environments/primary/target"), async (original) => ({
@@ -57,14 +58,6 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (load) => {
   };
 });
 
-const SIZES = [
-  { width: 900, height: 700, scale: 1 },
-  { width: 1920, height: 1080, scale: 1 },
-  { width: 2560, height: 1080, scale: 1 },
-  { width: 3440, height: 1440, scale: 1 },
-  { width: 3840, height: 2160, scale: 1 },
-  { width: 3840, height: 2160, scale: 2 },
-];
 /** The app sidebar's default width. */
 const SIDEBAR = 256;
 
@@ -130,36 +123,11 @@ const channel = (name: string, extra: { read?: boolean; join?: boolean } = {}) =
   },
 });
 
-// Playwright fixes the device scale factor per context, so a test changes it over DevTools.
-const devtools = () =>
-  cdp() as unknown as {
-    send(method: string, params?: Record<string, unknown>): Promise<unknown>;
-  };
-
-async function showWindow(size: (typeof SIZES)[number]) {
-  const before = { width: window.innerWidth, height: window.innerHeight };
-  await page.viewport(size.width, size.height);
-  if (size.scale !== 1)
-    await devtools().send("Emulation.setDeviceMetricsOverride", {
-      width: size.width,
-      height: size.height,
-      deviceScaleFactor: size.scale,
-      mobile: false,
-    });
-  // A matrix that kept the old window would pass everything, so check what the page sees.
-  await vi.waitFor(() =>
-    expect([window.innerWidth, window.innerHeight, window.devicePixelRatio]).toEqual([
-      size.width,
-      size.height,
-      size.scale,
-    ]),
-  );
-  return {
-    async [Symbol.asyncDispose]() {
-      if (size.scale !== 1) await devtools().send("Emulation.clearDeviceMetricsOverride");
-      await page.viewport(before.width, before.height);
-    },
-  };
+/** Shows one size, and gives the window back as it was when the test ends. */
+async function atViewport(size: (typeof VIEWPORTS)[number]) {
+  const before = { width: window.innerWidth, height: window.innerHeight, scale: 1 };
+  await showViewport(size);
+  return { [Symbol.asyncDispose]: () => showViewport(before) };
 }
 
 const box = (element: Element) => element.getBoundingClientRect();
@@ -305,12 +273,14 @@ function expectReadable(root: Element, label: string, maxWidth: number) {
   }
 }
 
-async function capture(surface: string, size: (typeof SIZES)[number]) {
+async function capture(surface: string, size: (typeof VIEWPORTS)[number]) {
   const folder = import.meta.env.VITE_LAYOUT_SHOTS as string | undefined;
   if (!folder) return;
-  const { data } = (await devtools().send("Page.captureScreenshot", { format: "png" })) as {
-    data: string;
+  // DevTools captures device pixels, so the 2x window is saved at its real resolution.
+  const devtools = cdp() as unknown as {
+    send(method: string, params: object): Promise<{ data: string }>;
   };
+  const { data } = await devtools.send("Page.captureScreenshot", { format: "png" });
   await commands.writeFile(
     `../../${folder}/${surface}-${size.width}x${size.height}@${size.scale}x.png`,
     data,
@@ -369,8 +339,8 @@ function relay() {
   });
 }
 
-it.each(SIZES)("channel settings sheet fits $width x $height @$scale x", async (size) => {
-  await using _window = await showWindow(size);
+it.each(VIEWPORTS)("channel settings sheet fits $name", async (size) => {
+  await using _viewport = await atViewport(size);
   using _styles = styles();
   using _relay = relay();
   await using _screen = await render(
@@ -401,8 +371,8 @@ it.each(SIZES)("channel settings sheet fits $width x $height @$scale x", async (
   await capture("channel-settings", size);
 });
 
-it.each(SIZES)("Browse channels fits the sidebar at $width x $height @$scale x", async (size) => {
-  await using _window = await showWindow(size);
+it.each(VIEWPORTS)("Browse channels fits the sidebar at $name", async (size) => {
+  await using _viewport = await atViewport(size);
   using _styles = styles();
   using _relay = relay();
   await using screen = await render(
@@ -420,8 +390,8 @@ it.each(SIZES)("Browse channels fits the sidebar at $width x $height @$scale x",
   await capture("browse-channels", size);
 });
 
-it.each(SIZES)("Roles fits the settings page at $width x $height @$scale x", async (size) => {
-  await using _window = await showWindow(size);
+it.each(VIEWPORTS)("Roles fits the settings page at $name", async (size) => {
+  await using _viewport = await atViewport(size);
   using _styles = styles();
   using _relay = relay();
   useEnterpriseFeed.mockReturnValue(enterprise([]));
@@ -472,8 +442,8 @@ function unnamedThread() {
   return { [Symbol.dispose]: () => void vi.mocked(chatRpc.run).mockImplementation(answer) };
 }
 
-it.each(SIZES)("thread header entry points fit $width x $height @$scale x", async (size) => {
-  await using _window = await showWindow(size);
+it.each(VIEWPORTS)("thread header entry points fit $name", async (size) => {
+  await using _viewport = await atViewport(size);
   using _styles = styles();
   using _relay = relay();
   usePause.setState({ [env]: { status: { paused: false, held: 0, running: [] } } });
@@ -533,10 +503,15 @@ it.each(SIZES)("thread header entry points fit $width x $height @$scale x", asyn
     await screen.getByRole("button", { name: "Cancel" }).click();
     // Each popover opens inside the window.
     await screen.getByRole("button", { name: "Tool access" }).click();
-    const levels = screen.getByRole("combobox");
+    const levels = page.getByRole("combobox", { name: "Banneret tools" });
     await expect.element(levels).toBeVisible();
-    expectUnclipped(levels.element().closest("fieldset")!, "tool access panel");
-    await screen.getByRole("button", { name: "Tool access" }).click();
+    const panel = levels.element().closest("fieldset")!;
+    await Promise.all(
+      document.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+    );
+    expectUnclipped(panel, "tool access panel");
+    await userEvent.keyboard("{Escape}");
+    await expect.element(levels).not.toBeInTheDocument();
     if (agents) {
       await summary.click();
       const wake = screen.getByRole("combobox", { name: "Who can wake this agent" });
