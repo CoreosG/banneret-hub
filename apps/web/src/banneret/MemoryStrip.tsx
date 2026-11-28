@@ -1,3 +1,4 @@
+import { MemoryContradictionCard } from "./MemoryContradictionCard";
 import { MemoryPreferences } from "./MemoryPreferences";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -128,7 +129,10 @@ export function MemoryStrip({
       ":",
     ),
   );
-  async function apply(note: MemoryReviewNote, action: MemoryReviewAction) {
+  async function apply(
+    note: Pick<MemoryReviewNote, "key" | "version">,
+    action: MemoryReviewAction,
+  ) {
     const result = await runAtomCommand(appAtomRegistry, review, {
       environmentId,
       input: { threadId, key: note.key, version: note.version, action },
@@ -144,7 +148,7 @@ export function MemoryStrip({
     refresh((n) => n + 1);
     if (result._tag !== "Success") throw new Error("Import batch changed.");
   };
-  const cards =
+  const reviewCards =
     visible && query !== undefined ? (
       <section aria-label="Memory command" className="chat-content-lane rounded border p-3">
         <div className="flex justify-between">
@@ -193,6 +197,20 @@ export function MemoryStrip({
         <MemoryNotes notes={notes.value} expanded={false} writable={writable} apply={apply} />
       </div>
     ) : null;
+  const cards = (
+    <>
+      {visible &&
+        counts.reminders?.contradictions?.map((c) => (
+          <MemoryContradictionCard
+            key={c.id}
+            conflict={c}
+            writable={writable}
+            apply={(action) => apply(c.a, action)}
+          />
+        ))}
+      {reviewCards}
+    </>
+  );
   return (
     <>
       {visible && (

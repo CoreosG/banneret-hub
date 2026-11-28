@@ -318,6 +318,23 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
         this.review(key, version, { kind: "confirm" });
       }
     },
+    openConflicts(thread: string) {
+      const notes = this.list(false);
+      return this.reminders(thread)
+        .conflicts()
+        .filter((c) =>
+          [c.a, c.b].every(
+            (side) =>
+              !side.key ||
+              notes.some(
+                (n) =>
+                  n.key === side.key &&
+                  n.version === side.version &&
+                  ["confirmed", "trusted", "pinned"].includes(n.trust),
+              ),
+          ),
+        );
+    },
     reviewInChat(
       key: string,
       version: string,
@@ -332,6 +349,55 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
           !["confirm", "editConfirm", "dismiss"].includes(action.kind))
       )
         throw new Error("Unavailable proposal.");
+      if (
+        action.kind === "resolveConflict" ||
+        action.kind === "editConflict" ||
+        action.kind === "scopeConflict"
+      ) {
+        const reminders = this.reminders(thread);
+        const conflict = this.openConflicts(thread).find((c) => c.id === action.id);
+        if (
+          !orchestrator ||
+          !reminders.setting() ||
+          !conflict ||
+          conflict.a.key !== key ||
+          conflict.a.version !== version
+        )
+          throw new Error("The contradiction changed.");
+        const { a, b } = conflict;
+        if (action.kind === "editConflict")
+          this.review(key, version, { kind: "edit", text: action.text });
+        else if (action.kind === "scopeConflict") {
+          if (
+            !action.scopeA.trim() ||
+            !action.scopeB.trim() ||
+            action.scopeA.trim().toLowerCase() === action.scopeB.trim().toLowerCase()
+          )
+            throw new Error("Choose different scopes.");
+          const qualify = (text: string, scope: string) => {
+            const qualified = "When " + scope.trim() + ": " + text;
+            if (qualified.length > 4096) throw new Error("Scoped note is too long.");
+            return qualified;
+          };
+          this.review(key, version, {
+            kind: "edit",
+            text:
+              qualify(a.text, action.scopeA) +
+              (b.key ? "" : "\nThe provider rule applies when " + action.scopeB.trim() + "."),
+          });
+          if (b.key)
+            this.review(b.key, b.version!, { kind: "edit", text: qualify(b.text, action.scopeB) });
+        } else {
+          const loser = action.choice === "keepA" ? b : a;
+          if (loser.key)
+            this.review(loser.key, loser.version!, {
+              kind: "flag",
+              reason: "Person chose the other rule in a contradiction.",
+            });
+        }
+        reminders.finish(conflict.id);
+        return;
+      }
       const target = main
         ? db
             .prepare(
@@ -342,7 +408,11 @@ function notes(db: NodeSqlite.DatabaseSync, project: string, now: number) {
       notes(db, typeof target === "string" ? target : project, now).review(key, version, action);
     },
     review(key: string, version: string, action: MemoryReviewAction) {
-      if ("text" in action) scanMemory(action.text);
+      if ("id" in action) throw new Error("Resolve through the chat card.");
+      if ("text" in action) {
+        if (action.text.length > 4096) throw new Error("Note is too long.");
+        scanMemory(action.text);
+      }
       const row = read(key);
       const current = db.prepare("select version from review where key=?").get(key)?.version ?? "";
       if (current !== version) throw new Error("The note changed.");
