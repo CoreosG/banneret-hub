@@ -19,13 +19,7 @@ import { ComposerBannerStack } from "../components/chat/ComposerBannerStack";
 import { V2LifecycleRow } from "../components/chat/V2LifecycleRow";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useSwitchBanner } from "./ProviderSwitchNotice";
-import {
-  expectInside,
-  expectNoPageScroll,
-  showViewport,
-  VIEWPORTS,
-  windowRect,
-} from "./testViewports";
+import { expectInside, expectNoPageScroll, forEachViewport, windowRect } from "./test/viewports";
 
 const ask = vi.hoisted(() => vi.fn());
 vi.mock(import("~/environments/primary/target"), async (original) => ({
@@ -268,57 +262,47 @@ describe("composer line", () => {
   });
 });
 
-// The shared list has no 1080p screen at double density.
-const SIZES = [...VIEWPORTS, { width: 1920, height: 1080, scale: 2, name: "1920x1080 at 2x" }];
-
-describe.each(SIZES)("layout at $name", (size) => {
-  it("keeps the row and the composer line inside the chat column, uncut", async () => {
-    using _answers = answering();
-    await showViewport(size);
-    const thread = `layout-${size.width}-${size.scale}`;
-    await using _screen = await render(
-      <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-        <div className="min-h-0 flex-1 overflow-y-auto px-4">
-          <div className="chat-content-lane pt-6" data-testid="lane">
-            <p className="ml-auto w-fit rounded-2xl bg-secondary px-4 py-2 text-sm">
-              Claude is close to its limit. Carry on with the retry change on Codex.
-            </p>
-            {row(thread, "claudeAgent", "codex")}
-            <p className="text-sm">I read the earlier work. I will finish the retry change.</p>
-          </div>
+forEachViewport("the provider switch notice stays inside the chat column", async (at) => {
+  using _answers = answering();
+  const thread = `layout-${at.id}`;
+  await using _screen = await render(
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4">
+        <div className="chat-content-lane pt-6" data-testid="lane">
+          <p className="ml-auto w-fit rounded-2xl bg-secondary px-4 py-2 text-sm">
+            Claude is close to its limit. Carry on with the retry change on Codex.
+          </p>
+          {row(thread, "claudeAgent", "codex")}
+          <p className="text-sm">I read the earlier work. I will finish the retry change.</p>
         </div>
-        <div className="px-4 pb-4">
-          <div className="chat-content-lane">
-            <ComposerLine thread={thread} from="codex" />
-          </div>
+      </div>
+      <div className="px-4 pb-4">
+        <div className="chat-content-lane">
+          <ComposerLine thread={thread} from="codex" />
         </div>
-      </div>,
-    );
-    pick(thread, "claudeAgent");
-    await expect.element(card()).toBeVisible();
-    const line = page.getByText("Switching to Claude Code starts a new session.");
-    await expect.element(line).toBeVisible();
-    await expect
-      .element(page.getByText("Claude Code follows its own instruction files."))
-      .toBeVisible();
+      </div>
+    </div>,
+  );
+  pick(thread, "claudeAgent");
+  await expect.element(card()).toBeVisible();
+  const line = page.getByText("Switching to Claude Code starts a new session.");
+  await expect.element(line).toBeVisible();
+  await expect
+    .element(page.getByText("Claude Code follows its own instruction files."))
+    .toBeVisible();
 
-    const lane = page.getByTestId("lane").element().getBoundingClientRect();
-    const notice = card().element() as HTMLElement;
-    expectInside(notice, windowRect());
-    expectInside(line.element(), windowRect());
-    const box = notice.getBoundingClientRect();
-    expect(box.left).toBeGreaterThanOrEqual(lane.left - 0.5);
-    expect(box.right).toBeLessThanOrEqual(lane.right + 0.5);
-    for (const part of [notice, ...notice.querySelectorAll<HTMLElement>("dt, dd, p")]) {
-      expect(part.scrollWidth).toBeLessThanOrEqual(part.clientWidth + 1);
-    }
-    // A cut banner offers its full text behind a button.
-    await expect.poll(() => page.getByRole("button", { name: /^Show/ }).query()).toBeNull();
-    expectNoPageScroll();
-    if (import.meta.env.VITE_ME13_SCREENSHOTS) {
-      await page.screenshot({
-        path: `${import.meta.env.VITE_ME13_SCREENSHOTS}/switch-${size.width}x${size.height}@${size.scale}x.png`,
-      });
-    }
-  });
+  const lane = page.getByTestId("lane").element().getBoundingClientRect();
+  const notice = card().element() as HTMLElement;
+  expectInside(notice, windowRect(), "the switch notice");
+  expectInside(line.element(), windowRect(), "the composer line");
+  const box = notice.getBoundingClientRect();
+  expect(box.left).toBeGreaterThanOrEqual(lane.left - 0.5);
+  expect(box.right).toBeLessThanOrEqual(lane.right + 0.5);
+  for (const part of [notice, ...notice.querySelectorAll<HTMLElement>("dt, dd, p")]) {
+    expect(part.scrollWidth).toBeLessThanOrEqual(part.clientWidth + 1);
+  }
+  // A cut banner offers its full text behind a button.
+  await expect.poll(() => page.getByRole("button", { name: /^Show/ }).query()).toBeNull();
+  expectNoPageScroll();
+  await at.screenshot();
 });
