@@ -165,6 +165,8 @@ export interface EnvironmentFeed {
   readonly leaseClocks?: BanneretFeedState["leaseClocks"];
   readonly sectionsKnown: boolean;
   readonly sections: ReadonlyArray<string>;
+  /** What Banneret does not own at this company; absent for a relay without `owners`. */
+  readonly elsewhere?: BanneretFeedState["elsewhere"];
   /** From the last `needs.changed`; null until one arrives. */
   readonly needsCount: number | null;
   readonly today: BanneretFeedToday | null;
@@ -431,6 +433,7 @@ function applyState(target: RelayTarget, state: BanneretFeedState) {
     boardChannels: state.boardChannels,
     sectionsKnown: state.sectionsKnown,
     sections: state.sections,
+    elsewhere: state.elsewhere,
     dashboards: state.dashboards,
     leaseClocks: state.leaseClocks,
     needsCount: state.needsCount,

@@ -1,7 +1,7 @@
 import type { OrchestrationV2DomainEvent } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
-import { memoryAccess } from "./access.ts";
+import { hubServes, memoryAccess } from "./access.ts";
 import { personalMessage } from "./corrections.ts";
 
 export const nudge = Effect.fn("BanneretMemory.nudge")(
@@ -16,10 +16,9 @@ export const nudge = Effect.fn("BanneretMemory.nudge")(
         event.payload.delegatedTaskId &&
         ["completed", "failed", "interrupted"].includes(event.payload.status));
     if (!ended && !message) return;
-    const access = yield* memoryAccess(
-      event.threadId,
-      yield* (yield* ServerEnvironment).getEnvironmentId,
-    );
+    const environment = yield* (yield* ServerEnvironment).getEnvironmentId;
+    if (!(yield* hubServes(event.threadId, environment, "memory"))) return;
+    const access = yield* memoryAccess(event.threadId, environment);
     if (access.orchestrator) yield* access.open((s) => s.nudge(event.threadId, message));
   },
   (effect) => Effect.ignoreCause(effect),

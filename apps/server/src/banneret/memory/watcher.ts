@@ -13,7 +13,7 @@ import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import * as TextGenerators from "../../textGeneration/TextGenerators.ts";
 import { providerRules } from "./providerRules.ts";
-import { memoryAccess } from "./access.ts";
+import { hubServes, memoryAccess } from "./access.ts";
 import { personalMessage } from "./corrections.ts";
 import {
   candidates,
@@ -71,6 +71,7 @@ export const setupWatcher = Effect.gen(function* () {
         )
       )
         return [];
+      if (!(yield* hubServes(thread, environment, "memory"))) return [];
       const access = yield* memoryAccess(thread, environment);
       if (!access.orchestrator) return [];
       const setting = yield* access.open((s) => s.reminders(thread).setting(), "watcher");

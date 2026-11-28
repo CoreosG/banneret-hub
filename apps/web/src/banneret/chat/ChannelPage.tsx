@@ -38,6 +38,7 @@ import {
 import { ChannelSettings } from "./ChannelSettings";
 import { chatHref } from "./ChannelRows";
 import { PostToGitHub } from "./PostToGitHub";
+import { OwnedElsewhere } from "../OwnedElsewhere";
 import { Markdown } from "./Markdown";
 
 type Person = Pick<Extract<ChatMember, { kind: "person" }>, "id" | "login">;
@@ -58,7 +59,11 @@ type View = {
 export function ChannelPage({ id, root, focus }: Omit<View, "enterprise">) {
   const enterprise = useEnterpriseFeed();
   if (!enterprise?.feed.sectionsKnown || !enterprise.feed.sections.includes("chat"))
-    return <QuietLine fact="This page is unavailable." />;
+    return enterprise?.feed.elsewhere?.chat ? (
+      <OwnedElsewhere capabilities={["chat"]} />
+    ) : (
+      <QuietLine fact="This page is unavailable." />
+    );
   return (
     <ChannelView
       key={relayKey(enterprise.target) + "/" + id + "/" + (focus ?? "")}

@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { ThreadId, EnvironmentId } from "@t3tools/contracts";
 import { BanneretEnrolment } from "../relay/Enrolment.ts";
+import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
 import { memoryAccess, unavailable } from "../memory/access.ts";
 import { defaultText } from "./defaults.ts";
 import { parseSkill, skillName } from "./format.ts";
@@ -67,8 +68,12 @@ const advertised = Schema.is(
 export const skillCatalog = Effect.fn("BanneretSkills.catalog")(
   function* (thread: ThreadId, environment: EnvironmentId) {
     const access = yield* memoryAccess(thread, environment, "skills");
+    // Skills owned elsewhere leave only the person's own and the checkout's.
+    const registry = !(
+      access.origin && (yield* (yield* BanneretRelayFeed).elsewhere(access.origin))?.skills
+    );
     let company: Skill[] = [];
-    if (access.origin) {
+    if (access.origin && registry) {
       const relay = yield* (yield* BanneretEnrolment).relay(access.origin);
       if (!relay) return yield* unavailable();
       const caps = yield* relay.signedGet("/relay/v1/capabilities");
@@ -108,7 +113,7 @@ export const skillCatalog = Effect.fn("BanneretSkills.catalog")(
         })),
     );
     const skills = mergeSkills(
-      defaults,
+      registry ? defaults : [],
       company,
       project,
       notes.filter((s) => s.layer === "project"),

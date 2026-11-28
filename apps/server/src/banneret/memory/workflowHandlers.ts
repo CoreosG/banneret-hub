@@ -7,7 +7,7 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import * as Scheduler from "../../scheduling/Scheduler.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { makePauseStore } from "../PauseStore.ts";
-import { memoryAccess, unavailable } from "./access.ts";
+import { hubServes, memoryAccess, unavailable } from "./access.ts";
 import { dispatchWorkflowReview, readWorkflowJudgment } from "./workflowModel.ts";
 import { memoryEnabled } from "./settings.ts";
 
@@ -17,7 +17,9 @@ const mainThreads = readDesignations.pipe(
   ]),
 );
 const accessMain = Effect.fn(function* (id: ThreadId) {
-  const access = yield* memoryAccess(id, yield* (yield* ServerEnvironment).getEnvironmentId);
+  const environment = yield* (yield* ServerEnvironment).getEnvironmentId;
+  if (!(yield* hubServes(id, environment, "memory"))) return yield* unavailable();
+  const access = yield* memoryAccess(id, environment);
   if (!access.main || (access.enterprise && !access.origin)) return yield* unavailable();
   return access;
 });

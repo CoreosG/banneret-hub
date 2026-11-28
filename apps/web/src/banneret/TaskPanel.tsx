@@ -52,6 +52,7 @@ import { RelativeTime } from "./ui/RelativeTime";
 import { StatusPill } from "./ui/StatusPill";
 import { TEXT_DIALOG_TITLE, TYPE, toneProps, type Tone } from "./ui/tokens";
 import { useTaskIssueRef } from "./useTaskIssueRef";
+import { OwnedElsewhere } from "./OwnedElsewhere";
 
 const CHECK_TONES: Readonly<Record<string, Tone>> = {
   passing: "ok",
@@ -454,6 +455,7 @@ function TaskHeader(props: {
         </p>
       )}
       {props.leases ? <LeaseNoticeLine entry={props.lease} /> : null}
+      <OwnedElsewhere capabilities={["tasks"]} />
       {/* Without any project here the link row below already says so. */}
       {props.leases &&
       routeProblem(props.route) !== null &&

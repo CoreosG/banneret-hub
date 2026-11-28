@@ -710,7 +710,7 @@ export const layerWith = (options: Partial<LeaseServiceOptions>) =>
   Layer.effect(LeaseService, make(options));
 
 export const layer = layerWith({}).pipe(
-  Layer.provide(Layer.mergeAll(CommentEdits.layer, LeaseTracker.layer, Orchestrator.lifecycle)),
+  Layer.provide(Layer.mergeAll(CommentEdits.layer, LeaseTracker.layer)),
 );
 
 /** Handlers for the lease RPCs, spread into the WebSocket handler group. */

@@ -9,7 +9,7 @@ import { defaults, skillCatalog } from "../skills/catalog.ts";
 import * as Schema from "effect/Schema";
 import { knowledgeRevision } from "../memory/KbIndex.ts";
 import { memoryEnabled } from "../memory/settings.ts";
-import { memoryAccess, offersHubMemory } from "../memory/access.ts";
+import { hubServes, memoryAccess, offersSkillProposals } from "../memory/access.ts";
 import * as SandboxHandoff from "./SandboxHandoff.ts";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
@@ -98,33 +98,45 @@ const offeredOnly = McpServer.visibility(
           return yield* mayPause(thread.threadId, caller.environmentId).pipe(
             Effect.provideContext(memoryContext),
           );
-        if (
-          target === "banneret_skills_propose" &&
-          !(yield* offersHubMemory(thread.threadId, caller.environmentId).pipe(
-            Effect.provideContext(memoryContext),
-          ))
-        )
-          return false;
-        if (skillNames.includes(target) || target.startsWith("skill://"))
-          return yield* memoryAccess(thread.threadId, caller.environmentId, "skills").pipe(
-            Effect.as(true),
+        const serves = (capability: "memory" | "skills" | "search") =>
+          hubServes(thread.threadId, caller.environmentId, capability).pipe(
             Effect.provideContext(memoryContext),
           );
+        if (target === "banneret_skills_propose") {
+          if (
+            !(yield* offersSkillProposals(thread.threadId, caller.environmentId).pipe(
+              Effect.provideContext(memoryContext),
+            ))
+          )
+            return false;
+        }
+        if (skillNames.includes(target) || target.startsWith("skill://"))
+          return (
+            (yield* serves("skills")) &&
+            (yield* memoryAccess(thread.threadId, caller.environmentId, "skills").pipe(
+              Effect.as(true),
+              Effect.provideContext(memoryContext),
+            ))
+          );
         if (target === "banneret_kb_search")
-          return yield* memoryAccess(thread.threadId, caller.environmentId).pipe(
-            Effect.flatMap((a) => a.open((s) => s.folders().length > 0)),
-            Effect.provideContext(memoryContext),
+          return (
+            (yield* serves("search")) &&
+            (yield* memoryAccess(thread.threadId, caller.environmentId).pipe(
+              Effect.flatMap((a) => a.open((s) => s.folders().length > 0)),
+              Effect.provideContext(memoryContext),
+            ))
           );
         if (memoryNames.includes(target)) {
           if (!(yield* memoryEnabled.pipe(Effect.provideContext(memoryContext)))) return false;
-          return yield* offersHubMemory(thread.threadId, caller.environmentId).pipe(
-            Effect.provideContext(memoryContext),
-          );
+          return yield* serves("memory");
         }
         const offered = yield* relays.offered(thread.threadId);
-        if (target === JOIN_URI && offered.size === 0)
+        if (target === JOIN_URI && offered.size === 0) {
+          // A company that owns everything itself still tells its agents who owns what.
+          if (yield* relays.elsewhere(thread.threadId)) return true;
           return yield* memoryAccess(thread.threadId, caller.environmentId, "skills").pipe(
-            Effect.as(true),
+            Effect.andThen(serves("skills")),
+            Effect.filterOrFail((offers) => offers),
             Effect.catch(() =>
               memoryAccess(thread.threadId, caller.environmentId).pipe(
                 Effect.map((a) => a.orchestrator),
@@ -132,6 +144,7 @@ const offeredOnly = McpServer.visibility(
             ),
             Effect.provideContext(memoryContext),
           );
+        }
         return taskPrompts.some((p) => p.name === target)
           ? offered.has("banneret_lease_take")
           : target === JOIN_URI
@@ -201,25 +214,32 @@ const joinResource = Layer.effectDiscard(
           return yield* new McpSchema.InvalidParams({ message: "A Hub thread is required." });
         const id = scope.thread.threadId;
         const offered = yield* relays.offered(id);
-        const relay = offered.size ? yield* relays.forThread(id) : null;
-        const index = yield* memoryAccess(id, scope.environmentId).pipe(
-          Effect.provideContext(memoryContext),
-          Effect.flatMap((access) =>
-            access.orchestrator ? access.open((store) => store.index()) : Effect.succeed(""),
-          ),
-          Effect.orElseSucceed(() => ""),
-        );
-        const skillsOffered = yield* memoryAccess(id, scope.environmentId, "skills").pipe(
-          Effect.as(true),
-          Effect.orElseSucceed(() => false),
-          Effect.provideContext(memoryContext),
-        );
+        const elsewhere = yield* relays.elsewhere(id);
+        const relay = offered.size || elsewhere ? yield* relays.forThread(id) : null;
+        const serves = (capability: "memory" | "skills") =>
+          hubServes(id, scope.environmentId, capability).pipe(Effect.provideContext(memoryContext));
+        const index = (yield* serves("memory"))
+          ? yield* memoryAccess(id, scope.environmentId).pipe(
+              Effect.provideContext(memoryContext),
+              Effect.flatMap((access) =>
+                access.orchestrator ? access.open((store) => store.index()) : Effect.succeed(""),
+              ),
+              Effect.orElseSucceed(() => ""),
+            )
+          : "";
+        const skillsOffered =
+          (yield* serves("skills")) &&
+          (yield* memoryAccess(id, scope.environmentId, "skills").pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+            Effect.provideContext(memoryContext),
+          ));
         if (!relay && !index && !skillsOffered)
           return yield* new McpSchema.InvalidParams({
             message: "No join resource for this thread.",
           });
         return [
-          relay && joinText({ company: relay.company, login: relay.me.login }),
+          relay && joinText({ company: relay.company, login: relay.me.login, elsewhere, offered }),
           !relay && skillsOffered && skillRules,
           index,
         ]

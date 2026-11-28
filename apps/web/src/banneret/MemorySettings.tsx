@@ -1,6 +1,7 @@
 import { PauseSetting } from "./Pause";
 import { useSearchableSetting } from "../components/settings/settingsSearch";
 import { MemoryImportSetting } from "./MemoryTransfer";
+import { OwnedElsewhere } from "./OwnedElsewhere";
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -19,6 +20,93 @@ const write = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:write-memory-setting",
   tag: "memory.setSetting",
 });
+const readSkills = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "banneret:read-skills-setting",
+  tag: "skills.getSetting",
+});
+const writeSkills = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "banneret:write-skills-setting",
+  tag: "skills.setSetting",
+});
+
+/** One machine's saved switch: read when its row mounts, replaced only by the server's answer. */
+function useMachineSwitch(
+  environmentId: EnvironmentId,
+  commands: { readonly read: typeof read; readonly write: typeof write },
+  failures: { readonly read: string; readonly save: string },
+) {
+  const writable = useAtomValue(commands.write.permissionAtom(environmentId));
+  const [enabled, setEnabled] = useState<boolean>();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- load this environment's saved setting when its row mounts
+  useEffect(() => {
+    let current = true;
+    void runAtomCommand(appAtomRegistry, commands.read, { environmentId, input: {} }).then(
+      (result) => {
+        if (!current) return;
+        if (result._tag === "Success") setEnabled(result.value);
+        else setError(failures.read);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [environmentId, commands.read, failures.read]);
+  async function save(next: boolean) {
+    setSaving(true);
+    const result = await runAtomCommand(appAtomRegistry, commands.write, {
+      environmentId,
+      input: { enabled: next },
+    });
+    if (result._tag === "Success") {
+      setEnabled(result.value);
+      setError(undefined);
+    } else setError(failures.save);
+    setSaving(false);
+  }
+  return {
+    writable,
+    status: error,
+    checked: enabled ?? false,
+    disabled: !writable || saving || enabled === undefined,
+    onCheckedChange: save,
+  };
+}
+
+const memoryCommands = { read, write };
+const memoryFailures = {
+  read: "Could not read memory setting.",
+  save: "Could not save memory setting.",
+};
+const skillsCommands = { read: readSkills, write: writeSkills };
+const skillsFailures = {
+  read: "Could not read skills setting.",
+  save: "Could not save skills setting.",
+};
+
+function SkillsRow({ environmentId, label }: { environmentId: EnvironmentId; label: string }) {
+  const { status, checked, disabled, onCheckedChange } = useMachineSwitch(
+    environmentId,
+    skillsCommands,
+    skillsFailures,
+  );
+  return (
+    <SettingsRow
+      title={`Banneret skills on ${label}`}
+      description={`Offers Banneret's skill tools to Solo chats on ${label}. Turn this off when your own server provides skills. Company chats follow the company's relay.`}
+      status={status}
+      control={
+        <Switch
+          aria-label={`Offer Banneret skills on ${label}`}
+          disabled={disabled}
+          checked={checked}
+          onCheckedChange={onCheckedChange}
+        />
+      }
+    />
+  );
+}
 
 function MemoryRow({
   environmentId,
@@ -30,48 +118,25 @@ function MemoryRow({
   first: boolean;
 }) {
   const setting = useSearchableSetting();
-  const writable = useAtomValue(write.permissionAtom(environmentId));
-  const [enabled, setEnabled] = useState<boolean>();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- load this environment's saved setting when its row mounts
-  useEffect(() => {
-    let current = true;
-    void runAtomCommand(appAtomRegistry, read, { environmentId, input: {} }).then((result) => {
-      if (!current) return;
-      if (result._tag === "Success") setEnabled(result.value);
-      else setError("Could not read memory setting.");
-    });
-    return () => {
-      current = false;
-    };
-  }, [environmentId]);
-  async function save(next: boolean) {
-    setSaving(true);
-    const result = await runAtomCommand(appAtomRegistry, write, {
-      environmentId,
-      input: { enabled: next },
-    });
-    if (result._tag === "Success") {
-      setEnabled(result.value);
-      setError(undefined);
-    } else setError("Could not save memory setting.");
-    setSaving(false);
-  }
+  const { writable, status, checked, disabled, onCheckedChange } = useMachineSwitch(
+    environmentId,
+    memoryCommands,
+    memoryFailures,
+  );
   return (
     <SettingsRow
       title={`${setting("banneret-memory").title} on ${label}`}
       description={`Adds Banneret's shared memory to Hub chats on ${label}. Claude and Codex keep their own memory.`}
       id={first ? setting("banneret-memory").id : undefined}
-      status={error}
+      status={status}
       control={
         <>
           {writable && <MemoryImportSetting environmentId={environmentId} />}
           <Switch
             aria-label={`Use Banneret memory on ${label}`}
-            disabled={!writable || saving || enabled === undefined}
-            checked={enabled ?? false}
-            onCheckedChange={save}
+            disabled={disabled}
+            checked={checked}
+            onCheckedChange={onCheckedChange}
           />
         </>
       }
@@ -92,6 +157,7 @@ export function MemorySettings() {
         ))}
       </SettingsSection>
       <SettingsSection {...setting("memory")}>
+        <OwnedElsewhere capabilities={["memory", "skills", "search"]} className="m-3" />
         {connectedEnvironments.map(({ environmentId, label }, index) => (
           <MemoryRow
             first={index === 0}
@@ -99,6 +165,9 @@ export function MemorySettings() {
             environmentId={environmentId}
             label={label}
           />
+        ))}
+        {connectedEnvironments.map(({ environmentId, label }) => (
+          <SkillsRow key={environmentId} environmentId={environmentId} label={label} />
         ))}
       </SettingsSection>
     </>

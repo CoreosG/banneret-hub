@@ -4,6 +4,7 @@ import { RoleRef, Admission } from "./banneretChat.ts";
 // views below; clients never see the token or key. Relay failures are data, not errors, so a screen
 // always has the last good answer and its age to show.
 import * as Rpc from "effect/rpc/Rpc";
+import { ElsewhereOwners } from "./banneretCapabilityOwners.ts";
 import * as Schema from "effect/Schema";
 
 import {
@@ -658,8 +659,10 @@ export const BanneretFeedState = Schema.Struct({
   leaseClocks: Schema.optional(
     Schema.Struct({ staleSeconds: Schema.Number, expirySeconds: Schema.Number }),
   ),
-  /** The section kinds the relay advertises. */
+  /** The section kinds the relay advertises, less those of capabilities Banneret does not own. */
   sections: Schema.Array(Schema.String),
+  /** What Banneret does not own; absent for a relay without `owners` or before it is read. */
+  elsewhere: Schema.optional(ElsewhereOwners),
   /** The open needs-you count from the last `needs.changed`, if one arrived. */
   needsCount: Schema.NullOr(Schema.Number),
   boardChannels: Schema.optional(Schema.Record(Schema.String, Schema.String)),
