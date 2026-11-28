@@ -5,13 +5,12 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
+import { buildSidebarProjectSnapshots } from "../banneret/sidebarProjectSnapshots";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
 import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 import { useWorkspaceScopedProjects } from "../banneret/useWorkspaceScopedProjects";
-import { labelNoProjectTwins } from "../banneret/labelNoProjectTwins";
 
 export function useSidebarProjectGroups() {
   const projects = useWorkspaceScopedProjects(useProjects());
@@ -47,7 +46,5 @@ export function useSidebarProjectGroups() {
     },
     resolve,
   );
-  return labelNoProjectTwins(
-    sortSidebarV2ProjectGroups(unsortedGroups, threads, sortOrder, delegatedUnderParent),
-  );
+  return sortSidebarV2ProjectGroups(unsortedGroups, threads, sortOrder, delegatedUnderParent);
 }

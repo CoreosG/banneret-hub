@@ -1,7 +1,11 @@
-// Banneret Hub: every machine's No project home is one sidebar group. Another group can still read
-// "No project": a folder its server no longer uses as the home (a database brought from another
-// data directory), or a machine whose config names no home. Such twins say where they are.
-import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
+// Banneret Hub: the sidebar's project snapshots. Upstream puts every machine's No project home in
+// one group. Another group can still read "No project": a folder its server no longer uses as the
+// home (such as a database brought from another data directory), or a machine whose config names no
+// home. Such twins say where they are.
+import {
+  buildSidebarProjectSnapshots as buildUpstreamSnapshots,
+  type SidebarProjectSnapshot,
+} from "../sidebarProjectGrouping";
 
 /** The title the server gives a No project home. */
 const HOME_TITLE = "No project";
@@ -16,7 +20,7 @@ const machinesOf = (group: Group) =>
     .toSorted()
     .join(", ");
 
-export function labelNoProjectTwins<TGroup extends Group>(groups: ReadonlyArray<TGroup>): TGroup[] {
+function labelNoProjectTwins<TGroup extends Group>(groups: ReadonlyArray<TGroup>): TGroup[] {
   const twins = groups.filter((group) => group.isScratch || group.displayName === HOME_TITLE);
   if (twins.length < 2) return [...groups];
   return groups.map((group) => {
@@ -28,3 +32,6 @@ export function labelNoProjectTwins<TGroup extends Group>(groups: ReadonlyArray<
     return where === null ? group : { ...group, displayName: `${group.displayName} · ${where}` };
   });
 }
+
+export const buildSidebarProjectSnapshots = (...args: Parameters<typeof buildUpstreamSnapshots>) =>
+  labelNoProjectTwins(buildUpstreamSnapshots(...args));
