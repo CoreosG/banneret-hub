@@ -53,6 +53,7 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
+import { makeHandoffs } from "../chat/Handoffs.ts";
 import { makeDeliveries } from "../chat/Deliveries.ts";
 import { promote } from "../chat/Promote.ts";
 import { SourceControlDrivers } from "../../sourceControl/builtInDrivers.ts";
@@ -289,6 +290,10 @@ const needsItem = (value: unknown, labelFor: LabelFor): BanneretFeedNeedsItem | 
     ...(typeof source?.count === "number" &&
       Number.isInteger(source.count) &&
       source.count > 0 && { count: source.count }),
+    ...optional("handoffId", text(source?.handoffId, 64)),
+    ...(source?.step === "waiting_release" || source?.step === "waiting_take"
+      ? { step: source.step }
+      : {}),
     ...optional("conversationId", text(source?.conversationId, 64)),
     ...optional("handleId", text(source?.handleId, 64)),
     ...(isChatAsk(source?.ask) ? { ask: source.ask } : {}),
@@ -584,6 +589,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   layerScope: Scope.Scope,
   agents?: Effect.Success<typeof makeDeliveries>,
   github?: SourceControlDriverInstance,
+  handoffs?: Effect.Success<typeof makeHandoffs>,
 ) {
   const changes = yield* PubSub.unbounded<BanneretFeedState>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -1527,20 +1533,42 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       Effect.forever(Effect.sleep("10 seconds").pipe(Effect.andThen(syncAgents))),
       layerScope,
     );
+  if (handoffs)
+    yield* Effect.forkIn(
+      Effect.forever(
+        Effect.sleep("5 seconds").pipe(
+          Effect.andThen(
+            Effect.suspend(() =>
+              joined && chatFlags.includes("handoffs")
+                ? handoffs.reconcile(enrolment, readTask)
+                : Effect.void,
+            ),
+          ),
+        ),
+      ),
+      layerScope,
+    );
   const service: RelayFeedInstance = {
     chat: (action) =>
       joined && sections.includes(action.kind === "roles" ? "roles" : "chat")
-        ? action.kind === "threadChat"
-          ? agents && chatFlags.includes("agents")
-            ? agents.settings(enrolment, action)
+        ? action.kind === "offerHandoff" ||
+          action.kind === "acceptHandoff" ||
+          action.kind === "advanceHandoff" ||
+          action.kind === "withdrawHandoff"
+          ? handoffs && chatFlags.includes("handoffs")
+            ? handoffs.act(enrolment, readTask, action)
             : Effect.succeed(chatUnavailable)
-          : action.kind === "promote"
-            ? chatFlags.includes("promote")
-              ? promote(enrolment, github, action)
+          : action.kind === "threadChat"
+            ? agents && chatFlags.includes("agents")
+              ? agents.settings(enrolment, action)
               : Effect.succeed(chatUnavailable)
-            : action.kind === "search" && !chatFlags.includes("search")
-              ? Effect.succeed(chatUnavailable)
-              : channelAction(enrolment.signedChat, action)
+            : action.kind === "promote"
+              ? chatFlags.includes("promote")
+                ? promote(enrolment, github, action)
+                : Effect.succeed(chatUnavailable)
+              : action.kind === "search" && !chatFlags.includes("search")
+                ? Effect.succeed(chatUnavailable)
+                : channelAction(enrolment.signedChat, action)
         : Effect.succeed(chatUnavailable),
     today: readToday,
     needs: readNeeds,
@@ -1579,6 +1607,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   overrides: Partial<RelayFeedOptions> = {},
   agents?: Effect.Success<typeof makeDeliveries>,
   github?: SourceControlDriverInstance,
+  handoffs?: Effect.Success<typeof makeHandoffs>,
 ) {
   const options = { ...DEFAULT_OPTIONS, ...overrides };
   const enrolment = yield* BanneretEnrolment;
@@ -1602,6 +1631,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           layerScope,
           agents,
           github,
+          handoffs,
         );
         feeds.set(relay.origin, added);
         return added;
@@ -1685,7 +1715,12 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const agents = yield* makeDeliveries;
     const drivers = yield* SourceControlDrivers;
-    return yield* make({}, agents, drivers.find((d) => d.driver.kind === "github")?.instance);
+    return yield* make(
+      {},
+      agents,
+      drivers.find((d) => d.driver.kind === "github")?.instance,
+      yield* makeHandoffs,
+    );
   }),
 );
 

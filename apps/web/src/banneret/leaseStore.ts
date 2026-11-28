@@ -341,6 +341,7 @@ export function openReleaseDialog(target: ReleaseTarget | null): void {
 
 /** A take, finish or withdraw waiting for the person to pick the machine; null when none is. */
 export interface LeaseConfirmTarget {
+  readonly handoffId?: string;
   readonly relay: RelayTarget;
   readonly taskId: string;
   readonly title: string;

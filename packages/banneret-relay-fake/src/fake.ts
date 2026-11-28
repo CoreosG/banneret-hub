@@ -2579,7 +2579,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const handoffs = new Map<string, Handoff>();
   const offerKeys = new Map<string, string>();
   const stalledNotified = new Set<string>();
-  const offerThreads = new Map<string, string>();
   const stepSince = new Map<string, number>();
   const wakeDefaults = new Map<string, ChatHandle["wake"]>();
   type Channel = {
@@ -3039,7 +3038,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return next;
   }
   function handoffEvent(h: Handoff, event: string, text: string) {
-    const root = messages.get(offerThreads.get(h.id) ?? taskThreads.get(h.taskId) ?? "");
+    const root = messages.get(h.threadRootId ?? taskThreads.get(h.taskId) ?? "");
     if (root) systemMessage(channels.get(root.conversationId)!, h.taskId, event, text, root);
   }
   function settleHandoffs() {
@@ -4168,6 +4167,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           const now = Date.now();
           const h: Handoff = {
             id: randomId("ho"),
+            fromMachineId: caller.machine.id,
+            ...(rootId && { threadRootId: rootId }),
             taskId: task.id,
             receipts: input.receipt ? [input.receipt] : [],
             to: personRef(to),
@@ -4184,33 +4185,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           };
           handoffs.set(h.id, h);
           offerKeys.set(key, h.id);
-          if (rootId) offerThreads.set(h.id, rootId);
           handoffEvent(
             h,
             "handoff_offered",
             person.login + " offered the task to " + to.login + ".",
           );
-          const policy = policyFor(to.id);
-          if (
-            policy.default !== "off" &&
-            [...machines.values()].some(
-              (m) => m.personId === to.id && m.revokedAt === null && usageAllows(policy, m.id),
-            ) &&
-            !paused.has(to.id) &&
-            !companyPaused &&
-            policy.auto.some(
-              (r) =>
-                "person" in r.from &&
-                r.from.person.id === person.id &&
-                r.kinds.some((k) => k === "handoff"),
-            )
-          )
-            moveHandoff(
-              h,
-              { state: "accepted", step: "waiting_release" },
-              "Auto-accepted by " + to.login + "'s rule.",
-            );
-          else notifyWork(to.id);
+          notifyWork(to.id);
           return send("Handoff", handoffs.get(h.id));
         }
         if (method === "POST" && id && action) {
@@ -4232,6 +4212,28 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (input.receipt) owned(input.receipt.handle);
             if (input.machineId && machines.get(input.machineId)?.personId !== person.id)
               throw new RelayError("forbidden", "Choose your own machine.");
+            if (input.byRule) {
+              const policy = policyFor(person.id);
+              if (
+                !input.machineId ||
+                input.machineId !== caller.machine.id ||
+                policy.default === "off" ||
+                paused.has(person.id) ||
+                companyPaused ||
+                !usageAllows(policy, input.machineId) ||
+                !policy.auto.some(
+                  (r) =>
+                    "person" in r.from &&
+                    r.from.person.id === h.from.id &&
+                    r.kinds.some((k) => k === "handoff"),
+                )
+              ) {
+                throw new RelayError(
+                  "forbidden",
+                  "Automatic acceptance is unavailable. The offer still awaits your decision.",
+                );
+              }
+            }
             return send(
               "Handoff",
               moveHandoff(
@@ -4242,12 +4244,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                   state: "accepted",
                   step: "waiting_release",
                 },
-                person.login + " accepted the hand-off.",
+                input.byRule
+                  ? "Auto-accepted by " + person.login + "'s rule."
+                  : person.login + " accepted the hand-off.",
               ),
             );
           }
           if (action === "decline" || action === "withdraw") {
             const input = parseJson(body, "HandoffReason") as { reason?: string };
+            if (action === "decline" && !input.reason?.trim())
+              throw new RelayError("malformed", "Give a reason for declining.");
             return send(
               "Handoff",
               moveHandoff(

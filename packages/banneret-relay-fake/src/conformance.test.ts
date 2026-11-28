@@ -42,7 +42,11 @@ beforeAll(async () => {
   fake = await startFakeRelay({
     autoApprove: false,
     retryAfterMs: 0,
-    chat: { agentAsks: { enabled: true }, handoffs: { enabled: true }, reviews: { enabled: true } },
+    chat: {
+      agentAsks: { enabled: true },
+      handoffs: { enabled: true, stallAfter: "1s" },
+      reviews: { enabled: true },
+    },
     skills: [
       {
         name: "publish",
@@ -3469,6 +3473,86 @@ describe("chat contract", () => {
       items: expect.arrayContaining([expect.objectContaining({ id: to.id, paused: true })]),
     });
   });
+  it("checks the named hand-off rule again on the receiver machine and leaves a stalled take actionable", async () => {
+    const { asker, answerer, chat, from, to, threadRootId } = await sharedAskThread();
+    const taskId = "task_" + randomText(5);
+    const seed = (holder?: string) =>
+      client.control("/board/seed", {
+        tasks: [
+          {
+            id: taskId,
+            title: "Hand-off",
+            projectKey: "example-org/example-app",
+            ...(holder && { holder }),
+          },
+        ],
+      });
+    await seed(asker.login);
+    const settings = (await call(answerer, "GET", chat + "me/settings")).body as {
+      agentAsks: object;
+    };
+    const rule = (allow: boolean) =>
+      call(answerer, "PUT", chat + "me/settings", {
+        ...settings,
+        agentAsks: {
+          ...settings.agentAsks,
+          auto: allow ? [{ from: { person: from.owner }, kinds: ["handoff"] }] : [],
+        },
+      });
+    await rule(true);
+    const offer = await call(asker, "POST", chat + "handoffs", {
+      taskId,
+      to: to.owner,
+      threadRootId,
+      note: { goal: "Tests", done: "Unit", next: "Browser" },
+      key: "offer",
+    });
+    expect(offer.body).toMatchObject({ state: "offered" });
+    const id = (offer.body as { id: string }).id;
+    const accept = () =>
+      call(answerer, "POST", chat + "handoffs/" + id + "/accept", {
+        byRule: true,
+        machineId: answerer.machineId,
+      });
+    await rule(false);
+    expectError(await accept(), 403, "forbidden");
+    await rule(true);
+    expect((await accept()).body).toMatchObject({
+      state: "accepted",
+      step: "waiting_release",
+      machineId: answerer.machineId,
+    });
+    expect(
+      JSON.stringify((await call(answerer, "GET", chat + "threads/" + threadRootId)).body),
+    ).toContain("Auto-accepted by " + answerer.login + "'s rule.");
+    await seed();
+    const offers = () => call(answerer, "GET", chat + "handoffs");
+    expect((await offers()).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id, state: "accepted", step: "waiting_take" }),
+      ]),
+    });
+    if (!external)
+      await expect
+        .poll(async () => (await call(answerer, "GET", "/relay/v1/needs")).body, { timeout: 5000 })
+        .toMatchObject({
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              kind: "handoff_stalled",
+              handoffId: id,
+              step: "waiting_take",
+            }),
+          ]),
+        });
+    const third = await enrol();
+    await seed(third.login);
+    expect((await offers()).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id, state: "closed", outcome: "lost" }),
+      ]),
+    });
+  });
+
   it("keeps the reviewer independent and derives hand-off progress from the task holder", async () => {
     const { asker, answerer, chat, to, newAsk } = await sharedAskThread();
     const taskId = "task_" + randomText(5),

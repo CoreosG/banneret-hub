@@ -952,7 +952,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(RemoteDelegation.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   // Links agents ask for: shown in a thread from /mcp, answered over WebSocket.
   Layer.provide(PeerLinkRequests.layer),
-  Layer.provide(Layer.merge(BanneretRelayFeed.layer, LeaseService.layer)),
+  Layer.provide(BanneretRelayFeed.layer.pipe(Layer.provideMerge(LeaseService.layer))),
   Layer.provide(BanneretEnrolment.layer.pipe(Layer.provide(BanneretFacts.layer))),
   // Share the service so HTTP/WS clients single-flight reads and invalidate each other's cached patches.
   Layer.provide(layerPullRequestService),

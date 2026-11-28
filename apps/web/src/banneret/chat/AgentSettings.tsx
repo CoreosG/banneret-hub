@@ -87,6 +87,49 @@ export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
           }
         />
       )}
+      {settings && enterprise.feed.chatFlags?.includes("handoffs") && (
+        <fieldset className="grid gap-1">
+          <legend>Automatically accept hand-offs from</legend>
+          {enterprise.feed.team?.value?.people
+            .filter((p) => p.id !== enterprise.enrolment.me?.id)
+            .map((p) => {
+              const rules = settings.agentAsks.auto;
+              const checked = rules.some(
+                (r) =>
+                  "person" in r.from &&
+                  r.from.person.id === p.id &&
+                  r.kinds.some((k) => k === "handoff"),
+              );
+              return (
+                <label key={p.id}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => {
+                      const auto: typeof rules = checked
+                        ? rules
+                            .map((r) =>
+                              "person" in r.from && r.from.person.id === p.id
+                                ? { from: r.from, kinds: r.kinds.filter((k) => k !== "handoff") }
+                                : r,
+                            )
+                            .filter((r) => r.kinds.length)
+                        : [
+                            ...rules,
+                            { from: { person: { id: p.id, login: p.login } }, kinds: ["handoff"] },
+                          ];
+                      void save({
+                        kind: "setDmSettings",
+                        settings: { ...settings, agentAsks: { ...settings.agentAsks, auto } },
+                      });
+                    }}
+                  />{" "}
+                  {p.login}
+                </label>
+              );
+            })}
+        </fieldset>
+      )}
       {(error || setting.error) && <span role="alert">{error || setting.error}</span>}
     </fieldset>
   );

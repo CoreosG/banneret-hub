@@ -38,6 +38,9 @@ import { follow, hasHandoff } from "./SandboxHandoff.ts";
 import { poolResources, sandboxBooking, BanneretEnrolment, relayHash } from "../relay/Enrolment.ts";
 import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
 import { type AgentRelay, BanneretAgentRelays } from "./AgentRelays.ts";
+import { verifyPushedWork } from "../chat/pushedWork.ts";
+import { ProjectService } from "../../project/ProjectService.ts";
+import { handoffNote } from "../chat/handoffNote.ts";
 import { chatClient, invalid } from "../chat/AgentChat.ts";
 import { AgentToolkit } from "./tools.ts";
 
@@ -121,6 +124,7 @@ const make = Effect.gen(function* () {
   const enrolment = yield* BanneretEnrolment;
   const relays = yield* BanneretAgentRelays;
   const feed = yield* BanneretRelayFeed;
+  const projects = yield* Effect.serviceOption(ProjectService);
   const leases = yield* LeaseService;
   const issues = yield* IssueService.IssueService;
   const threadIssues = yield* ThreadIssueService.ThreadIssueService;
@@ -496,6 +500,26 @@ const make = Effect.gen(function* () {
         );
         if (reason) return yield* invalid("The answer reached its usage limit.");
         return { askId: result.id };
+      }),
+    ),
+    banneret_handoff_offer: McpToolAccess.actsAsCaller((offer) =>
+      Effect.gen(function* () {
+        const { relay } = yield* requireRelay;
+        const ref = yield* leaseRef(relay, offer.taskId);
+        if (!(yield* leases.check(ref)).actions.release)
+          return yield* invalid("You must hold this task to offer it.");
+        yield* handoffNote(offer.note);
+        if (Option.isNone(projects)) return yield* invalid("Open the task repository first.");
+        const roots = yield* projects.value
+          .listShells()
+          .pipe(Effect.mapError(() => invalid("Cannot read projects.")));
+        yield* verifyPushedWork(roots, ref, offer.branch, offer.headSha);
+        if (!offer.threadRootId) {
+          const linked = yield* feed.chat(relay.relayOrigin, { kind: "discuss", id: offer.taskId });
+          if (!linked.ok) return yield* invalid(linked.message);
+        }
+        const r = yield* (yield* chat).write("POST", "handoffs", offer);
+        return { handoffId: r.id };
       }),
     ),
     banneret_chat_ask: McpToolAccess.actsAsCaller(({ thread, task, ...ask }) =>

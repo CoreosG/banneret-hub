@@ -1,4 +1,5 @@
 import { WaitingAsks } from "./chat/AgentAskCards";
+import { HandoffCards } from "./chat/HandoffCards";
 import { JoinRequests } from "./chat/JoinRequests";
 // Banneret Hub: Needs you for an Enterprise workspace, from the relay's GET /needs in the order the
 // relay returns it (most urgent first). Pages load on request.
@@ -124,6 +125,10 @@ export function NeedsPage() {
                     target={target}
                     chatRevision={feed.chatRevision}
                   />
+                ) : item.handoffId && feed.chatFlags?.includes("handoffs") ? (
+                  <li key={item.id}>
+                    <HandoffCards enterprise={enterprise} id={item.handoffId} />
+                  </li>
                 ) : item.kind === "chat_join_requests" &&
                   item.conversationId &&
                   feed.chatFlags?.includes("join_requests") ? (

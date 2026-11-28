@@ -4316,12 +4316,15 @@ components:
       - id
       - taskId
       - from
+      - fromMachineId
       - to
       - note
       - state
       - createdAt
       - expiresAt
       properties:
+        fromMachineId: {$ref: '#/components/schemas/Id'}
+        threadRootId: {$ref: '#/components/schemas/Id'}
         receipts: {type: array, items: {$ref: '#/components/schemas/AskReceipt'}}
         id:
           $ref: '#/components/schemas/Id'
@@ -4387,6 +4390,7 @@ components:
       type: object
       additionalProperties: false
       properties:
+        byRule: {const: true}
         receipt: {$ref: '#/components/schemas/AskReceipt'}
         machineId:
           $ref: '#/components/schemas/Id'

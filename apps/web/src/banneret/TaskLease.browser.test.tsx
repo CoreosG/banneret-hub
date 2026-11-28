@@ -1,3 +1,6 @@
+import { HandoffCards } from "./chat/HandoffCards";
+import { chatRpc } from "./chat/client";
+import { useEnvironmentFeed } from "./relayFeedStore";
 import appCss from "../index.css?inline";
 import { minuteTick } from "@t3tools/client-runtime/clock";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -286,6 +289,69 @@ const result = (
   ok({ outcome, status, ...(detail === undefined ? {} : { detail }) });
 
 describe("Take", () => {
+  it("opens the named offer in Take and accepts on the selected machine", async () => {
+    const { rpc } = setup();
+    rpc.check.mockResolvedValue(ok(leaseStatus()));
+    vi.mocked(taskRpc.read).mockResolvedValue({ joined: true, fetchedAt: null, value: card() });
+    const calls = vi.spyOn(chatRpc, "run").mockImplementation(async (_target, action) =>
+      action.kind === "handoffs"
+        ? {
+            nextCursor: null,
+            items: [
+              {
+                id: "h1",
+                fromMachineId: "desk",
+                receipts: [],
+                taskId: "t_2",
+                state: "offered",
+                from: { id: "p_from", login: "leo" },
+                to: { id: "p_me", login: ME },
+                note: { goal: "Fix invites", done: "Unit tests pass", next: "Integration test" },
+                branch: "work/invites",
+                headSha: "a".repeat(40),
+                createdAt: ago(MINUTE),
+                expiresAt: ago(-MINUTE),
+              },
+            ],
+          }
+        : {},
+    );
+    function Screen() {
+      const company = useEnvironmentFeed(RELAY);
+      return (
+        <>
+          <HandoffCards
+            id="h1"
+            enterprise={{
+              target: RELAY,
+              environmentId: LOCAL,
+              enrolment: useEnrolmentStore.getState().views[LOCAL]![0]!,
+              feed: company,
+              workspace: {
+                id: "ent-0123456789abcdef",
+                kind: "enterprise",
+                name: "Company",
+                updatedAt: ago(MINUTE),
+                projectKeys: [],
+              },
+            }}
+          />
+          <LeaseConfirmHost />
+        </>
+      );
+    }
+    await using screen = await render(
+      <>
+        <style>{appCss}</style>
+        <Screen />
+      </>,
+    );
+    await expect.element(screen.getByText("Unit tests pass")).toBeVisible();
+    await userEvent.click(button("Accept"));
+    await userEvent.click(button("Accept and take on desk"));
+    expect(calls).toHaveBeenCalledWith(RELAY, { kind: "acceptHandoff", id: "h1" });
+    expect(rpc.take).not.toHaveBeenCalled();
+  });
   it("hands a new sandbox request to the orchestrator without writing a claim", async () => {
     const { emit, rpc } = setup();
     rpc.check.mockResolvedValue(ok(leaseStatus()));

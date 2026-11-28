@@ -6,6 +6,8 @@ import { Link } from "@tanstack/react-router";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
+import { OfferButton } from "./chat/HandoffCards";
+import { chatRpc } from "./chat/client";
 import { Button } from "../components/ui/button";
 import {
   Dialog,
@@ -312,7 +314,23 @@ function LeaseConfirmDialog() {
   const [sending, setSending] = useState(false);
   const [destination, setDestination] = useState<Awaited<ReturnType<typeof sandboxHandoff>>>(null);
   const words = CONFIRM_WORDS[target.operation];
-  const confirm = () => {
+  const [problem, setProblem] = useState("");
+  const confirm = async () => {
+    if (target.handoffId) {
+      setSending(true);
+      try {
+        await chatRpc.run(
+          { ...target.relay, environmentId: machine.environmentId },
+          { kind: "acceptHandoff", id: target.handoffId },
+        );
+        chooseLeaseMachine(machine.ref, machine.environmentId);
+        openLeaseConfirm(null);
+      } catch (e) {
+        setProblem(String(e));
+      }
+      setSending(false);
+      return;
+    }
     openLeaseConfirm(null);
     if (target.operation === "take") chooseLeaseMachine(machine.ref, machine.environmentId);
     void runLease(
@@ -345,7 +363,7 @@ function LeaseConfirmDialog() {
             onChange={setMachine}
           />
 
-          {target.operation === "take" && (
+          {target.operation === "take" && !target.handoffId && (
             <label>
               <input
                 type="checkbox"
@@ -361,6 +379,7 @@ function LeaseConfirmDialog() {
             Cancel
           </Button>
           {target.operation === "take" &&
+            !target.handoffId &&
             feed.sections.includes("pool") &&
             !justClaim &&
             (destination ? (
@@ -386,10 +405,12 @@ function LeaseConfirmDialog() {
                 A new sandbox
               </Button>
             ))}
-          <Button
-            disabled={sending || !!destination}
-            onClick={confirm}
-          >{`${words.action} on ${machine.label}`}</Button>
+          <Button disabled={sending || !!destination} onClick={confirm}>
+            {target.handoffId
+              ? "Accept and take on " + machine.label
+              : `${words.action} on ${machine.label}`}
+          </Button>
+          {problem && <p role="alert">{problem}</p>}
         </DialogFooter>
       </DialogPopup>
     </Dialog>
@@ -460,6 +481,12 @@ export function LeaseButtons(props: {
           {running === "take" ? "Taking…" : takeLabel(props.route, props.continues)}
         </Button>
       ) : null}
+      {status.actions.release && (
+        <OfferButton
+          target={{ ...props.target, environmentId: props.route.chosen.environmentId }}
+          taskId={props.taskId}
+        />
+      )}
       {status.actions.release ? (
         <Button size="sm" variant="outline" disabled={disabled} onClick={() => run("release")}>
           {running === "release" ? "Releasing…" : "Release…"}
