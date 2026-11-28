@@ -82,6 +82,7 @@ import * as AgentHandlers from "./handlers.ts";
 import { defaults } from "../skills/catalog.ts";
 import { JOIN_LINE, JOIN_URI, joinText } from "./join.ts";
 import * as AgentMcp from "./mcp.ts";
+import { memorySettingsHandlers } from "../memory/settings.ts";
 import { AgentToolkit, memoryNames, skillNames } from "./tools.ts";
 
 const ENVIRONMENT = "env-agents-1";
@@ -420,6 +421,8 @@ describe("agent toolkit listing", () => {
         },
       ).pipe(Layer.build);
       return {
+        setMemory: (enabled: boolean) =>
+          memorySettingsHandlers["memory.setSetting"]({ enabled }).pipe(Effect.provide(local)),
         companyLevel: (level: "read" | "read_write") =>
           setLevel(COMPANY_THREAD, toolkitSource, level).pipe(Effect.provide(local)),
         parkCompany: turns.get(COMPANY_THREAD)!,
@@ -464,8 +467,14 @@ describe("agent toolkit listing", () => {
       Effect.scoped(
         Effect.gen(function* () {
           relayTools = ALL_TOOLS;
-          const { configureKnowledge, confirmSoloSkill, companyLevel, parkCompany, startCompany } =
-            yield* serveAgents({});
+          const {
+            setMemory,
+            configureKnowledge,
+            confirmSoloSkill,
+            companyLevel,
+            parkCompany,
+            startCompany,
+          } = yield* serveAgents({});
           const httpClient = yield* HttpClient.HttpClient;
           const session = (token: string) =>
             Effect.gen(function* () {
@@ -538,6 +547,8 @@ describe("agent toolkit listing", () => {
             });
 
           const company = yield* session("company");
+          expect(yield* company.tools).not.toContain(memoryNames[0]);
+          yield* setMemory(true);
           expect(yield* company.tools).toEqual(
             [
               ...memoryNames,
@@ -762,7 +773,8 @@ describe("agent toolkit listing", () => {
       Effect.gen(function* () {
         // The thread's session starts before the Hub has read the relay's capabilities.
         relayTools = null;
-        yield* serveAgents({ relistEvery: "20 millis" });
+        const { setMemory } = yield* serveAgents({ relistEvery: "20 millis" });
+        yield* setMemory(true);
         const httpClient = yield* HttpClient.HttpClient;
         const post = (method: string, params: object) =>
           httpClient.post("/mcp", {
@@ -833,6 +845,11 @@ describe("agent toolkit listing", () => {
             "upstream_tool",
           ].sort(),
         );
+        yield* setMemory(false);
+        expect(yield* Queue.take(notices).pipe(Effect.timeout("5 seconds"))).toBe(
+          "notifications/tools/list_changed",
+        );
+        expect(yield* toolNames).not.toContain("banneret_memory_search");
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

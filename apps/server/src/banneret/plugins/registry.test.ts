@@ -4,6 +4,7 @@ import { HttpRouter, HttpClient, HttpBody } from "effect/http";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import * as Activity from "../../preview/PreviewAgentActivity.ts";
 import { setLevel, pluginSource } from "./levels.ts";
+import { memorySettingsHandlers } from "../memory/settings.ts";
 import { pluginRoute } from "./proxy.ts";
 import * as NodeHttp from "node:http";
 
@@ -141,7 +142,13 @@ it.live(
                     result:
                       rpc.method === "tools/call"
                         ? { content: [] }
-                        : { tools: [{ name: "skills_get" }, { name: "delete_issue" }] },
+                        : {
+                            tools: [
+                              { name: "skills_get" },
+                              { name: "delete_issue" },
+                              { name: "banneret_memory_search" },
+                            ],
+                          },
                   }),
                 );
               }
@@ -220,6 +227,16 @@ it.live(
         );
       const readList = yield* (yield* send(server.headers.Authorization!)).text;
       expect(readList).toContain("skills_get");
+      expect(readList).not.toContain("banneret_memory_search");
+      expect(yield* (yield* call("banneret_memory_search")).text).toContain("memory is off");
+      if (!templateEndpoint) {
+        yield* memorySettingsHandlers["memory.setSetting"]({ enabled: true });
+        yield* setLevel(threadId, pluginSource("starter"), "read_write");
+        expect(yield* (yield* send(server.headers.Authorization!)).text).toContain(
+          "banneret_memory_search",
+        );
+        yield* setLevel(threadId, pluginSource("starter"), "read");
+      }
       expect(readList).not.toContain("delete_issue");
       if (!templateEndpoint)
         expect(yield* (yield* call("skills_get")).json).toMatchObject({ result: { content: [] } });

@@ -5,6 +5,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import { PreviewAgentActivity } from "../../preview/PreviewAgentActivity.ts";
 import { approvalMachine } from "./approvals.ts";
 import { forward, storedTransport } from "./transport.ts";
+import { memoryEnabled, isPluginMemoryTool } from "../memory/settings.ts";
 import { catalog } from "./catalog.ts";
 import {
   classify,
@@ -76,20 +77,29 @@ const proxy = Effect.gen(function* () {
           ),
         catch: () => "Plugin catalog unavailable" as const,
       });
+    const isMemoryTool = (name: string) => isPluginMemoryTool(name, plugin.manifest.toolPrefix);
     if (rpc.method === "tools/list") {
       const page = yield* listing(rpc.id, rpc.params ?? {});
       if (!page.tools) return reply({ error: page.error });
       const current = yield* level();
+      const showMemory =
+        !page.tools.some((tool) => isMemoryTool(tool.name)) || (yield* memoryEnabled);
       return reply({
         result: {
           ...page.result,
-          tools: page.tools.filter((tool) => allows(current, tool, plugin.manifest.toolPrefix)),
+          tools: page.tools.filter(
+            (tool) =>
+              (showMemory || !isMemoryTool(tool.name)) &&
+              allows(current, tool, plugin.manifest.toolPrefix),
+          ),
         },
       });
     }
     if (rpc.method === "tools/call") {
       const name = rpc.params?.name;
       if (typeof name !== "string") return refuse("Missing tool name.");
+      if (isMemoryTool(name) && !(yield* memoryEnabled))
+        return refuse("Banneret memory is off on this machine.");
       const activity = yield* PreviewAgentActivity;
       if (!(yield* activity.active(thread))) return refuse(parkedMessage);
       const initial = yield* level();

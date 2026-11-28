@@ -7,6 +7,7 @@ import type { EnterpriseFeed } from "../useEnterpriseFeed";
 import type { RelayTarget } from "../enrolmentStore";
 type Person = { id: string; login: string };
 const Chat = createContext<{
+  boardChannel?: string | undefined;
   dms: boolean;
   viewer?: string | undefined;
   channels: Map<string, string>;
@@ -14,9 +15,11 @@ const Chat = createContext<{
 } | null>(null);
 export function OfficeChat({
   enterprise,
+  board,
   children,
 }: {
   enterprise: EnterpriseFeed;
+  board?: string | undefined;
   children: ReactNode;
 }) {
   const { feed, target } = enterprise;
@@ -37,6 +40,10 @@ export function OfficeChat({
     <Chat.Provider
       value={{
         channels,
+        boardChannel:
+          board && feed.boardChannels && Object.hasOwn(feed.boardChannels, board)
+            ? channels.get(feed.boardChannels[board]!)
+            : undefined,
         dms:
           flags.includes("dms") &&
           !!enterprise.enrolment.me?.permissions.some(
@@ -49,6 +56,9 @@ export function OfficeChat({
       {children}
     </Chat.Provider>
   );
+}
+export function useBoardChannel() {
+  return useContext(Chat)?.boardChannel;
 }
 export function RoomChannel({ board, title }: { board: string; title: string }) {
   const chat = useContext(Chat);

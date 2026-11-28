@@ -8,6 +8,7 @@ import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import { PageHeader } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
 import { LAYOUT_PAGE } from "./ui/tokens";
+import { DeskEnterprise } from "./offices/DeskDetails";
 import { OfficeViews } from "./offices/OfficeViews";
 /** The page fills the window; only the people panel scrolls. */
 function TeamFrame(props: { readonly company?: string; readonly children: ReactNode }) {
@@ -69,12 +70,14 @@ export function TeamPage() {
         problem={read?.problem ?? null}
       />
       {read?.value?.office ? (
-        <OfficeViews
-          key={enterprise.environmentId + workspace.id}
-          enterprise={enterprise}
-          people={read.value.people}
-          office={read.value.office}
-        />
+        <DeskEnterprise value={enterprise}>
+          <OfficeViews
+            key={enterprise.environmentId + workspace.id}
+            enterprise={enterprise}
+            people={read.value.people}
+            office={read.value.office}
+          />
+        </DeskEnterprise>
       ) : read?.problem ? null : (
         <p>Loading team…</p>
       )}

@@ -29,3 +29,9 @@ export const memorySettingsHandlers = {
     return enabled;
   }, Effect.mapError(failed)),
 };
+
+export const memoryEnabled = memorySettingsHandlers["memory.getSetting"]().pipe(
+  Effect.orElseSucceed(() => false),
+);
+export const isPluginMemoryTool = (name: string, prefix = "") =>
+  name.startsWith(prefix + "banneret_memory_");

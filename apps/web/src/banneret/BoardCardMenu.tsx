@@ -1,7 +1,8 @@
 // Banneret Hub: a board card's menu. Take, Continue, Release, Finish and Withdraw follow the server's
 // `leases.check`, read only when the menu opens, never for every card on the board, on the machine the
 // route picked (leaseRoute.logic).
-import { useNavigate } from "@tanstack/react-router";
+import { useBoardChannel } from "./offices/OfficeChat";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useEnvironmentFeed } from "./relayFeedStore";
 import type { BanneretBoardCard, BanneretBoardTask } from "@t3tools/contracts";
 import { EllipsisVerticalIcon } from "lucide-react";
@@ -92,12 +93,15 @@ function SandboxMenuItem({ target, taskId }: { target: RelayTarget; taskId: stri
 }
 
 export function BoardCardMenu(props: {
+  readonly leases: boolean;
   readonly target: RelayTarget;
   readonly card: BanneretBoardCard;
   readonly onOpen: (task: BanneretBoardTask) => void;
 }) {
   const entry = useLeaseEntry(props.target, props.card.task.id);
   const running = entry?.phase.kind === "running";
+  const channelId = useBoardChannel();
+  if (!props.leases && !channelId) return null;
   return (
     <Menu>
       <MenuTrigger
@@ -113,15 +117,29 @@ export function BoardCardMenu(props: {
       </MenuTrigger>
       <MenuPopup align="end" sideOffset={4} className="min-w-48">
         <MenuItem onClick={() => props.onOpen(props.card.task)}>Open task</MenuItem>
-        <SandboxMenuItem target={props.target} taskId={props.card.task.id} />
-        <MenuSeparator />
-        {running ? (
-          <MenuItem disabled data-testid="lease-menu-off">
-            A change to this task is running…
+        {channelId && (
+          <MenuItem
+            render={
+              <Link
+                to="/channels/$channelId"
+                params={{ channelId }}
+                search={{ thread: undefined, message: undefined }}
+              />
+            }
+          >
+            Open chat
           </MenuItem>
-        ) : (
-          <LeaseItems target={props.target} card={props.card} onOpen={props.onOpen} />
         )}
+        <SandboxMenuItem target={props.target} taskId={props.card.task.id} />
+        {props.leases && <MenuSeparator />}
+        {props.leases &&
+          (running ? (
+            <MenuItem disabled data-testid="lease-menu-off">
+              A change to this task is running…
+            </MenuItem>
+          ) : (
+            <LeaseItems target={props.target} card={props.card} onOpen={props.onOpen} />
+          ))}
       </MenuPopup>
     </Menu>
   );

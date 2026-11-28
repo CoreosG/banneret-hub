@@ -38,6 +38,7 @@ import {
   unclaimedAssignees,
   type BoardColumnView,
 } from "./board.logic";
+import { OfficeChat } from "./offices/OfficeChat";
 import { BoardCardMenu } from "./BoardCardMenu";
 import { rememberBoard, rememberedBoard } from "./boardChoice";
 import {
@@ -217,9 +218,12 @@ function BoardCard(props: {
         }
         onOpen={() => props.onOpen(card.task)}
       />
-      {props.leases ? (
-        <BoardCardMenu target={props.target} card={card} onOpen={props.onOpen} />
-      ) : null}
+      <BoardCardMenu
+        leases={props.leases}
+        target={props.target}
+        card={card}
+        onOpen={props.onOpen}
+      />
       {entry?.notice?.destination && (
         <p role="status">
           {entry.notice.message}{" "}
@@ -729,20 +733,22 @@ export function BoardPage() {
                   hint="Tasks you take or are assigned appear here."
                 />
               ) : null}
-              <div className="min-h-0 flex-1" {...LAYOUT_BOARD_COLUMNS}>
-                {columns.map((column) => (
-                  <BoardColumn
-                    key={column.id}
-                    target={enterprise.target}
-                    column={column}
-                    atWork={atWork}
-                    leases={leases}
-                    me={me}
-                    review={review}
-                    onOpen={openTask}
-                  />
-                ))}
-              </div>
+              <OfficeChat key={workspace.id} enterprise={enterprise} board={active?.id}>
+                <div className="min-h-0 flex-1" {...LAYOUT_BOARD_COLUMNS}>
+                  {columns.map((column) => (
+                    <BoardColumn
+                      key={column.id}
+                      target={enterprise.target}
+                      column={column}
+                      atWork={atWork}
+                      leases={leases}
+                      me={me}
+                      review={review}
+                      onOpen={openTask}
+                    />
+                  ))}
+                </div>
+              </OfficeChat>
             </>
           )}
         </>

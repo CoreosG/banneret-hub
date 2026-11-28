@@ -1,3 +1,4 @@
+import { countLabel } from "./countLabel";
 import type { MemoryReviewAction, MemoryReviewNote } from "@t3tools/contracts";
 import { useState } from "react";
 import { Section } from "./ui/Section";
@@ -218,7 +219,8 @@ export function MemoryNotes({
                     setConfirming(false);
                   }}
                 >
-                  Confirm {pending.length} imported notes from batch {batch?.slice(0, 8)}
+                  Confirm {countLabel(pending.length, "imported note")} from batch{" "}
+                  {batch?.slice(0, 8)}
                 </button>
               );
             })}

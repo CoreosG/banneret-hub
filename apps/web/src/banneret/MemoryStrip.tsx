@@ -1,4 +1,5 @@
 import { MemoryContradictionCard } from "./MemoryContradictionCard";
+import { countLabel } from "./countLabel";
 import { MemoryPreferences } from "./MemoryPreferences";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -224,7 +225,8 @@ export function MemoryStrip({
             <span aria-hidden>{expanded ? "▾" : "▸"}</span>
             <strong>Memory</strong>
             <span>
-              {counts.total} notes · {counts.proposed} proposed · {counts.disputed} disputed
+              {countLabel(counts.total, "note")} · {counts.proposed} proposed · {counts.disputed}{" "}
+              disputed
             </span>
             <span>Stored unencrypted on this machine</span>
           </button>

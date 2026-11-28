@@ -1,3 +1,4 @@
+import { memoryEnabled, isPluginMemoryTool } from "../memory/settings.ts";
 import * as NodeSqlite from "node:sqlite";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
@@ -182,6 +183,8 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
           if (!transport) return yield* error("The stored transport is unavailable.");
           const wire = yield* decodeWire(transport.body);
           yield* permitted;
+          if (isPluginMemoryTool(row.name, plugin.manifest.toolPrefix) && !(yield* memoryEnabled))
+            return yield* error("Banneret memory is off on this machine.");
           const response = yield* Effect.tryPromise({
             try: async (signal) =>
               rpcResponse(

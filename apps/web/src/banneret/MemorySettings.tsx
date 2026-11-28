@@ -1,5 +1,5 @@
 import { PauseSetting } from "./Pause";
-import { AccountsSettings } from "./AccountsSettings";
+import { useSearchableSetting } from "../components/settings/settingsSearch";
 import { MemoryImportSetting } from "./MemoryTransfer";
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
@@ -20,7 +20,16 @@ const write = createEnvironmentRpcCommand(connectionAtomRuntime, {
   tag: "memory.setSetting",
 });
 
-function MemoryRow({ environmentId, label }: { environmentId: EnvironmentId; label: string }) {
+function MemoryRow({
+  environmentId,
+  label,
+  first,
+}: {
+  environmentId: EnvironmentId;
+  label: string;
+  first: boolean;
+}) {
+  const setting = useSearchableSetting();
   const writable = useAtomValue(write.permissionAtom(environmentId));
   const [enabled, setEnabled] = useState<boolean>();
   const [saving, setSaving] = useState(false);
@@ -51,8 +60,9 @@ function MemoryRow({ environmentId, label }: { environmentId: EnvironmentId; lab
   }
   return (
     <SettingsRow
-      title={`Use Banneret memory on ${label}`}
+      title={`${setting("banneret-memory").title} on ${label}`}
       description={`Adds Banneret's shared memory to Hub chats on ${label}. Claude and Codex keep their own memory.`}
+      id={first ? setting("banneret-memory").id : undefined}
       status={error}
       control={
         <>
@@ -70,6 +80,7 @@ function MemoryRow({ environmentId, label }: { environmentId: EnvironmentId; lab
 }
 
 export function MemorySettings() {
+  const setting = useSearchableSetting();
   const { scope, connectedEnvironments } = useSettingsScope();
   if ((scope.kind !== "all" && scope.kind !== "environment") || !connectedEnvironments.length)
     return null;
@@ -80,10 +91,14 @@ export function MemorySettings() {
           <PauseSetting key={environmentId} id={environmentId} label={label} />
         ))}
       </SettingsSection>
-      <AccountsSettings machines={connectedEnvironments} />
-      <SettingsSection id="memory" title="Memory">
-        {connectedEnvironments.map(({ environmentId, label }) => (
-          <MemoryRow key={environmentId} environmentId={environmentId} label={label} />
+      <SettingsSection {...setting("memory")}>
+        {connectedEnvironments.map(({ environmentId, label }, index) => (
+          <MemoryRow
+            first={index === 0}
+            key={environmentId}
+            environmentId={environmentId}
+            label={label}
+          />
         ))}
       </SettingsSection>
     </>

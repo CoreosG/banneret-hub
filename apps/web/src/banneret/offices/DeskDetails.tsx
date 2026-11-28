@@ -5,7 +5,8 @@ import type {
   OfficeSummary,
   PoolResources,
 } from "@t3tools/contracts";
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
+import type { EnterpriseFeed } from "../useEnterpriseFeed";
 import type { RelayTarget } from "../enrolmentStore";
 import { MachineResources } from "../ui/MachineResources";
 import { LeaseChip } from "../ui/Chips";
@@ -109,6 +110,7 @@ export function Claims({
     </>
   );
 }
+export const DeskEnterprise = createContext<EnterpriseFeed | null>(null);
 export function DeskDetails({
   p,
   counts,
@@ -128,6 +130,12 @@ export function DeskDetails({
   visible: boolean;
   pool: PoolResources | null;
 }) {
+  const enterprise = useContext(DeskEnterprise);
+  const office = enterprise?.feed.team?.value?.office;
+  const own = enterprise?.enrolment.me?.login === p.login;
+  const share =
+    enterprise?.enrolment.sharing?.share ??
+    (office?.preset === "community" ? "hidden" : "agents_only");
   return (
     <>
       <strong>{p.displayName ?? p.login}</strong>
@@ -139,6 +147,7 @@ export function DeskDetails({
       <div className="my-1">
         <AgentCounts counts={counts} />
       </div>
+      {!agents.length && <p>No agents at this desk.</p>}
       {agents.map((session) => (
         <AgentDetails key={session.id} session={session} target={target} />
       ))}
@@ -153,6 +162,23 @@ export function DeskDetails({
             pool={pool}
           />
         ))}
+      {office?.flags.includes("sharing") &&
+        !p.machines.length &&
+        (own ? (
+          <p>
+            {share === "hidden"
+              ? "Sharing nothing."
+              : share === "agents_only"
+                ? "Machine name hidden."
+                : "No machines listed."}{" "}
+            <a className="underline" href="#office-sharing">
+              Set what colleagues see.
+            </a>
+          </p>
+        ) : (
+          <p>Nothing shared</p>
+        ))}
+      {!cards.some((card) => card.lease) && <p>No claimed tasks.</p>}
       <Claims cards={cards} login={p.login} target={target} />
     </>
   );

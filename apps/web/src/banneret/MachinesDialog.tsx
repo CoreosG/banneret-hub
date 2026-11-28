@@ -61,6 +61,10 @@ export function MachinesPanel(props: { readonly origin: string; readonly onClose
   }));
   const joined = rows.filter((row) => row.view?.state === "configured");
   const roster = joined.find((row) => row.environmentId === primary) ?? joined[0];
+  const companyFeed = useEnvironmentFeed(
+    roster ? { environmentId: roster.environmentId, relayOrigin: props.origin } : null,
+  );
+  const preset = companyFeed.team?.value?.office?.preset;
   return (
     <>
       <DialogHeader>
@@ -79,6 +83,9 @@ export function MachinesPanel(props: { readonly origin: string; readonly onClose
               !!missing[environmentId],
             );
             const status = update ?? machineEnrolment[state];
+            const share =
+              view?.sharing?.share ??
+              (preset === "community" ? "hidden" : preset ? "agents_only" : undefined);
             const pending = status === "Pending";
             return (
               <li
@@ -93,6 +100,17 @@ export function MachinesPanel(props: { readonly origin: string; readonly onClose
                     {update && <span className="block">Update Banneret Hub on {label}.</span>}
                     {pending && view?.confirmCode ? ` · code ${view.confirmCode}` : ""}
                   </p>
+                  {state === "configured" && (
+                    <p className="text-muted-foreground text-xs">
+                      {share === "agents_and_name"
+                        ? "Colleagues can see your agents and this machine’s name."
+                        : share === "agents_only"
+                          ? "Colleagues can see your agents. The machine name is hidden."
+                          : share === "hidden"
+                            ? "Your agents and machine name are hidden from colleagues."
+                            : "Visibility follows the office sharing default."}
+                    </p>
+                  )}
                 </div>
                 {pending && view && (
                   <CopyDetails target={{ environmentId, relayOrigin: props.origin }} view={view} />
