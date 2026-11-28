@@ -11,11 +11,15 @@ import { cn } from "../../lib/utils";
 import { TabsBar } from "./TabsBar";
 import { subscribeTabsToRoute } from "./tabsRoute";
 import { useTabsStore } from "./tabsStore";
+import { WorkspaceTabsBar } from "./WorkspaceTabsBar";
+import { WorkspaceTabsFollower } from "./WorkspaceTabsFollower";
+import { useWorkspaceTabsStore } from "./workspaceTabsStore";
 
 export function TabsFrame() {
   const router = useRouter();
   const pathname = useLocation({ select: (location) => location.pathname });
   const hidden = useTabsStore((state) => state.hidden);
+  const workspaces = useWorkspaceTabsStore((state) => state.mode === "workspaces");
   const on = !hidden && pathname !== "/welcome";
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- every navigation and workspace switch opens or reuses a tab
   useEffect(() => subscribeTabsToRoute(router), [router]);
@@ -25,8 +29,9 @@ export function TabsFrame() {
         data-banneret-tabs-bar=""
         className={cn("items-center gap-1 border-b bg-background", isElectron && "drag-region")}
       >
-        {on ? <TabsBar /> : null}
+        {!on ? null : workspaces ? <WorkspaceTabsBar /> : <TabsBar />}
       </div>
+      {workspaces ? <WorkspaceTabsFollower /> : null}
       <div data-banneret-tabs-body="">
         <Outlet />
       </div>

@@ -34,12 +34,14 @@ import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
 import { OutsideWorkspace } from "./OutsideWorkspace";
 import { OwnedElsewhere } from "./OwnedElsewhere";
+import { SidebarWorkspaceList } from "./SidebarWorkspaceList";
 
 export function EnterpriseSidebarRows() {
   return (
     <>
       <OutsideWorkspace />
       <CompanyRows />
+      <SidebarWorkspaceList />
     </>
   );
 }

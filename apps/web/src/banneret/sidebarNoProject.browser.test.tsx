@@ -20,6 +20,8 @@ import {
 } from "../state/environments";
 import { makeThreadFixture } from "../test-fixtures";
 import type { Project } from "../types";
+import { useWorkspaceTabsStore } from "./tabs/workspaceTabsStore";
+import { EMPTY_WORKSPACE_TABS, NO_PROJECT_KEY, visitWorkspace } from "./tabs/workspaceTabs.logic";
 import {
   expectClickable,
   expectInside,
@@ -176,6 +178,36 @@ forEachViewport("a No project folder named by its path stays inside the sidebar"
 });
 
 describe("No project folders across two machines", () => {
+  it("share one Workspaces tab, still named by machine, and hide other projects", async () => {
+    const stack = new DisposableStack();
+    stack.defer(() => useWorkspaceTabsStore.setState(EMPTY_WORKSPACE_TABS, true));
+    const twins = [
+      noProject(PC, "pc-home", "C:\\Users\\a\\.banneret\\scratch", true),
+      noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
+    ];
+    const web = { ...noProject(PC, "web", "/home/a/web", false), title: "web" };
+    useWorkspaceTabsStore.setState(
+      visitWorkspace(
+        { ...EMPTY_WORKSPACE_TABS, mode: "workspaces" },
+        { key: NO_PROJECT_KEY, members: [] },
+        null,
+        1,
+      ),
+      true,
+    );
+    let rows = "";
+    expect(
+      await folderNames([...twins, web], async () => {
+        rows = document.querySelector('[data-slot="sidebar-container"]')!.textContent!;
+        await expect.element(page.getByRole("button", { name: "Workspaces" })).toBeVisible();
+      }),
+    ).toEqual(["No project · PC", "No project · WSL"]);
+    expect(rows).toContain("Work in pc-home");
+    expect(rows).toContain("Work in wsl-stray");
+    expect(rows).not.toContain("Work in web");
+    stack.dispose();
+  });
+
   it("are one folder, with no machine label, when both are No project homes", async () => {
     expect(
       await folderNames([

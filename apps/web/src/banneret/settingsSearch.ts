@@ -1,4 +1,10 @@
 export const banneretSettings = [
+  {
+    id: "tabs-show",
+    title: "Tabs show",
+    to: "/settings/appearance",
+    searchTerms: ["tabs", "chats", "workspaces", "workspace tabs", "projects"],
+  },
   { id: "accounts", title: "Accounts", to: "/settings/accounts", scope: "environment-defaults" },
   {
     id: "account-github",
