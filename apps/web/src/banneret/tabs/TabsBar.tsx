@@ -22,11 +22,19 @@ import {
   TAB_BUTTON_CLASS_NAME,
   tabClassName,
   TabStrip,
+  TabTitle,
   useKeepTabInView,
 } from "./tabStrip";
 import type { Tab } from "./tabs.logic";
 import { close, keep, move, pin, retitle, useTabsStore } from "./tabsStore";
 import { useThreadGone } from "./useThreadGone";
+
+/** A page's tab also says which workspace the page belongs to. */
+function tabTitle(tab: Tab, workspaceNames: ReadonlyMap<string, string>) {
+  if (tab.kind === "thread") return tab.title;
+  const workspace = tab.workspaceId === null ? "Personal" : workspaceNames.get(tab.workspaceId);
+  return workspace === undefined ? tab.title : `${tab.title} · ${workspace}`;
+}
 
 /** Closes the tab once its thread is gone (useThreadGone). */
 function ThreadGoneWatcher(props: {
@@ -65,7 +73,9 @@ function TabItem(props: {
   tab: Tab;
   active: boolean;
   offline: boolean;
-  workspaceName: string | undefined;
+  workspaceNames: ReadonlyMap<string, string>;
+  /** The names of the other tabs in the bar. */
+  otherTitles: ReadonlyArray<string>;
   menuOpen: boolean;
   onMenu: (element: HTMLElement, at: { x: number; y: number }) => void;
 }) {
@@ -78,13 +88,8 @@ function TabItem(props: {
   useEffect(() => {
     if (liveTitle) retitle(tab.id, liveTitle);
   }, [liveTitle, tab.id]);
-  const workspaceLabel = tab.workspaceId === null ? "Personal" : props.workspaceName;
   const title =
-    tab.kind === "thread"
-      ? (liveTitle ?? tab.title)
-      : workspaceLabel === undefined
-        ? tab.title
-        : `${tab.title} · ${workspaceLabel}`;
+    tab.kind === "thread" ? (liveTitle ?? tab.title) : tabTitle(tab, props.workspaceNames);
   const machine = tab.threadRef
     ? readEnvironment(EnvironmentId.make(tab.threadRef.environmentId))?.label
     : undefined;
@@ -108,6 +113,7 @@ function TabItem(props: {
             role="tab"
             tabIndex={active ? 0 : -1}
             aria-selected={active}
+            aria-label={title}
             data-tab-id={tab.id}
             data-preview={tab.kept ? undefined : ""}
             data-pinned={tab.pinned ? "" : undefined}
@@ -155,7 +161,7 @@ function TabItem(props: {
         {active && !tab.kept && threadRef !== null ? (
           <SendKeeper key={tab.id} tabId={tab.id} sentAt={sentAt} />
         ) : null}
-        <span className="min-w-0 truncate">{title}</span>
+        <TabTitle title={title} titles={props.otherTitles} />
         {/* Nothing may appear on hover: a tab that grows pushes its close button out of reach. */}
         {tab.pinned ? (
           <button
@@ -207,6 +213,7 @@ export function TabsBar() {
   const workspaces = useWorkspaces();
   const workspaceNames = new Map(workspaces.map((workspace) => [workspace.id, workspace.name]));
   const [menu, setMenu] = useState<TabMenuState | null>(null);
+  const titles = tabs.map((tab) => tabTitle(tab, workspaceNames));
 
   return (
     <TabStrip
@@ -223,7 +230,7 @@ export function TabsBar() {
         )
       }
     >
-      {tabs.map((tab) => (
+      {tabs.map((tab, position) => (
         <TabItem
           key={tab.id}
           tab={tab}
@@ -232,7 +239,8 @@ export function TabsBar() {
             tab.threadRef !== null &&
             !connected.includes(EnvironmentId.make(tab.threadRef.environmentId))
           }
-          workspaceName={tab.workspaceId === null ? undefined : workspaceNames.get(tab.workspaceId)}
+          workspaceNames={workspaceNames}
+          otherTitles={titles.toSpliced(position, 1)}
           menuOpen={menu?.open === true && menu.tabId === tab.id}
           onMenu={(element, at) => setMenu({ open: true, tabId: tab.id, element, ...at })}
         />

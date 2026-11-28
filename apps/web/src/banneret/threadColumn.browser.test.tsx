@@ -11,12 +11,14 @@ import { page } from "vite-plus/test/browser";
 import { AppRoot } from "~/AppRoot";
 // The route loads ChatView lazily; importing it here keeps its first transform out of the timeout.
 import "~/components/ChatView";
-import { __setClientSettingsForTests } from "~/hooks/useSettings";
+import { __setClientSettingsForTests, getClientSettings } from "~/hooks/useSettings";
 import stylesheet from "~/index.css?inline";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { getRouter } from "~/router";
 import { ENVIRONMENT_ID, type FakeDriver } from "../../test/fakeEnvironment";
 import { act, render } from "../../test/render";
+import { useTabsStore } from "./tabs/tabsStore";
+import { keepBrowserStorage } from "./test/browserStorage";
 import {
   expectCentred,
   expectClickable,
@@ -79,6 +81,15 @@ async function expectSharedLane(label: string) {
 }
 
 forEachViewport("keeps the chat column and the composer in one centred lane", async (at) => {
+  // The app saves its panel, tab and draft as it goes; each size starts and ends with none.
+  using own = new DisposableStack();
+  own.use(keepBrowserStorage());
+  const settings = getClientSettings();
+  own.defer(() => {
+    __setClientSettingsForTests(settings);
+    useRightPanelStore.setState({ byThreadKey: {}, threadPanelVisibilityByThreadKey: {} });
+    useTabsStore.setState({ tabs: [], activeId: null });
+  });
   const style = document.createElement("style");
   style.textContent = stylesheet;
   document.head.append(style);

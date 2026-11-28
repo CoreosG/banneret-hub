@@ -50,6 +50,7 @@ import {
   expectUnclipped,
   forEachViewport,
 } from "./test/viewports";
+import { keepBrowserStorage } from "./test/browserStorage";
 
 vi.mock(import("~/environments/primary/target"), async (original) => ({
   ...(await original()),
@@ -276,6 +277,8 @@ async function openBoard(
   size: { readonly width: number; readonly height: number } | null = { width: 1600, height: 900 },
 ) {
   if (size) await page.viewport(size.width, size.height);
+  // The page saves its board choice and filters.
+  stack.use(keepBrowserStorage());
   const style = document.createElement("style");
   style.textContent = appCss;
   document.head.append(style);
