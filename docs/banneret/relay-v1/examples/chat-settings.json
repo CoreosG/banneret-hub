@@ -1,4 +1,11 @@
 {
   "agentsReadMyDms": false,
-  "agentWakeDefault": "everyone"
+  "agentWakeDefault": "everyone",
+  "agentAsks": {
+    "default": "approve",
+    "auto": [],
+    "maxTokens": 200000,
+    "maxSeconds": 900
+  },
+  "agentsPaused": false
 }

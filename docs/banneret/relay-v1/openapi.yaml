@@ -1372,7 +1372,292 @@ paths:
                 $ref: '#/components/schemas/ChatSearch'
         default:
           $ref: '#/components/responses/Error'
+  /chat/asks/{id}/decision:
+    post:
+      tags:
+      - chat
+      operationId: decisionAsk
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatDecision'
+      responses:
+        '200':
+          description: ChatAsk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAsk'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/asks/{id}/confirm:
+    post:
+      tags:
+      - chat
+      operationId: confirmAsk
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatConfirm'
+      responses:
+        '200':
+          description: ChatAsk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAsk'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/handoffs:
+    get:
+      tags:
+      - chat
+      operationId: listHandoffs
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - name: role
+        in: query
+        schema:
+          type: string
+          enum:
+          - giver
+          - receiver
+      - name: state
+        in: query
+        schema:
+          type: string
+          enum:
+          - offered
+          - accepted
+          - declined
+          - withdrawn
+          - expired
+          - void
+          - closed
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ChatHandoffs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatHandoffs'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags:
+      - chat
+      operationId: offerHandoff
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatNewHandoff'
+      responses:
+        '200':
+          description: Handoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handoff'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/handoffs/{id}/accept:
+    post:
+      tags:
+      - chat
+      operationId: acceptHandoff
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffAccept'
+      responses:
+        '200':
+          description: Handoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handoff'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/handoffs/{id}/decline:
+    post:
+      tags:
+      - chat
+      operationId: declineHandoff
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffReason'
+      responses:
+        '200':
+          description: Handoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handoff'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/handoffs/{id}/withdraw:
+    post:
+      tags:
+      - chat
+      operationId: withdrawHandoff
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandoffReason'
+      responses:
+        '200':
+          description: Handoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Handoff'
+        default:
+          $ref: '#/components/responses/Error'
+  /chat/agents/pause:
+    put:
+      tags:
+      - chat
+      operationId: pauseAgentWakes
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentPause'
+      responses:
+        '200':
+          description: AgentPause
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPause'
+        default:
+          $ref: '#/components/responses/Error'
   /chat/asks:
+    get:
+      tags:
+      - chat
+      operationId: listAsks
+      parameters:
+      - $ref: '#/components/parameters/Device'
+      - $ref: '#/components/parameters/Counter'
+      - $ref: '#/components/parameters/SentAt'
+      - $ref: '#/components/parameters/Signature'
+      - name: role
+        in: query
+        schema:
+          type: string
+          enum:
+          - asker
+          - answerer
+          - owner
+      - name: state
+        in: query
+        schema:
+          type: string
+          enum:
+          - waiting_owner
+          - open
+          - draft
+          - answered
+          - declined
+          - unanswered
+          - cancelled
+          - expired
+          - orphaned
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ChatAsks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatAsks'
+        default:
+          $ref: '#/components/responses/Error'
     post:
       tags:
       - chat
@@ -3273,6 +3558,7 @@ components:
           const: true
         agents.dm:
           const: true
+        agents.ask: {const: true}
         agents.wakeOthers:
           const: true
         hub.team:
@@ -3763,10 +4049,406 @@ components:
               state:
                 type: string
           maxItems: 12
+    AskTarget:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - person
+        properties:
+          kind:
+            const: person
+          person:
+            $ref: '#/components/schemas/PersonRef'
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - handle
+        - owner
+        properties:
+          kind:
+            const: agent
+          handle:
+            $ref: '#/components/schemas/Id'
+          owner:
+            $ref: '#/components/schemas/PersonRef'
+    AskPr:
+      type: object
+      additionalProperties: false
+      required:
+      - repo
+      - number
+      - headSha
+      properties:
+        repo:
+          type: string
+        number:
+          type: integer
+          minimum: 1
+        headSha:
+          type: string
+    AskReceipt:
+      type: object
+      additionalProperties: false
+      required:
+      - handle
+      - tokens
+      - seconds
+      - tools
+      properties:
+        handle:
+          $ref: '#/components/schemas/Id'
+        tokens:
+          type: integer
+          minimum: 0
+        seconds:
+          type: integer
+          minimum: 0
+        tools:
+          type: array
+          items:
+            type: string
+    AgentAskPolicy:
+      type: object
+      additionalProperties: false
+      required:
+      - default
+      - auto
+      - maxTokens
+      - maxSeconds
+      properties:
+        default:
+          type: string
+          enum:
+          - 'off'
+          - approve
+        auto:
+          type: array
+          items:
+            oneOf:
+            - type: object
+              additionalProperties: false
+              required:
+              - from
+              - kinds
+              properties:
+                from:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - person
+                  properties:
+                    person:
+                      $ref: '#/components/schemas/PersonRef'
+                kinds:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                    - question
+                    - review
+                    - handoff
+                  minItems: 1
+                  uniqueItems: true
+            - type: object
+              additionalProperties: false
+              required:
+              - from
+              - kinds
+              properties:
+                from:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - agent
+                  properties:
+                    agent:
+                      $ref: '#/components/schemas/Id'
+                kinds:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                    - question
+                  minItems: 1
+                  uniqueItems: true
+            - type: object
+              additionalProperties: false
+              required:
+              - from
+              - kinds
+              properties:
+                from:
+                  type: object
+                  additionalProperties: false
+                  required:
+                  - role
+                  properties:
+                    role:
+                      $ref: '#/components/schemas/RoleRef'
+                kinds:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                    - question
+                  minItems: 1
+                  uniqueItems: true
+        maxTokens:
+          type: integer
+          minimum: 1
+        maxSeconds:
+          type: integer
+          minimum: 1
+        usageWindowBelowPercent:
+          type: integer
+          minimum: 0
+          maximum: 100
+    ChatDecision:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - allow
+        properties:
+          allow:
+            type: string
+            enum:
+            - once
+            - draft
+            - always
+          kinds:
+            type: array
+            items:
+              type: string
+              enum:
+              - question
+              - review
+      - type: object
+        additionalProperties: false
+        required:
+        - decline
+        - reason
+        properties:
+          decline:
+            const: true
+          reason:
+            type: string
+            minLength: 1
+    ChatConfirm:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - post
+        properties:
+          post:
+            const: true
+          text:
+            type: string
+      - type: object
+        additionalProperties: false
+        required:
+        - post
+        properties:
+          post:
+            const: false
+    ChatNewHandoff:
+      type: object
+      additionalProperties: false
+      required:
+      - taskId
+      - to
+      - note
+      - key
+      properties:
+        receipt: {$ref: '#/components/schemas/AskReceipt'}
+        taskId:
+          $ref: '#/components/schemas/Id'
+        to:
+          $ref: '#/components/schemas/PersonRef'
+        note:
+          type: object
+          additionalProperties: false
+          required:
+          - goal
+          - done
+          - next
+          properties:
+            goal:
+              type: string
+            done:
+              type: string
+            next:
+              type: string
+            risks:
+              type: string
+        branch:
+          type: string
+        headSha:
+          type: string
+        expiresInSeconds:
+          type: integer
+          minimum: 1
+        threadRootId:
+          $ref: '#/components/schemas/Id'
+        asHandle:
+          $ref: '#/components/schemas/Id'
+        key:
+          $ref: '#/components/schemas/Id'
+    Handoff:
+      allOf:
+      - if: {properties: {state: {const: accepted}}}
+        then: {required: [step]}
+        else: {not: {required: [step]}}
+      - if: {properties: {state: {const: closed}}}
+        then: {required: [outcome]}
+        else: {not: {required: [outcome]}}
+      - if: {properties: {state: {enum: [offered, accepted]}}}
+        then: {not: {required: [closedAt]}}
+        else: {required: [closedAt]}
+      type: object
+      additionalProperties: false
+      required:
+      - receipts
+      - id
+      - taskId
+      - from
+      - to
+      - note
+      - state
+      - createdAt
+      - expiresAt
+      properties:
+        receipts: {type: array, items: {$ref: '#/components/schemas/AskReceipt'}}
+        id:
+          $ref: '#/components/schemas/Id'
+        taskId:
+          $ref: '#/components/schemas/Id'
+        to:
+          $ref: '#/components/schemas/PersonRef'
+        note:
+          type: object
+          additionalProperties: false
+          required:
+          - goal
+          - done
+          - next
+          properties:
+            goal:
+              type: string
+            done:
+              type: string
+            next:
+              type: string
+            risks:
+              type: string
+        branch:
+          type: string
+        headSha:
+          type: string
+        from:
+          $ref: '#/components/schemas/PersonRef'
+        fromHandle:
+          $ref: '#/components/schemas/Id'
+        state:
+          type: string
+          enum:
+          - offered
+          - accepted
+          - declined
+          - withdrawn
+          - expired
+          - void
+          - closed
+        outcome:
+          type: string
+          enum:
+          - done
+          - lost
+        step:
+          type: string
+          enum:
+          - waiting_release
+          - waiting_take
+        machineId:
+          $ref: '#/components/schemas/Id'
+        reason:
+          type: string
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        expiresAt:
+          $ref: '#/components/schemas/Timestamp'
+        closedAt:
+          $ref: '#/components/schemas/Timestamp'
+    HandoffAccept:
+      type: object
+      additionalProperties: false
+      properties:
+        receipt: {$ref: '#/components/schemas/AskReceipt'}
+        machineId:
+          $ref: '#/components/schemas/Id'
+    HandoffReason:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+    AgentPause:
+      type: object
+      additionalProperties: false
+      required:
+      - paused
+      properties:
+        paused:
+          type: boolean
+    ChatHandoffs:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Handoff'
+        nextCursor:
+          type:
+          - string
+          - 'null'
+    ChatAsks:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatAsk'
+        nextCursor:
+          type:
+          - string
+          - 'null'
     ChatAsk:
-      if: { properties: { state: { const: answered } } }
-      then: { required: [answerMessageId] }
-      else: { not: { required: [answerMessageId] } }
+      allOf:
+      - if: {properties: {state: {enum: [waiting_owner, open, draft]}}}
+        then: {not: {required: [closedAt]}}
+        else: {required: [closedAt]}
+      - if: {properties: {state: {const: answered}}}
+        then: {required: [answer]}
+      - if: {properties: {kind: {const: review}}}
+        then:
+          required: [pr]
+          properties:
+            to: {properties: {kind: {const: agent}}}
+            mode: {const: answer}
+            state: {not: {const: draft}}
+            answer: {required: [verdict, headSha]}
       type: object
       additionalProperties: false
       required:
@@ -3774,13 +4456,23 @@ components:
       - to
       - choices
       - state
+      - kind
+      - question
+      - from
+      - onBehalfOf
+      - depth
+      - receipts
+      - createdAt
+      - expiresAt
       properties:
         id:
           $ref: '#/components/schemas/Id'
         to:
-          $ref: '#/components/schemas/ChatPerson'
+          $ref: '#/components/schemas/AskTarget'
         choices:
-          anyOf: [{ maxItems: 0 }, { minItems: 2 }]
+          anyOf:
+          - maxItems: 0
+          - minItems: 2
           type: array
           items:
             type: string
@@ -3788,13 +4480,94 @@ components:
         state:
           type: string
           enum:
+          - waiting_owner
           - open
+          - draft
           - answered
+          - declined
+          - unanswered
           - cancelled
           - expired
           - orphaned
         answerMessageId:
           $ref: '#/components/schemas/Id'
+        kind:
+          type: string
+          enum:
+          - question
+          - review
+        question:
+          type: string
+        context:
+          type: string
+          x-maxBytes: 8192
+        doneWhen:
+          type: string
+          x-maxBytes: 300
+        pr:
+          $ref: '#/components/schemas/AskPr'
+        parentAskId:
+          $ref: '#/components/schemas/Id'
+        depth:
+          type: integer
+          minimum: 1
+        taskRef:
+          $ref: '#/components/schemas/Id'
+        mode:
+          type: string
+          enum:
+          - answer
+          - draft
+        decidedBy:
+          $ref: '#/components/schemas/PersonRef'
+        reason:
+          type: string
+        answer:
+          type: object
+          additionalProperties: false
+          required:
+          - text
+          - by
+          properties:
+            text:
+              type: string
+            choice:
+              type: string
+            verdict:
+              type: string
+              enum:
+              - clean
+              - findings
+              - could_not_review
+            headSha:
+              type: string
+            by:
+              oneOf:
+              - $ref: '#/components/schemas/PersonRef'
+              - $ref: '#/components/schemas/Id'
+        receipts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AskReceipt'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        expiresAt:
+          $ref: '#/components/schemas/Timestamp'
+        closedAt:
+          $ref: '#/components/schemas/Timestamp'
+        onBehalfOf:
+          $ref: '#/components/schemas/PersonRef'
+        from:
+          type: object
+          additionalProperties: false
+          required:
+          - handle
+          - owner
+          properties:
+            handle:
+              $ref: '#/components/schemas/Id'
+            owner:
+              $ref: '#/components/schemas/PersonRef'
     ChatAuthor:
       oneOf:
       - type: object
@@ -3958,6 +4731,7 @@ components:
       - machine
       - reachable
       - wake
+      - paused
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -3988,6 +4762,8 @@ components:
           - everyone
           - owner
           - nobody
+        paused:
+          type: boolean
     ChatActiveProgress:
       type: object
       additionalProperties: false
@@ -4021,10 +4797,18 @@ components:
       - state
       - expiresAt
       properties:
-        threadRef: {type: string}
-        wakes: {type: boolean}
-        wake: {type: string, enum: [everyone, owner, nobody]}
-        message: {$ref: '#/components/schemas/ChatMessage'}
+        threadRef:
+          type: string
+        wakes:
+          type: boolean
+        wake:
+          type: string
+          enum:
+          - everyone
+          - owner
+          - nobody
+        message:
+          $ref: '#/components/schemas/ChatMessage'
         id:
           $ref: '#/components/schemas/Id'
         handleId:
@@ -4040,6 +4824,8 @@ components:
           - mention
           - dm
           - follow
+          - ask
+          - ask_result
         fromOwner:
           type: boolean
         state:
@@ -4377,9 +5163,16 @@ components:
       required:
       - agentWakeDefault
       - agentsReadMyDms
+      - agentAsks
+      - agentsPaused
       properties:
-        agentWakeDefault: {$ref: "#/components/schemas/ChatWake"}
+        agentWakeDefault:
+          $ref: '#/components/schemas/ChatWake'
         agentsReadMyDms:
+          type: boolean
+        agentAsks:
+          $ref: '#/components/schemas/AgentAskPolicy'
+        agentsPaused:
           type: boolean
     ChatNotifications:
       type: object
@@ -4482,6 +5275,9 @@ components:
         taskRef:
           $ref: '#/components/schemas/Id'
     ChatNewAsk:
+      allOf:
+      - if: {required: [kind], properties: {kind: {const: review}}}
+        then: {required: [pr], properties: {to: {properties: {kind: {const: agent}}}}}
       type: object
       additionalProperties: false
       required:
@@ -4490,11 +5286,33 @@ components:
       - key
       - asHandle
       properties:
+        receipt: {$ref: '#/components/schemas/AskReceipt'}
         to:
-          $ref: '#/components/schemas/Id'
+          oneOf:
+          - type: object
+            additionalProperties: false
+            required:
+            - kind
+            - person
+            properties:
+              kind:
+                const: person
+              person:
+                $ref: '#/components/schemas/Id'
+          - type: object
+            additionalProperties: false
+            required:
+            - kind
+            - handle
+            properties:
+              kind:
+                const: agent
+              handle:
+                $ref: '#/components/schemas/Id'
         question:
           type: string
-          maxLength: 16384
+          minLength: 1
+          x-maxBytes: 6144
         choices:
           type: array
           items:
@@ -4511,24 +5329,66 @@ components:
           $ref: '#/components/schemas/Id'
         asHandle:
           $ref: '#/components/schemas/Id'
+        kind:
+          type: string
+          enum:
+          - question
+          - review
+        context:
+          type: string
+          x-maxBytes: 8192
+        doneWhen:
+          type: string
+          x-maxBytes: 300
+        pr:
+          $ref: '#/components/schemas/AskPr'
+        parentAskId:
+          $ref: '#/components/schemas/Id'
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+          maximum: 604800
     ChatAnswer:
-      description: Only the named recipient may answer an open ask. Choice must equal an offered label. Text must contain a non-whitespace character.
+      anyOf: [{required: [text]}, {required: [choice]}, {required: [none, asHandle]}]
       oneOf:
       - type: object
         additionalProperties: false
         required:
-        - choice
+        - none
+        - reason
         properties:
-          choice:
+          none:
+            const: true
+          reason:
             type: string
+          asHandle:
+            $ref: '#/components/schemas/Id'
+          receipt:
+            $ref: '#/components/schemas/AskReceipt'
       - type: object
         additionalProperties: false
-        required:
-        - text
         properties:
           text:
             type: string
-            maxLength: 16384
+          choice:
+            type: string
+          verdict:
+            type: string
+            enum:
+            - clean
+            - findings
+            - could_not_review
+          headSha:
+            type: string
+          asHandle:
+            $ref: '#/components/schemas/Id'
+          receipt:
+            $ref: '#/components/schemas/AskReceipt'
+        anyOf:
+        - required:
+          - text
+        - required:
+          - choice
     ChatRegister:
       type: object
       additionalProperties: false
@@ -4596,10 +5456,14 @@ components:
           maxItems: 50
           items:
             type: object
-            required: [board, channel]
+            required:
+            - board
+            - channel
             properties:
-              board: { type: string }
-              channel: { type: string }
+              board:
+                type: string
+              channel:
+                type: string
         maxTextBytes:
           type: integer
           minimum: 0
@@ -4615,6 +5479,8 @@ components:
           - openAsks
           - hopCap
           - pairPerMinute
+          - agentAsks
+          - handoffs
           properties:
             postsPerMinute:
               type: integer
@@ -4631,6 +5497,52 @@ components:
             pairPerMinute:
               type: integer
               minimum: 0
+            agentAsks:
+              type: object
+              additionalProperties: false
+              required:
+              - pairOpen
+              - pairPerDay
+              - maxDepth
+              - sameQuestion
+              - declineCooloffSeconds
+              - defaultTimeoutSeconds
+              - maxTimeoutSeconds
+              properties:
+                pairOpen:
+                  type: integer
+                  minimum: 1
+                pairPerDay:
+                  type: integer
+                  minimum: 1
+                maxDepth:
+                  type: integer
+                  minimum: 1
+                sameQuestion:
+                  type: integer
+                  minimum: 1
+                declineCooloffSeconds:
+                  type: integer
+                  minimum: 1
+                defaultTimeoutSeconds:
+                  type: integer
+                  minimum: 1
+                maxTimeoutSeconds:
+                  type: integer
+                  minimum: 1
+            handoffs:
+              type: object
+              additionalProperties: false
+              required:
+              - expireAfterSeconds
+              - stallAfterSeconds
+              properties:
+                expireAfterSeconds:
+                  type: integer
+                  minimum: 1
+                stallAfterSeconds:
+                  type: integer
+                  minimum: 1
         retentionDays:
           type: object
           additionalProperties: false
@@ -4701,6 +5613,9 @@ components:
                 `network_identity_mismatch`, `not_found`, `rate_limited`, `capacity`, `unavailable`, `internal`.
                 Role and chat codes: role_permission_missing, role_in_use, role_not_for_outside, chat_outsiders_not_allowed,
                 chat_request_closed, chat_manage_restricted, chat_dm_restricted, chat_agent_capped, chat_post_restricted, chat_invite_restricted, chat_not_member.
+                Agent work codes: agent_ask_off, agent_ask_paused, agent_ask_capped, agent_ask_depth, agent_ask_cycle,
+                agent_ask_circle, agent_ask_declined_recently, agent_ask_no_home, auto_accept_scope, review_same_owner,
+                handoff_not_holder, handoff_cannot_take, ask_closed, handoff_closed, handoff_open.
                 Outside token_revoked reasons: outside_grant_lost, outside_entry_removed, outside_2fa_off, outside_identity_mismatch.
                 A retryable unavailable response uses outside_check_pending.
                 Not a closed enum: a client treats an unknown code by its
@@ -4835,7 +5750,7 @@ components:
           then:
             properties:
               version: { const: 1 }
-              flags: { type: array, uniqueItems: true, items: { enum: [channel_access, join_requests, agent_inbox, channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, asks, task_links, reactions, search, promote] } }
+              flags: { type: array, uniqueItems: true, items: { enum: [agent_asks, handoffs, reviews, agent_pause, channel_access, join_requests, agent_inbox, channels, private_channels, dms, group_dms, threads, agents, agent_dms, agent_owner_dm_read, others_agents, asks, task_links, reactions, search, promote] } }
         - if: { properties: { kind: { const: team } } }
           then:
             properties:
@@ -5191,39 +6106,121 @@ components:
         login: { $ref: "#/components/schemas/Login" }
     NeedsItem:
       allOf:
-        - if: {properties: {kind: {const: chat_join_requests}}}
-          then: {required: [conversationId, count]}
-        - if: {properties: {kind: {const: agent_inbox}}}
-          then: {required: [handleId, count]}
-      if: { properties: { kind: { const: chat_ask } } }
-      then: { required: [ask] }
+      - if:
+          properties:
+            kind:
+              const: chat_join_requests
+        then:
+          required:
+          - conversationId
+          - count
+      - if:
+          properties:
+            kind:
+              const: agent_inbox
+        then:
+          required:
+          - handleId
+          - count
+      - if:
+          properties:
+            kind:
+              const: agent_ask
+        then:
+          required:
+          - owner
+          - count
+      - if:
+          properties:
+            kind:
+              const: review_request
+        then:
+          required:
+          - askId
+      - if:
+          properties:
+            kind:
+              const: handoff_offer
+        then:
+          required:
+          - handoffId
+      - if:
+          properties:
+            kind:
+              const: handoff_stalled
+        then:
+          required:
+          - handoffId
+          - step
+      if:
+        properties:
+          kind:
+            const: chat_ask
+      then:
+        required:
+        - ask
       type: object
-      required: [id, kind, title, createdAt]
+      required:
+      - id
+      - kind
+      - title
+      - createdAt
       properties:
-        id: { $ref: "#/components/schemas/Id" }
+        id:
+          $ref: '#/components/schemas/Id'
         kind:
-          description: |
-            Open set. Known values: `chat_ask`, `thread_question`, `thread_approval`, `pull_request`, `pr_approval`, `waiting_for_approver`, `founder_question`,
+          description: 'Open set. Known values: `chat_ask`, `thread_question`, `thread_approval`, `pull_request`, `pr_approval`,
+            `waiting_for_approver`, `founder_question`,
+
             `promotion`, `health`, `mention`, `agent_message`, `persona_ask`, `suggestion`, `other` (class 5, the explicit
+
             catch-all). Not a closed enum:
+
             a client shows an unknown kind as a generic item and never fails on it.
+
+            '
           type: string
-          pattern: "^[a-z][a-z0-9_]{0,63}$"
-        title: { type: string, maxLength: 300 }
-        recommendation: { type: string, maxLength: 500 }
-        conversationId: {$ref: "#/components/schemas/Id"}
-        handleId: {$ref: "#/components/schemas/Id"}
-        count: {type: integer, minimum: 1}
-        chatRead: { $ref: "#/components/schemas/ChatRead" }
-        ask: { $ref: "#/components/schemas/ChatAsk" }
-        from: { $ref: "#/components/schemas/PersonRef" }
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+        title:
+          type: string
+          maxLength: 300
+        recommendation:
+          type: string
+          maxLength: 500
+        conversationId:
+          $ref: '#/components/schemas/Id'
+        handleId:
+          $ref: '#/components/schemas/Id'
+        count:
+          type: integer
+          minimum: 1
+        chatRead:
+          $ref: '#/components/schemas/ChatRead'
+        ask:
+          $ref: '#/components/schemas/ChatAsk'
+        from:
+          $ref: '#/components/schemas/PersonRef'
         url:
           description: Link out, such as the GitHub issue or pull request.
           type: string
           format: uri
-        deepLink: { $ref: "#/components/schemas/DeepLink" }
-        createdAt: { $ref: "#/components/schemas/Timestamp" }
-        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+        deepLink:
+          $ref: '#/components/schemas/DeepLink'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        owner:
+          $ref: '#/components/schemas/PersonRef'
+        askId:
+          $ref: '#/components/schemas/Id'
+        handoffId:
+          $ref: '#/components/schemas/Id'
+        step:
+          type: string
+          enum:
+          - waiting_release
+          - waiting_take
     NeedsPage:
       type: object
       required: [items, nextCursor]

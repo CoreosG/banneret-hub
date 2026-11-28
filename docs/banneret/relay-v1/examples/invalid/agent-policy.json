@@ -1,0 +1,15 @@
+{
+  "default": "approve",
+  "auto": [
+    {
+      "from": {
+        "agent": "h_build"
+      },
+      "kinds": [
+        "handoff"
+      ]
+    }
+  ],
+  "maxTokens": 200000,
+  "maxSeconds": 900
+}

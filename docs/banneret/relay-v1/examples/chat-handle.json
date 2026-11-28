@@ -11,5 +11,6 @@
     "label": "example"
   },
   "reachable": false,
-  "wake": "everyone"
+  "wake": "everyone",
+  "paused": false
 }

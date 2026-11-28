@@ -1,0 +1,39 @@
+{
+  "default": "approve",
+  "auto": [
+    {
+      "from": {
+        "person": {
+          "id": "p_ada",
+          "login": "ada"
+        }
+      },
+      "kinds": [
+        "question",
+        "review",
+        "handoff"
+      ]
+    },
+    {
+      "from": {
+        "agent": "h_build"
+      },
+      "kinds": [
+        "question"
+      ]
+    },
+    {
+      "from": {
+        "role": {
+          "id": "staff",
+          "name": "Staff"
+        }
+      },
+      "kinds": [
+        "question"
+      ]
+    }
+  ],
+  "maxTokens": 200000,
+  "maxSeconds": 900
+}

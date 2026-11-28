@@ -433,6 +433,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const result = yield* (yield* chat).write("POST", "asks", {
           ...ask,
+          to: { kind: "person", person: ask.to },
           threadRootId: thread,
           taskRef: task,
         });

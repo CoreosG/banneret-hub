@@ -1,0 +1,22 @@
+{
+  "id": "offer",
+  "taskId": "task",
+  "to": {
+    "id": "p_leo",
+    "login": "leo"
+  },
+  "note": {
+    "goal": "Release",
+    "done": "Built",
+    "next": "Test"
+  },
+  "state": "accepted",
+  "step": "waiting_release",
+  "createdAt": "2026-11-27T00:00:00Z",
+  "expiresAt": "2026-11-28T00:00:00Z",
+  "from": {
+    "id": "p_ada",
+    "login": "ada"
+  },
+  "receipts": []
+}

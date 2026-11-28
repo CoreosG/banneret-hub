@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { NonNegativeInt, PositiveInt } from "./baseSchemas.ts";
 
 export const ChatPerson = Schema.Struct({ id: Schema.String, login: Schema.String });
 export type ChatPerson = typeof ChatPerson.Type;
@@ -105,14 +106,217 @@ export const ChatProgress = Schema.Struct({
 });
 export type ChatProgress = typeof ChatProgress.Type;
 
+export const AskTarget = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("person"),
+    person: ChatPerson,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("agent"),
+    handle: Schema.String,
+    owner: ChatPerson,
+  }),
+]);
+export type AskTarget = typeof AskTarget.Type;
+
+export const AskPr = Schema.Struct({
+  repo: Schema.String,
+  number: PositiveInt,
+  headSha: Schema.String,
+});
+export type AskPr = typeof AskPr.Type;
+
+export const AskReceipt = Schema.Struct({
+  handle: Schema.String,
+  tokens: NonNegativeInt,
+  seconds: NonNegativeInt,
+  tools: Schema.Array(Schema.String),
+});
+export type AskReceipt = typeof AskReceipt.Type;
+
+export const AgentAskPolicy = Schema.Struct({
+  default: Schema.Literals(["off", "approve"]),
+  auto: Schema.Array(
+    Schema.Union([
+      Schema.Struct({
+        from: Schema.Struct({
+          person: ChatPerson,
+        }),
+        kinds: Schema.Array(Schema.Literals(["question", "review", "handoff"])),
+      }),
+      Schema.Struct({
+        from: Schema.Struct({
+          agent: Schema.String,
+        }),
+        kinds: Schema.Array(Schema.Literals(["question"])),
+      }),
+      Schema.Struct({
+        from: Schema.Struct({
+          role: RoleRef,
+        }),
+        kinds: Schema.Array(Schema.Literals(["question"])),
+      }),
+    ]),
+  ),
+  maxTokens: PositiveInt,
+  maxSeconds: PositiveInt,
+  usageWindowBelowPercent: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  ),
+});
+export type AgentAskPolicy = typeof AgentAskPolicy.Type;
+
 export const ChatAsk = Schema.Struct({
   id: Schema.String,
-  to: ChatPerson,
+  to: AskTarget,
   choices: Schema.Array(Schema.String),
-  state: Schema.Literals(["open", "answered", "cancelled", "expired", "orphaned"]),
+  state: Schema.Literals([
+    "waiting_owner",
+    "open",
+    "draft",
+    "answered",
+    "declined",
+    "unanswered",
+    "cancelled",
+    "expired",
+    "orphaned",
+  ]),
   answerMessageId: Schema.optionalKey(Schema.String),
+  kind: Schema.Literals(["question", "review"]),
+  question: Schema.String,
+  context: Schema.optionalKey(Schema.String),
+  doneWhen: Schema.optionalKey(Schema.String),
+  pr: Schema.optionalKey(AskPr),
+  parentAskId: Schema.optionalKey(Schema.String),
+  depth: PositiveInt,
+  taskRef: Schema.optionalKey(Schema.String),
+  mode: Schema.optionalKey(Schema.Literals(["answer", "draft"])),
+  decidedBy: Schema.optionalKey(ChatPerson),
+  reason: Schema.optionalKey(Schema.String),
+  answer: Schema.optionalKey(
+    Schema.Struct({
+      text: Schema.String,
+      choice: Schema.optionalKey(Schema.String),
+      verdict: Schema.optionalKey(Schema.Literals(["clean", "findings", "could_not_review"])),
+      headSha: Schema.optionalKey(Schema.String),
+      by: Schema.Union([ChatPerson, Schema.String]),
+    }),
+  ),
+  receipts: Schema.Array(AskReceipt),
+  createdAt: Schema.String,
+  expiresAt: Schema.String,
+  closedAt: Schema.optionalKey(Schema.String),
+  onBehalfOf: ChatPerson,
+  from: Schema.Struct({
+    handle: Schema.String,
+    owner: ChatPerson,
+  }),
 });
 export type ChatAsk = typeof ChatAsk.Type;
+
+export const ChatDecision = Schema.Union([
+  Schema.Struct({
+    allow: Schema.Literals(["once", "draft", "always"]),
+    kinds: Schema.optionalKey(Schema.Array(Schema.Literals(["question", "review"]))),
+  }),
+  Schema.Struct({
+    decline: Schema.Literal(true),
+    reason: Schema.String,
+  }),
+]);
+export type ChatDecision = typeof ChatDecision.Type;
+
+export const ChatConfirm = Schema.Union([
+  Schema.Struct({
+    post: Schema.Literal(true),
+    text: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    post: Schema.Literal(false),
+  }),
+]);
+export type ChatConfirm = typeof ChatConfirm.Type;
+
+export const ChatAsks = Schema.Struct({
+  items: Schema.Array(ChatAsk),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export type ChatAsks = typeof ChatAsks.Type;
+
+export const ChatNewHandoff = Schema.Struct({
+  receipt: Schema.optionalKey(AskReceipt),
+  taskId: Schema.String,
+  to: ChatPerson,
+  note: Schema.Struct({
+    goal: Schema.String,
+    done: Schema.String,
+    next: Schema.String,
+    risks: Schema.optionalKey(Schema.String),
+  }),
+  branch: Schema.optionalKey(Schema.String),
+  headSha: Schema.optionalKey(Schema.String),
+  expiresInSeconds: Schema.optionalKey(PositiveInt),
+  threadRootId: Schema.optionalKey(Schema.String),
+  asHandle: Schema.optionalKey(Schema.String),
+  key: Schema.String,
+});
+export type ChatNewHandoff = typeof ChatNewHandoff.Type;
+
+export const Handoff = Schema.Struct({
+  receipts: Schema.Array(AskReceipt),
+  id: Schema.String,
+  taskId: Schema.String,
+  to: ChatPerson,
+  note: Schema.Struct({
+    goal: Schema.String,
+    done: Schema.String,
+    next: Schema.String,
+    risks: Schema.optionalKey(Schema.String),
+  }),
+  branch: Schema.optionalKey(Schema.String),
+  headSha: Schema.optionalKey(Schema.String),
+  from: ChatPerson,
+  fromHandle: Schema.optionalKey(Schema.String),
+  state: Schema.Literals([
+    "offered",
+    "accepted",
+    "declined",
+    "withdrawn",
+    "expired",
+    "void",
+    "closed",
+  ]),
+  outcome: Schema.optionalKey(Schema.Literals(["done", "lost"])),
+  step: Schema.optionalKey(Schema.Literals(["waiting_release", "waiting_take"])),
+  machineId: Schema.optionalKey(Schema.String),
+  reason: Schema.optionalKey(Schema.String),
+  createdAt: Schema.String,
+  expiresAt: Schema.String,
+  closedAt: Schema.optionalKey(Schema.String),
+});
+export type Handoff = typeof Handoff.Type;
+
+export const HandoffAccept = Schema.Struct({
+  receipt: Schema.optionalKey(AskReceipt),
+  machineId: Schema.optionalKey(Schema.String),
+});
+export type HandoffAccept = typeof HandoffAccept.Type;
+
+export const HandoffReason = Schema.Struct({
+  reason: Schema.optionalKey(Schema.String),
+});
+export type HandoffReason = typeof HandoffReason.Type;
+
+export const ChatHandoffs = Schema.Struct({
+  items: Schema.Array(Handoff),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+export type ChatHandoffs = typeof ChatHandoffs.Type;
+
+export const AgentPause = Schema.Struct({
+  paused: Schema.Boolean,
+});
+export type AgentPause = typeof AgentPause.Type;
 
 export const ChatAuthor = Schema.Union([
   Schema.Struct({ kind: Schema.Literals(["person"]), id: Schema.String, login: Schema.String }),
@@ -160,9 +364,13 @@ export const ChatHandle = Schema.Struct({
   claimName: Schema.String,
   shortName: Schema.optionalKey(Schema.String),
   provider: Schema.String,
-  machine: Schema.Struct({ id: Schema.String, label: Schema.String }),
+  machine: Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+  }),
   reachable: Schema.Boolean,
-  wake: ChatWake,
+  wake: Schema.Literals(["everyone", "owner", "nobody"]),
+  paused: Schema.Boolean,
 });
 export type ChatHandle = typeof ChatHandle.Type;
 
@@ -182,7 +390,7 @@ export const ChatDelivery = Schema.Struct({
   handleId: Schema.String,
   messageId: Schema.String,
   machineId: Schema.String,
-  reason: Schema.Literals(["answer", "mention", "dm", "follow"]),
+  reason: Schema.Literals(["answer", "mention", "dm", "follow", "ask", "ask_result"]),
   fromOwner: Schema.Boolean,
   state: Schema.Literals(["pending", "claimed", "consumed", "refused", "expired"]),
   expiresAt: Schema.String,
@@ -338,6 +546,8 @@ export type ChatPatch = typeof ChatPatch.Type;
 export const ChatSettings = Schema.Struct({
   agentWakeDefault: ChatWake,
   agentsReadMyDms: Schema.Boolean,
+  agentAsks: AgentAskPolicy,
+  agentsPaused: Schema.Boolean,
 });
 export type ChatSettings = typeof ChatSettings.Type;
 
@@ -384,19 +594,47 @@ export const ChatTask = Schema.Struct({ taskRef: Schema.String });
 export type ChatTask = typeof ChatTask.Type;
 
 export const ChatNewAsk = Schema.Struct({
-  to: Schema.String,
+  receipt: Schema.optionalKey(AskReceipt),
+  to: Schema.Union([
+    Schema.Struct({
+      kind: Schema.Literal("person"),
+      person: Schema.String,
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("agent"),
+      handle: Schema.String,
+    }),
+  ]),
   question: Schema.String,
   choices: Schema.optionalKey(Schema.Array(Schema.String)),
   threadRootId: Schema.optionalKey(Schema.String),
   taskRef: Schema.optionalKey(Schema.String),
   key: Schema.String,
   asHandle: Schema.String,
+  kind: Schema.optionalKey(Schema.Literals(["question", "review"])),
+  context: Schema.optionalKey(Schema.String),
+  doneWhen: Schema.optionalKey(Schema.String),
+  pr: Schema.optionalKey(AskPr),
+  parentAskId: Schema.optionalKey(Schema.String),
+  timeoutSeconds: Schema.optionalKey(PositiveInt.check(Schema.isLessThanOrEqualTo(604800))),
 });
 export type ChatNewAsk = typeof ChatNewAsk.Type;
 
 export const ChatAnswer = Schema.Union([
-  Schema.Struct({ choice: Schema.String }),
-  Schema.Struct({ text: Schema.String }),
+  Schema.Struct({
+    none: Schema.Literal(true),
+    reason: Schema.String,
+    asHandle: Schema.optionalKey(Schema.String),
+    receipt: Schema.optionalKey(AskReceipt),
+  }),
+  Schema.Struct({
+    text: Schema.optionalKey(Schema.String),
+    choice: Schema.optionalKey(Schema.String),
+    verdict: Schema.optionalKey(Schema.Literals(["clean", "findings", "could_not_review"])),
+    headSha: Schema.optionalKey(Schema.String),
+    asHandle: Schema.optionalKey(Schema.String),
+    receipt: Schema.optionalKey(AskReceipt),
+  }),
 ]);
 export type ChatAnswer = typeof ChatAnswer.Type;
 
@@ -419,6 +657,14 @@ export const ChatPromotion = Schema.Struct({ text: Schema.String, link: Schema.S
 export type ChatPromotion = typeof ChatPromotion.Type;
 
 export const ChatLimits = Schema.Struct({
+  boards: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        board: Schema.String,
+        channel: Schema.String,
+      }),
+    ),
+  ),
   maxTextBytes: Schema.Int,
   editWindowSeconds: Schema.Int,
   rate: Schema.Struct({
@@ -427,8 +673,24 @@ export const ChatLimits = Schema.Struct({
     openAsks: Schema.Int,
     hopCap: Schema.Int,
     pairPerMinute: Schema.Int,
+    agentAsks: Schema.Struct({
+      pairOpen: Schema.Int,
+      pairPerDay: Schema.Int,
+      maxDepth: Schema.Int,
+      sameQuestion: Schema.Int,
+      declineCooloffSeconds: Schema.Int,
+      defaultTimeoutSeconds: Schema.Int,
+      maxTimeoutSeconds: Schema.Int,
+    }),
+    handoffs: Schema.Struct({
+      expireAfterSeconds: Schema.Int,
+      stallAfterSeconds: Schema.Int,
+    }),
   }),
-  retentionDays: Schema.Struct({ channels: Schema.Int, dms: Schema.Int }),
+  retentionDays: Schema.Struct({
+    channels: Schema.Int,
+    dms: Schema.Int,
+  }),
 });
 export type ChatLimits = typeof ChatLimits.Type;
 

@@ -105,7 +105,11 @@
         "promote",
         "join_requests",
         "agent_inbox",
-        "channel_access"
+        "channel_access",
+        "agent_asks",
+        "reviews",
+        "handoffs",
+        "agent_pause"
       ]
     },
     {
@@ -134,7 +138,20 @@
       "postsPerHour": 120,
       "openAsks": 5,
       "hopCap": 4,
-      "pairPerMinute": 20
+      "pairPerMinute": 20,
+      "agentAsks": {
+        "pairOpen": 3,
+        "pairPerDay": 20,
+        "maxDepth": 2,
+        "sameQuestion": 3,
+        "declineCooloffSeconds": 3600,
+        "defaultTimeoutSeconds": 14400,
+        "maxTimeoutSeconds": 604800
+      },
+      "handoffs": {
+        "expireAfterSeconds": 86400,
+        "stallAfterSeconds": 1800
+      }
     },
     "retentionDays": {
       "channels": 0,
@@ -185,6 +202,21 @@
     {
       "name": "banneret_chat_inbox",
       "description": "Consume waiting deliveries for this handle."
+    },
+    {
+      "name": "banneret_agent_ask",
+      "requires": "agents.ask",
+      "description": "Work in a shared chat thread."
+    },
+    {
+      "name": "banneret_agent_answer",
+      "requires": "agents.ask",
+      "description": "Work in a shared chat thread."
+    },
+    {
+      "name": "banneret_handoff_offer",
+      "requires": "agents.ask",
+      "description": "Work in a shared chat thread."
     }
   ],
   "adapters": [

@@ -18,6 +18,13 @@ import {
 import type { TeamPresenceEdit, TeamPresenceValues } from "@t3tools/contracts";
 import type {
   ChatAnswer,
+  ChatAsk,
+  AgentAskPolicy,
+  ChatDecision,
+  ChatConfirm,
+  Handoff,
+  ChatNewHandoff,
+  HandoffAccept,
   ChatTask,
   ChatDelivery,
   ChatHandle,
@@ -89,6 +96,21 @@ type ErrorCode =
   | "forbidden"
   | "network_identity_mismatch"
   | "not_found"
+  | "agent_ask_off"
+  | "agent_ask_paused"
+  | "agent_ask_capped"
+  | "agent_ask_depth"
+  | "agent_ask_cycle"
+  | "agent_ask_circle"
+  | "agent_ask_declined_recently"
+  | "agent_ask_no_home"
+  | "review_same_owner"
+  | "handoff_not_holder"
+  | "handoff_cannot_take"
+  | "auto_accept_scope"
+  | "ask_closed"
+  | "handoff_closed"
+  | "handoff_open"
   | "role_permission_missing"
   | "chat_post_restricted"
   | "chat_not_member"
@@ -164,6 +186,18 @@ export interface FakeRelayOptions {
     | boolean
     | {
         readonly defaultChannels?: readonly string[];
+        readonly agentAsks?: {
+          enabled?: boolean;
+          pairOpen?: number;
+          pairPerDay?: number;
+          maxDepth?: number;
+          sameQuestion?: number;
+          declineCooloffSeconds?: number;
+          defaultTimeout?: string;
+          maxTimeout?: string;
+        };
+        readonly handoffs?: { enabled?: boolean; expireAfter?: string; stallAfter?: string };
+        readonly reviews?: { enabled?: boolean };
         readonly requests?: {
           expireAfter?: string;
           retryAfterDecline?: string;
@@ -334,6 +368,11 @@ interface Machine {
 }
 
 interface NeedsItem {
+  readonly owner?: PersonView;
+  readonly askId?: string;
+  readonly handoffId?: string;
+  readonly step?: Handoff["step"];
+  readonly count?: number;
   /** Recording order: the tie-break within a class and createdAt. Not sent. */
   readonly seq: number;
   readonly id: string;
@@ -444,6 +483,7 @@ interface LinkedPr {
   readonly approvals: PrApprovals | null;
   readonly author: string;
   readonly candidates: string[];
+  readonly headSha?: string;
   readonly approvalOnly: boolean;
   readonly number: number;
   readonly state: string;
@@ -487,6 +527,7 @@ interface RelayEvent {
   readonly data: unknown;
   /** Null: every person. */
   readonly personId: string | null;
+  readonly machineId?: string;
 }
 
 interface Stream {
@@ -531,6 +572,21 @@ const STATUS: Record<ErrorCode, number> = {
   forbidden: 403,
   network_identity_mismatch: 403,
   not_found: 404,
+  agent_ask_off: 403,
+  agent_ask_paused: 403,
+  agent_ask_capped: 403,
+  agent_ask_depth: 403,
+  agent_ask_cycle: 403,
+  agent_ask_circle: 403,
+  agent_ask_declined_recently: 403,
+  agent_ask_no_home: 403,
+  review_same_owner: 403,
+  handoff_not_holder: 403,
+  handoff_cannot_take: 403,
+  auto_accept_scope: 403,
+  ask_closed: 409,
+  handoff_closed: 409,
+  handoff_open: 409,
   role_permission_missing: 403,
   chat_post_restricted: 403,
   chat_not_member: 403,
@@ -680,6 +736,10 @@ const pageParams = (query: URLSearchParams) => {
 const NEEDS_CLASS: Readonly<Record<string, number>> = {
   thread_question: 1,
   thread_approval: 1,
+  agent_ask: 2,
+  review_request: 2,
+  handoff_offer: 2,
+  handoff_stalled: 2,
   chat_ask: 1,
   chat_join_requests: 2,
   agent_inbox: 3,
@@ -791,6 +851,23 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       Number(match[1]) *
       { s: 1000, m: 60000, h: 3600000, d: 86400000 }[match[2] as "s" | "m" | "h" | "d"]
     );
+  };
+  const agentAsksEnabled = chatConfig?.agentAsks?.enabled === true;
+  const handoffsEnabled = chatConfig?.handoffs?.enabled === true;
+  const reviewsEnabled = agentAsksEnabled && chatConfig?.reviews?.enabled === true;
+  const cfg = chatConfig?.agentAsks;
+  const askLimits = {
+    pairOpen: cfg?.pairOpen ?? 3,
+    pairPerDay: cfg?.pairPerDay ?? 20,
+    maxDepth: cfg?.maxDepth ?? 2,
+    sameQuestion: cfg?.sameQuestion ?? 3,
+    declineCooloffSeconds: cfg?.declineCooloffSeconds ?? 3600,
+    defaultTimeoutSeconds: duration(cfg?.defaultTimeout ?? "4h") / 1000,
+    maxTimeoutSeconds: Math.min(604800, duration(cfg?.maxTimeout ?? "7d") / 1000),
+  };
+  const handoffLimits = {
+    expireAfterSeconds: duration(chatConfig?.handoffs?.expireAfter ?? "24h") / 1000,
+    stallAfterSeconds: duration(chatConfig?.handoffs?.stallAfter ?? "30m") / 1000,
   };
   const requestLifetime = duration(chatConfig?.requests?.expireAfter ?? "14d");
   const declineCooldown = duration(chatConfig?.requests?.retryAfterDecline ?? "7d");
@@ -976,14 +1053,31 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
   };
 
-  const emit = (type: string, schema: SchemaName, data: unknown, personId: string | null) => {
+  const emit = (
+    type: string,
+    schema: SchemaName,
+    data: unknown,
+    personId: string | null,
+    machineId?: string,
+  ) => {
     const problem = spec.check(schema, data);
     if (problem !== null) throw new Error(`fake relay built an invalid ${type} event: ${problem}`);
-    const event: RelayEvent = { id: nextEventId++, at: eventClock(), type, data, personId };
+    const event: RelayEvent = {
+      id: nextEventId++,
+      at: eventClock(),
+      type,
+      data,
+      personId,
+      ...(machineId && { machineId }),
+    };
     events.push(event);
     pruneEvents();
     for (const stream of streams) {
-      if (personId === null || stream.personId === personId) writeEvent(stream, event);
+      if (
+        (personId === null || stream.personId === personId) &&
+        (!machineId || stream.machineId === machineId)
+      )
+        writeEvent(stream, event);
     }
   };
 
@@ -1437,6 +1531,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       ...(needs.get(person.id) ?? []).filter(
         (i) => i.kind !== "health" || has(person, "hub.health"),
       ),
+      ...workNeeds(person),
       ...chatNeeds(person),
       ...requestNeeds(person),
       ...approvalNeeds(person),
@@ -2450,6 +2545,42 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     replies: "everyone",
     invite: ["announcement", "community", "shared"].includes(template) ? "managers" : "members",
   });
+  const policyDefault: AgentAskPolicy = {
+    default: "approve",
+    auto: [],
+    maxTokens: 200000,
+    maxSeconds: 900,
+  };
+  const policies = new Map<string, AgentAskPolicy>();
+  const policyFor = (id: string) => policies.get(id) ?? policyDefault;
+  const usageAllows = (
+    policy: AgentAskPolicy,
+    machineId: string | undefined,
+    provider?: string,
+  ) => {
+    const limit = policy.usageWindowBelowPercent;
+    if (limit === undefined) return true;
+    if (!machineId) return false;
+    const machine = machines.get(machineId);
+    if (!machine?.lastHeardAt || Date.now() - machine.lastHeardAt > NOT_HEARD_FROM_MS) return false;
+    const windows = machine.usage.filter(
+      (w) =>
+        (!provider || w.provider === provider) &&
+        (!w.resetsAt || Date.parse(w.resetsAt) > Date.now()),
+    );
+    return windows.length > 0 && windows.every((w) => w.usedPercent < limit);
+  };
+  const paused = new Set<string>();
+  let companyPaused = false;
+  const askOwner = (ask: ChatAsk | undefined) =>
+    ask?.to.kind === "agent" ? ask.to.owner.id : ask?.to.person.id;
+  const activeAsk = (ask: ChatAsk) => ["waiting_owner", "open", "draft"].includes(ask.state);
+  const drafts = new Map<string, NonNullable<ChatAsk["answer"]>>();
+  const handoffs = new Map<string, Handoff>();
+  const offerKeys = new Map<string, string>();
+  const stalledNotified = new Set<string>();
+  const offerThreads = new Map<string, string>();
+  const stepSince = new Map<string, number>();
   const wakeDefaults = new Map<string, ChatHandle["wake"]>();
   type Channel = {
     dmKey?: string;
@@ -2645,7 +2776,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           m.kind !== "progress" &&
           !(m.author.kind === "person" && m.author.id === stream.personId) &&
           (channel.dmKey ||
-            m.ask?.to.id === stream.personId ||
+            askOwner(m.ask) === stream.personId ||
             (channel.members.has(stream.personId) &&
               !prefs?.muted &&
               prefs?.notify !== "nothing" &&
@@ -2675,7 +2806,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (
           "message" in value &&
           !channel.dmKey &&
-          value.message.ask?.to.id !== p.id &&
+          askOwner(value.message.ask) !== p.id &&
           !value.message.mentions.some((t) => t.id === p.id) &&
           value.kind === "message.created"
         )
@@ -2777,8 +2908,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       ...(root ? { threadRootId: root.id } : {}),
     };
     messages.set(m.id, m);
-    if (root)
-      messages.set(root.id, { ...root, replyCount: root.replyCount + 1, lastReplyAt: m.createdAt });
+    if (root) {
+      const current = messages.get(root.id)!;
+      messages.set(root.id, {
+        ...current,
+        replyCount: current.replyCount + 1,
+        lastReplyAt: m.createdAt,
+      });
+    }
     chatChange(channel, { kind: "message.created", seq: m.seq, message: m });
     return m;
   }
@@ -2787,6 +2924,201 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     if (root) systemMessage(channels.get(root.conversationId)!, task.id, event, text, root);
   }
 
+  function handleReadsHome(c: Channel, handleId: string, rootId: string) {
+    const h = handles.get(handleId);
+    if (!h) return false;
+    if (c.dmKey) return c.members.has(handleId);
+    return (
+      visible(c, h.view.owner.id) &&
+      (c.access.visibility === "public" ||
+        c.members.has(handleId) ||
+        !!follows.get(rootId)?.has(handleId))
+    );
+  }
+  function askDelivery(message: ChatMessage, handleId: string, reason: "ask" | "ask_result") {
+    const h = handles.get(handleId);
+    const c = channels.get(message.conversationId)!;
+    if (!h || !handleReadsHome(c, handleId, message.threadRootId ?? message.id)) return;
+    const row: ChatDelivery = {
+      id: randomId("d"),
+      handleId,
+      reason,
+      messageId: message.id,
+      message,
+      machineId: h.view.machine.id,
+      threadRef: h.threadRef,
+      wake: h.view.wake,
+      wakes:
+        reason === "ask" && message.ask?.state !== "open"
+          ? false
+          : !companyPaused && !paused.has(h.view.owner.id),
+      fromOwner: false,
+      state: "pending",
+      expiresAt: reason === "ask" ? message.ask!.expiresAt : iso(Date.now() + deliveryLifetime),
+    };
+    deliveries.set(row.id, { row, claimedAt: 0 });
+    emit(
+      "chat.delivery",
+      "ChatDeliveryEvent",
+      { deliveryId: row.id, handleId },
+      h.view.owner.id,
+      row.machineId,
+    );
+  }
+  function changeAsk(message: ChatMessage, patch: Partial<ChatAsk>) {
+    const ask = { ...message.ask!, ...patch };
+    const channel = channels.get(message.conversationId)!;
+    if (!activeAsk(ask)) {
+      ask.closedAt = iso(Date.now());
+      drafts.delete(ask.id);
+      for (const d of deliveries.values())
+        if (
+          d.row.messageId === message.id &&
+          d.row.reason === "ask" &&
+          ["pending", "claimed"].includes(d.row.state)
+        )
+          d.row = { ...d.row, state: "expired" };
+    }
+    const updated = { ...message, ask };
+    messages.set(message.id, updated);
+    for (const d of deliveries.values())
+      if (
+        d.row.reason === "ask" &&
+        d.row.messageId === message.id &&
+        d.row.state === "pending" &&
+        !d.row.wakes
+      )
+        d.row = { ...d.row, state: "expired" };
+    if (!activeAsk(ask)) askDelivery(updated, ask.from.handle, "ask_result");
+    else if (ask.state === "open" && ask.to.kind === "agent")
+      askDelivery(updated, ask.to.handle, "ask");
+    chatChange(channel, { kind: "message.edited", seq: ++chatSeq, message: updated });
+    if (ask.to.kind === "agent") {
+      const actor = patch.decidedBy?.login ?? "Relay";
+      const root = messages.get(message.threadRootId ?? "");
+      if (root && !root.deleted)
+        systemMessage(
+          channel,
+          ask.taskRef,
+          "ask_updated",
+          actor + " set the ask to " + ask.state + ".",
+          root,
+        );
+    }
+    return ask;
+  }
+  function notifyWork(id: string) {
+    const p = people.get(id);
+    if (p && !p.removed)
+      emit(
+        "needs.changed",
+        "NeedsChangedEvent",
+        { at: iso(Date.now()), count: personalNeeds(p).length },
+        id,
+      );
+  }
+  function moveHandoff(h: Handoff, patch: Partial<Handoff>, text: string) {
+    const { step: _step, ...rest } = h;
+    const next = {
+      ...rest,
+      ...patch,
+      ...(patch.state !== "accepted" && { closedAt: iso(Date.now()) }),
+    };
+    handoffs.set(h.id, next);
+    stepSince.set(h.id, Date.now());
+    stalledNotified.delete(h.id);
+    const event =
+      next.state === "accepted"
+        ? "handoff_accepted"
+        : next.state === "declined"
+          ? "handoff_declined"
+          : "handoff_closed";
+    handoffEvent(h, event, text);
+    notifyWork(h.from.id);
+    notifyWork(h.to.id);
+    return next;
+  }
+  function handoffEvent(h: Handoff, event: string, text: string) {
+    const root = messages.get(offerThreads.get(h.id) ?? taskThreads.get(h.taskId) ?? "");
+    if (root) systemMessage(channels.get(root.conversationId)!, h.taskId, event, text, root);
+  }
+  function settleHandoffs() {
+    for (const h of handoffs.values()) {
+      if (h.state !== "offered" && h.state !== "accepted") continue;
+      const task = boardTasks.find((t) => t.id === h.taskId),
+        holder = task && leaseOf(task, Date.now())?.holder.id;
+      const lostAccess = [h.from, h.to].some((p) => {
+        const person = people.get(p.id);
+        return !person || person.removed || !task || !taskAllowed(person, task);
+      });
+      if (lostAccess || task?.closedAt != null || (h.state === "offered" && holder !== h.from.id))
+        moveHandoff(h, { state: "void" }, "Hand-off void.");
+      else if (h.state === "offered" && Date.parse(h.expiresAt) <= Date.now())
+        moveHandoff(h, { state: "expired" }, "Hand-off expired.");
+      else if (h.state === "accepted") {
+        if (holder && holder !== h.from.id)
+          moveHandoff(
+            h,
+            { state: "closed", outcome: holder === h.to.id ? "done" : "lost" },
+            "Hand-off closed.",
+          );
+        else if (!holder && h.step !== "waiting_take") {
+          handoffs.set(h.id, { ...h, step: "waiting_take" });
+          stepSince.set(h.id, Date.now());
+          stalledNotified.delete(h.id);
+          notifyWork(h.to.id);
+        } else if (
+          !stalledNotified.has(h.id) &&
+          Date.now() - (stepSince.get(h.id) ?? Date.now()) >= handoffLimits.stallAfterSeconds * 1000
+        ) {
+          stalledNotified.add(h.id);
+          notifyWork(h.step === "waiting_release" ? h.from.id : h.to.id);
+        }
+      }
+    }
+  }
+
+  function reviewTask(pr: ChatAsk["pr"]) {
+    return (
+      pr &&
+      boardTasks.find(
+        (t) => pr.repo === "example-org/example-app" && t.prs.some((p) => p.number === pr.number),
+      )
+    );
+  }
+  function sweepWork() {
+    for (const m of messages.values()) {
+      if (!m.ask || !activeAsk(m.ask)) continue;
+      const a = m.ask,
+        c = channels.get(m.conversationId)!;
+      if (
+        !handles.has(a.from.handle) ||
+        !(visible(c, a.from.owner.id) || (c.dmKey && c.members.has(a.from.handle))) ||
+        !visible(c, askOwner(a)!) ||
+        people.get(askOwner(a)!)?.removed ||
+        people.get(a.from.owner.id)?.removed ||
+        (a.to.kind === "agent" &&
+          (!handleReadsHome(c, a.to.handle, m.threadRootId ?? m.id) ||
+            !handleReadsHome(c, a.from.handle, m.threadRootId ?? m.id) ||
+            !rights(c, people.get(a.to.owner.id)!).reply ||
+            !rights(c, people.get(a.from.owner.id)!).reply ||
+            !rights(c, people.get(a.onBehalfOf.id)!).reply ||
+            m.deleted ||
+            (m.threadRootId && messages.get(m.threadRootId)?.deleted) ||
+            c.agents === "off"))
+      )
+        changeAsk(m, { state: "orphaned" });
+      else if (
+        a.kind === "review" &&
+        reviewTask(a.pr)?.prs.some(
+          (pr) => pr.number === a.pr?.number && (pr.mergedAt !== null || pr.state === "closed"),
+        )
+      )
+        changeAsk(m, { state: "orphaned" });
+      else if (Date.parse(a.expiresAt) <= Date.now()) changeAsk(m, { state: "expired" });
+    }
+    settleHandoffs();
+  }
   const deliveryReadable = (d: ChatDelivery, person: Person) => {
     const channel = channels.get(d.message.conversationId);
     return (
@@ -2836,6 +3168,63 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       ),
     ];
   }
+  function workNeeds(person: Person): NeedsItem[] {
+    const items: NeedsItem[] = [];
+    const groups = new Map<string, { first: ChatAsk; count: number }>();
+    for (const { ask, conversationId } of messages.values()) {
+      if (
+        ask?.to.kind !== "agent" ||
+        ask.to.owner.id !== person.id ||
+        !["draft", "waiting_owner"].includes(ask.state) ||
+        !visible(channels.get(conversationId)!, person.id)
+      )
+        continue;
+      if (ask.kind === "review")
+        items.push({
+          askId: ask.id,
+          seq: 0,
+          id: ask.id,
+          kind: "review_request",
+          title: ask.question.slice(0, 300),
+          createdAt: ask.createdAt,
+        });
+      else {
+        const group = groups.get(ask.from.owner.id);
+        if (group) group.count++;
+        else groups.set(ask.from.owner.id, { first: ask, count: 1 });
+      }
+    }
+    for (const { first, count } of groups.values()) {
+      items.push({
+        owner: first.from.owner,
+        count,
+        seq: 0,
+        id: first.id,
+        kind: "agent_ask",
+        title: "Agent questions",
+        createdAt: first.createdAt,
+      });
+    }
+    for (const h of handoffs.values()) {
+      const stalled =
+        h.state === "accepted" &&
+        Date.now() - (stepSince.get(h.id) ?? Date.now()) >= handoffLimits.stallAfterSeconds * 1000;
+      if (
+        (h.state === "offered" && h.to.id === person.id) ||
+        (stalled && (h.step === "waiting_release" ? h.from.id : h.to.id) === person.id)
+      )
+        items.push({
+          handoffId: h.id,
+          ...(stalled && { step: h.step }),
+          seq: 0,
+          id: h.id,
+          kind: stalled ? "handoff_stalled" : "handoff_offer",
+          title: h.note.goal.slice(0, 300),
+          createdAt: h.createdAt,
+        });
+    }
+    return items;
+  }
   function chatNeeds(person: Person) {
     return [...messages.values()].flatMap((m) => {
       const c = channels.get(m.conversationId);
@@ -2844,7 +3233,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         visible(c, person.id) &&
         !m.deleted &&
         m.ask?.state === "open" &&
-        m.ask.to.id === person.id
+        m.ask.to.kind === "person" &&
+        m.ask.to.person.id === person.id
       )
         return [
           {
@@ -2975,7 +3365,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       const last = /^[0-9]{1,15}$/.test(lastEventId) ? Number(lastEventId) : Number.NaN;
       if (last >= oldest - 1 && last < nextEventId) {
         for (const event of events) {
-          if (event.id > last && (event.personId === null || event.personId === stream.personId)) {
+          if (
+            event.id > last &&
+            (!event.machineId || event.machineId === stream.machineId) &&
+            (event.personId === null || event.personId === stream.personId)
+          ) {
             writeEvent(stream, event);
           }
         }
@@ -3098,6 +3492,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     openAsks: 5,
                     hopCap: 4,
                     pairPerMinute: 20,
+                    agentAsks: askLimits,
+                    handoffs: handoffLimits,
                   },
                   retentionDays: { channels: 0, dms: 0 },
                 },
@@ -3120,6 +3516,10 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                       "task_links",
                       "channel_access",
                       "join_requests",
+                      ...(agentAsksEnabled ? ["agent_asks"] : []),
+                      ...(handoffsEnabled ? ["handoffs"] : []),
+                      ...(reviewsEnabled ? ["reviews"] : []),
+                      "agent_pause",
                       "agent_inbox",
                       "channels",
                       "private_channels",
@@ -3175,17 +3575,27 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             },
           }),
           // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
-          mcpTools: BANNERET_AGENT_TOOLS.filter(
-            (name) =>
-              (options.chat || !name.startsWith("banneret_chat_")) &&
-              ((options.pool?.enabled && has(caller.person, "hub.pool")) ||
-                !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
-          ).map((name) => ({
-            name,
-            description: "A Banneret Hub agent tool.",
-            ...(name === "banneret_team" && { requires: "hub.team" }),
-            ...(BANNERET_POOL_TOOLS.some((tool) => tool === name) && { requires: "hub.pool" }),
-          })),
+          mcpTools: [
+            ...[
+              ...(agentAsksEnabled ? ["banneret_agent_ask", "banneret_agent_answer"] : []),
+              ...(handoffsEnabled ? ["banneret_handoff_offer"] : []),
+            ].map((name) => ({
+              name,
+              description: "Work in a shared chat thread.",
+              requires: "agents.ask",
+            })),
+            ...BANNERET_AGENT_TOOLS.filter(
+              (name) =>
+                (options.chat || !name.startsWith("banneret_chat_")) &&
+                ((options.pool?.enabled && has(caller.person, "hub.pool")) ||
+                  !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
+            ).map((name) => ({
+              name,
+              description: "A Banneret Hub agent tool.",
+              ...(name === "banneret_team" && { requires: "hub.team" }),
+              ...(BANNERET_POOL_TOOLS.some((tool) => tool === name) && { requires: "hub.pool" }),
+            })),
+          ],
           adapters: [
             { role: "work_tracker", kind: "none" },
             { role: "staff_directory", kind: "none" },
@@ -3449,6 +3859,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     if (options.chat && route.startsWith("/chat/")) {
+      sweepWork();
       settleRequests();
       const { person } = caller;
       const [, , resource, id = "", action, memberId] = route.split("/");
@@ -3498,6 +3909,17 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         const { offset, limit } = pageParams(query);
         return page(rows, offset, limit);
       };
+      if (resource === "agents" && id === "pause" && method === "PUT") {
+        if (reader) throw new RelayError("forbidden", "Only an administrator can pause wakes.");
+        if (!has(person, "relay.admin"))
+          throw new RelayError("role_permission_missing", "Requires relay.admin.", {
+            account: account(person),
+            rule: "relay.admin",
+          });
+        const value = parseJson(body, "AgentPause") as { paused: boolean };
+        companyPaused = value.paused;
+        return send("AgentPause", value);
+      }
       const messageMentions = (text: string, card?: ChatMessage["card"]) => {
         if (
           Buffer.byteLength(text) > 16384 ||
@@ -3520,16 +3942,345 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         !(
           (method === "GET" &&
             ["conversations", "threads", "search", "deliveries"].includes(resource ?? "")) ||
+          (resource === "asks" && method === "POST" && action === "cancel") ||
           (resource === "messages" && action === "reactions")
         )
       )
         throw new RelayError("forbidden", "This call is unavailable to agents.");
+      if (resource === "asks") {
+        const all = [...messages.values()].filter(
+          (m) => m.ask && visible(channels.get(m.conversationId)!, person.id),
+        );
+        if (method === "GET" && !id) {
+          const role = query.get("role"),
+            state = query.get("state");
+          const rows = all.flatMap((m) => {
+            const a = m.ask!,
+              mine = a.from.owner.id === person.id,
+              target = askOwner(a) === person.id;
+            if (
+              !(role === "asker"
+                ? mine
+                : role === "owner" || role === "answerer"
+                  ? target
+                  : mine || target) ||
+              (state && state !== a.state)
+            )
+              return [];
+            return [a.state === "draft" && target ? { ...a, answer: drafts.get(a.id) } : a];
+          });
+          return send("ChatAsks", paged(rows));
+        }
+        if (id && method === "POST") {
+          const m = all.find((m) => m.ask?.id === id);
+          if (!m?.ask) throw new RelayError("not_found", "Unknown question.");
+          const a = m.ask,
+            target = a.to.kind === "agent" ? a.to : undefined;
+          if ((action === "cancel" ? a.from.owner.id : askOwner(a)) !== person.id)
+            throw new RelayError("forbidden", "This decision belongs to another owner.");
+          const closed = () =>
+            new RelayError("ask_closed", "This question has already moved.", {
+              account: account(person),
+              owner: personRef(person),
+              asHandle: a.from.handle,
+              decidedBy: a.decidedBy,
+            });
+          if (!activeAsk(a)) throw closed();
+          const decidedBy = personRef(person);
+          if (action === "cancel") {
+            if (query.has("asHandle") && owned(query.get("asHandle")!).view.id !== a.from.handle)
+              throw new RelayError("forbidden", "Only the asker can cancel.");
+            return send("ChatAsk", changeAsk(m, { state: "cancelled", decidedBy }));
+          }
+          if (target && action === "decision") {
+            if (a.state !== "waiting_owner") throw closed();
+            const decision = parseJson(body, "ChatDecision") as ChatDecision;
+            if ("decline" in decision)
+              return send(
+                "ChatAsk",
+                changeAsk(m, { state: "declined", reason: decision.reason, decidedBy }),
+              );
+            if (companyPaused || paused.has(person.id))
+              throw new RelayError("agent_ask_paused", "The target is paused.", {
+                account: account(person),
+                asHandle: target.handle,
+                owner: personRef(person),
+              });
+            if (a.kind === "review" && decision.allow === "draft")
+              throw new RelayError("malformed", "Reviews return findings directly.");
+            if (decision.allow === "always") {
+              const policy = policyFor(person.id);
+              policies.set(person.id, {
+                ...policy,
+                auto: [
+                  ...policy.auto,
+                  { from: { person: a.from.owner }, kinds: decision.kinds ?? [a.kind] },
+                ],
+              });
+            }
+            return send(
+              "ChatAsk",
+              changeAsk(m, {
+                state: "open",
+                mode: decision.allow === "draft" ? "draft" : "answer",
+                decidedBy,
+              }),
+            );
+          }
+          if (target && action === "confirm") {
+            if (a.state !== "draft") throw closed();
+            const confirm = parseJson(body, "ChatConfirm") as ChatConfirm;
+            const answer = drafts.get(id)!;
+            drafts.delete(id);
+            return send(
+              "ChatAsk",
+              changeAsk(
+                m,
+                confirm.post
+                  ? {
+                      state: "answered",
+                      answer: { ...answer, text: confirm.text ?? answer.text },
+                      decidedBy,
+                    }
+                  : { state: "declined", decidedBy },
+              ),
+            );
+          }
+          if (target && action === "answer") {
+            const input = parseJson(body, "ChatAnswer") as ChatAnswer;
+            if (input.asHandle) {
+              if (owned(input.asHandle).view.id !== target.handle)
+                throw new RelayError("forbidden", "Only the target handle may answer.");
+              if (a.state !== "open") throw closed();
+            } else if (a.state !== "waiting_owner") throw closed();
+            if ("none" in input)
+              return send(
+                "ChatAsk",
+                changeAsk(m, { state: "unanswered", reason: input.reason, decidedBy }),
+              );
+            if (input.choice && !a.choices.includes(input.choice))
+              throw new RelayError("malformed", "Choose an offered answer.");
+            if (a.kind === "review" && (!input.verdict || !input.headSha))
+              throw new RelayError("malformed", "Provide the review verdict and head.");
+            const currentHead =
+              a.kind === "review" &&
+              reviewTask(a.pr)?.prs.find((p) => p.number === a.pr?.number)?.headSha;
+            if (
+              a.kind === "review" &&
+              (input.headSha !== a.pr?.headSha || (currentHead && currentHead !== a.pr?.headSha))
+            )
+              return send(
+                "ChatAsk",
+                changeAsk(m, { state: "unanswered", reason: "head_moved", decidedBy }),
+              );
+            if (input.receipt && input.receipt.handle !== target.handle)
+              throw new RelayError("malformed", "Receipt belongs to another handle.");
+            const { text, choice, verdict, headSha } = input;
+            if (!(text ?? choice)?.trim()) throw new RelayError("malformed", "Provide an answer.");
+            const answer = {
+              text: text ?? choice!,
+              ...(choice && { choice }),
+              ...(verdict && { verdict }),
+              ...(headSha && { headSha }),
+              by: input.asHandle ?? decidedBy,
+            };
+            const receipts = input.receipt ? [...a.receipts, input.receipt] : a.receipts;
+            if (a.mode === "draft") {
+              drafts.set(id, answer);
+              return send("ChatAsk", changeAsk(m, { state: "draft", receipts }));
+            }
+            return send(
+              "ChatAsk",
+              changeAsk(m, { state: "answered", answer, receipts, decidedBy }),
+            );
+          }
+        }
+      }
+      if (resource === "handoffs") {
+        if (!handoffsEnabled) throw new RelayError("not_found", "Hand-offs are disabled.");
+        const state = query.get("state"),
+          role = query.get("role");
+        const rows = [...handoffs.values()].filter(
+          (h) =>
+            (h.from.id === person.id || h.to.id === person.id) && recordAllowed(person, h.taskId),
+        );
+        if (method === "GET" && !id)
+          return send(
+            "ChatHandoffs",
+            paged(
+              rows.filter(
+                (h) =>
+                  (!state || h.state === state) &&
+                  (role === "giver"
+                    ? h.from.id === person.id
+                    : role === "receiver"
+                      ? h.to.id === person.id
+                      : true),
+              ),
+            ),
+          );
+        if (method === "POST" && !id) {
+          const input = parseJson(body, "ChatNewHandoff") as ChatNewHandoff;
+          if (input.asHandle) owned(input.asHandle);
+          if (input.receipt && input.receipt.handle !== input.asHandle)
+            throw new RelayError("malformed", "A receipt must name the offering handle.");
+          const fail = (code: ErrorCode) => {
+            throw new RelayError(code, "Hand-off refused: " + code, {
+              rule: code === "role_permission_missing" ? "agents.ask" : code,
+              account: account(person),
+              owner: personRef(person),
+              asHandle: input.asHandle,
+            });
+          };
+          if (!has(person, "agents.ask")) fail("role_permission_missing");
+          const key = JSON.stringify([person.id, input.asHandle, input.key]);
+          const prior = offerKeys.get(key);
+          if (prior) return send("Handoff", handoffs.get(prior));
+          const task = boardTasks.find((t) => t.id === input.taskId);
+          if (!task || !taskAllowed(person, task))
+            throw new RelayError("not_found", "Unknown task.");
+          if (leaseOf(task, Date.now())?.holder.id !== person.id) fail("handoff_not_holder");
+          const to = people.get(input.to.id);
+          if (!to || to.removed || to.id === person.id || !taskAllowed(to, task))
+            throw new RelayError(
+              "handoff_cannot_take",
+              "Choose a receiver who can take the task.",
+              { account: account(person), owner: personRef(person), asHandle: input.asHandle },
+            );
+          if (
+            [...handoffs.values()].some(
+              (h) => h.taskId === task.id && ["offered", "accepted"].includes(h.state),
+            )
+          )
+            fail("handoff_open");
+          const rootId = input.threadRootId ?? taskThreads.get(task.id);
+          if (rootId) {
+            const root = messageFor(rootId),
+              channel = channels.get(root.conversationId)!;
+            if (
+              root.deleted ||
+              root.threadRootId ||
+              !rights(channel, person).reply ||
+              !visible(channel, to.id)
+            )
+              throw new RelayError("forbidden", "Choose a shared hand-off thread.");
+          }
+          const now = Date.now();
+          const h: Handoff = {
+            id: randomId("ho"),
+            taskId: task.id,
+            receipts: input.receipt ? [input.receipt] : [],
+            to: personRef(to),
+            from: personRef(person),
+            note: input.note,
+            ...(input.asHandle && { fromHandle: input.asHandle }),
+            ...(input.branch && { branch: input.branch }),
+            ...(input.headSha && { headSha: input.headSha }),
+            state: "offered",
+            createdAt: iso(now),
+            expiresAt: iso(
+              now + (input.expiresInSeconds ?? handoffLimits.expireAfterSeconds) * 1000,
+            ),
+          };
+          handoffs.set(h.id, h);
+          offerKeys.set(key, h.id);
+          if (rootId) offerThreads.set(h.id, rootId);
+          handoffEvent(
+            h,
+            "handoff_offered",
+            person.login + " offered the task to " + to.login + ".",
+          );
+          const policy = policyFor(to.id);
+          if (
+            policy.default !== "off" &&
+            [...machines.values()].some(
+              (m) => m.personId === to.id && m.revokedAt === null && usageAllows(policy, m.id),
+            ) &&
+            !paused.has(to.id) &&
+            !companyPaused &&
+            policy.auto.some(
+              (r) =>
+                "person" in r.from &&
+                r.from.person.id === person.id &&
+                r.kinds.some((k) => k === "handoff"),
+            )
+          )
+            moveHandoff(
+              h,
+              { state: "accepted", step: "waiting_release" },
+              "Auto-accepted by " + to.login + "'s rule.",
+            );
+          else notifyWork(to.id);
+          return send("Handoff", handoffs.get(h.id));
+        }
+        if (method === "POST" && id && action) {
+          const h = rows.find((h) => h.id === id);
+          if (!h) throw new RelayError("not_found", "Unknown hand-off.");
+          if ((action === "withdraw" ? h.from : h.to).id !== person.id)
+            throw new RelayError("forbidden", "This decision belongs to another owner.");
+          if (
+            h.state !== "offered" &&
+            !(action === "withdraw" && h.state === "accepted" && h.step === "waiting_release")
+          )
+            throw new RelayError("handoff_closed", "This offer has already moved.", {
+              account: account(person),
+              owner: personRef(person),
+              asHandle: h.fromHandle,
+            });
+          if (action === "accept") {
+            const input = parseJson(body, "HandoffAccept") as HandoffAccept;
+            if (input.receipt) owned(input.receipt.handle);
+            if (input.machineId && machines.get(input.machineId)?.personId !== person.id)
+              throw new RelayError("forbidden", "Choose your own machine.");
+            return send(
+              "Handoff",
+              moveHandoff(
+                h,
+                {
+                  ...(input.machineId && { machineId: input.machineId }),
+                  receipts: input.receipt ? [...h.receipts, input.receipt] : h.receipts,
+                  state: "accepted",
+                  step: "waiting_release",
+                },
+                person.login + " accepted the hand-off.",
+              ),
+            );
+          }
+          if (action === "decline" || action === "withdraw") {
+            const input = parseJson(body, "HandoffReason") as { reason?: string };
+            return send(
+              "Handoff",
+              moveHandoff(
+                h,
+                { ...input, state: action === "decline" ? "declined" : "withdrawn" },
+                person.login +
+                  (action === "decline" ? " declined" : " withdrew") +
+                  " the hand-off.",
+              ),
+            );
+          }
+        }
+      }
+
       if (resource === "handles") {
         if (method === "GET" && !id)
           return send(
             "ChatHandles",
             paged([...handles.values()].map((h) => h.view).filter(handleVisible)),
           );
+        if (method === "DELETE" && id && !action) {
+          const handle = owned(id);
+          retiredHandles.set(id, handle.view);
+          handles.delete(id);
+          for (const channel of channels.values())
+            if (channel.members.delete(id) && channel.dmKey) channel.archived = true;
+          for (const d of deliveries.values())
+            if (d.row.handleId === id && ["claimed", "pending"].includes(d.row.state))
+              d.row = { ...d.row, state: "expired" };
+          sweepWork();
+          response.writeHead(204).end();
+          return;
+        }
         if (method === "PUT" && id) {
           const data = parseJson(body, "ChatRegister") as ChatRegister;
           const existing = handles.has(id) ? owned(id) : undefined;
@@ -3559,6 +4310,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             machine: { id: data.machineId, label: caller.machine.facts.label },
             provider: data.provider,
             reachable: true,
+            paused: paused.has(person.id),
             wake: data.wake ?? existing?.view.wake ?? wakeDefaults.get(person.id) ?? "everyone",
           };
           if ([...handles.values()].some((h) => h.view.id !== id && label(h.view) === label(view)))
@@ -3706,7 +4458,18 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         const h = owned((progress ?? ask)!.asHandle).view;
         const root = messages.get(ask?.threadRootId ?? id);
         let c = channels.get(root?.conversationId ?? id);
-        const to = ask && (people.get(ask.to) ?? peopleByLogin.get(ask.to));
+        const target = ask?.to.kind === "agent" ? handles.get(ask.to.handle)?.view : undefined;
+        const to = target
+          ? people.get(target.owner.id)
+          : ask?.to.kind === "person"
+            ? (people.get(ask.to.person) ?? peopleByLogin.get(ask.to.person))
+            : undefined;
+        if (ask?.to.kind === "agent" && !root)
+          throw new RelayError("agent_ask_no_home", "Choose a shared thread.", {
+            asHandle: h.id,
+            owner: personRef(person),
+            account: account(person),
+          });
         if (ask && (!to || to.removed))
           throw new RelayError("not_found", "Choose a current staff member.");
         if (ask && !ask.threadRootId && to) {
@@ -3757,7 +4520,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             !c.members.has(h.id) &&
             !(root && follows.get(root.threadRootId ?? root.id)?.has(h.id)))
         )
-          throw new RelayError("forbidden", "This agent cannot post here.");
+          throw new RelayError(
+            target ? "agent_ask_no_home" : "forbidden",
+            "This agent cannot post here.",
+            { account: account(person), asHandle: h.id, owner: personRef(person) },
+          );
         const rootId = root?.kind === "progress" ? root.threadRootId : root?.id;
         if ((root && root.threadRootId && root.kind !== "progress") || (!root && !c.dmKey))
           throw new RelayError("malformed", "Choose a thread or the top of a DM.");
@@ -3782,10 +4549,170 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (
           ask &&
           [...messages.values()].filter(
-            (m) => m.author.kind === "agent" && m.author.id === h.id && m.ask?.state === "open",
+            (m) => m.author.kind === "agent" && m.author.id === h.id && m.ask && activeAsk(m.ask),
           ).length >= 5
         )
           throw new RelayError("rate_limited", "Answer or cancel an open question first.");
+        let row: ChatAsk | undefined;
+        if (ask && to) {
+          if (ask.receipt && ask.receipt.handle !== h.id)
+            throw new RelayError("malformed", "A receipt must name the asking handle.");
+          const from = { handle: h.id, owner: personRef(person) };
+          const reject = (code: ErrorCode) => {
+            throw new RelayError(code, "Ask refused: " + code, {
+              rule: code === "role_permission_missing" ? "agents.ask" : code,
+              account: account(person),
+              asHandle: h.id,
+              owner: from.owner,
+            });
+          };
+          const kind = ask.kind ?? "question";
+          const all = [...messages.values()].flatMap((m) => (m.ask ? [{ m, ask: m.ask }] : []));
+          const parent = all.find((r) => r.ask.id === ask.parentAskId)?.ask;
+          if (
+            ask.parentAskId &&
+            (!parent ||
+              parent.state !== "open" ||
+              parent.to.kind !== "agent" ||
+              parent.to.handle !== h.id)
+          )
+            reject("agent_ask_cycle");
+          const origin = parent?.onBehalfOf ?? from.owner;
+          const depth = (parent?.depth ?? 0) + 1;
+          let auto = false;
+          if (target) {
+            if (
+              !rights(c, people.get(origin.id)!).reply ||
+              !has(people.get(origin.id)!, "agents.ask")
+            )
+              reject("role_permission_missing");
+            if (!agentAsksEnabled || (kind === "review" && !reviewsEnabled)) reject("not_found");
+            if (
+              (ask.timeoutSeconds ?? askLimits.defaultTimeoutSeconds) > askLimits.maxTimeoutSeconds
+            )
+              reject("malformed");
+            if (!has(person, "agents.ask")) reject("role_permission_missing");
+            if (
+              !root ||
+              root.deleted ||
+              (c.agents === "mentions_only" &&
+                ![...messages.values()].some(
+                  (m) =>
+                    (m.threadRootId ?? m.id) === root.id &&
+                    m.mentions.some((t) => t.id === target.id),
+                )) ||
+              !visible(c, origin.id) ||
+              !rights(c, to).reply ||
+              (c.access.visibility === "private" &&
+                !c.members.has(target.id) &&
+                !follows.get(root.id)?.has(target.id))
+            )
+              reject("agent_ask_no_home");
+            if (paused.has(to.id) || companyPaused) reject("agent_ask_paused");
+            const policy = policyFor(to.id);
+            if (policy.default === "off" && person.id !== to.id) reject("agent_ask_off");
+            if (depth > askLimits.maxDepth) reject("agent_ask_depth");
+            for (let a = parent; a; a = all.find((r) => r.ask.id === a?.parentAskId)?.ask)
+              if (a.from.handle === target.id) reject("agent_ask_cycle");
+            const pair = all.filter(
+              (r) =>
+                r.ask.from.owner.id === person.id &&
+                r.ask.to.kind === "agent" &&
+                r.ask.to.owner.id === to.id,
+            );
+            if (
+              pair.filter((r) => activeAsk(r.ask)).length >= askLimits.pairOpen ||
+              pair.filter((r) => Date.now() - Date.parse(r.ask.createdAt) < 86400000).length >=
+                askLimits.pairPerDay
+            )
+              reject("agent_ask_capped");
+            if (
+              all.filter(
+                (r) =>
+                  r.m.threadRootId === root?.id &&
+                  r.ask.to.kind === "agent" &&
+                  r.ask.to.handle === target.id &&
+                  r.ask.question === ask.question,
+              ).length >= askLimits.sameQuestion
+            )
+              reject("agent_ask_circle");
+            if (
+              pair.some(
+                (r) =>
+                  r.ask.state === "declined" &&
+                  r.ask.question === ask.question &&
+                  Date.now() - Date.parse(r.ask.closedAt!) < askLimits.declineCooloffSeconds * 1000,
+              )
+            )
+              reject("agent_ask_declined_recently");
+            if (kind === "review") {
+              const task = reviewTask(ask.pr);
+              const pr = task?.prs.find((pr) => pr.number === ask.pr?.number);
+              if (
+                !task ||
+                !pr ||
+                !taskAllowed(person, task) ||
+                !taskAllowed(to, task) ||
+                !taskAllowed(people.get(origin.id)!, task)
+              )
+                throw new RelayError("not_found", "Unknown pull request.");
+              if (pr.state === "closed" || pr.mergedAt !== null) reject("malformed");
+              if (pr.author === to.login || leaseOf(task, Date.now())?.holder.id === to.id)
+                reject("review_same_owner");
+              if (
+                all.some(
+                  (r) =>
+                    activeAsk(r.ask) &&
+                    r.ask.to.kind === "agent" &&
+                    r.ask.to.owner.id === to.id &&
+                    r.ask.kind === "review" &&
+                    r.ask.pr?.repo === ask.pr?.repo &&
+                    r.ask.pr?.number === ask.pr?.number &&
+                    r.ask.pr?.headSha === ask.pr?.headSha,
+                )
+              )
+                reject("agent_ask_capped");
+            }
+            auto =
+              usageAllows(policy, target.machine.id, target.provider) &&
+              policy.auto.some(
+                (r) =>
+                  r.kinds.some((k) => k === kind) &&
+                  ("person" in r.from
+                    ? r.from.person.id === person.id
+                    : "agent" in r.from
+                      ? r.from.agent === h.id
+                      : person.admission !== "outside" &&
+                        !roleOf(person).forOutside &&
+                        r.from.role.id === person.role),
+              );
+          } else if (kind === "review" || ask.parentAskId) reject("malformed");
+          row = {
+            id: randomId("a"),
+            from,
+            onBehalfOf: origin,
+            kind,
+            to: target
+              ? { kind: "agent", handle: target.id, owner: personRef(to) }
+              : { kind: "person", person: personRef(to) },
+            question: ask.question,
+            choices: ask.choices ?? [],
+            depth,
+            receipts: ask.receipt ? [ask.receipt] : [],
+            createdAt: iso(Date.now()),
+            expiresAt: iso(
+              Date.now() +
+                (ask.timeoutSeconds ?? (target ? askLimits.defaultTimeoutSeconds : 604800)) * 1000,
+            ),
+            state: target && person.id !== to.id && !auto ? "waiting_owner" : "open",
+            ...(auto ? { reason: "auto_accepted", mode: "answer" as const } : {}),
+            ...(ask.context !== undefined && { context: ask.context }),
+            ...(ask.doneWhen && { doneWhen: ask.doneWhen }),
+            ...(ask.pr && { pr: ask.pr }),
+            ...(ask.taskRef && { taskRef: ask.taskRef }),
+            ...(ask.parentAskId && { parentAskId: ask.parentAskId }),
+          };
+        }
         const m: ChatMessage = {
           id: prior ? prior.id : randomId("m"),
           conversationId: c.id,
@@ -3801,17 +4728,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           kind: progress ? "progress" : "ask",
           text: progress?.text ?? ask!.question,
           ...(progress ? { progress: { state: progress.state, steps: progress.steps ?? [] } } : {}),
-          ...(ask && to
-            ? {
-                ask: {
-                  id: randomId("a"),
-                  to: { id: to.id, login: to.login },
-                  state: "open",
-                  choices: ask.choices ?? [],
-                },
-                ...(ask.taskRef ? { taskRef: ask.taskRef } : {}),
-              }
-            : {}),
+          ...(row && { ask: row }),
+          ...(ask?.taskRef && { taskRef: ask.taskRef }),
           mentions: [],
           replyCount: prior ? prior.replyCount : 0,
           reactions: [],
@@ -3833,6 +4751,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           kind: prior ? "message.edited" : "message.created",
           message: m,
         });
+        if (target && m.ask?.reason === "auto_accepted")
+          systemMessage(
+            c,
+            ask?.taskRef,
+            "ask_auto_accepted",
+            "Auto-accepted by " + target.owner.login + "'s rule.",
+            root,
+          );
+        if (m.ask && target) askDelivery(m, target.id, "ask");
         return m.ask ? send("ChatAsk", m.ask) : send("ChatMessage", m);
       }
       if (resource === "messages" && action === "promote" && method === "POST") {
@@ -3928,11 +4855,40 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       if (resource === "me" && id === "settings" && !action) {
         if (method === "GET")
           return send("ChatSettings", {
+            agentAsks: policyFor(person.id),
+            agentsPaused: paused.has(person.id),
             agentWakeDefault: wakeDefaults.get(person.id) ?? "everyone",
             agentsReadMyDms: ownersAllowingDmReads.has(person.id),
           });
         if (method === "PUT") {
+          let raw: Partial<ChatSettings>;
+          try {
+            raw = JSON.parse(body.toString());
+          } catch {
+            throw new RelayError("malformed", "Invalid settings.");
+          }
+          if (
+            Array.isArray(raw?.agentAsks?.auto) &&
+            raw.agentAsks.auto.some(
+              (rule) =>
+                rule?.from &&
+                typeof rule.from === "object" &&
+                Array.isArray(rule.kinds) &&
+                ((!("person" in rule.from) && rule.kinds.some((k: unknown) => k !== "question")) ||
+                  ("role" in rule.from && roles.get(rule.from.role?.id)?.forOutside !== false)),
+            )
+          )
+            throw new RelayError("auto_accept_scope", "Choose a permitted source for this rule.", {
+              account: account(person),
+              owner: personRef(person),
+            });
           const settings = parseJson(body, "ChatSettings") as ChatSettings;
+          policies.set(person.id, settings.agentAsks);
+          if (settings.agentsPaused) paused.add(person.id);
+          else paused.delete(person.id);
+          for (const h of handles.values())
+            if (h.view.owner.id === person.id)
+              h.view = { ...h.view, paused: settings.agentsPaused };
           wakeDefaults.set(person.id, settings.agentWakeDefault);
           if (settings.agentsReadMyDms !== ownersAllowingDmReads.has(person.id)) {
             if (settings.agentsReadMyDms) ownersAllowingDmReads.add(person.id);
@@ -4429,11 +5385,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!question?.ask || question.deleted)
             throw new RelayError("not_found", "Unknown question.");
           channelFor(question.conversationId);
-          if (question.ask.to.id !== person.id)
+          if (question.ask.to.kind !== "person" || question.ask.to.person.id !== person.id)
             throw new RelayError("forbidden", "This question is addressed to someone else.");
           const answer = parseJson(body, "ChatAnswer") as ChatAnswer;
-          const text = "choice" in answer ? answer.choice : answer.text;
-          if (!text.trim() || ("choice" in answer && !question.ask.choices.includes(text)))
+          if ("none" in answer || answer.asHandle)
+            throw new RelayError("malformed", "A person answers this question.");
+          const text = answer.text ?? answer.choice ?? "";
+          if (
+            !text.trim() ||
+            (answer.choice !== undefined && !question.ask.choices.includes(answer.choice))
+          )
             throw new RelayError("malformed", "Choose an offered option or enter an answer.");
           if (question.ask.state !== "open")
             throw new RelayError("malformed", "This question is closed.");
@@ -4564,13 +5525,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               question.deleted ||
               question.author.kind !== "agent" ||
               question.ask?.state !== "open" ||
-              question.ask.to.id !== person.id ||
+              question.ask.to.kind !== "person" ||
+              question.ask.to.person.id !== person.id ||
               (question.threadRootId ?? question.id) !== root.id
             )
               continue;
             const updated = {
               ...question,
-              ask: { ...question.ask, state: "answered" as const, answerMessageId: m.id },
+              ask: {
+                ...question.ask,
+                state: "answered" as const,
+                answerMessageId: m.id,
+                closedAt: m.createdAt,
+                decidedBy: personRef(person),
+                answer: { text: m.text, by: personRef(person) },
+              },
             };
             messages.set(question.id, updated);
             edits.push(updated);
@@ -4597,6 +5566,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!reason) continue;
           const fromOwner = !h && target.view.owner.id === person.id;
           const wakes =
+            !companyPaused &&
+            !paused.has(target.view.owner.id) &&
+            (!h || target.view.owner.id === person.id) &&
             target.view.wake !== "nobody" &&
             (fromOwner ||
               (target.view.wake === "everyone" &&
@@ -4964,6 +5936,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
 
     if (method === "GET" && route === "/needs") {
+      sweepWork();
       const { offset, limit } = pageParams(query);
       const ordered = personalNeeds(caller.person);
       sendJson(response, 200, "NeedsPage", page(ordered, offset, limit));
@@ -5261,6 +6234,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               ? [...new Set(entry.canApprove.map(String))]
               : [],
             author: String(entry.author ?? ""),
+            ...(typeof entry.headSha === "string" && { headSha: entry.headSha }),
             approvalOnly: entry.approvalOnly === true,
             number,
             state,
@@ -5617,6 +6591,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     server.once("error", reject);
     server.listen(options.port ?? 0, options.host ?? "127.0.0.1", () => resolve());
   });
+  const sweeper = setInterval(sweepWork, 1000);
+  sweeper.unref();
   const address = server.address() as NodeNet.AddressInfo;
   const host = address.family === "IPv6" ? `[${address.address}]` : address.address;
   const url = `http://${host}:${address.port}`;
@@ -5626,6 +6602,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     baseUrl: `${url}${PREFIX}`,
     close: () =>
       new Promise<void>((resolve) => {
+        clearInterval(sweeper);
         closeStreams(() => true);
         server.close(() => {
           alarms?.close();

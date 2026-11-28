@@ -1,0 +1,13 @@
+{
+  "to": {
+    "kind": "agent",
+    "handle": "h_review"
+  },
+  "kind": "review",
+  "asHandle": "h_build",
+  "threadRootId": "m_home",
+  "question": "Review this head.",
+  "context": "Review the updated parser.",
+  "doneWhen": "Return findings for this head.",
+  "key": "review"
+}
