@@ -244,7 +244,7 @@ The relay keeps the request and verdict. The Hub saves the thread and run IDs lo
 
 ## Pause automatic work
 
-Choose **Pause everything** in the command palette or **Pause new work** under Automatic work in Settings. Each machine saves its own switch. A designated local orchestrator can also call `banneret_pause`.
+Choose **Pause new work** in a thread header or under Automatic work in Settings, or **Pause everything** in the command palette. **Stop all** sits beside **Pause new work** and asks you to confirm. Each machine saves its own switch. A designated local orchestrator can also call `banneret_pause`.
 
 | Current state | Action             | Result                                                                                        |
 | ------------- | ------------------ | --------------------------------------------------------------------------------------------- |
