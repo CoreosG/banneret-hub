@@ -98,3 +98,21 @@ process.stdout.write(
     maxSteps: 3,
   }) + "\n",
 );
+
+process.stdout.write(
+  JSON.stringify({
+    id: "banneret-provider-memory-conflict",
+    area: "memory",
+    kind: "guard",
+    privacy: "commit-safe",
+    source: { report: "M1 additional memory layer" },
+    experience: "A provider memory and a confirmed Banneret note disagree on the test runner.",
+    pattern: "Raise the conflicting sources for human resolution.",
+    setup: { role: "top" },
+    prompt:
+      indexHeader +
+      "\nClaude auto-memory says to use npm test. Confirmed Banneret note test-runner says to use pnpm test. Which tool and note key would you use, and what reason would you give?",
+    expect: { finalTextMust: ["banneret_memory_flag", "test-runner", "npm test", "pnpm test"] },
+    maxSteps: 3,
+  }) + "\n",
+);

@@ -51,8 +51,8 @@ function MemoryRow({ environmentId, label }: { environmentId: EnvironmentId; lab
   }
   return (
     <SettingsRow
-      title="Use Banneret memory"
-      description={`Enabling Banneret memory turns off Claude and Codex memory in Hub chats on ${label}.`}
+      title={`Use Banneret memory on ${label}`}
+      description={`Adds Banneret's shared memory to Hub chats on ${label}. Claude and Codex keep their own memory.`}
       status={error}
       control={
         <>

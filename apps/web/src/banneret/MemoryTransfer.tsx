@@ -176,7 +176,7 @@ export function MemoryTransfer({
   }
   const choose = (directory: boolean) => (
     <label className="cursor-pointer rounded border px-2 py-1">
-      {directory ? "Import memory folder" : "Import Markdown or rules"}
+      {directory ? "Import memory folder" : "Import provider notes"}
       <input
         type="file"
         multiple
