@@ -1,12 +1,32 @@
 {
   "id": "example_1",
   "to": {
-    "id": "example_1",
-    "login": "ada"
+    "kind": "person",
+    "person": {
+      "id": "example_1",
+      "login": "ada"
+    }
   },
   "choices": [
     "Proceed",
     "Wait"
   ],
-  "state": "open"
+  "state": "open",
+  "kind": "question",
+  "question": "Which build?",
+  "depth": 1,
+  "onBehalfOf": {
+    "id": "example_1",
+    "login": "ada"
+  },
+  "from": {
+    "handle": "builder",
+    "owner": {
+      "id": "example_1",
+      "login": "ada"
+    }
+  },
+  "receipts": [],
+  "createdAt": "2026-11-27T00:00:00Z",
+  "expiresAt": "2026-11-27T04:00:00Z"
 }

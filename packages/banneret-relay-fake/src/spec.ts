@@ -30,6 +30,19 @@ export type SchemaName =
   | "ChatConversation"
   | "ChatCard"
   | "ChatProgress"
+  | "AskTarget"
+  | "AskPr"
+  | "AskReceipt"
+  | "AgentAskPolicy"
+  | "ChatDecision"
+  | "ChatConfirm"
+  | "ChatAsks"
+  | "ChatNewHandoff"
+  | "Handoff"
+  | "HandoffAccept"
+  | "HandoffReason"
+  | "ChatHandoffs"
+  | "AgentPause"
   | "ChatAsk"
   | "ChatAuthor"
   | "ChatMessage"
@@ -199,6 +212,10 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "chat-conversation.json": "ChatConversation",
   "chat-card.json": "ChatCard",
   "chat-progress.json": "ChatProgress",
+  "agent-policy.json": "AgentAskPolicy",
+  "review-request.json": "ChatNewAsk",
+  "handoff.json": "Handoff",
+  "ask-receipt.json": "AskReceipt",
   "chat-ask.json": "ChatAsk",
   "chat-author.json": "ChatAuthor",
   "chat-message.json": "ChatMessage",

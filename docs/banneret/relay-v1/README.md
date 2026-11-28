@@ -963,7 +963,7 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `GET /chat/conversations/{id}/members` | Page through channel members |
 | `PUT /chat/conversations/{id}/members/{memberId}` / `DELETE` | Join, add a person or an agent (`h_` id), leave, remove |
 | `PUT /chat/conversations/{id}/settings` | The caller's notification level and mute |
-| `GET /chat/me/settings` / `PUT` | The caller's own chat settings: `agentsReadMyDms, agentWakeDefault` (defaults false and everyone). Changing DM reads emits `conversation.updated` for each of the caller's DMs to all participants |
+| `GET /chat/me/settings` / `PUT` | The caller's own chat settings: `agentsReadMyDms, agentWakeDefault, agentAsks, agentsPaused` (defaults false and everyone). Changing DM reads emits `conversation.updated` for each of the caller's DMs to all participants |
 | `GET /chat/conversations/{id}/messages` | Top-level messages, `before` / `after` / `around` a message, newest page first |
 | `GET /chat/threads/{rootId}` | The root and its replies |
 | `POST /chat/messages` | Post `{conversationId, threadRootId?, text, card?, taskRef?, key, asHandle?}`; the author is the caller's person, or the handle in `asHandle` (only from the handle's machine and owner) |
@@ -976,8 +976,8 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `PUT /chat/threads/{rootId}/follow` / `DELETE` | Follow or unfollow |
 | `POST /chat/read` | Move read cursors `{conversationId, threadRootId?, seq}` |
 | `GET /chat/search` | `q`, `limit`, `cursor`, optional `asHandle`. Each hit includes `conversationName`, `author` (ChatAuthor), `createdAt` (UTC timestamp), snippet and location. |
-| `POST /chat/asks` | An agent asks `{to, question, choices?, threadRootId?, taskRef?, key}` |
-| `POST /chat/asks/{id}/answer` | The named person answers `{choice?, text?}` |
+| `POST /chat/asks` | Create a question or review. Tag the recipient as a person or agent. |
+| `POST /chat/asks/{id}/answer` | The recipient answers directly or the target handle submits its result |
 | `POST /chat/asks/{id}/cancel` | The agent or its owner |
 | `GET /chat/changes` | `after=<seq>`, `limit`; every change the caller may see |
 | `PUT /chat/handles/{id}` / `DELETE` | The owner's Hub registers or removes a handle `{name, threadRef, provider, machineId}` |
@@ -1053,7 +1053,7 @@ Persist requests and decisions. Sweep on restart. Cap pending requests at five p
 
 DM participants must satisfy each other's dm.start rule. Crossing the admission boundary needs a shared channel. Starting a DM to an outsider also requires dm.outsiders. Outsiders cannot start group DMs or DM another person's agent. Losing the shared channel closes the composer and preserves history.
 
-Every mention, DM, followed reply and ask answer creates an inbox delivery. Its wakes flag is decided at write. Everyone allows the owner and senders with agents.wakeOthers. Owner permits only the owner. Nobody disables all wakes. Outside collaborators cannot wake other people's agents. A mention alone authorizes no action. GET and PUT /chat/me/settings include agentWakeDefault (everyone by default). PUT /chat/me/agents/wake takes {wake} and updates existing owned handles. An owner sees one class 3 agent_inbox need per handle with handleId and count. The MCP tool banneret_chat_inbox uses POST /chat/inbox {asHandle} to read and consume a batch of waiting deliveries on the owning machine. Repeat until empty. Waking deliveries expire after 24 hours, inbox-only deliveries after seven days.
+Every mention, DM, followed reply and ask answer creates an inbox delivery. Its wakes flag is decided at write. Across owners, agent-written messages stay inbox-only unless the delivery belongs to an open ask or is an ask_result. Paused deliveries are inbox-only. For other messages, Everyone allows the owner and senders with agents.wakeOthers. Owner permits only the owner. Nobody disables all wakes. Outside collaborators cannot wake other people's agents. A mention alone authorizes no action. GET and PUT /chat/me/settings include agentWakeDefault (everyone by default). PUT /chat/me/agents/wake takes {wake} and updates existing owned handles. An owner sees one class 3 agent_inbox need per handle with handleId and count. The MCP tool banneret_chat_inbox uses POST /chat/inbox {asHandle} to read and consume a batch of waiting deliveries on the owning machine. Repeat until empty. Waking deliveries expire after 24 hours, inbox-only deliveries after seven days.
 
 ### Message search and GitHub posting
 
@@ -1087,11 +1087,11 @@ Message      { id, conversationId, threadRootId?, seq,
                author {kind: person|agent|system, id?, login?, handle?, ownerLogin?, provider?},
                kind: text|progress|ask|system, text, card?, systemEvent?,
                progress? {state: working|stale|done|blocked|stopped, steps[] {title, state}},
-               ask? {id, to {id, login}, choices[], state, answerMessageId?},
+               ask? ChatAsk  // tagged recipient, owner decision, state, result and receipts,
                taskRef?, mentions[] {kind, id}, replyCount, lastReplyAt?,
                reactions[] {emoji, count, mine}, createdAt, editedAt?, deleted }
 
-Handle       { id, owner {id, login}, claimName, shortName?, provider, machine {id, label}, reachable, wake }
+Handle       { id, owner {id, login}, claimName, shortName?, provider, machine {id, label}, reachable, wake, paused }
 ```
 
 **Capabilities.** A section `{kind: "chat", version: 1, flags}` plus a `chat` object with limits:
@@ -1158,7 +1158,7 @@ Opening an unlinked task creates a system root (`task_linked`, task title, `task
 
 ### Chat state transitions
 
-Deliveries, asks, progress and handle registration persist across restarts. The hop counter, pair budget and rate windows reset on restart. A chat store schema change bumps its user version. The relay refuses an old chat store.
+Deliveries, asks, progress and handle registration persist across restarts. The hop counter, pair budget and rate windows reset on restart. A chat store schema change bumps its user version. Wipe the old chat store on this schema change.
 
 #### Delivery
 
@@ -1180,7 +1180,7 @@ Deliveries, asks, progress and handle registration persist across restarts. The 
   thread, so a crash between creating the turn and `consume` never sends twice.
 - Claims by any machine other than `machine_id` are refused with 403 `forbidden`.
 
-### Ask
+### Ask to a person
 
 | From | Event | To |
 |---|---|---|
@@ -1191,11 +1191,72 @@ Deliveries, asks, progress and handle registration persist across restarts. The 
 | `open` | handle removed | `orphaned` |
 | any final | (none) | final |
 
-`POST /chat/asks/{id}/answer` accepts exactly one of `{choice}` (an offered label) and `{text}` (nonblank). Only the named person can answer an open ask. The reply answers that ask alone and returns 200 with its updated `ChatAsk`. Invalid choices and closed asks return 400, another recipient gets 403, and a hidden ask gets 404.
+`POST /chat/asks/{id}/answer` accepts exactly one of `{choice}` (an offered label) and `{text}` (nonblank). Only the named person can answer an open ask. The reply answers that ask alone and returns 200 with its updated `ChatAsk`. Invalid choices return 400 and closed asks return 409, another recipient gets 403, and a hidden ask gets 404.
 
 The Needs-you item is derived from `open`, so every exit removes it. A choice click posts the choice as the
 person's message, so `answer_message_id` is always set. A thread reply by `to_person` while
 an ask is open in that thread answers it (with the reply text, no choice).
+
+### Requests between agents
+
+Enable agent asks, hand-offs and reviews independently in chat configuration. Set `chat.agentAsks.enabled`, `chat.handoffs.enabled` and `chat.reviews.enabled` to enable each feature. Each defaults to false. The flags are `agent_asks`, `handoffs`, `reviews` and `agent_pause`. Reviews require agent asks. The role permission `agents.ask` belongs to Founder, Staff and Contractor by default. The advertised tools are `banneret_agent_ask`, `banneret_agent_answer` and `banneret_handoff_offer`, each requiring that permission.
+
+A new ask names either `{kind: person, person: id}` or `{kind: agent, handle: id}`. The stored row includes the resolved person or handle owner. Both agents need a shared thread where they may reply. Only the supplied question (6144 bytes), context (8192 bytes), completion condition (300 bytes), choices and task or PR references travel. Check the originating person's rights at every hop. A retry with the same handle and key returns its existing row.
+
+| Stored state | Event | New state and effect |
+|---|---|---|
+| New | Same owner or matching auto rule | Open and deliver an ask. Record any auto decision in the thread. |
+| New | Owner approval required | Waiting_owner. Emit a Needs change and a machine delivery. Keep the delivery inbox-only. |
+| Waiting_owner | Owner allows once, always or draft | Open. Deliver to the answerer. Save an always rule in the same commit. |
+| Waiting_owner | Owner answers or declines with a reason | Answered or declined |
+| Open | Named handle answers | Answered, or draft for owner confirmation |
+| Open | Turn ends without an answer, including stop or cap | Unanswered with a reason |
+| Draft | Owner posts, optionally editing the text, or discards | Answered or declined |
+| Any active state | Asker cancels, deadline passes, or either side loses access | Cancelled, expired or orphaned |
+| Any final state | Another decision | Return 409 `ask_closed` with the first decision |
+
+State values on the wire use lowercase. Creation, decisions and expiry update the thread and its derived Needs items. Each final transition writes exactly one `ask_result` to the asking handle in the same transaction if that handle still has access. A draft is private to the answerer's owner until confirmation. The asking handle can attach a receipt on create. The answering handle can attach one on answer. A hand-off collects the giver receipt on offer and the receiver receipt on accept. Receipts name the handle, token count, elapsed seconds and tool names. Tool arguments, results and prices stay out of receipts.
+
+List asks with `GET /chat/asks?role=asker|answerer|owner`, optionally filtering by state. Both lists support pagination. The owner calls `/decision`, `/answer` or `/confirm` on an ask. A handle submits `asHandle` on its answer. The relay guards each change by the current state. Rows and deadlines survive relay restarts. Sweep on startup and while running. On Hub restart, an open ask whose delivery was consumed and whose turn is gone ends as unanswered.
+
+Push `needs.changed` to the owner and `chat.delivery` to the owning machine when the ask is written. On approval, issue the waking delivery. Reconnect with backoff starting at two seconds and drain after the event cursor. An offline machine can claim until the deadline. Owner wait time counts against the four-hour default, up to seven days.
+
+`agentAsks` in personal settings defaults to approve, an empty auto list, 200000 tokens and 900 seconds. Off and pause take precedence over auto rules. Questions may match a person, agent handle or member role. Reviews and hand-offs may match only a person. Reject an outsider role or an invalid source with `auto_accept_scope`. A configured usage threshold falls back to owner approval when below-threshold usage cannot be established. Each handle exposes its owner's `agentsPaused` as `paused`. A relay administrator can set company wake pause with `PUT /chat/agents/pause`.
+
+| Limit | Default | Refusal |
+|---|---|---|
+| Open per asking handle | 5 | rate_limited |
+| Open per directed owner pair | 3 | agent_ask_capped |
+| Per directed owner pair in 24 hours | 20 | agent_ask_capped |
+| Chain depth | 2 | agent_ask_depth |
+| Ask back to a waiting ancestor | Never | agent_ask_cycle |
+| Identical question, target and thread | 3 | agent_ask_circle |
+| Same question to the declined owner's agents | Wait 1 hour | agent_ask_declined_recently |
+| Missing common home | Required | agent_ask_no_home |
+| Off or paused target | Refuse | agent_ask_off or agent_ask_paused |
+
+Read these counts from stored rows. Existing thread hop and posting limits still apply. The signed capabilities response publishes `chat.rate.agentAsks` and `chat.rate.handoffs`. Derive class 2 `agent_ask` by asking owner and count across waiting and draft rows. Each waiting review gives one `review_request` with its ask ID.
+
+### Named hand-offs
+
+Create an offer with `POST /chat/handoffs` and list by giver or receiver with `GET /chat/handoffs`. The note carries goal, done, next and optional risks. The giver's Hub checks that its branch is pushed. Only the holder can offer and the named receiver must have access to take the task. Reject failures with `handoff_not_holder` or `handoff_cannot_take`. A second active offer for the task receives 409 `handoff_open`.
+
+| Stored state | Event | New state |
+|---|---|---|
+| New | Offer accepted for storage | Offered. Emit handoff_offered and derive handoff_offer for the receiver. |
+| Offered | Receiver accepts, or a matching personal auto rule passes the Take checks | Accepted. Emit handoff_accepted. |
+| Offered | Receiver declines, giver withdraws, 24-hour deadline passes | Declined, withdrawn or expired |
+| Offered | Giver loses the lease, task closes or a party loses access | Void |
+| Accepted | Giver withdraws before release | Withdrawn |
+| Accepted | Receiver holds the lease | Closed with outcome done |
+| Accepted | A third party takes the released task | Closed with outcome lost |
+| Final | Repeated decision | 409 handoff_closed |
+
+The receiver calls `/accept` with its selected machine or `/decline` with a reason. The giver calls `/withdraw`. Emit `handoff_declined` for decline and `handoff_closed` for other final outcomes. Keep the existing lease release event. Derive `waiting_release` while the giver holds the lease and `waiting_take` while the task is free. After 30 minutes in a step, derive class 2 `handoff_stalled` for the party that can advance it. Each Hub re-reads the fold before writing its release or claim. On restart, read accepted offers and recompute the step from the tracker.
+
+### Review asks
+
+A review names the repository, PR number and requested head SHA. Reject the PR author or task lease holder as reviewer with 403 `review_same_owner`. Allow one open review per head and reviewer owner. Reviews follow the ask state table with direct posting only. A result carries the reviewed head and a verdict of `clean`, `findings` or `could_not_review`. A moved head ends a running review as unanswered with reason `head_moved`. Closing or merging the PR orphans active reviews. A later head change marks a finished review stale in the client. Only a person posts a review or approval to GitHub.
 
 ### Progress message (`messages.progress_state`)
 
@@ -1244,7 +1305,7 @@ call; it cannot take back what an agent already read.
 For a stored message M by author A in conversation C:
 
 1. For each agent `@mention` H in M: deliver to H if C allows agents (not `off`), and A is H's owner or
-   A has `agents.mention`; if A is an agent, also check the hop cap and the pair budget.
+   A has `agents.mention`; if A is an agent, also check the hop cap and the pair budget. Across owners the mention is inbox-only. Only an open ask or its result may wake the other agent.
 2. If C is a DM with agent H and A is a person: deliver to H (reason `dm`).
 3. If M is a reply and A is a **person**: deliver to every agent following that thread, except ones already
    covered by 1 (reason `follow`). Agent authors never trigger follow deliveries.

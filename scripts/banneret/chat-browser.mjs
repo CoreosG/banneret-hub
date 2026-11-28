@@ -150,6 +150,7 @@ export async function command(operation, arg) {
       });
       const kim = await enrol(relay, "kim");
       await kim.call("PUT", "chat/me/settings", {
+        ...(await kim.call("GET", "chat/me/settings")).body,
         agentsReadMyDms: true,
         agentWakeDefault: "everyone",
       });
@@ -177,7 +178,7 @@ export async function command(operation, arg) {
   }
   if (op === "ask") {
     await session.leo.call("POST", "chat/asks", {
-      to: session.ada.me.id,
+      to: { kind: "person", person: session.ada.me.id },
       question: "Which build should I publish?",
       choices: ["Linux", "Mac"],
       asHandle: "h_review",

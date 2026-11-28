@@ -1,0 +1,9 @@
+{
+  "handle": "h_review",
+  "tokens": 2100,
+  "seconds": 12,
+  "tools": [
+    "read"
+  ],
+  "price": 1
+}

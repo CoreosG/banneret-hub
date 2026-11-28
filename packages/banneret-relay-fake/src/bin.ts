@@ -44,6 +44,7 @@ const relay = await startFakeRelay({
   ...(settings.criticalRecipients && { criticalRecipients: settings.criticalRecipients }),
   ...(settings.alarmDatabase && { alarmDatabase: settings.alarmDatabase }),
   chat: (values.chat || settings.chat?.enabled === true) && {
+    ...settings.chat,
     ...(settings.chat?.boards && { boards: settings.chat.boards }),
     defaultChannels: settings.chat?.defaultChannels ?? ["general"],
   },

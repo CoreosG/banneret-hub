@@ -6,7 +6,7 @@ export interface RoleWrite {
 const enabled = (keys: string) =>
   Object.fromEntries(keys.split(" ").map((key) => [key, true as const]));
 const contractor = {
-  ...enabled("dm.group agents.mention agents.dm agents.wakeOthers hub.team"),
+  ...enabled("dm.group agents.mention agents.ask agents.dm agents.wakeOthers hub.team"),
   "dm.start": "anyone",
   "scope.people": "all",
   "scope.boards": "all",

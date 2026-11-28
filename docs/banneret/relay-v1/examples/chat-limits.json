@@ -6,7 +6,20 @@
     "postsPerHour": 1,
     "openAsks": 1,
     "hopCap": 1,
-    "pairPerMinute": 1
+    "pairPerMinute": 1,
+    "agentAsks": {
+      "pairOpen": 3,
+      "pairPerDay": 20,
+      "maxDepth": 2,
+      "sameQuestion": 3,
+      "declineCooloffSeconds": 3600,
+      "defaultTimeoutSeconds": 14400,
+      "maxTimeoutSeconds": 604800
+    },
+    "handoffs": {
+      "expireAfterSeconds": 86400,
+      "stallAfterSeconds": 1800
+    }
   },
   "retentionDays": {
     "channels": 1,
