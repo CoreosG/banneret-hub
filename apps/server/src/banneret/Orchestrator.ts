@@ -1,3 +1,4 @@
+import { registerWorkflow } from "./memory/workflowHandlers.ts";
 import { setupWatcher } from "./memory/watcher.ts";
 import { nudge } from "./memory/nudge.ts";
 import * as Schema from "effect/Schema";
@@ -57,6 +58,7 @@ export const lifecycle = Layer.effectDiscard(
   Effect.gen(function* () {
     const orchestrator = yield* OrchestratorV2;
     const afterTool = yield* setupWatcher;
+    yield* registerWorkflow;
     yield* orchestrator.streamDomainEvents.pipe(
       Stream.mapEffect(afterTool, { concurrency: 4 }),
       Stream.runDrain,

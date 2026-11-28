@@ -20,7 +20,7 @@ vi.mock("@t3tools/client-runtime/state/runtime", async (load) => {
       ...args: Parameters<typeof original.createEnvironmentRpcCommand>
     ) =>
       args[1].tag.startsWith("memory.")
-        ? { permissionAtom: () => Atom.make(true) }
+        ? { tag: args[1].tag, permissionAtom: () => Atom.make(true) }
         : original.createEnvironmentRpcCommand(...args),
     runAtomCommand: respond,
   };
@@ -112,4 +112,55 @@ it("labels a rule reminder separately from chat messages and shows its source an
   await expect.element(screen.getByText("Use two spaces.")).toBeVisible();
   await expect.element(screen.getByText("Source: Owner review")).toBeVisible();
   await expect.element(screen.getByText(/3 fired · 1 acknowledged · 1 contested/)).toBeVisible();
+});
+
+it("runs Review my workflow locally from the composer and presents the report in chat", async () => {
+  const ref = {
+    environmentId: EnvironmentId.make("machine"),
+    threadId: ThreadId.make("main-workflow"),
+  };
+  let runs = 0;
+  respond.mockImplementation(async (_registry, command, { input }) => {
+    if (command.tag === "memory.summary")
+      return { _tag: "Success", value: { main: true, total: 0, proposed: 0, disputed: 0 } };
+    if (input.action === "run") runs++;
+    return {
+      _tag: "Success",
+      value: {
+        weekly: false,
+        report: runs
+          ? {
+              created: 1,
+              retries: 2,
+              failures: 0,
+              waiting: 0,
+              disputed: 0,
+              corrections: 0,
+              proposed: 0,
+              stale: 0,
+              contested: 0,
+              fired: 0,
+              acknowledged: 0,
+              pending: false,
+            }
+          : null,
+      },
+    };
+  });
+  await using screen = await render(<MemoryStrip {...ref} />);
+  await expect.element(screen.getByRole("button", { name: "Review my workflow" })).toBeVisible();
+  expect(runs).toBe(0);
+  const { openMemoryCommand } = await import("./memoryCommand");
+  const promptRef = { current: "Review my workflow" };
+  expect(
+    openMemoryCommand(
+      { routeThreadRef: ref, composerDraftTarget: ref, composerRef: { current: null }, promptRef },
+      promptRef.current,
+    ),
+  ).toBe(true);
+  await expect
+    .element(screen.getByRole("article", { name: "Workflow review result" }))
+    .toBeVisible();
+  expect(runs).toBe(1);
+  expect(promptRef.current).toBe("");
 });

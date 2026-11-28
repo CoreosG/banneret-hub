@@ -82,7 +82,43 @@ const preferences = Schema.Struct({
   ),
 });
 export type MemoryPreferencesInput = typeof preferences.Type;
+const workflowReport = Schema.Struct({
+  topRule: Schema.NullOr(Schema.String),
+  topCount: Schema.Int,
+  proposalKey: Schema.NullOr(Schema.String),
+  failures: Schema.Int,
+  waiting: Schema.Int,
+  disputed: Schema.Int,
+  corrections: Schema.Int,
+  created: Schema.Int,
+  retries: Schema.Int,
+  proposed: Schema.Int,
+  contested: Schema.Int,
+  stale: Schema.Int,
+  fired: Schema.Int,
+  acknowledged: Schema.Int,
+  pending: Schema.Boolean,
+});
+const workflowState = Schema.Struct({
+  relayOrigin: Schema.optional(Schema.String),
+  weekly: Schema.Boolean,
+  report: Schema.NullOr(workflowReport),
+});
 export const MEMORY_RPCS = [
+  Rpc.make("memory.workflow", {
+    payload: Schema.Struct({
+      threadId: ThreadId,
+      action: Schema.Literals(["read", "run", "enable", "disable", "dismiss", "propose"]),
+      created: Schema.optional(Schema.Int),
+    }),
+    success: workflowState,
+    error,
+  }),
+  Rpc.make("memory.workflowNeeds", {
+    payload: Schema.Struct({ workspaceId: bounded(256) }),
+    success: Schema.NullOr(ThreadId),
+    error,
+  }),
   Rpc.make("memory.repoSetting", {
     payload: Schema.Struct({ threadId: ThreadId }),
     success: Schema.Struct({
@@ -166,6 +202,7 @@ export const MEMORY_RPCS = [
             ),
           }),
         ),
+        main: Schema.optional(Schema.Boolean),
         cardsOnly: Schema.optional(Schema.Boolean),
         total: Schema.Int,
         proposed: Schema.Int,
@@ -204,6 +241,8 @@ export const MEMORY_RPCS = [
 export const MEMORY_RPC_SCOPES = {
   "memory.repoSetting": AuthSettingsWriteScope,
   "memory.setRepo": AuthSettingsWriteScope,
+  "memory.workflow": AuthSettingsWriteScope,
+  "memory.workflowNeeds": AuthSettingsWriteScope,
   "memory.sync": AuthSettingsWriteScope,
   "memory.configure": AuthSettingsWriteScope,
   "memory.preferences": AuthSettingsWriteScope,
@@ -222,6 +261,8 @@ export const MEMORY_RPC_SCOPES = {
 export const MEMORY_RPC_AGGREGATES = {
   "memory.repoSetting": "leases",
   "memory.setRepo": "leases",
+  "memory.workflow": "leases",
+  "memory.workflowNeeds": "leases",
   "memory.sync": "leases",
   "memory.configure": "leases",
   "memory.preferences": "leases",

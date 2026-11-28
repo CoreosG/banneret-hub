@@ -1,3 +1,4 @@
+import { WorkflowReview } from "./WorkflowReview";
 import { MemoryContradictionCard } from "./MemoryContradictionCard";
 import { countLabel } from "./countLabel";
 import { MemoryPreferences } from "./MemoryPreferences";
@@ -209,6 +210,14 @@ export function MemoryStrip({
             apply={(action) => apply(c.a, action)}
           />
         ))}
+      {visible && writable && counts.main && (
+        <WorkflowReview
+          key={memoryThreadKey(ref)}
+          {...ref}
+          revision={revision}
+          openProposal={(key) => setMemoryCard(ref, key)}
+        />
+      )}
       {reviewCards}
     </>
   );

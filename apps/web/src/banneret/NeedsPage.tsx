@@ -1,3 +1,4 @@
+import { WorkflowNeeds } from "./WorkflowReview";
 import { WaitingAsks } from "./chat/AgentAskCards";
 import { HandoffCards } from "./chat/HandoffCards";
 import { JoinRequests } from "./chat/JoinRequests";
@@ -41,7 +42,10 @@ export function NeedsPage() {
     return (
       <FeedFrame title="Needs you">
         <PageHeader title="Needs you" />
-        <LocalCallApprovals />
+        <>
+          <WorkflowNeeds />
+          <LocalCallApprovals />
+        </>
         <QuietLine
           fact="No company here yet."
           hint="Choose an Enterprise workspace that this machine has joined to see its company here."
@@ -54,7 +58,10 @@ export function NeedsPage() {
     return (
       <FeedFrame title="Needs you" company={workspace.name}>
         <PageHeader title="Needs you" />
-        <LocalCallApprovals />
+        <>
+          <WorkflowNeeds />
+          <LocalCallApprovals />
+        </>
         <QuietLine fact={`${workspace.name} does not offer Needs you.`} />
       </FeedFrame>
     );
@@ -79,7 +86,12 @@ export function NeedsPage() {
           )
         }
       />
-      {(filter === "All" || filter === "Reviews") && <LocalCallApprovals />}
+      {(filter === "All" || filter === "Reviews") && (
+        <>
+          <WorkflowNeeds />
+          <LocalCallApprovals />
+        </>
+      )}
       <FeedStatus
         feed={feed}
         company={workspace.name}
