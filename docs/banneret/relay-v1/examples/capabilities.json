@@ -131,6 +131,12 @@
     }
   ],
   "chat": {
+    "boards": [
+      {
+        "board": "platform",
+        "channel": "platform"
+      }
+    ],
     "maxTextBytes": 16384,
     "editWindowSeconds": 0,
     "rate": {

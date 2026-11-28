@@ -1,5 +1,6 @@
 import { vi } from "vite-plus/test";
 import * as ReviewCheckout from "../chat/ReviewCheckout.ts";
+import { pushedCheckout } from "../chat/pushedCheckout.testkit.ts";
 import { handleId } from "../chat/AgentChat.ts";
 import { makeAnswerRuns } from "../chat/AnswerRuns.ts";
 import { answeringAsk } from "../chat/AnswerTurn.ts";
@@ -186,8 +187,11 @@ const threadsLayer = Layer.mock(ThreadManagementService.ThreadManagementService)
   },
 });
 
+/** The checkouts the hand-off tool may verify a pushed branch in. */
+const checkouts: Array<OrchestrationProjectShell> = [];
 const projectsLayer = Layer.mock(ProjectService.ProjectService)({
   getShell: (projectId) => Effect.succeed(Option.fromNullishOr(PROJECTS.get(projectId))),
+  listShells: () => Effect.succeed(checkouts),
 });
 
 const providersLayer = Layer.mock(ProviderRegistry)({
@@ -1562,6 +1566,84 @@ describe("agent lease tools against the fake relay", () => {
           );
           expect(held.writes).toEqual([]);
         }),
+      ),
+  );
+
+  it.live.each([
+    [404, "not_found"],
+    [403, "forbidden"],
+    [503, "unavailable"],
+  ] as const)(
+    "offers a hand-off without a thread when the relay answers %i to the task's thread",
+    ([status, code]) =>
+      withFake(
+        (fake, relay) =>
+          Effect.gen(function* () {
+            const root = yield* tempDir;
+            const { remoteUrl, head } = pushedCheckout(root);
+            checkouts.splice(0, checkouts.length, {
+              ...project("project-company", root),
+              repositoryIdentity: { locator: { remoteUrl } },
+            } as unknown as OrchestrationProjectShell);
+            relay.intercept = (request) =>
+              request.url.endsWith("/chat/tasks/t_free/thread")
+                ? {
+                    status,
+                    body: JSON.stringify({
+                      error: { code, message: "No thread.", retryable: status === 503 },
+                    }),
+                  }
+                : undefined;
+            yield* onHub(
+              newTracker(),
+              Effect.gen(function* () {
+                yield* joinWithBoard(fake, relay);
+                const feed = yield* RelayFeed.BanneretRelayFeed;
+                yield* feed.events(relay.origin).pipe(
+                  Stream.filter((state) => state.chatFlags?.includes("task_links") === true),
+                  Stream.runHead,
+                );
+                expect(yield* call("banneret_lease_take", { taskId: "t_free" })).toMatchObject({
+                  outcome: "taken",
+                });
+                // The relay's board shows the lease once it reads the tracker.
+                yield* control(fake, "/board/seed", {
+                  tasks: [{ id: "t_free", title: "Rate limits", holder: ME }],
+                });
+                const enrolment = yield* Enrolment.BanneretEnrolment;
+                const device = (yield* enrolment.relay(relay.origin))!;
+                const directory = yield* device.signedGet("/relay/v1/team/people?q=cy-example");
+                const [to] = (directory.body as { people: Array<{ id: string; login: string }> })
+                  .people;
+                expect(
+                  yield* call("banneret_handoff_offer", {
+                    taskId: "t_free",
+                    to: { id: to!.id, login: to!.login },
+                    note: { goal: "Limit invites", done: "Test", next: "Review" },
+                    branch: "work",
+                    headSha: head,
+                    key: "offer",
+                  }),
+                ).toMatchObject({ handoffId: expect.any(String) });
+              }),
+            );
+            expect(
+              relay.requests.flatMap((r) =>
+                /\/chat\/(tasks\/t_free\/thread|handoffs)$/.test(r.url) && r.method !== "GET"
+                  ? [[r.method, r.url.split("/chat/")[1], r.status]]
+                  : [],
+              ),
+            ).toEqual([
+              ["PUT", "tasks/t_free/thread", status],
+              ["POST", "handoffs", 200],
+            ]);
+          }),
+        {
+          chat: {
+            handoffs: { enabled: true },
+            boards: [{ board: "platform", channel: "general" }],
+          },
+        },
       ),
   );
 

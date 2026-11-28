@@ -270,6 +270,29 @@ describe("Task tab", () => {
       .toBeVisible();
   });
 
+  it("says so when a task can have no chat thread, and keeps other failures as errors", async () => {
+    const { emit } = setup();
+    const shown = card("2", "Guild invites");
+    using rpc = vi
+      .spyOn(chatRpc, "run")
+      .mockRejectedValue(
+        Object.assign(new Error("This task has no chat thread."), { code: "not_found" }),
+      );
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
+    await emit({ ...state(["board"], [shown]), chatFlags: ["task_links"] });
+    await page.getByRole("button", { name: "Discuss this task" }).click();
+    await expect
+      .element(page.getByText(/This task has no chat thread you can open\./))
+      .toBeVisible();
+    expect(page.getByRole("alert").elements()).toHaveLength(0);
+    rpc.mockRejectedValue(new Error("Cannot reach this machine."));
+    await page.getByRole("button", { name: "Discuss this task" }).click();
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent("Error: Cannot reach this machine.");
+    expect(page.getByText(/This task has no chat thread/).elements()).toHaveLength(0);
+  });
+
   it("draws the header from the board card, with the preview and sign-off from the task read", async () => {
     using _clock = pinClock();
     const { emit, read } = setup();

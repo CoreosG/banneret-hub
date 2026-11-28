@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off - isolated git repositories and an SSH transport fixture.
-import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -12,6 +11,8 @@ import * as Effect from "effect/Effect";
 import { expect, it } from "@effect/vitest";
 import { ME, OTHER, leases, newTracker, ref, enrolledAs } from "../lease/leaseTracker.testkit.ts";
 import { handoffsForMachine } from "./Handoffs.ts";
+import { pushedCheckout } from "./pushedCheckout.testkit.ts";
+import { RelayCallError } from "../relay/RelayClient.ts";
 
 it.effect(
   "rechecks the tracker on either Hub before release and take, including after restart",
@@ -159,21 +160,6 @@ it.effect(
     }),
 );
 
-/** A checkout whose branch is pushed to the task's repository, and its head. */
-function pushedCheckout(root: string) {
-  const git = (...args: string[]) =>
-    NodeChildProcess.execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-  git("init", "--quiet", "-b", "work");
-  git("init", "--bare", "--quiet", "remote.git");
-  const author = ["-c", "user.name=A", "-c", "user.email=a@example.org"];
-  git(...author, "commit", "--quiet", "--allow-empty", "-m", "work");
-  const remoteUrl = "git@github.com:example-org/example-app.git";
-  git("remote", "add", "origin", remoteUrl);
-  git("config", "core.sshCommand", "git-upload-pack ./remote.git #");
-  git("push", "--quiet", "./remote.git", "work");
-  return { remoteUrl, head: git("rev-parse", "HEAD") };
-}
-
 it.effect("opens the task thread before an offer only on a relay with task threads", () =>
   Effect.gen(function* () {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "handoff-offer-"));
@@ -189,13 +175,23 @@ it.effect("opens the task thread before an offer only on a relay with task threa
     const projects = { listShells: () => Effect.succeed([shell] as never) };
     const giver = handoffsForMachine(give, projects, () => Effect.void);
     const calls: string[] = [];
+    let noThread = false;
     const relay = {
       origin: ref.relayOrigin,
       status: Effect.succeed<BanneretEnrolmentView>({ state: "none" } as BanneretEnrolmentView),
       signedChat: (method: string, path: string) =>
-        Effect.sync(() => {
+        Effect.suspend(() => {
           calls.push(method + " " + path);
-          return { status: 200, etag: undefined, bytes: new Uint8Array(), body: {} };
+          return noThread && method === "PUT"
+            ? Effect.fail(
+                new RelayCallError({
+                  status: 404,
+                  code: "not_found",
+                  message: "This task has no chat thread.",
+                  retryable: false,
+                }),
+              )
+            : Effect.succeed({ status: 200, etag: undefined, bytes: new Uint8Array(), body: {} });
         }),
     };
     const read = () =>
@@ -233,6 +229,11 @@ it.effect("opens the task thread before an offer only on a relay with task threa
     expect(yield* giver.act(relay, read, offer, false)).toMatchObject({ ok: true });
     expect(calls).toEqual(["POST handoffs"]);
     calls.length = 0;
+    expect(yield* giver.act(relay, read, offer, true)).toMatchObject({ ok: true });
+    expect(calls).toEqual(["PUT tasks/t1/thread", "POST handoffs"]);
+    // The relay may refuse the task a thread. The offer still goes.
+    calls.length = 0;
+    noThread = true;
     expect(yield* giver.act(relay, read, offer, true)).toMatchObject({ ok: true });
     expect(calls).toEqual(["PUT tasks/t1/thread", "POST handoffs"]);
   }),
