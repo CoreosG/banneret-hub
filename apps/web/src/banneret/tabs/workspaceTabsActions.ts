@@ -122,7 +122,8 @@ export interface DrawnWorkspaceTabs {
 
 /**
  * Closes (hides) workspace tabs. When the selected one is among them, `instead` is shown in its
- * place if given, otherwise a neighbour, or home when none is left.
+ * place if given, otherwise a neighbour. With none left the chat stays on screen: going home would
+ * start a draft and bring a tab straight back.
  */
 export async function closeWorkspaceTabs(
   router: AnyRouter,
@@ -134,11 +135,11 @@ export async function closeWorkspaceTabs(
     keys,
     drawn.tabs.map((tab) => tab.entry.key),
     drawn.shownKey,
+    drawn.tabs.map((tab) => tab.workspace),
   );
   if (!closedShown) return;
   const target = instead ?? drawn.tabs.find((tab) => tab.entry.key === next)?.workspace;
-  if (target === undefined) await router.navigate({ to: "/" });
-  else await showWorkspace(router, target);
+  if (target !== undefined) await showWorkspace(router, target);
 }
 
 /** Tabs show: Workspaces. The open chats' projects get tabs, and the chat in view stays in front. */

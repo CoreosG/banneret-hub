@@ -452,6 +452,24 @@ describe("Workspaces tabs", () => {
     }
   });
 
+  it("leaves the chat on screen when the last tab closes, with the list to bring it back", async () => {
+    await userEvent.click(tabNamed("web"));
+    await vi.waitFor(() => expect(path()).toBe(webDraft));
+    for (const title of tabTitles().filter((title) => title !== "web")) {
+      await menuOn(title!, "Close");
+    }
+    await menuOn("web", "Close");
+    await vi.waitFor(() => expect(tabs()).toHaveLength(0));
+    expect(path()).toBe(webDraft);
+    await expectSidebarLists("render", "web", "api");
+    // No home page, so no new draft brought a tab back.
+    expect(tabs()).toHaveLength(0);
+    await pickWorkspace("web");
+    await vi.waitFor(() => expect(tabTitles()).toEqual(["web"]));
+    await expectSidebarLists("web");
+    await pickWorkspace("render");
+  });
+
   it("lists everything with the bar hidden or in a narrow window", async () => {
     await userEvent.click(tabNamed("web"));
     await expectSidebarLists("web");

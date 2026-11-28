@@ -73,18 +73,48 @@ function workspaceOfEntry<T extends WorkspaceIdentity>(
   );
 }
 
+/**
+ * Folds saved entries that now stand for one listed workspace (their projects were grouped since)
+ * into the first open one, so its single tab is pinned, moved and closed as one.
+ */
+export function foldMerged(
+  state: WorkspaceTabsState,
+  workspaces: ReadonlyArray<WorkspaceIdentity>,
+): WorkspaceTabsState {
+  const owners = new Map(
+    state.entries.map((entry) => [entry, workspaceOfEntry(entry, workspaces)?.key]),
+  );
+  let activeKey = state.activeKey;
+  const entries = state.entries.flatMap((entry) => {
+    const owner = owners.get(entry);
+    if (owner === undefined) return [entry];
+    const group = state.entries.filter((other) => owners.get(other) === owner);
+    if (entry !== (group.find((other) => other.open) ?? group[0])) return [];
+    if (group.length === 1) return [entry];
+    if (group.some((other) => other.key === state.activeKey)) activeKey = entry.key;
+    const latest = group.toSorted((a, b) => b.visitedAt - a.visitedAt);
+    return [
+      {
+        ...entry,
+        members: [...new Set(group.flatMap((other) => other.members))],
+        pinned: group.some((other) => other.pinned),
+        visitedAt: latest[0]!.visitedAt,
+        lastChat: latest.find((other) => other.lastChat !== null)?.lastChat ?? null,
+      },
+    ];
+  });
+  return entries.length === state.entries.length ? state : { ...state, activeKey, entries };
+}
+
 /** The open tabs to draw, in order, one per listed workspace. */
 export function openTabs<T extends WorkspaceIdentity>(
   state: WorkspaceTabsState,
   workspaces: ReadonlyArray<T>,
 ): Array<{ readonly entry: WorkspaceEntry; readonly workspace: T }> {
-  const drawn = new Set<string>();
-  return state.entries.flatMap((entry) => {
+  return foldMerged(state, workspaces).entries.flatMap((entry) => {
     if (!entry.open) return [];
     const workspace = workspaceOfEntry(entry, workspaces);
-    if (workspace === null || drawn.has(workspace.key)) return [];
-    drawn.add(workspace.key);
-    return [{ entry, workspace }];
+    return workspace === null ? [] : [{ entry, workspace }];
   });
 }
 
@@ -98,7 +128,8 @@ export function shownWorkspace<T extends WorkspaceIdentity>(
   visible: (workspace: T) => boolean,
 ): T | null {
   const candidates = openTabs(state, workspaces).filter((tab) => visible(tab.workspace));
-  const active = candidates.find((tab) => tab.entry.key === state.activeKey);
+  const { activeKey } = foldMerged(state, workspaces);
+  const active = candidates.find((tab) => tab.entry.key === activeKey);
   if (active !== undefined) return active.workspace;
   const recent = candidates.toSorted((a, b) => b.entry.visitedAt - a.entry.visitedAt)[0];
   return recent?.workspace ?? null;
@@ -235,12 +266,12 @@ export function moveWorkspace(
   return { ...state, entries };
 }
 
-/** The entry's last chat is gone for good (deleted or archived). */
-export function forgetLastChat(state: WorkspaceTabsState, key: string): WorkspaceTabsState {
+/** The chat is gone for good (deleted or archived): it is no workspace's last chat. */
+export function forgetLastChat(state: WorkspaceTabsState, href: string): WorkspaceTabsState {
   return {
     ...state,
     entries: state.entries.map((entry) =>
-      entry.key === key && entry.lastChat !== null ? { ...entry, lastChat: null } : entry,
+      entry.lastChat?.href === href ? { ...entry, lastChat: null } : entry,
     ),
   };
 }

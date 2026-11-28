@@ -34,10 +34,11 @@ function LastChatGoneWatcher({ entry, active }: { entry: WorkspaceEntry; active:
   const gone = useThreadGone(ref, useQuietThreadShell(ref));
   // The chat in front stays: its route already handles a missing thread.
   const forgetNow = gone && !active;
+  const href = entry.lastChat?.href;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a thread deleted or archived elsewhere is no longer where its workspace was left
   useEffect(() => {
-    if (forgetNow) forgetChat(entry.key);
-  }, [forgetNow, entry.key]);
+    if (forgetNow && href !== undefined) forgetChat(href);
+  }, [forgetNow, href]);
   return null;
 }
 
@@ -120,7 +121,10 @@ function WorkspaceTabItem(props: {
             className={TAB_BUTTON_CLASS_NAME}
             onClick={(event) => {
               event.stopPropagation();
-              pinWorkspace(entry.key);
+              pinWorkspace(
+                entry.key,
+                props.drawn.tabs.map((other) => other.workspace),
+              );
             }}
           >
             <PinIcon className="size-3 fill-current" />
@@ -163,7 +167,13 @@ export function WorkspaceTabsBar() {
     <TabStrip
       label="Workspace tabs"
       ids={tabs.map((tab) => tab.entry.key)}
-      onMove={moveWorkspaceTab}
+      onMove={(key, beforeKey) =>
+        moveWorkspaceTab(
+          key,
+          beforeKey,
+          tabs.map((tab) => tab.workspace),
+        )
+      }
       menu={
         menu === null ? null : (
           <WorkspaceTabMenu

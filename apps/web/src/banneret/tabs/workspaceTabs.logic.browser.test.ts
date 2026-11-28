@@ -21,6 +21,7 @@ import {
 } from "./workspaceTabs.logic";
 import {
   __reloadWorkspaceTabsForTests,
+  hide,
   pinWorkspace,
   setSavedTabsMode,
   useWorkspaceTabsStore,
@@ -85,6 +86,34 @@ describe("one tab per workspace", () => {
     expect(after.activeKey).toBe("repo");
   });
 
+  it("closes and pins as one the two saved tabs of projects grouped since", () => {
+    // The same repository on two machines, saved by path before the repository was known.
+    const merged = ws("repo", "pc:/repo", "wsl:/repo");
+    useWorkspaceTabsStore.setState(
+      visited(ws("pc-path", "pc:/repo"), ws("wsl-path", "wsl:/repo"), C),
+      true,
+    );
+    const listed = [merged, C];
+    useWorkspaceTabsStore.setState((state) => ({
+      ...state,
+      entries: state.entries.map((e) => (e.key === "wsl-path" ? { ...e, pinned: true } : e)),
+      activeKey: "wsl-path",
+    }));
+    const drawn = openTabs(useWorkspaceTabsStore.getState(), listed);
+    expect(drawn.map((tab) => [tab.entry.key, tab.entry.pinned, tab.entry.lastChat])).toEqual([
+      ["pc-path", true, chat("wsl-path-1")],
+      ["c", false, chat("c-1")],
+    ]);
+    expect(shownWorkspace(useWorkspaceTabsStore.getState(), listed, all)?.key).toBe("repo");
+    pinWorkspace("pc-path", listed);
+    expect(openTabs(useWorkspaceTabsStore.getState(), listed)[0]!.entry.pinned).toBe(false);
+    hide(new Set(["pc-path"]), ["pc-path", "c"], "pc-path", listed);
+    expect(keys(useWorkspaceTabsStore.getState(), listed)).toEqual(["c"]);
+    expect(useWorkspaceTabsStore.getState().activeKey).toBe("c");
+    localStorage.removeItem(WORKSPACE_TABS_STORAGE_KEY);
+    __reloadWorkspaceTabsForTests();
+  });
+
   it("keeps the saved tab of a workspace that is not listed right now", () => {
     const state = visited(A, B);
     expect(keys(state, [A])).toEqual(["a"]);
@@ -130,7 +159,7 @@ describe("close, pin and reorder", () => {
   });
 
   it("forgets only a deleted last chat", () => {
-    const state = forgetLastChat(visited(A, B), "a");
+    const state = forgetLastChat(visited(A, B), chat("a-1").href);
     expect(entry(state, "a")).toMatchObject({ open: true, lastChat: null });
     expect(entry(state, "b").lastChat).toEqual(chat("b-1"));
   });
@@ -223,7 +252,7 @@ describe("what is saved on this device", () => {
     setSavedTabsMode("workspaces");
     visit(A, chat("a-1"));
     visit(B, chat("b-1"));
-    pinWorkspace("a");
+    pinWorkspace("a", ALL);
     const before = useWorkspaceTabsStore.getState();
     useWorkspaceTabsStore.setState(EMPTY_WORKSPACE_TABS, true);
     __reloadWorkspaceTabsForTests();

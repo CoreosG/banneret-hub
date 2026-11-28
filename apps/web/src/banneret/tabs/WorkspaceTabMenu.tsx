@@ -56,7 +56,14 @@ export function WorkspaceTabMenu(props: {
           Close to the right
         </MenuItem>
         <MenuSeparator />
-        <MenuItem onClick={() => pinWorkspace(tab.entry.key)}>
+        <MenuItem
+          onClick={() =>
+            pinWorkspace(
+              tab.entry.key,
+              drawn.tabs.map((other) => other.workspace),
+            )
+          }
+        >
           {tab.entry.pinned ? "Unpin" : "Pin"}
         </MenuItem>
         <MenuSeparator />

@@ -281,7 +281,7 @@ above. **Workspaces** is for people with many projects:
 - Pin, close, drag and the tab menu work as above. There are no preview tabs, no Keep and no 20-tab limit. Copy
   link copies the tab's last chat.
 - Closing a tab only hides it. The workspace list at the top of the sidebar shows every project and brings the
-  tab back.
+  tab back. After you close the last tab, the chat stays on screen and the sidebar lists every chat.
 - Pages such as Board get no tab of their own in this mode. The shown project stays selected.
 - With the tabs bar hidden, or in a window too narrow for it, the sidebar lists every chat again.
 - Switching between the two keeps your chat tabs and the chat in front. The choice is saved on this device.
