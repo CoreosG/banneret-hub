@@ -969,7 +969,7 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `POST /chat/messages` | Post `{conversationId, threadRootId?, text, card?, taskRef?, key, asHandle?}`; the author is the caller's person, or the handle in `asHandle` (only from the handle's machine and owner) |
 | `PATCH /chat/messages/{id}` | Edit (author only) |
 | `DELETE /chat/messages/{id}` | Delete (author; founders) |
-| `PUT /chat/messages/{id}/progress` | Create or edit the caller agent's progress message in a thread |
+| `PUT /chat/messages/{id}/progress` | Create or edit the caller agent's progress message in a thread (relay slice CR6) |
 | `PUT /chat/messages/{id}/reactions/{emoji}` / `DELETE` | React |
 | `PUT /chat/tasks/{taskId}/thread` | Open or create the board task's canonical discussion; no request body (relay slice CR5) |
 | `PUT /chat/threads/{rootId}/task` / `DELETE` | Associate a current root with a board task, or remove its association (204) (relay slice CR5) |
@@ -1235,6 +1235,7 @@ Agent asks, hand-offs and reviews each have a switch in chat configuration: `cha
 
 - **The asks and hand-off switches are independent.** Hand-offs work with asks off, and asks work with hand-offs off.
 - **Reviews require asks.** With asks off, the relay advertises no `reviews` flag, whatever the review switch says.
+- **Reviews stay off until relay slice CR6.** Keep `chat.reviews` off until the relay serves promotion (see [Review asks](#review-asks)).
 
 The flags are `agent_asks`, `handoffs`, `reviews` and `agent_pause`. With asks off, an ask to an agent returns 404 `not_found`. With hand-offs off, every hand-off call returns 404. The role permission `agents.ask` belongs to Founder, Staff and Contractor by default. The tools `banneret_agent_ask` and `banneret_agent_answer` come with asks, and `banneret_handoff_offer` comes with hand-offs. Each requires that permission.
 
@@ -1343,7 +1344,37 @@ The receiver calls `/accept` with its selected machine (and `newThread: true` to
 
 ### Review asks
 
-A review names the repository, PR number and requested head SHA. Reject the PR author or task lease holder as reviewer with 403 `review_same_owner`. Allow one open review per head and reviewer owner. Reviews follow the ask state table with direct posting only. A result carries the reviewed head and a verdict of `clean`, `findings` or `could_not_review`. A moved head ends a running review as unanswered with reason `head_moved`. Closing or merging the PR orphans active reviews. A later head change marks a finished review stale in the client. The board exposes the current commit in the linked PR’s optional `headSha`. An answered review’s `answerMessageId` identifies the result card for the human-only message promotion check. Only a person posts a review or approval to GitHub.
+A review is an ask of kind `review`, sent to an agent. It names the repository, the PR number and the requested head SHA. The rules for requests between agents above apply too: consent, rules by a named person and the loop limits. A review has no draft mode, so `allow: "draft"` returns 400. A result carries the reviewed head and a verdict of `clean`, `findings` or `could_not_review`. Only a person posts a review or approval to GitHub.
+
+**`chat.reviews` stays off until relay slice CR6, "agent reads + progress".** The Hub's "Post as review" first calls `POST /chat/messages/{id}/promote`, which that slice serves.
+
+The relay finds the pull request on the asker's board by its GitHub link. The asker, the reviewer's owner and the person the chain started from must all see it, or the relay returns 404 `not_found`. When the relay cannot read enough of a board to decide this, it returns 503 `unavailable`. A merged or closed pull request returns 400 `malformed`. Each head has at most one active review for each reviewer owner.
+
+**Maker and checker.** The reviewer's owner must not have opened the pull request or hold any task that links it. Logins are compared without case. An `incomplete` lease counts for the holder it names. This applies between one owner's agents too. If the board shows neither, but the relay cannot tell who opened the pull request or who holds a linked task, a review request returns 503 `unavailable`.
+
+**The relay checks again when the verdict arrives,** because the owner may have taken the task since. This covers the reviewing agent's answer and the owner's own answer by hand:
+
+- If the reviewer's owner now holds a linked task or opened the pull request, the review ends as `orphaned` with reason `review_same_owner`. It writes its one `ask_result`. The answer gets 403 `review_same_owner`, and the change is still saved.
+- If the board cannot rule that out, also when no task on it links the pull request any more, the answer gets 503 and the review stays active.
+- An answer with `none: true` posts no verdict, so it is not checked.
+- No background check ends a review for this.
+
+**When the head moves.** The board comes from GitHub data, which can lag. It may still show the old head when an agent asks about a commit it has just pushed. So the relay ends a review as `head_moved` for a different board head only after its board has shown the requested commit. A board read that began before the review was written does not count. Until then, only the reviewer's Hub can report a move. It reads the head itself when it checks out the pull request and before it answers. It then sends `none: true` with reason `head_moved`. An answer that names another head ends the review the same way.
+
+| Stored state | Event | New state and effect |
+|---|---|---|
+| New | The reviewer's owner opened the pull request or holds a linked task | Refused, 403 `review_same_owner` |
+| New | The board cannot rule that out | Refused, 503 `unavailable` |
+| New | That head already has an active review by that owner | Refused, 403 `agent_ask_capped` |
+| Waiting_owner, open | A verdict arrives and the reviewer's owner now made the pull request or holds a linked task | Orphaned, `review_same_owner`. The answer gets 403 |
+| Waiting_owner, open | A verdict arrives and the board cannot rule that out | Unchanged. The answer gets 503 |
+| Open | A verdict for the requested head | Answered, with verdict and head |
+| Waiting_owner, open | The answer names another head | Unanswered, `head_moved` |
+| Open | The board has shown the requested head and now shows another | Unanswered, `head_moved` |
+| Waiting_owner | The owner answers after the board showed the requested head and then another | Unanswered, `head_moved` |
+| Waiting_owner, open | The pull request is merged or closed | Orphaned |
+
+Every other change follows the ask table, so an answer to a review that has already ended gets 409 `ask_closed`. The relay sees a merge or close only while the pull request is still on the board. Otherwise the review ends at its deadline. A head change after a review has finished does not change it, and the client marks it stale. The board shows the current commit in the linked pull request's optional `headSha`. An answered review's `answerMessageId` names the ask's own message, the result card that the human-only promotion check uses.
 
 ### Progress message (`messages.progress_state`)
 
@@ -1428,6 +1459,8 @@ Message changes resolve to the current message, including its tombstone after de
 `PUT /chat/handles/{id}` accepts an opaque string `threadRef`. Omit `name` or `wake` to preserve that field on an existing registration. A new handle defaults to its claim name and wakes for everyone. The Hub derives the id from the thread. An existing id cannot move to another owner, machine or thread.
 
 Every `ChatDelivery` includes the target `threadRef`, `wake` policy at write and the resulting `wakes` flag and current `message: ChatMessage`. Only its enrolled machine can read or claim it. `GET /chat/deliveries?asHandle=...` additionally limits the list to one owned handle. Reclaiming a claimed delivery from the same machine returns its current contents. The Hub uses the handle and delivery ids as its durable dispatch receipt.
+
+Relay slice CR6, "agent reads + progress", adds both progress calls, together with owner-DM reads, search and promotion.
 
 `GET /chat/progress?cursor=...&limit=...` returns `{items: [{handleId, threadRef, message}], nextCursor}` for this machine's working or stale progress. For `PUT /chat/messages/{id}/progress`, the id may be a thread root, a DM conversation, or the working progress message itself. Updating by progress id must reject a closed message. This prevents a stale reconciliation from stopping a newer message. Agent conversation reads with `asHandle` page oldest first.
 

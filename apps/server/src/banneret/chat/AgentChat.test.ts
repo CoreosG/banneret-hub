@@ -67,6 +67,9 @@ it.effect("explains why the maker's owner cannot check the pull request", () =>
     );
     const refusal = yield* client.write("POST", "asks", {}).pipe(Effect.flip);
     expect(refusal.message).toMatch(/owner wrote the pull request or holds the task lease/);
+    // At the answer the review is already closed, so the relay's own words stand.
+    const closed = yield* client.write("POST", "asks/a_one/answer", {}).pipe(Effect.flip);
+    expect(closed.message).toBe("Ask refused");
   }),
 );
 

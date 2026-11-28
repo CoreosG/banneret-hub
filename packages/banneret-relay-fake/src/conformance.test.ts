@@ -4745,68 +4745,205 @@ describe("chat contract", () => {
     });
   });
 
-  it("binds reviews to the PR head through acceptance, answer, head move and closure", async () => {
-    const { asker, answerer, chat, to, newAsk } = await sharedAskThread();
+  /** A shared thread and one pull request on the board that the asker opened. */
+  async function reviewWorld() {
+    const t = await sharedAskThread();
     const repo = "example-org/example-app",
-      headSha = "a".repeat(40),
-      id = "task_" + randomText(5);
-    const seed = (head: string, state = "open") =>
-      client.control("/board/seed", {
+      taskId = "task_" + randomText(5);
+    const seed = (
+      head: string,
+      pr: { state?: string; author?: string | undefined; holder?: string } = {},
+    ) => {
+      const author = "author" in pr ? pr.author : t.asker.login;
+      return client.control("/board/seed", {
         tasks: [
           {
-            id,
+            id: taskId,
             title: "Review",
             projectKey: repo,
-            holder: asker.login,
-            prs: [{ number: 17, author: asker.login, state, headSha: head }],
+            holder: pr.holder ?? t.asker.login,
+            prs: [
+              { number: 17, state: pr.state ?? "open", headSha: head, ...(author && { author }) },
+            ],
           },
         ],
       });
-    const request = async (key: string, head: string) => {
-      const r = await call(asker, "POST", chat + "asks", {
-        ...newAsk,
+    };
+    const send = (key: string, head: string) =>
+      call(t.asker, "POST", t.chat + "asks", {
+        ...t.newAsk,
         question: key,
         key,
         kind: "review",
         pr: { repo, number: 17, headSha: head },
       });
-      return r.body as { id: string; state: string };
+    // The loop limits count agent asks in a thread since a person last wrote there.
+    const speak = () =>
+      call(t.asker, "POST", t.chat + "messages", {
+        conversationId: t.conversationId,
+        threadRootId: t.threadRootId,
+        text: "Carry on.",
+        key: randomText(8),
+      });
+    const request = async (key: string, head: string) => {
+      await speak();
+      const reply = await send(key, head);
+      expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+      return reply.body as { id: string; state: string };
     };
-    await seed(headSha);
-    const first = await request("first_review", headSha);
+    const allow = (id: string) =>
+      call(t.answerer, "POST", t.chat + "asks/" + id + "/decision", { allow: "once" });
+    const verdict = (id: string, headSha: string) =>
+      call(t.answerer, "POST", t.chat + "asks/" + id + "/answer", {
+        asHandle: t.to.id,
+        text: "Checked retry. UI unchecked.",
+        verdict: "clean",
+        headSha,
+      });
+    const read = async (id: string) =>
+      (
+        (await call(t.answerer, "GET", t.chat + "asks?role=answerer&limit=100")).body as {
+          items: { id: string; state: string; reason?: string }[];
+        }
+      ).items.find((a) => a.id === id);
+    return { ...t, seed, send, request, allow, verdict, read };
+  }
+  const oldHead = "a".repeat(40),
+    newHead = "b".repeat(40),
+    laterHead = "c".repeat(40);
+
+  it("binds reviews to the PR head through acceptance, answer, head move and closure", async () => {
+    const t = await reviewWorld();
+    await t.seed(oldHead);
+    const first = await t.request("first_review", oldHead);
     expect(first.state).toBe("waiting_owner");
-    const path = chat + "asks/" + first.id;
-    expect(
-      (await call(answerer, "POST", path + "/decision", { allow: "always", kinds: ["review"] }))
-        .body,
-    ).toMatchObject({ state: "open" });
     expect(
       (
-        await call(answerer, "POST", path + "/answer", {
-          asHandle: to.id,
-          text: "Checked retry. UI unchecked.",
-          verdict: "clean",
-          headSha,
+        await call(t.answerer, "POST", t.chat + "asks/" + first.id + "/decision", {
+          allow: "always",
+          kinds: ["review"],
         })
       ).body,
-    ).toMatchObject({ state: "answered", answer: { verdict: "clean", headSha } });
-    const second = await request("second_review", headSha);
+    ).toMatchObject({ state: "open" });
+    expect((await t.verdict(first.id, oldHead)).body).toMatchObject({
+      state: "answered",
+      answer: { verdict: "clean", headSha: oldHead },
+    });
+    const second = await t.request("second_review", oldHead);
     expect(second.state).toBe("open");
-    const nextHead = "b".repeat(40);
-    await seed(nextHead);
-    const rows = () => call(answerer, "GET", chat + "asks?role=answerer");
-    expect((await rows()).body).toMatchObject({
-      items: expect.arrayContaining([
-        expect.objectContaining({ id: second.id, state: "unanswered", reason: "head_moved" }),
-        expect.objectContaining({ id: first.id, state: "answered" }),
-      ]),
-    });
-    const last = await request("last_review", nextHead);
-    await seed(nextHead, "closed");
-    expect((await rows()).body).toMatchObject({
-      items: expect.arrayContaining([expect.objectContaining({ id: last.id, state: "orphaned" })]),
-    });
+    await t.seed(newHead);
+    expect(await t.read(second.id)).toMatchObject({ state: "unanswered", reason: "head_moved" });
+    expect(await t.read(first.id)).toMatchObject({ state: "answered" });
+    const last = await t.request("last_review", newHead);
+    await t.seed(newHead, { state: "closed" });
+    expect(await t.read(last.id)).toMatchObject({ state: "orphaned" });
   });
+
+  it("ends a review as head_moved only after the board has shown the requested commit", async () => {
+    const t = await reviewWorld();
+    // The board lags: it still shows the old head when the asker names the one it has just pushed.
+    await t.seed(oldHead);
+    const early = await t.request("early_review", newHead);
+    await t.allow(early.id);
+    expect(await t.read(early.id)).toMatchObject({ state: "open" });
+    expect((await t.verdict(early.id, newHead)).body).toMatchObject({ state: "answered" });
+    // Only the reviewer's Hub can report a move before the board shows the requested head.
+    const reported = await t.request("reported_review", newHead);
+    await t.allow(reported.id);
+    expect((await t.verdict(reported.id, laterHead)).body).toMatchObject({
+      state: "unanswered",
+      reason: "head_moved",
+    });
+    const lagging = await t.request("lagging_review", newHead);
+    await t.allow(lagging.id);
+    await t.seed(laterHead);
+    expect(await t.read(lagging.id)).toMatchObject({ state: "open" });
+    await t.seed(newHead);
+    expect(await t.read(lagging.id)).toMatchObject({ state: "open" });
+    await t.seed(laterHead);
+    expect(await t.read(lagging.id)).toMatchObject({ state: "unanswered", reason: "head_moved" });
+  });
+
+  it("refuses a review with 503 when it cannot tell who opened the pull request", async () => {
+    const t = await reviewWorld();
+    await t.seed(oldHead, { author: undefined });
+    expectError(await t.send("unknown_author", oldHead), 503, "unavailable");
+    // What the board does show still decides: a reviewer who holds the task is refused outright.
+    await t.seed(oldHead, { author: undefined, holder: t.answerer.login });
+    expectError(await t.send("known_holder", oldHead), 403, "review_same_owner");
+  });
+
+  // The control surface of another relay cannot seed a holder that could not be read.
+  it.skipIf(external)(
+    "refuses a review with 503 when it cannot read who holds the task",
+    async () => {
+      const t = await reviewWorld();
+      await client.control("/board/seed", {
+        tasks: [
+          {
+            id: "task_" + randomText(5),
+            title: "Review",
+            projectKey: "example-org/example-app",
+            leaseUnknown: true,
+            prs: [{ number: 17, author: t.asker.login, headSha: oldHead }],
+          },
+        ],
+      });
+      expectError(await t.send("unread_holder", oldHead), 503, "unavailable");
+    },
+  );
+
+  it("checks the reviewer's independence again when the verdict arrives", async () => {
+    const t = await reviewWorld();
+    await t.seed(oldHead);
+    const taken = await t.request("taken_review", oldHead);
+    await t.allow(taken.id);
+    // Unknown at the answer: the review stays open.
+    await t.seed(oldHead, { author: undefined });
+    expectError(await t.verdict(taken.id, oldHead), 503, "unavailable");
+    expect(await t.read(taken.id)).toMatchObject({ state: "open" });
+    // The reviewer's owner has taken the task. A read alone ends nothing.
+    await t.seed(oldHead, { holder: t.answerer.login });
+    expect(await t.read(taken.id)).toMatchObject({ state: "open" });
+    expectError(await t.verdict(taken.id, oldHead), 403, "review_same_owner");
+    expect(await t.read(taken.id)).toMatchObject({
+      state: "orphaned",
+      reason: "review_same_owner",
+    });
+    expectError(await t.verdict(taken.id, oldHead), 409, "ask_closed");
+
+    // The owner's own answer by hand is checked too, here because they now show as the author.
+    await t.seed(oldHead);
+    const waiting = await t.request("waiting_review", oldHead);
+    expect(waiting.state).toBe("waiting_owner");
+    await t.seed(oldHead, { author: t.answerer.login });
+    const path = t.chat + "asks/" + waiting.id + "/answer";
+    expectError(
+      await call(t.answerer, "POST", path, { text: "Fine.", verdict: "clean", headSha: oldHead }),
+      403,
+      "review_same_owner",
+    );
+    expect(await t.read(waiting.id)).toMatchObject({
+      state: "orphaned",
+      reason: "review_same_owner",
+    });
+
+    // A "no answer" posts no verdict, so it is not checked.
+    await t.seed(oldHead);
+    const silent = await t.request("silent_review", oldHead);
+    await t.allow(silent.id);
+    await t.seed(oldHead, { holder: t.answerer.login });
+    expect(
+      (
+        await call(t.answerer, "POST", t.chat + "asks/" + silent.id + "/answer", {
+          asHandle: t.to.id,
+          none: true,
+          reason: "turn_ended",
+        })
+      ).body,
+    ).toMatchObject({ state: "unanswered", reason: "turn_ended" });
+  });
+
   it("keeps the reviewer independent and derives hand-off progress from the task holder", async () => {
     const { asker, answerer, chat, to, newAsk } = await sharedAskThread();
     const taskId = "task_" + randomText(5),
@@ -4872,7 +5009,8 @@ describe("chat contract", () => {
     }
   });
 
-  it("delivers a non-owner agent DM only to its machine and coalesces progress", async () => {
+  /** An agent, and a DM that someone else has just opened with it and written in. */
+  async function agentDm() {
     const owner = await enrol(),
       sender = await enrol();
     const prefix = "/relay/v1/chat/",
@@ -4894,6 +5032,11 @@ describe("chat contract", () => {
       text: "What passed?",
       key: "question",
     });
+    return { owner, sender, prefix, asHandle, conversationId };
+  }
+
+  it("delivers a non-owner agent DM only to its machine", async () => {
+    const { owner, sender, prefix, asHandle } = await agentDm();
     const items = (await call(owner, "GET", prefix + "deliveries")).body as {
       items: { id: string }[];
     };
@@ -4906,19 +5049,43 @@ describe("chat contract", () => {
     expect((await call(owner, "POST", path + "/consume", { asHandle })).body).toMatchObject({
       state: "consumed",
     });
-    const progress = (text: string) =>
-      call(owner, "PUT", prefix + "messages/" + conversationId + "/progress", {
-        asHandle,
-        text,
-        state: "working",
-      });
-    const first = await progress("Checking");
-    expectSchema("ChatMessage", first.body);
-    expect((await progress("Reading results")).body).toMatchObject({
-      id: (first.body as { id: string }).id,
-      text: "Reading results",
-    });
   });
+
+  // Pending relay slice CR6, "agent reads + progress".
+  it.skipIf(external)(
+    "coalesces progress on a DM root and lists it while the agent works (pending relay slice CR6, agent reads + progress)",
+    async () => {
+      const { owner, sender, prefix, asHandle, conversationId } = await agentDm();
+      const progress = (text: string, state = "working") =>
+        call(owner, "PUT", prefix + "messages/" + conversationId + "/progress", {
+          asHandle,
+          text,
+          state,
+        });
+      const working = async (machine: Enrolled) => {
+        const reply = await call(machine, "GET", prefix + "progress?limit=100");
+        expectSchema("ChatActiveProgress", reply.body);
+        return (reply.body as { items: { handleId: string }[] }).items.filter(
+          (row) => row.handleId === asHandle,
+        );
+      };
+      const first = await progress("Checking");
+      expectSchema("ChatMessage", first.body);
+      const id = (first.body as { id: string }).id;
+      expect((await progress("Reading results")).body).toMatchObject({
+        id,
+        text: "Reading results",
+      });
+      expect(await working(owner)).toMatchObject([
+        { threadRef: "thread1", message: { id, text: "Reading results" } },
+      ]);
+      // Only the handle's machine lists its progress.
+      expect(await working(sender)).toEqual([]);
+      expect((await progress("All passed", "done")).body).toMatchObject({ id });
+      expect(await working(owner)).toEqual([]);
+    },
+  );
+
   /** An agent and its helper, and a colleague whose channel mentions the agent. */
   async function namedAskThread() {
     const owner = await enrol(),
@@ -5039,10 +5206,10 @@ describe("chat contract", () => {
       ],
     });
   });
-  // Pending relay slice CR6, "agent reads: owner-DM reads, search, promotion". Until a relay
-  // serves it, this runs against the fake.
+  // Pending relay slice CR6, "agent reads + progress". Until a relay serves it, this runs
+  // against the fake.
   it.skipIf(external)(
-    "limits owner DM reads, and finds an agent's question in search but never promotes it (pending relay slice CR6, agent reads: owner-DM reads, search, promotion)",
+    "limits owner DM reads, and finds an agent's question in search but never promotes it (pending relay slice CR6, agent reads + progress)",
     async () => {
       const { owner, colleague, path, h, person, c, root, askColleague } = await namedAskThread();
       const dm = (
@@ -5178,7 +5345,7 @@ describe("chat contract", () => {
     },
   );
   it.skipIf(external)(
-    "searches messages by filter and returns a promotable text and link (pending relay slice CR6, agent reads: owner-DM reads, search, promotion; its task filters need CR5)",
+    "searches messages by filter and returns a promotable text and link (pending relay slice CR6, agent reads + progress; its task filters need CR5)",
     async () => {
       const { member, path, conversationId, threadRootId } = await taskDiscussion();
       const text = "needle" + randomText(6);
@@ -5424,11 +5591,9 @@ describe("shared machines", () => {
   it("binds host facts and sandbox offers to host credentials and serves quota only to its owner", async () => {
     const owner = await enrol({ poolHostId: "dev" });
     const colleague = await enrol({ role: "staff" });
-    expect((await call(owner, "GET", "/relay/v1/machines")).body).toMatchObject({
-      items: expect.arrayContaining([
-        expect.objectContaining({ id: owner.machineId, poolHostId: "dev" }),
-      ]),
-    });
+    expect(await listMachines(owner)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: owner.machineId, poolHostId: "dev" })]),
+    );
     const prefix = "/relay/v1/pool";
     const hub = (method: string, path: string, body?: unknown) =>
       call(owner, method, prefix + path, body);

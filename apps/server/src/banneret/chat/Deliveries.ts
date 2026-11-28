@@ -370,14 +370,15 @@ export const makeDeliveries = Effect.gen(function* () {
         watched.set(relay.origin, relay);
         yield* pause.whenRunning(
           Effect.gen(function* () {
-            yield* startAnswerTurn(
+            const started = yield* startAnswerTurn(
               { threads, providers: yield* providers.getProviders, answers },
               relay,
               t,
               d,
               ask,
             );
-            yield* call("POST", path + "/consume", body);
+            // With no turn the ask has ended, and the relay has closed its delivery.
+            if (started) yield* call("POST", path + "/consume", body);
           }),
           Effect.void,
         );

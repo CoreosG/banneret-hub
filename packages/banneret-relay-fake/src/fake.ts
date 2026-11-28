@@ -517,6 +517,8 @@ interface BoardTask {
   preview: { readonly state: string; readonly url?: string } | null;
   checked: CheckedRecord | null;
   readonly forcedLeaseState: "paused" | "conflict" | null;
+  /** The tracker could not be read, so nobody can say who holds the task. */
+  readonly leaseUnknown: boolean;
   readonly tracker: TrackerIssue | null;
   readonly branch: string | null;
   readonly projectKey: string | null;
@@ -3156,13 +3158,40 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     }
   }
 
-  function reviewTask(pr: ChatAsk["pr"]) {
-    return (
-      pr &&
-      boardTasks.find(
-        (t) => pr.repo === "example-org/example-app" && t.prs.some((p) => p.number === pr.number),
-      )
-    );
+  // A review follows its pull request; the state table is in the README under "Review asks".
+  // `shownHeads` holds, in memory only, the reviews whose requested head the board has shown.
+  const shownHeads = new Set<string>();
+  const sameText = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  /** What the board says about a pull request, across every task that links it. */
+  function reviewFacts(pr: NonNullable<ChatAsk["pr"]>) {
+    const tasks = sameText(pr.repo, "example-org/example-app")
+      ? boardTasks.filter((t) => t.prs.some((p) => p.number === pr.number))
+      : [];
+    const links = tasks.flatMap((t) => t.prs.filter((p) => p.number === pr.number));
+    return {
+      tasks,
+      closed: links.some((p) => p.state !== "open"),
+      head: links.findLast((p) => p.headSha)?.headSha,
+      author: links.findLast((p) => p.author)?.author,
+      holders: tasks.flatMap((t) => leaseOf(t, Date.now())?.holder.id ?? []),
+      holderUnread: tasks.some((t) => t.leaseUnknown),
+    };
+  }
+  type ReviewFacts = ReturnType<typeof reviewFacts>;
+  const headMoved = (a: ChatAsk, facts: ReviewFacts) =>
+    shownHeads.has(a.id) && !!facts.head && !sameText(facts.head, a.pr!.headSha);
+  const sawHead = (a: ChatAsk, facts: ReviewFacts) => {
+    if (facts.head && sameText(facts.head, a.pr!.headSha)) shownHeads.add(a.id);
+  };
+  /** Whether the reviewer's owner made the pull request or holds its task. 503 when unknown. */
+  function isMaker(facts: ReviewFacts, owner: Person) {
+    if (facts.holders.includes(owner.id) || sameText(facts.author ?? "", owner.login)) return true;
+    if (!facts.author || facts.holderUnread)
+      throw new RelayError(
+        "unavailable",
+        "The board cannot show who opened this pull request or holds its task. Try again later.",
+      );
+    return false;
   }
   function sweepWork() {
     for (const m of messages.values()) {
@@ -3186,22 +3215,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             c.agents === "off"))
       )
         changeAsk(m, { state: "orphaned" });
-      else if (
-        a.kind === "review" &&
-        reviewTask(a.pr)?.prs.some(
-          (pr) => pr.number === a.pr?.number && (pr.mergedAt !== null || pr.state === "closed"),
-        )
-      )
+      else if (a.kind === "review" && reviewFacts(a.pr!).closed)
         changeAsk(m, { state: "orphaned" });
-      else if (
-        a.kind === "review" &&
-        a.state === "open" &&
-        reviewTask(a.pr)?.prs.some(
-          (pr) => pr.number === a.pr?.number && pr.headSha && pr.headSha !== a.pr.headSha,
-        )
-      )
+      else if (a.kind === "review" && a.state === "open" && headMoved(a, reviewFacts(a.pr!)))
         changeAsk(m, { state: "unanswered", reason: "head_moved" });
       else if (Date.parse(a.expiresAt) <= Date.now()) changeAsk(m, { state: "expired" });
+      else if (a.kind === "review") sawHead(a, reviewFacts(a.pr!));
     }
     settleHandoffs();
   }
@@ -4162,18 +4181,33 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               return send("ChatAsk", move({ state: "unanswered", reason: input.reason }));
             if (input.choice && !a.choices.includes(input.choice))
               throw new RelayError("malformed", "Choose an offered answer.");
-            if (a.kind === "review" && (!input.verdict || !input.headSha))
-              throw new RelayError("malformed", "Provide the review verdict and head.");
-            const currentHead =
-              a.kind === "review" &&
-              reviewTask(a.pr)?.prs.find((p) => p.number === a.pr?.number)?.headSha;
-            if (
-              a.kind === "review" &&
-              (input.headSha !== a.pr?.headSha || (currentHead && currentHead !== a.pr?.headSha))
-            )
-              return send("ChatAsk", move({ state: "unanswered", reason: "head_moved" }));
             if (input.receipt && input.receipt.handle !== target.handle)
               throw new RelayError("malformed", "Receipt belongs to another handle.");
+            const receipts = input.receipt ? [...a.receipts, input.receipt] : a.receipts;
+            if (a.kind === "review") {
+              if (!input.verdict || !input.headSha)
+                throw new RelayError("malformed", "Provide the review verdict and head.");
+              const facts = reviewFacts(a.pr!);
+              if (!facts.tasks.length)
+                throw new RelayError("unavailable", "The board does not show this pull request.");
+              const reviewer = people.get(target.owner.id)!;
+              if (isMaker(facts, reviewer)) {
+                // The refusal keeps this change. The relay ends the review, so nobody decided it.
+                changeAsk(m, { state: "orphaned", reason: "review_same_owner", receipts });
+                throw new RelayError(
+                  "review_same_owner",
+                  reviewer.login +
+                    " opened this pull request or holds its task now, so this review is closed.",
+                  {
+                    account: account(person),
+                    owner: personRef(reviewer),
+                    asHandle: input.asHandle,
+                  },
+                );
+              }
+              if (!sameText(input.headSha, a.pr!.headSha) || headMoved(a, facts))
+                return send("ChatAsk", move({ state: "unanswered", reason: "head_moved" }));
+            }
             const { text, choice, verdict, headSha } = input;
             if (!(text ?? choice)?.trim()) throw new RelayError("malformed", "Provide an answer.");
             const answer = {
@@ -4183,7 +4217,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               ...(headSha && { headSha }),
               by: input.asHandle ?? decidedBy,
             };
-            const receipts = input.receipt ? [...a.receipts, input.receipt] : a.receipts;
             if (a.mode === "draft") {
               drafts.set(id, answer);
               return send("ChatAsk", move({ state: "draft", receipts }));
@@ -4775,19 +4808,15 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               reject("agent_ask_circle");
             if (declinedRecently()) reject("agent_ask_declined_recently");
             if (kind === "review") {
-              const task = reviewTask(ask.pr);
-              const pr = task?.prs.find((pr) => pr.number === ask.pr?.number);
+              const facts = reviewFacts(ask.pr!);
+              const parties = [person, to, people.get(origin.id)!];
               if (
-                !task ||
-                !pr ||
-                !taskAllowed(person, task) ||
-                !taskAllowed(to, task) ||
-                !taskAllowed(people.get(origin.id)!, task)
+                !facts.tasks.length ||
+                !parties.every((p) => facts.tasks.some((t) => taskAllowed(p, t)))
               )
                 throw new RelayError("not_found", "Unknown pull request.");
-              if (pr.state === "closed" || pr.mergedAt !== null) reject("malformed");
-              if (pr.author === to.login || leaseOf(task, Date.now())?.holder.id === to.id)
-                reject("review_same_owner");
+              if (facts.closed) reject("malformed");
+              if (isMaker(facts, to)) reject("review_same_owner");
               if (
                 all.some(
                   (r) =>
@@ -4795,9 +4824,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     r.ask.to.kind === "agent" &&
                     r.ask.to.owner.id === to.id &&
                     r.ask.kind === "review" &&
-                    r.ask.pr?.repo === ask.pr?.repo &&
-                    r.ask.pr?.number === ask.pr?.number &&
-                    r.ask.pr?.headSha === ask.pr?.headSha,
+                    sameText(r.ask.pr!.repo, ask.pr!.repo) &&
+                    r.ask.pr!.number === ask.pr!.number &&
+                    sameText(r.ask.pr!.headSha, ask.pr!.headSha),
                 )
               )
                 reject("agent_ask_capped");
@@ -4902,6 +4931,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           deleted: false,
         };
         messages.set(m.id, m);
+        if (m.ask?.kind === "review") sawHead(m.ask, reviewFacts(m.ask.pr!));
         if (key) postKeys.set(key, m.id);
         if (!prior && rootId) {
           const parent = messages.get(rootId)!;
@@ -6486,6 +6516,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               : null,
           checked: null,
           forcedLeaseState: forced ? (raw.leaseState as "paused" | "conflict") : null,
+          leaseUnknown: raw.leaseUnknown === true,
           tracker,
           branch: raw.branch === undefined ? null : String(raw.branch),
           projectKey: raw.projectKey === undefined ? null : String(raw.projectKey),

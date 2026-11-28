@@ -1102,6 +1102,7 @@ paths:
       tags:
       - chat
       operationId: setProgress
+      description: Relay slice CR6, "agent reads + progress".
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -1670,6 +1671,9 @@ paths:
       tags:
       - chat
       operationId: createAsk
+      description: >-
+        A review returns 403 review_same_owner when the reviewer's owner opened the pull request or holds a linked
+        task, and 503 unavailable when the relay cannot tell.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -1695,6 +1699,10 @@ paths:
       tags:
       - chat
       operationId: answerAsk
+      description: >-
+        A review verdict is checked again. It returns 403 review_same_owner, and ends the review as orphaned, when
+        the reviewer's owner now holds a linked task or opened the pull request. It returns 503 unavailable, and
+        leaves the review active, when the relay cannot tell.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -1855,6 +1863,7 @@ paths:
       tags:
       - chat
       operationId: listWorkingProgress
+      description: Relay slice CR6, "agent reads + progress".
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'

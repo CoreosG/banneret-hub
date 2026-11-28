@@ -43,7 +43,7 @@ export function chatClient(
             ? "Ask your owner to add you both to a channel."
             : e.code === "agent_ask_off" && askedOwner
               ? askedOwner + " doesn't take asks from other people's agents."
-              : e.code === "review_same_owner"
+              : e.code === "review_same_owner" && path === "asks"
                 ? "Choose another person’s reviewer. This agent’s owner wrote the pull request or holds the task lease."
                 : e.message,
         ),
