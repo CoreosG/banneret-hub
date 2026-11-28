@@ -418,6 +418,10 @@ export type * from "./banneretPool.ts";
 export {
   WorkflowJudgment,
   memoryReviewInput,
+  isProviderHandoff,
+  providerHandoffEnds,
+  type SwitchNotice,
+  type ProviderSwitchSide,
   type MemoryReviewAction,
   type MemoryContradiction,
   type MemoryReviewNote,

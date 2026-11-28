@@ -68,6 +68,7 @@ import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon"
 import { cn } from "~/lib/utils";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { subagentResumedSince } from "./V2LifecycleRow.logic";
+import { isProviderHandoff, providerSwitchRow } from "../../banneret/ProviderSwitchNotice";
 import { Button, InlineButton } from "../ui/button";
 import { T3Wordmark } from "../T3Wordmark";
 
@@ -97,6 +98,7 @@ export function V2LifecycleRow(props: {
     );
   }
   if (item.type === "handoff") {
+    if (isProviderHandoff(item)) return providerSwitchRow(props, item, EnvironmentHandoffRow);
     return (
       <EnvironmentHandoffRow
         environmentId={props.environmentId}

@@ -9,6 +9,7 @@ import { pluginHandlers } from "../plugins/registry.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import { memorySettingsHandlers } from "../memory/settings.ts";
+import { switchNotice } from "../memory/providerSwitch.ts";
 import type { memoryReviewInput } from "@t3tools/contracts";
 import { skillCatalog, describeSkill } from "../skills/catalog.ts";
 import { memoryAccess, unavailable } from "../memory/access.ts";
@@ -939,6 +940,7 @@ export const rpcHandlers = {
   ),
   ...levelHandlers,
   ...pluginHandlers,
+  "memory.switchNotice": switchNotice,
   "memory.summary": Effect.fn("BanneretMemory.summary")(
     function* ({ threadId }: { threadId: ThreadId }) {
       const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;

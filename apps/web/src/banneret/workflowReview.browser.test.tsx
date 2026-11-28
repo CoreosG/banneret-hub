@@ -48,6 +48,7 @@ function composer(threadId: ThreadId, onSend: () => void) {
   const props = {
     routeThreadRef: ref,
     composerDraftTarget: ref,
+    activeThreadRuns: [],
     composerRef: { current: null },
     promptRef: { current: "Review my workflow" },
     providerStatuses: [],

@@ -25,7 +25,8 @@ import {
 import { readDesignations } from "../OrchestratorState.ts";
 import { scanMemory } from "./files.ts";
 
-import { installHook, reminderDelivery, type PromptHook } from "./promptHook.ts";
+import { bothHooks, installHook, reminderDelivery, type PromptHook } from "./promptHook.ts";
+import { setupSwitchNote } from "./providerSwitch.ts";
 function activityOf(event: OrchestrationV2DomainEvent) {
   if (event.type === "plan.updated") {
     const plan = event.payload;
@@ -164,7 +165,7 @@ export const setupWatcher = Effect.gen(function* () {
         ),
       ),
     );
-  yield* installHook(hook);
+  yield* installHook(bothHooks(yield* setupSwitchNote, hook));
   return Effect.fn("BanneretMemory.afterTool")(
     function* (event: OrchestrationV2DomainEvent) {
       if (event.type !== "plan.updated" && event.type !== "turn-item.updated") return;
