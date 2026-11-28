@@ -2598,6 +2598,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   // Someone the relay does not know counts as outside.
   const outside = (personId: string) => people.get(personId)?.admission !== "member";
   const held = (ownerId: string) => companyPaused || paused.has(ownerId);
+  // An outside collaborator wakes only their own agents.
+  const mayWake = (fromId: string, ownerId: string) => fromId === ownerId || !outside(fromId);
   const askOwner = (ask: ChatAsk | undefined) =>
     ask?.to.kind === "agent" ? ask.to.owner.id : ask?.to.person.id;
   const activeAsk = (ask: ChatAsk) => ["waiting_owner", "open", "draft"].includes(ask.state);
@@ -2969,7 +2971,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       d.row = {
         ...d.row,
         wakes: false,
-        expiresAt: d.row.reason === "ask" ? d.row.expiresAt : iso(Date.now() + inboxLifetime),
+        // Any other row was written to wake, so its inbox lifetime counts from that write.
+        expiresAt:
+          d.row.reason === "ask"
+            ? d.row.expiresAt
+            : iso(Date.parse(d.row.expiresAt) - deliveryLifetime + inboxLifetime),
       };
       owners.add(owner);
     }
@@ -2979,12 +2985,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const h = handles.get(handleId);
     const c = channels.get(message.conversationId)!;
     if (!h || !handleReadsHome(c, handleId, message.threadRootId ?? message.id)) return;
-    // A result wakes unless an outside collaborator answered. A nobody agent wakes for an ask
-    // only after its owner's click.
+    // A result wakes unless an outsider answered another person's agent. A nobody agent wakes
+    // for an ask only after its owner's click.
     const wakes =
       !held(h.view.owner.id) &&
       (reason === "ask_result"
-        ? !outside(askOwner(message.ask)!)
+        ? mayWake(askOwner(message.ask)!, h.view.owner.id)
         : message.ask?.state === "open" && (h.view.wake !== "nobody" || !!message.ask.decidedBy));
     const row: ChatDelivery = {
       id: randomId("d"),
@@ -4661,6 +4667,25 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             reject("agent_ask_cycle");
           const origin = parent?.onBehalfOf ?? from.owner;
           const depth = (parent?.depth ?? 0) + 1;
+          // What this owner's agents have spent on one person. For an outside collaborator it
+          // includes the questions put to that person.
+          const pair = all.filter(
+            (r) =>
+              r.ask.from.owner.id === person.id &&
+              askOwner(r.ask) === to.id &&
+              (r.ask.to.kind === "agent" || outside(person.id)),
+          );
+          const pairCapped = () =>
+            pair.filter((r) => activeAsk(r.ask)).length >= askLimits.pairOpen ||
+            pair.filter((r) => Date.now() - Date.parse(r.ask.createdAt) < 86400000).length >=
+              askLimits.pairPerDay;
+          const declinedRecently = () =>
+            pair.some(
+              (r) =>
+                r.ask.state === "declined" &&
+                r.ask.question === ask.question &&
+                Date.now() - Date.parse(r.ask.closedAt!) < askLimits.declineCooloffSeconds * 1000,
+            );
           let auto = false;
           if (target) {
             if (
@@ -4696,20 +4721,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (depth > askLimits.maxDepth) reject("agent_ask_depth");
             for (let a = parent; a; a = all.find((r) => r.ask.id === a?.parentAskId)?.ask)
               if (a.from.handle === target.id) reject("agent_ask_cycle");
-            const pair = all.filter(
-              (r) =>
-                r.ask.from.owner.id === person.id &&
-                r.ask.to.kind === "agent" &&
-                r.ask.to.owner.id === to.id,
-            );
             const sameOwner = person.id === to.id;
-            if (
-              !sameOwner &&
-              (pair.filter((r) => activeAsk(r.ask)).length >= askLimits.pairOpen ||
-                pair.filter((r) => Date.now() - Date.parse(r.ask.createdAt) < 86400000).length >=
-                  askLimits.pairPerDay)
-            )
-              reject("agent_ask_capped");
+            if (!sameOwner && pairCapped()) reject("agent_ask_capped");
             if (
               all.filter(
                 (r) =>
@@ -4720,15 +4733,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               ).length >= askLimits.sameQuestion
             )
               reject("agent_ask_circle");
-            if (
-              pair.some(
-                (r) =>
-                  r.ask.state === "declined" &&
-                  r.ask.question === ask.question &&
-                  Date.now() - Date.parse(r.ask.closedAt!) < askLimits.declineCooloffSeconds * 1000,
-              )
-            )
-              reject("agent_ask_declined_recently");
+            if (declinedRecently()) reject("agent_ask_declined_recently");
             if (kind === "review") {
               const task = reviewTask(ask.pr);
               const pr = task?.prs.find((pr) => pr.number === ask.pr?.number);
@@ -4782,6 +4787,29 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                       : !roleOf(person).forOutside && r.from.role.id === person.role),
               );
           } else if (kind === "review" || ask.parentAskId) reject("malformed");
+          else if (outside(person.id) && to.id !== person.id) {
+            // An outsider's agent asks only whom its owner could DM, within the ask limits.
+            if (!dmAllowed(person, new Set([person.id, to.id])))
+              throw new RelayError("chat_dm_restricted", "These participants cannot open a DM.", {
+                account: account(person),
+                rule: "dm.start",
+                asHandle: h.id,
+                owner: from.owner,
+              });
+            if (pairCapped()) reject("agent_ask_capped");
+            if (
+              all.filter(
+                (r) =>
+                  r.m.conversationId === c.id &&
+                  r.m.threadRootId === rootId &&
+                  r.ask.to.kind === "person" &&
+                  r.ask.to.person.id === to.id &&
+                  r.ask.question === ask.question,
+              ).length >= askLimits.sameQuestion
+            )
+              reject("agent_ask_circle");
+            if (declinedRecently()) reject("agent_ask_declined_recently");
+          }
           row = {
             id: randomId("a"),
             from,
@@ -4995,9 +5023,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (
               !stored.has(sourceOf(rule)) &&
               !("person" in rule.from
-                ? people.get(rule.from.person.id)?.removed === false
+                ? people.get(rule.from.person.id)?.removed === false &&
+                  !outside(rule.from.person.id)
                 : "agent" in rule.from
-                  ? handles.has(rule.from.agent)
+                  ? handles.has(rule.from.agent) &&
+                    !outside(handles.get(rule.from.agent)!.view.owner.id)
                   : roles.get(rule.from.role.id)?.forOutside === false)
             )
               badSource();
@@ -5685,14 +5715,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!reason) continue;
           const fromOwner = !h && target.view.owner.id === person.id;
           const wakes =
-            !companyPaused &&
-            !paused.has(target.view.owner.id) &&
-            (!h || target.view.owner.id === person.id) &&
-            target.view.wake !== "nobody" &&
-            (fromOwner ||
-              (target.view.wake === "everyone" &&
-                person.admission !== "outside" &&
-                has(person, "agents.wakeOthers")));
+            !held(target.view.owner.id) &&
+            // The agent asked and waits for this, so its wake setting does not apply.
+            (reason === "answer"
+              ? mayWake(person.id, target.view.owner.id)
+              : (!h || target.view.owner.id === person.id) &&
+                target.view.wake !== "nobody" &&
+                (fromOwner ||
+                  (target.view.wake === "everyone" &&
+                    person.admission !== "outside" &&
+                    has(person, "agents.wakeOthers"))));
           const row: ChatDelivery = {
             wakes,
             id: randomId("d"),

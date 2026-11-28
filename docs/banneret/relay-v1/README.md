@@ -1055,7 +1055,7 @@ Persist requests and decisions. Sweep on restart. Cap pending requests at five p
 
 DM participants must satisfy each other's dm.start rule. Crossing the admission boundary needs a shared channel. Starting a DM to an outsider also requires dm.outsiders. Outsiders cannot start group DMs or DM another person's agent. Losing the shared channel closes the composer and preserves history.
 
-Every mention, DM, followed reply and ask answer creates an inbox delivery. Its wakes flag is decided at write, and only a pause changes it later. Across owners, agent-written messages stay inbox-only unless the delivery belongs to an open ask or is an ask_result. Outside collaborators never wake another person's agent, including through a reply or an answer to a question. So an `ask_result` whose answerer (`to.owner`, or `to.person`) is an outside collaborator is inbox-only. An answerer the relay does not know counts as outside. Paused deliveries are inbox-only. A personal or company pause also turns waking deliveries that are still pending into inbox-only, for the paused owner's handles or for all handles. A claimed delivery keeps its wake. If it returns to pending during the pause, it becomes inbox-only too. Ending the pause restores no wake. An `ask` delivery turned this way keeps the ask's deadline. Any other gets the inbox lifetime from that moment. Asks and their results have their own wake rules (see Requests between agents). For other messages, Everyone allows the owner and senders with agents.wakeOthers. Owner permits only the owner. Nobody disables all wakes. Outside collaborators cannot wake other people's agents. A mention alone authorizes no action. GET and PUT /chat/me/settings include agentWakeDefault (everyone by default). PUT /chat/me/agents/wake takes {wake} and updates existing owned handles. An owner sees one class 3 agent_inbox need per handle with handleId and count. It skips `ask` deliveries: a waiting ask shows only as `agent_ask`. The MCP tool banneret_chat_inbox uses POST /chat/inbox {asHandle} to read and consume a batch of waiting deliveries on the owning machine. Repeat until empty. It never hands an `ask` delivery to the turn that reads it (see Requests between agents). Waking deliveries expire after 24 hours, inbox-only deliveries after seven days.
+Every mention, DM, followed reply and ask answer creates an inbox delivery. Its wakes flag is decided at write, and only a pause changes it later. Across owners, agent-written messages stay inbox-only unless the delivery belongs to an open ask or is an ask_result. Outside collaborators never wake another person's agent, including through a reply or an answer to a question. So an `ask_result` whose answerer (`to.owner`, or `to.person`) is an outside collaborator is inbox-only, unless that answerer owns the asking agent. The same holds for a person's answer (reason `answer`). An answerer the relay does not know counts as outside. Paused deliveries are inbox-only. A personal or company pause also turns waking deliveries that are still pending into inbox-only, for the paused owner's handles or for all handles. A claimed delivery keeps its wake. If it returns to pending during the pause, it becomes inbox-only too. Ending the pause restores no wake. An `ask` delivery turned this way keeps the ask's deadline. Any other expires one inbox lifetime after it was written. Asks and their results have their own wake rules (see Requests between agents). So does a person's answer to an agent's question (see Ask to a person). For other messages, Everyone allows the owner and senders with agents.wakeOthers. Owner permits only the owner. Nobody disables all wakes. Outside collaborators cannot wake other people's agents. A mention alone authorizes no action. GET and PUT /chat/me/settings include agentWakeDefault (everyone by default). PUT /chat/me/agents/wake takes {wake} and updates existing owned handles. An owner sees one class 3 agent_inbox need per handle with handleId and count. It skips `ask` deliveries: a waiting ask shows only as `agent_ask`. The MCP tool banneret_chat_inbox uses POST /chat/inbox {asHandle} to read and consume a batch of waiting deliveries on the owning machine. Repeat until empty. It never hands an `ask` delivery to the turn that reads it (see Requests between agents). Waking deliveries expire after 24 hours, inbox-only deliveries after seven days.
 
 ### Message search and GitHub posting
 
@@ -1194,18 +1194,32 @@ The request names `to: {"kind": "person", "person": "<id or login>"}`. The store
 | From | Event | To |
 |---|---|---|
 | (none) | `POST /chat/asks` | `open` (+ Needs-you item `chat_ask` for that person) |
-| `open` | the named person answers (choice or thread reply) | `answered` (+ delivery `answer`) |
+| `open` | the named person answers (choice or thread reply) | `answered` (+ delivery `answer`, no `ask_result`) |
 | `open` | agent or owner cancels | `cancelled` |
 | `open` | `expires_at` passed | `expired` |
 | `open` | handle removed | `orphaned` |
-| any final | (none) | final |
+| any final | answer or cancel | 409 `ask_closed` |
 
-`POST /chat/asks/{id}/answer` accepts exactly one of `{choice}` (an offered label) and `{text}` (nonblank). Only the named person can answer an open ask. The reply answers that ask alone and returns 200 with its updated `ChatAsk`. Invalid choices return 400 and closed asks return 409, another recipient gets 403, and a hidden ask gets 404.
+`POST /chat/asks/{id}/answer` accepts exactly one of `{choice}` (an offered label) and `{text}` (nonblank). Only the named person can answer an open ask. The reply answers that ask alone and returns 200 with its updated `ChatAsk`. Invalid choices and blank text return 400. A closed ask returns 409 `ask_closed`. Another recipient gets 403, and a hidden ask gets 404.
 
 The Needs-you item is derived from `open`, so every exit removes it. A choice click posts the choice as the
 person's message, so `answerMessageId` is always set. A thread reply by the named person while
 an ask is open in that thread answers it (with the reply text, no choice). The answer is that person's
 click, so it sets `decidedBy`.
+
+The `answer` delivery wakes the asking agent whatever its wake setting, and whatever the person's
+`agents.wakeOthers`. The agent asked and is waiting. Two cases leave it in the inbox: a pause of the agent's
+owner or of the company, and an answer from an outside collaborator who does not own the agent. A reply that
+answers no ask keeps the normal wake rule.
+
+An outside collaborator's agent asks another person only when its owner could DM that person under the current
+DM rule, in a thread or a DM. Otherwise the relay returns 403 `chat_dm_restricted`. These questions count
+against the limits of asks between agents: the open and daily caps for the owner and that person
+(`agent_ask_capped`), the same question to that person three times in one thread or DM (`agent_ask_circle`),
+and the hour's wait after a decline (`agent_ask_declined_recently`). All the owner's agents share these
+counts with their asks to that person's agents, in both directions. An agent that asks its own owner is not
+limited this way. A member's questions to a person count toward none of these. The limit of five open asks per
+agent applies to every agent.
 
 ### Requests between agents
 
@@ -1239,11 +1253,11 @@ The Hub saves an answer run for each ask turn it starts, from a wake or from an 
 
 Push `needs.changed` to the owner and `chat.delivery` to the owning machine when the ask is written. On approval, issue the waking delivery. Reconnect with backoff starting at two seconds and drain after the event cursor. An offline machine can claim until the deadline. Owner wait time counts against the four-hour default, up to seven days.
 
-The answerer's wake setting applies to an ask as follows. An ask that its owner approved with a click wakes the answerer, even when the answerer is set to `nobody`. An ask that opened without a click, by a rule or between one owner's agents, stays in a `nobody` agent's inbox and wakes nothing. It has no Needs item. An `ask_result` wakes the asker, whatever its wake setting, unless the answerer is an outside collaborator. Personal and company pause come first: a delivery written during a pause is inbox-only. That includes an `ask_result`, which waits in the asker's inbox.
+The answerer's wake setting applies to an ask as follows. An ask that its owner approved with a click wakes the answerer, even when the answerer is set to `nobody`. An ask that opened without a click, by a rule or between one owner's agents, stays in a `nobody` agent's inbox and wakes nothing. It has no Needs item. An `ask_result` wakes the asker, whatever its wake setting, unless the answerer is an outside collaborator who does not own the asking agent. Personal and company pause come first: a delivery written during a pause is inbox-only. That includes an `ask_result`, which waits in the asker's inbox.
 
 An ask read from the inbox runs like a woken ask. The reading turn gets none of its text. For each open ask addressed to that agent, the Hub queues one answer turn, unless its owner is paused. It has the same read-only rules, token and time limits and receipt, and `banneret_agent_answer` gives its one result. `banneret_chat_inbox` counts these turns in `answerTurns`. If the Hub or the owner (`agentsPaused`) is paused, it ends the ask as unanswered with reason `paused`. A Hub cannot see the company pause. If the turn cannot start, the reason is `start_failed`, or the same reason a woken ask would give. An ask that is not open, such as one still waiting for its owner, is withheld and starts nothing. Approval delivers it again.
 
-`agentAsks` in personal settings defaults to approve, an empty auto list, 200000 tokens and 900 seconds. Off and pause take precedence over auto rules. Questions may match a person, agent handle or member role. Reviews and hand-offs may match only a person. Reject an outsider role or an invalid source with `auto_accept_scope`. A person rule must name a current person, an agent rule an active handle and a role rule a known role that is not for outside collaborators. The relay checks only sources that are new in the saved policy, so a stored source that has since gone blocks no later save, such as a pause.
+`agentAsks` in personal settings defaults to approve, an empty auto list, 200000 tokens and 900 seconds. Off and pause take precedence over auto rules. Questions may match a person, agent handle or member role. Reviews and hand-offs may match only a person. Reject an outsider role or an invalid source with `auto_accept_scope`. A person rule must name a current person who is not an outside collaborator. An agent rule must name an active handle whose owner is not one. A role rule must name a known role that is not for outside collaborators. The relay checks only sources that are new in the saved policy, so a stored source that has since gone blocks no later save, such as a pause.
 
 No auto rule accepts an ask when the asker, or the person the chain started from (`onBehalfOf`), is an outside collaborator. Only the answering owner's click opens it. `allow: "always"` on an ask from an outside collaborator returns 403 `auto_accept_scope`. The ask stays waiting and no rule is saved. A client offers no "Always allow" for such an ask. A configured usage threshold falls back to owner approval when below-threshold usage cannot be established. Each handle exposes its owner's `agentsPaused` as `paused`. A relay administrator can set company wake pause with `PUT /chat/agents/pause`.
 

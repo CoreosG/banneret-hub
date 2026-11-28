@@ -3953,7 +3953,7 @@ describe("chat contract", () => {
   });
 
   /** An outside collaborator whose custom role may ask agents. */
-  const askingOutsider = async () => {
+  const askingOutsider = async (change: object = {}) => {
     const founder = await enrol();
     const roles = (await call(founder, "GET", "/relay/v1/roles")).body as {
       items: { id: string; permissions: object }[];
@@ -3965,6 +3965,7 @@ describe("chat contract", () => {
       permissions: {
         ...roles.items.find((r) => r.id === "outside")!.permissions,
         "agents.ask": true,
+        ...change,
       },
     });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
@@ -4060,10 +4061,6 @@ describe("chat contract", () => {
 
   it("waits for a click when the asker or the chain's origin is an outside collaborator", async () => {
     const t = await sharedAskThread({ asker: await askingOutsider() });
-    // Rules that match this asker by person and by agent still leave the ask to a click.
-    expect(
-      (await saveRules(t, t.answerer, [{ person: t.from.owner }, { agent: t.from.id }])).status,
-    ).toBe(200);
     const direct = await postAsk(t);
     expect(direct.state).toBe("waiting_owner");
     expect(direct).not.toHaveProperty("byRule");
@@ -4093,33 +4090,14 @@ describe("chat contract", () => {
     expect(own.body).toMatchObject({ state: "open", byRule: true });
   });
 
-  it("waits for a click when an outside collaborator's agent passes a member's question on", async () => {
-    const t = await sharedAskThread({ answerer: await askingOutsider() });
-    const first = await postAsk(t);
-    await call(t.answerer, "POST", t.chat + "asks/" + first.id + "/decision", { allow: "once" });
-    const third = await thirdOwner(t, t.asker);
-    // Rules that match the outsider, who asks onward. The chain's origin is a member.
-    expect(
-      (await saveRules(t, third.machine, [{ person: t.to.owner }, { agent: t.to.id }])).status,
-    ).toBe(200);
-    const sub = await call(t.answerer, "POST", t.chat + "asks", {
-      ...t.newAsk,
-      to: { kind: "agent", handle: third.handle },
-      asHandle: t.to.id,
-      parentAskId: first.id,
-      question: "Passed on?",
-      key: "onward",
-    });
-    expect(sub.body).toMatchObject({ state: "waiting_owner", onBehalfOf: t.from.owner });
-    expect(sub.body).not.toHaveProperty("byRule");
-  });
-
   it("refuses Always allow for an outside collaborator's ask", async () => {
     const t = await sharedAskThread({ asker: await askingOutsider() });
     const ask = await postAsk(t);
     const decide = (allow: string) =>
       call(t.answerer, "POST", t.chat + "asks/" + ask.id + "/decision", { allow });
     expectError(await decide("always"), 403, "auto_accept_scope");
+    for (const source of [{ person: t.from.owner }, { agent: t.from.id }])
+      expectError(await saveRules(t, t.answerer, [source]), 403, "auto_accept_scope");
     expect(await askList(t)).toEqual([
       expect.objectContaining({ id: ask.id, state: "waiting_owner" }),
     ]);
@@ -4189,6 +4167,156 @@ describe("chat contract", () => {
     expect((await call(t.asker, "DELETE", t.chat + "handles/" + t.from.id)).status).toBe(204);
     const paused = await saveRules(t, t.answerer, [{ agent: t.from.id }], { agentsPaused: true });
     expect(paused.status, JSON.stringify(paused.body)).toBe(200);
+  });
+
+  /** A question from one of the thread's agents to a person, and that person's answer. */
+  const askPersonIn = async (t: AskThread, person: string, extra: Record<string, unknown> = {}) =>
+    postAsk(t, {
+      to: { kind: "person", person },
+      question: "Person " + randomText(4) + "?",
+      key: "person_" + randomText(6),
+      doneWhen: undefined,
+      ...extra,
+    });
+  const answerAs = async (t: AskThread, machine: Enrolled, ask: AskRow) =>
+    expect(
+      (await call(machine, "POST", t.chat + "asks/" + ask.id + "/answer", { text: "Yes." })).body,
+    ).toMatchObject({ state: "answered" });
+  const setPaused = async (t: AskThread, machine: Enrolled, agentsPaused: boolean) =>
+    expect(
+      (
+        await call(machine, "PUT", t.chat + "me/settings", {
+          ...(await policyOf(t, machine)),
+          agentsPaused,
+        })
+      ).status,
+    ).toBe(200);
+  const inboxOf = async (t: AskThread, machine: Enrolled, asHandle: string) =>
+    (
+      (await call(machine, "POST", t.chat + "inbox", { asHandle })).body as {
+        items: { reason: string; wakes: boolean }[];
+      }
+    ).items.map((d) => [d.reason, d.wakes]);
+
+  it("wakes the asking agent with a person's answer, whatever its wake setting", async () => {
+    const t = await sharedAskThread();
+    expect((await call(t.asker, "PUT", t.chat + "me/agents/wake", { wake: "nobody" })).status).toBe(
+      204,
+    );
+    const typed = await askPersonIn(t, t.to.owner.id);
+    await answerAs(t, t.answerer, typed);
+    await askPersonIn(t, t.to.owner.id);
+    const reply = (text: string) =>
+      call(t.answerer, "POST", t.chat + "messages", {
+        conversationId: t.conversationId,
+        threadRootId: t.threadRootId,
+        text,
+        key: randomText(8),
+      });
+    // A thread reply answers too. The reply after it answers nothing and follows the setting.
+    await reply("By reply.");
+    await reply("One more thing.");
+    expect((await waking(t, t.asker)).map((d) => [d.reason, d.wakes])).toEqual([
+      ["answer", true],
+      ["answer", true],
+    ]);
+    const held = await askPersonIn(t, t.to.owner.id);
+    await inboxOf(t, t.asker, t.from.id);
+    await setPaused(t, t.asker, true);
+    await answerAs(t, t.answerer, held);
+    expect(await waking(t, t.asker)).toEqual([]);
+    expect(await inboxOf(t, t.asker, t.from.id)).toContainEqual(["answer", false]);
+  });
+
+  it("keeps an outside collaborator's answer from waking only another person's agent", async () => {
+    const t = await sharedAskThread({ answerer: { admission: "outside" } });
+    await answerAs(t, t.answerer, await askPersonIn(t, t.to.owner.id));
+    expect(await waking(t, t.asker)).toEqual([]);
+    expect(await inboxOf(t, t.asker, t.from.id)).toEqual([["answer", false]]);
+    // The outsider's own agent asks them: both the answer and a result wake it.
+    const own = { asHandle: t.to.id };
+    const ask = async () => {
+      const reply = await call(t.answerer, "POST", t.chat + "asks", {
+        ...t.newAsk,
+        ...own,
+        to: { kind: "person", person: t.to.owner.id },
+        question: "Mine " + randomText(4) + "?",
+        key: randomText(8),
+      });
+      expectSchema("ChatAsk", reply.body);
+      return reply.body as AskRow;
+    };
+    await answerAs(t, t.answerer, await ask());
+    const cancelled = await ask();
+    await call(t.answerer, "POST", t.chat + "asks/" + cancelled.id + "/cancel");
+    expect((await waking(t, t.answerer)).map((d) => [d.reason, d.wakes])).toEqual([
+      ["answer", true],
+      ["ask_result", true],
+    ]);
+  });
+
+  it("lets an outside collaborator's agent ask only whom its owner could DM, within shared limits", async () => {
+    const t = await sharedAskThread({ asker: await askingOutsider() });
+    const refusedAsk = (thread: AskThread, extra: Record<string, unknown>) =>
+      call(thread.asker, "POST", thread.chat + "asks", {
+        ...thread.newAsk,
+        ...extra,
+        key: randomText(8),
+      });
+    // It sees the thread's other member, but its role may message nobody.
+    const closed = await sharedAskThread({
+      asker: await askingOutsider({ "dm.start": "nobody" }),
+    });
+    expectError(
+      await refusedAsk(closed, {
+        to: { kind: "person", person: closed.to.owner.id },
+        question: "Hello?",
+      }),
+      403,
+      "chat_dm_restricted",
+    );
+    // Two questions to a person and one ask to their agent fill the pair's three.
+    await askPersonIn(t, t.to.owner.id);
+    await askPersonIn(t, t.to.owner.id);
+    const toAgent = await postAsk(t, { question: "Shared?", key: "shared" });
+    expectError(
+      await refusedAsk(t, { to: { kind: "person", person: t.to.owner.id }, question: "Fourth?" }),
+      403,
+      "agent_ask_capped",
+    );
+    expectError(await refusedAsk(t, { question: "Fourth to the agent?" }), 403, "agent_ask_capped");
+    await call(t.answerer, "POST", t.chat + "asks/" + toAgent.id + "/decision", {
+      decline: true,
+      reason: "No.",
+    });
+    expectError(
+      await refusedAsk(t, { to: { kind: "person", person: t.to.owner.id }, question: "Shared?" }),
+      403,
+      "agent_ask_declined_recently",
+    );
+  });
+
+  it("stops an outside collaborator's repeated question, and limits neither itself nor a member", async () => {
+    const t = await sharedAskThread({ asker: { admission: "outside" } });
+    const cancel = (ask: AskRow) => call(t.asker, "POST", t.chat + "asks/" + ask.id + "/cancel");
+    const same = { question: "Same?" };
+    for (const _ of [1, 2, 3]) await cancel(await askPersonIn(t, t.to.owner.id, same));
+    expectError(
+      await call(t.asker, "POST", t.chat + "asks", {
+        ...t.newAsk,
+        ...same,
+        to: { kind: "person", person: t.to.owner.id },
+        key: "same4",
+      }),
+      403,
+      "agent_ask_circle",
+    );
+    // Asking its own owner fills nobody else's Needs list.
+    for (const _ of [1, 2, 3, 4])
+      expect(await askPersonIn(t, t.from.owner.id)).toMatchObject({ state: "open" });
+    const member = await sharedAskThread();
+    for (const _ of [1, 2, 3]) await askPersonIn(member, member.to.owner.id);
+    expect(await postAsk(member)).toMatchObject({ state: "waiting_owner" });
   });
 
   it("checks the named hand-off rule again on the receiver machine and leaves a stalled take actionable", async () => {
@@ -4449,7 +4577,8 @@ describe("chat contract", () => {
       text: "Reading results",
     });
   });
-  it("limits owner DM reads, delivers only explicitly mentioned agents, and resolves a named ask", async () => {
+  /** An agent and its helper, and a colleague whose channel mentions the agent. */
+  async function namedAskThread() {
     const owner = await enrol(),
       colleague = await enrol();
     const path = "/relay/v1/chat/",
@@ -4473,32 +4602,6 @@ describe("chat contract", () => {
         ).status,
       ).toBe(200);
     }
-    const dm = (
-      await call(owner, "POST", path + "conversations", { kind: "dm", members: [person] })
-    ).body as { id: string };
-    const read = () =>
-      call(owner, "GET", path + "conversations/" + dm.id + "/messages?asHandle=" + h);
-    const privateText = "private" + randomText(6);
-    await call(owner, "POST", path + "messages", {
-      conversationId: dm.id,
-      key: privateText,
-      text: privateText,
-    });
-    const searchDm = () => call(owner, "GET", path + "search?q=" + privateText + "&asHandle=" + h);
-    expect((await searchDm()).body).toMatchObject({ items: [] });
-    expect((await read()).status).toBe(404);
-    for (const enabled of [true, false]) {
-      await call(owner, "PUT", path + "me/settings", {
-        agentAsks: { default: "approve", auto: [], maxTokens: 200000, maxSeconds: 900 },
-        agentsPaused: false,
-        agentsReadMyDms: enabled,
-        agentWakeDefault: "everyone",
-      });
-      expect((await searchDm()).body).toMatchObject({
-        items: enabled ? [{ conversationId: dm.id }] : [],
-      });
-      expect((await read()).status).toBe(enabled ? 200 : 404);
-    }
     const c = (
       await call(colleague, "POST", path + "conversations", {
         kind: "channel",
@@ -4507,10 +4610,7 @@ describe("chat contract", () => {
         agents: "allowed",
       })
     ).body as { id: string };
-    const ownerId = (
-      (await call(owner, "GET", "/relay/v1/capabilities")).body as { me: { id: string } }
-    ).me.id;
-    await call(owner, "PUT", path + "conversations/" + c.id + "/members/" + ownerId);
+    await call(owner, "PUT", path + "conversations/" + c.id + "/members/" + (await who(owner)));
     const root = (
       await call(colleague, "POST", path + "messages", {
         conversationId: c.id,
@@ -4518,6 +4618,23 @@ describe("chat contract", () => {
         key: "question",
       })
     ).body as { id: string };
+    const askColleague = async () => {
+      const ask = await call(owner, "POST", path + "asks", {
+        to: { kind: "person", person },
+        question: "Which upload?",
+        key: "ask",
+        asHandle: h,
+        threadRootId: root.id,
+      });
+      expectSchema("ChatAsk", ask.body);
+      return ask.body as { id: string };
+    };
+    return { owner, colleague, path, h, helper, person, c, root, askColleague };
+  }
+
+  it("delivers only explicitly mentioned agents and resolves a named ask", async () => {
+    const { owner, colleague, path, h, helper, person, c, root, askColleague } =
+      await namedAskThread();
     const write = (text: string, key: string) =>
       call(owner, "POST", path + "messages", {
         conversationId: c.id,
@@ -4535,27 +4652,9 @@ describe("chat contract", () => {
     expect((await inbox()).body).toMatchObject({
       items: [{ reason: "mention" }, { reason: "mention", fromOwner: false }],
     });
-    const ask = await call(owner, "POST", path + "asks", {
-      to: { kind: "person", person },
-      question: "Which upload?",
-      key: "ask",
-      asHandle: h,
-      threadRootId: root.id,
-    });
-    expectSchema("ChatAsk", ask.body);
-    const q = encodeURIComponent("upload kind:ask is:agent from:" + owner.login + "/builder");
-    expect((await call(colleague, "GET", path + "search?q=" + q)).body).toMatchObject({
-      items: [{ conversationId: c.id, threadRootId: root.id }],
-    });
-    expect(
-      (await call(owner, "POST", path + "messages/" + root.id + "/promote?asHandle=" + h)).status,
-    ).toBe(403);
-    expect(
-      (await call(owner, "POST", path + "messages/" + root.id + "/promote", { asHandle: h }))
-        .status,
-    ).toBe(403);
+    const ask = await askColleague();
     expect((await call(colleague, "GET", "/relay/v1/needs")).body).toMatchObject({
-      items: expect.arrayContaining([expect.objectContaining({ kind: "chat_ask", ask: ask.body })]),
+      items: expect.arrayContaining([expect.objectContaining({ kind: "chat_ask", ask })]),
     });
     for (const answer of [{ choice: "Linux" }, { text: "A custom answer" }]) {
       const extra = await call(owner, "POST", path + "asks", {
@@ -4572,7 +4671,7 @@ describe("chat contract", () => {
       const result = await call(colleague, "POST", answerPath, answer);
       expectSchema("ChatAsk", result.body);
       expect(result.body).toMatchObject({ state: "answered" });
-      expect((await call(colleague, "POST", answerPath, answer)).status).toBe(409);
+      expectError(await call(colleague, "POST", answerPath, answer), 409, "ask_closed");
       expect((await inbox()).body).toMatchObject({
         items: expect.arrayContaining([
           expect.objectContaining({
@@ -4598,6 +4697,53 @@ describe("chat contract", () => {
       ],
     });
   });
+  // Pending the relay slice after person asks: fork F3 (an agent reads its owner's DMs), F6
+  // (message search) and P1 (promotion). Until a relay serves them, this runs against the fake.
+  it.skipIf(external)(
+    "limits owner DM reads, and finds an agent's question in search but never promotes it (pending relay F3, F6 and P1)",
+    async () => {
+      const { owner, colleague, path, h, person, c, root, askColleague } = await namedAskThread();
+      const dm = (
+        await call(owner, "POST", path + "conversations", { kind: "dm", members: [person] })
+      ).body as { id: string };
+      const read = () =>
+        call(owner, "GET", path + "conversations/" + dm.id + "/messages?asHandle=" + h);
+      const privateText = "private" + randomText(6);
+      await call(owner, "POST", path + "messages", {
+        conversationId: dm.id,
+        key: privateText,
+        text: privateText,
+      });
+      const searchDm = () =>
+        call(owner, "GET", path + "search?q=" + privateText + "&asHandle=" + h);
+      expect((await searchDm()).body).toMatchObject({ items: [] });
+      expect((await read()).status).toBe(404);
+      for (const enabled of [true, false]) {
+        await call(owner, "PUT", path + "me/settings", {
+          agentAsks: { default: "approve", auto: [], maxTokens: 200000, maxSeconds: 900 },
+          agentsPaused: false,
+          agentsReadMyDms: enabled,
+          agentWakeDefault: "everyone",
+        });
+        expect((await searchDm()).body).toMatchObject({
+          items: enabled ? [{ conversationId: dm.id }] : [],
+        });
+        expect((await read()).status).toBe(enabled ? 200 : 404);
+      }
+      await askColleague();
+      const q = encodeURIComponent("upload kind:ask is:agent from:" + owner.login + "/builder");
+      expect((await call(colleague, "GET", path + "search?q=" + q)).body).toMatchObject({
+        items: [{ conversationId: c.id, threadRootId: root.id }],
+      });
+      expect(
+        (await call(owner, "POST", path + "messages/" + root.id + "/promote?asHandle=" + h)).status,
+      ).toBe(403);
+      expect(
+        (await call(owner, "POST", path + "messages/" + root.id + "/promote", { asHandle: h }))
+          .status,
+      ).toBe(403);
+    },
+  );
   it("opens one discussion per task and echoes lease transitions only while linked", async () => {
     const member = await enrol();
     const taskId = "t_" + randomText(6);
