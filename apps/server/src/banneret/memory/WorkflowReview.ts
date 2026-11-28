@@ -74,18 +74,19 @@ export function workflowStore(db: NodeSqlite.DatabaseSync, thread: string, now: 
         )
         .get(thread);
       const proposed = notes.filter((n) => n.trust === "proposed");
+      const previous = current();
       db.prepare(
         "insert or replace into workflow_reports values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       ).run(
         thread,
-        now,
+        Math.max(now, (previous?.created ?? 0) + 1),
         retries,
         proposed.length,
         contested,
         notes.filter((n) => n.trust === "stale").length,
         fired,
         acknowledged,
-        Number(scheduled || current()?.pending || false),
+        Number(scheduled || previous?.pending || false),
         failures,
         waiting,
         notes.filter((n) => n.trust === "disputed").length,

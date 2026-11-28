@@ -8,6 +8,7 @@ import * as Scheduler from "../../scheduling/Scheduler.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { makePauseStore } from "../PauseStore.ts";
 import { memoryAccess, unavailable } from "./access.ts";
+import { dispatchWorkflowReview, readWorkflowJudgment } from "./workflowModel.ts";
 import { memoryEnabled } from "./settings.ts";
 
 const mainThreads = readDesignations.pipe(
@@ -20,7 +21,16 @@ const accessMain = Effect.fn(function* (id: ThreadId) {
   if (!access.main || (access.enterprise && !access.origin)) return yield* unavailable();
   return access;
 });
-type Action = "read" | "run" | "enable" | "disable" | "dismiss" | "propose" | "scheduled";
+type Action =
+  | "read"
+  | "run"
+  | "enable"
+  | "disable"
+  | "dismiss"
+  | "propose"
+  | "setup"
+  | "rule"
+  | "scheduled";
 const workflow = Effect.fn(function* (threadId: ThreadId, action: Action, created?: number) {
   const access = yield* accessMain(threadId);
   let retries = 0;
@@ -62,33 +72,43 @@ const workflow = Effect.fn(function* (threadId: ThreadId, action: Action, create
     }
     if ((yield* accessMain(threadId)).storeId !== access.storeId) return yield* unavailable();
   } else if (action === "scheduled") return { weekly: false, report: null };
-  return yield* access.open(
-    (s) => {
-      const w = s.workflow(threadId);
-      if (action === "enable" || action === "disable") w.schedule(action === "enable");
-      if (action === "dismiss" && created !== undefined) w.dismiss(created);
-      if (action === "run" || action === "scheduled")
-        w.run(s, retries, action === "scheduled", failures, waiting);
-      if (action === "propose") {
-        const r = w.current();
-        if (!r || r.created !== created || !(r.retries || r.failures))
-          throw new Error("Review changed.");
-        if (
-          s.list(false).some((n) => n.key === "workflow-retries" && n.source === "Workflow review")
-        )
-          return { relayOrigin: access.origin, weekly: w.weekly(), report: r };
-        s.propose({
-          key: "workflow-retries",
-          text: "Before retrying a failed agent run, identify the cause and change the next attempt.",
-          source: "Workflow review",
-          scope: "project",
-          kind: "feedback",
-        });
-      }
-      return { relayOrigin: access.origin, weekly: w.weekly(), report: w.current() };
-    },
-    action === "propose" ? undefined : "watcher",
-  );
+  const state = yield* access.open((s) => {
+    const w = s.workflow(threadId);
+    if (action === "enable" || action === "disable") w.schedule(action === "enable");
+    if (action === "dismiss" && created !== undefined) w.dismiss(created);
+    const report =
+      action === "run" || action === "scheduled"
+        ? w.run(s, retries, action === "scheduled", failures, waiting)
+        : w.current();
+    return { relayOrigin: access.origin, weekly: w.weekly(), report };
+  }, "watcher");
+  const report = state.report;
+  if (!report) return state;
+  if (action === "run" || action === "scheduled") {
+    yield* dispatchWorkflowReview(threadId, access.storeId, report);
+    return state;
+  }
+  const model = yield* readWorkflowJudgment(threadId, access.storeId, report);
+  if (action === "propose" || action === "setup" || action === "rule") {
+    const fallback =
+      action === "propose" &&
+      !model.judgment &&
+      !model.reviewing &&
+      (report.retries || report.failures);
+    const text = fallback
+      ? "Before retrying a failed agent run, identify the cause and change the next attempt."
+      : action === "propose"
+        ? null
+        : model.judgment?.[action];
+    if (!text || created !== report.created) return yield* unavailable();
+    const key = fallback ? "workflow-retries" : `workflow-${action}-${created}`;
+    yield* access.open((s) => {
+      if (s.workflow(threadId).current()?.created !== created) throw new Error("Review changed.");
+      if (!s.list(false).some((n) => n.key === key && n.source === "Workflow review"))
+        s.propose({ key, text, source: "Workflow review", scope: "project", kind: "feedback" });
+    }, "watcher");
+  }
+  return { ...state, report: { ...report, ...model } };
 });
 const failed = () =>
   new TaskLeaseError({
@@ -105,7 +125,9 @@ export const workflowHandlers = {
   }, Effect.mapError(failed)),
   "memory.workflowNeeds": Effect.fn(function* ({ workspaceId }: { workspaceId: string }) {
     const id = (yield* readDesignations)[workspaceId]?.main;
-    return id && (yield* workflow(id, "read")).report?.pending ? id : null;
+    if (!id) return null;
+    const access = yield* accessMain(id);
+    return (yield* access.open((s) => s.workflow(id).current()?.pending, "watcher")) ? id : null;
   }, Effect.mapError(failed)),
 };
 export const registerWorkflow = Effect.gen(function* () {

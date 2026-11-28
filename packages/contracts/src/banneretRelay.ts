@@ -414,6 +414,7 @@ export function parseBanneretRelayAddress(input: string): BanneretRelayAddress {
 export type * from "./banneretPool.ts";
 
 export {
+  WorkflowJudgment,
   memoryReviewInput,
   type MemoryReviewAction,
   type MemoryContradiction,

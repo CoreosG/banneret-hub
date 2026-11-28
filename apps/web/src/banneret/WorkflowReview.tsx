@@ -3,6 +3,7 @@ import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 import { useState } from "react";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { useQuietThreadShell } from "../state/entities";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useWorkspacesStore } from "./workspacesStore";
@@ -18,7 +19,7 @@ const needs = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "Pending workflow reviews",
   tag: "memory.workflowNeeds",
 });
-type Action = "read" | "run" | "enable" | "disable" | "dismiss" | "propose";
+type Action = "read" | "run" | "enable" | "disable" | "dismiss" | "setup" | "rule" | "propose";
 const useWorkflowRevision = create<Record<string, number>>(() => ({}));
 export async function workflowAction(ref: ScopedThreadRef, action: Action, created?: number) {
   const result = await runAtomCommand(appAtomRegistry, review, {
@@ -79,32 +80,44 @@ export function WorkflowResult({
   report: WorkflowReport;
   openProposal?: ((key: string) => void) | undefined;
   target?: RelayTarget | undefined;
-  act: (action: "dismiss" | "propose") => void;
+  act: (action: "dismiss" | "setup" | "rule" | "propose") => void;
 }) {
   const [copied, setCopied] = useState("");
-  const draft = report.retries
-    ? {
-        title: "Explain agent retries",
-        body: "An agent needed to retry work. Show what caused a retry and what changed before the next attempt.",
-      }
-    : report.failures
-      ? {
-          title: "Explain failed agent tools",
-          body: "An agent tool failed. Show what caused the failure and how to recover.",
-        }
-      : report.contested
+  const draft = report.reviewing
+    ? null
+    : report.judgment
+      ? report.judgment.draft
+      : report.retries
         ? {
-            title: "Help diagnose contested reminders",
-            body: "A rule reminder was contested. Show why the rule was selected and how to adjust it.",
+            title: "Explain agent retries",
+            body: "An agent needed to retry work. Show what caused a retry and what changed before the next attempt.",
           }
-        : null;
+        : report.failures
+          ? {
+              title: "Explain failed agent tools",
+              body: "An agent tool failed. Show what caused the failure and how to recover.",
+            }
+          : report.contested
+            ? {
+                title: "Help diagnose contested reminders",
+                body: "A rule reminder was contested. Show why the rule was selected and how to adjust it.",
+              }
+            : null;
   return (
     <article
       aria-label="Workflow review result"
       className="chat-content-lane grid gap-2 rounded border p-3"
     >
       <h3>Workflow review</h3>
+      {report.reviewing && <p role="status">Reviewing your workflow in the main chat.</p>}
+      {report.judgment && <p>{report.judgment.summary}</p>}
       <strong>Your agents and setup</strong>
+      {report.judgment?.setup && (
+        <button onClick={() => act("setup")}>Propose setup change: {report.judgment.setup}</button>
+      )}
+      {report.judgment?.rule && (
+        <button onClick={() => act("rule")}>Propose rule: {report.judgment.rule}</button>
+      )}
       <p>
         {report.retries} agent retries. {report.proposed} proposed notes. {report.stale} stale
         notes.
@@ -113,7 +126,7 @@ export function WorkflowResult({
         {report.fired} reminders fired, {report.acknowledged} acknowledged, {report.contested}{" "}
         contested.
       </p>
-      {(report.retries > 0 || report.failures > 0) && (
+      {!report.reviewing && !report.judgment && (report.retries > 0 || report.failures > 0) && (
         <button onClick={() => act("propose")}>
           Propose a rule to diagnose failures before retrying
         </button>
@@ -161,7 +174,7 @@ export function WorkflowResult({
           </button>
           {target && (
             <CompanyDraft
-              key={JSON.stringify([target, report.created])}
+              key={JSON.stringify([target, report.created, draft])}
               target={target}
               text={draft.title + "\n\n" + draft.body}
             />
@@ -169,7 +182,7 @@ export function WorkflowResult({
           {copied && <p role="status">{copied}</p>}
         </>
       ) : (
-        <p>No platform suggestions.</p>
+        !report.reviewing && <p>No platform suggestions.</p>
       )}
       {report.pending && <button onClick={() => act("dismiss")}>Mark reviewed</button>}
     </article>
@@ -189,18 +202,26 @@ export function WorkflowReview({
   openProposal?: (key: string) => void;
 } & ScopedThreadRef) {
   const ref = { environmentId, threadId };
+  const thread = useQuietThreadShell(ref);
   const version = useWorkflowRevision((s) => s[JSON.stringify([environmentId, threadId])] ?? 0);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const state = useChatRead(
     () => workflowAction(ref, "read"),
-    [environmentId, threadId, revision, version].join(":"),
+    [
+      environmentId,
+      threadId,
+      revision,
+      version,
+      thread?.latestRun?.runId,
+      thread?.latestRun?.status,
+    ].join(":"),
   );
   async function act(action: Action) {
     setBusy(true);
     try {
       await workflowAction(ref, action, state.value?.report?.created);
-      setStatus(action === "propose" ? "Rule proposed for review." : "");
+      setStatus(["propose", "rule", "setup"].includes(action) ? "Note proposed for review." : "");
     } catch {
       setStatus("Could not apply the action. Open the current report in your main chat.");
     }

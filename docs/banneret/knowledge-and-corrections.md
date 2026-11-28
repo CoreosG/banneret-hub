@@ -18,21 +18,24 @@ The first correction stays private as a candidate. After two separate messages, 
 
 Type **Review my workflow** in the main orchestrator chat or use its review button. The report reads
 the workspace owner's local orchestrator records and Banneret notes. It counts retries, tool failures,
-completed approval waits, proposed or disputed notes, stale notes and reminder responses. A suggested
-rule enters the usual proposal queue when you choose it. The report never edits provider memory.
+completed approval waits, proposed or disputed notes, stale notes and reminder responses. The main chat sends those counts to its usual model.
+The model can suggest a setup change, a standing rule and a platform draft. Choosing a setup change
+or rule puts its exact text in the proposal queue for approval. The report never edits provider memory.
 
 Under Settings → Memory, choose **Manage memory and workflow reviews**, select the main chat, and
 enable **Weekly workflow review**. The shared Hub scheduler checks the saved deadline while automatic
 work is running. The report and schedule live in the owner's local memory database.
 
-| Saved state   | Event            | Result                                                      |
-| ------------- | ---------------- | ----------------------------------------------------------- |
-| Off (default) | Enable weekly    | First run due in seven days                                 |
-| Enabled       | Deadline reached | Replace the chat report and mark one Needs you item pending |
-| Enabled       | Disable weekly   | Remove the deadline                                         |
-| Any           | Run on demand    | Replace the report and preserve any pending item            |
-| Pending       | Mark reviewed    | Clear the item for that report                              |
-| Any           | Restart          | Resume the saved deadline and pending item                  |
+| Saved state   | Event                                  | Result                                                                     |
+| ------------- | -------------------------------------- | -------------------------------------------------------------------------- |
+| Off (default) | Enable weekly                          | First run due in seven days                                                |
+| Enabled       | Deadline reached                       | Replace the chat report and mark one Needs you item pending                |
+| Enabled       | Disable weekly                         | Remove the deadline                                                        |
+| Any           | Run on demand                          | Replace the report and preserve any pending item                           |
+| Counts saved  | Chat turn returns a structured result  | Show that review in the report cards                                       |
+| Counts saved  | Provider unavailable or missing result | Show the local counts and fallback suggestions                             |
+| Pending       | Mark reviewed                          | Clear the item for that report                                             |
+| Any           | Restart                                | Resume the deadline, pending item and result from the associated chat turn |
 
 A public issue draft contains only the displayed title and body. Open it to review and submit on
 GitHub, or copy it. In a company workspace, find a writable **#feedback** channel and press **Send

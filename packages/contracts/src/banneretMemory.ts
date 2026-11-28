@@ -82,7 +82,15 @@ const preferences = Schema.Struct({
   ),
 });
 export type MemoryPreferencesInput = typeof preferences.Type;
+export const WorkflowJudgment = Schema.Struct({
+  summary: bounded(1200),
+  setup: Schema.NullOr(bounded(512)),
+  rule: Schema.NullOr(bounded(512)),
+  draft: Schema.NullOr(Schema.Struct({ title: bounded(120), body: bounded(1200) })),
+});
 const workflowReport = Schema.Struct({
+  reviewing: Schema.optional(Schema.Boolean),
+  judgment: Schema.optional(WorkflowJudgment),
   topRule: Schema.NullOr(Schema.String),
   topCount: Schema.Int,
   proposalKey: Schema.NullOr(Schema.String),
@@ -108,7 +116,16 @@ export const MEMORY_RPCS = [
   Rpc.make("memory.workflow", {
     payload: Schema.Struct({
       threadId: ThreadId,
-      action: Schema.Literals(["read", "run", "enable", "disable", "dismiss", "propose"]),
+      action: Schema.Literals([
+        "read",
+        "run",
+        "enable",
+        "disable",
+        "dismiss",
+        "propose",
+        "rule",
+        "setup",
+      ]),
       created: Schema.optional(Schema.Int),
     }),
     success: workflowState,
