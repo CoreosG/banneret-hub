@@ -25,6 +25,8 @@ import * as Effect from "effect/Effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { McpSessionRegistry } from "../../mcp/McpSessionRegistry.ts";
 import { threadPlugins } from "./session.ts";
+import { isPersonTool, offeredToThread } from "../sources/filters.ts";
+import { sourceGate } from "../sources/proxyGate.ts";
 
 const decodeEnvelope = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -46,7 +48,14 @@ const proxy = Effect.gen(function* () {
   const plugins = yield* threadPlugins(invocation.thread.threadId, invocation.environmentId);
   const plugin = plugins.find((p) => p.manifest.source === source);
   if (!plugin) return HttpServerResponse.empty({ status: 404 });
+  const company = plugin.company;
+  const gate = plugin.company ? yield* sourceGate(plugin, invocation.thread.threadId) : undefined;
+  if (gate && request.method !== "POST" && gate.closed())
+    return HttpServerResponse.empty({ status: 405 });
   const web = yield* HttpServerRequest.toWeb(request);
+  let method: string | undefined;
+  /** A JSON-RPC error in words; a notification has no reply to carry it. */
+  let unavailable = (_message: string) => HttpServerResponse.empty({ status: 405 });
   let body: string | undefined;
   if (request.method === "POST") {
     const data = yield* Effect.promise(() =>
@@ -61,6 +70,11 @@ const proxy = Effect.gen(function* () {
       HttpServerResponse.jsonUnsafe({ jsonrpc: "2.0", id: rpc?.id ?? null, ...payload });
     const refuse = (message: string) => reply({ error: { code: -32602, message } });
     if (!rpc) return refuse("Expected one MCP request.");
+    method = rpc.method;
+    unavailable = (message) =>
+      rpc.id === undefined ? HttpServerResponse.empty({ status: 202 }) : refuse(message);
+    const notice = gate?.closed();
+    if (notice) return unavailable(notice);
     const thread = invocation.thread.threadId;
     const key = pluginSource(plugin.manifest.source);
     const isAnswering = Effect.gen(function* () {
@@ -83,10 +97,21 @@ const proxy = Effect.gen(function* () {
           ),
         catch: () => "Plugin catalog unavailable" as const,
       });
-    const isMemoryTool = (name: string) => isPluginMemoryTool(name, plugin.manifest.toolPrefix);
+    // The memory switch is for Banneret's memory. A company's own memory is not Banneret's.
+    const isMemoryTool = (name: string) =>
+      !company && isPluginMemoryTool(name, plugin.manifest.toolPrefix);
+    const shows = (name: string) =>
+      !isPersonTool(name) && (!company || offeredToThread(name, company));
     if (rpc.method === "tools/list") {
-      const page = yield* listing(rpc.id, rpc.params ?? {});
-      if (!page.tools) return reply({ error: page.error });
+      let page;
+      if (gate) {
+        const listed = yield* gate.list(web);
+        if (!listed.tools) return unavailable(listed.message);
+        page = listed;
+      } else {
+        page = yield* listing(rpc.id, rpc.params ?? {});
+        if (!page.tools) return reply({ error: page.error });
+      }
       const current = yield* level();
       const showMemory =
         !page.tools.some((tool) => isMemoryTool(tool.name)) || (yield* memoryEnabled);
@@ -96,6 +121,7 @@ const proxy = Effect.gen(function* () {
           ...page.result,
           tools: page.tools.filter(
             (tool) =>
+              shows(tool.name) &&
               (showMemory || !isMemoryTool(tool.name)) &&
               allows(current, tool, plugin.manifest.toolPrefix) &&
               (!answering ||
@@ -107,6 +133,12 @@ const proxy = Effect.gen(function* () {
     if (rpc.method === "tools/call") {
       const name = rpc.params?.name;
       if (typeof name !== "string") return refuse("Missing tool name.");
+      if (!shows(name))
+        return refuse(
+          isPersonTool(name)
+            ? name + " is for a person only. An agent cannot call it."
+            : name + " is not offered here. " + plugin.manifest.description + " does not own it.",
+        );
       if (isMemoryTool(name) && !(yield* memoryEnabled))
         return refuse("Banneret memory is off on this machine.");
       const activity = yield* PreviewAgentActivity;
@@ -116,15 +148,20 @@ const proxy = Effect.gen(function* () {
       let listed: ListedTool | undefined;
       const seen = new Set<string>();
       let cursor: string | undefined;
-      do {
-        const id = yield* (yield* SecureRandom.SecureRandom).uuidV4();
-        const page = yield* listing(id, cursor ? { cursor } : {});
-        listed = page.tools?.find((t) => t.name === name);
-        if (listed) break;
-        cursor = page.cursor;
-        if (!cursor || seen.has(cursor) || seen.size >= 100) break;
-        seen.add(cursor);
-      } while (true);
+      if (gate) {
+        const all = yield* gate.list(web);
+        if (!all.tools) return unavailable(all.message);
+        listed = all.tools.find((t) => t.name === name);
+      } else
+        do {
+          const id = yield* (yield* SecureRandom.SecureRandom).uuidV4();
+          const page = yield* listing(id, cursor ? { cursor } : {});
+          listed = page.tools?.find((t) => t.name === name);
+          if (listed) break;
+          cursor = page.cursor;
+          if (!cursor || seen.has(cursor) || seen.size >= 100) break;
+          seen.add(cursor);
+        } while (true);
       if (!listed || !allows(initial, listed, plugin.manifest.toolPrefix))
         return refuse(denied(name, plugin.manifest.source, initial));
       const kind = classify(listed, plugin.manifest.toolPrefix);
@@ -146,13 +183,20 @@ const proxy = Effect.gen(function* () {
         if (current === "none" || classify(tool, plugin.manifest.toolPrefix) !== "read")
           return denied(tool.name, plugin.manifest.source, current);
       });
-      const result = plugin.manifest.capabilities.includes("skills")
-        ? yield* skillReply(web, plugin, invocation.thread, permission)
-        : undefined;
+      // Local skills fill in for a Solo plugin only. A company's skills are what its server says.
+      const result =
+        !company && plugin.manifest.capabilities.includes("skills")
+          ? yield* skillReply(web, plugin, invocation.thread, permission)
+          : undefined;
       const reason = yield* permission(listed);
       if (reason) return refuse(reason);
       if (result) return result;
     }
+  }
+  if (gate) {
+    const sent =
+      method === "initialize" ? yield* gate.initialize(web, body!) : yield* gate.send(web, body);
+    return sent.response ? HttpServerResponse.fromWeb(sent.response) : unavailable(sent.message);
   }
   const response = yield* Effect.tryPromise({
     try: (signal) => forward(web, plugin.endpoint, plugin.token, signal, body),

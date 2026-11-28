@@ -6,7 +6,9 @@ import { approvalMachine } from "../plugins/approvals.ts";
 import * as Activity from "../../preview/PreviewAgentActivity.ts";
 import { setLevel, toolkitSource } from "../plugins/levels.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { memoryAccess } from "../memory/access.ts";
+import { hubServes, memoryAccess } from "../memory/access.ts";
+import { readSavedOwnership, writeSavedOwnership } from "../sources/ownership.ts";
+import { sourcesFor } from "../sources/ThreadSources.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off globalJsonInEffect:off globalTimersInEffect:off globalFetch:off globalFetchInEffect:off - a real HTTP relay (the fake) behind a recording forwarder.
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -47,6 +49,7 @@ import {
 } from "@t3tools/contracts";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -1410,18 +1413,22 @@ describe("agent lease tools against the fake relay", () => {
     issuedAt: 0,
   });
 
-  /** Runs `body` with the tools' handlers on a fresh Hub that uses `tracker`. */
-  const onHub = <A, E, R>(tracker: FakeTracker, body: Effect.Effect<A, E, R>) =>
-    Effect.flatMap(tempDir, (baseDir) =>
-      body.pipe(
-        Effect.provide(
-          McpToolAccess.HandlersLayer.layer(AgentHandlers.layer).pipe(
-            Layer.provideMerge(invocation),
-            Layer.provideMerge(hubLayer(baseDir, tracker)),
-          ),
+  /** Runs `body` on one Hub process over `baseDir`: running it again is a restart. */
+  const hubAt = <A, E, R>(baseDir: string, tracker: FakeTracker, body: Effect.Effect<A, E, R>) =>
+    body.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(AgentHandlers.layer).pipe(
+          Layer.provideMerge(invocation),
+          Layer.provideMerge(hubLayer(baseDir, tracker)),
         ),
+        // A restart builds every layer again.
+        { local: true },
       ),
     );
+
+  /** Runs `body` with the tools' handlers on a fresh Hub that uses `tracker`. */
+  const onHub = <A, E, R>(tracker: FakeTracker, body: Effect.Effect<A, E, R>) =>
+    Effect.flatMap(tempDir, (baseDir) => hubAt(baseDir, tracker, body));
 
   const call = Effect.fn("call")(function* (name: keyof typeof AgentToolkit.tools, params: object) {
     const toolkit = yield* AgentToolkit;
@@ -2101,6 +2108,8 @@ describe("agent lease tools against the fake relay", () => {
             yield* joinWithBoard(fake, relay);
             const state = yield* feedState(relay.origin);
             expect(state).not.toHaveProperty("elsewhere");
+            expect(yield* readSavedOwnership(relay.origin)).toBeNull();
+            expect(yield* sourcesFor(relay.origin)).toEqual([]);
             expect(state.sections).toEqual(expect.arrayContaining(["board", "chat"]));
             expect(state.board?.leases).toBe(true);
             const relays = yield* AgentRelays.BanneretAgentRelays;
@@ -2109,6 +2118,128 @@ describe("agent lease tools against the fake relay", () => {
           }),
         ),
       { chat: true },
+    ),
+  );
+
+  const gatewayOwners: FakeRelayOptions = {
+    owners: {
+      tasks: { owner: "banneret", leases: "banneret" },
+      skills: { owner: "external", source: "acme-gw" },
+      memory: { owner: "external", source: "acme-gw" },
+      search: { owner: "external", source: "acme-gw" },
+      chat: { owner: "off" },
+      health: { owner: "off" },
+    },
+    sources: [
+      {
+        id: "acme-gw",
+        title: "Acme gateway",
+        url: "https://mcp.example.test/gw",
+        provides: ["skills", "memory", "search"],
+        auth: { kind: "oauth" },
+        check: { state: "unchecked" },
+      },
+    ],
+  };
+
+  /** What the Hub offers the company thread of its own, and the company servers it adds. */
+  const offerNow = (origin: string) =>
+    Effect.gen(function* () {
+      const environment = EnvironmentId.make(ENVIRONMENT);
+      return {
+        elsewhere: Object.keys(
+          (yield* (yield* RelayFeed.BanneretRelayFeed).elsewhere(origin)) ?? {},
+        ).sort(),
+        memory: yield* hubServes(COMPANY_THREAD, environment, "memory"),
+        skills: yield* hubServes(COMPANY_THREAD, environment, "skills"),
+        search: yield* hubServes(COMPANY_THREAD, environment, "search"),
+        servers: (yield* sourcesFor(origin)).map((source) => source.manifest.source),
+      };
+    });
+  const companyOwned = {
+    elsewhere: ["chat", "health", "memory", "search", "skills"],
+    memory: false,
+    skills: false,
+    search: false,
+    servers: ["co-acme-gw"],
+  };
+
+  it.live("a Hub started while the relay is down uses the owners it saved", () =>
+    withFake(
+      (fake, relay) =>
+        Effect.gen(function* () {
+          const baseDir = yield* tempDir;
+          const hub = <A, E, R>(body: Effect.Effect<A, E, R>) => hubAt(baseDir, newTracker(), body);
+          yield* hub(
+            Effect.gen(function* () {
+              yield* joinWithBoard(fake, relay);
+              yield* feedState(relay.origin);
+              expect(yield* offerNow(relay.origin)).toEqual(companyOwned);
+            }),
+          );
+          yield* Effect.promise(relay.close);
+          const saved = yield* hub(
+            Effect.gen(function* () {
+              expect(yield* offerNow(relay.origin)).toEqual(companyOwned);
+              return (yield* readSavedOwnership(relay.origin))!;
+            }),
+          );
+
+          // The previous release wrote this same state directory with no saved owners. It still loads,
+          // and with the relay down the Hub offers what that release did.
+          yield* hub(writeSavedOwnership(relay.origin, null));
+          yield* hub(
+            Effect.gen(function* () {
+              const view = yield* (yield* Enrolment.BanneretEnrolment).status(relay.origin);
+              expect(view.state).toBe("configured");
+              expect(yield* offerNow(relay.origin)).toEqual({
+                elsewhere: [],
+                memory: true,
+                skills: true,
+                search: true,
+                servers: [],
+              });
+            }),
+          );
+
+          // Owners saved for another machine id are dropped, not applied.
+          yield* hub(
+            writeSavedOwnership(relay.origin, { ...saved, key: `${relay.origin} m_before` }),
+          );
+          yield* hub(
+            Effect.gen(function* () {
+              expect((yield* offerNow(relay.origin)).servers).toEqual([]);
+              expect(yield* readSavedOwnership(relay.origin)).toBeNull();
+            }),
+          );
+
+          yield* Effect.promise(relay.reopen);
+          yield* hub(
+            Effect.gen(function* () {
+              yield* feedState(relay.origin);
+              expect(yield* offerNow(relay.origin)).toEqual(companyOwned);
+              const feed = yield* RelayFeed.BanneretRelayFeed;
+              const gone = yield* feed.events(relay.origin).pipe(
+                Stream.filter((state) => !state.joined),
+                Stream.runHead,
+                Effect.forkChild({ startImmediately: true }),
+              );
+              yield* (yield* Enrolment.BanneretEnrolment).leave(relay.origin, "revoke");
+              yield* Fiber.join(gone).pipe(Effect.timeout("5 seconds"));
+              expect(yield* readSavedOwnership(relay.origin)).toBeNull();
+            }),
+          );
+
+          // A stop between leaving and removing the file: the next start removes it.
+          yield* hub(writeSavedOwnership(relay.origin, saved));
+          yield* hub(
+            Effect.gen(function* () {
+              yield* RelayFeed.BanneretRelayFeed;
+              expect(yield* readSavedOwnership(relay.origin)).toBeNull();
+            }),
+          );
+        }),
+      gatewayOwners,
     ),
   );
 

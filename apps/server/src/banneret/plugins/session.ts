@@ -9,6 +9,7 @@ import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { threadWorkspace } from "./workspace.ts";
 import { readPlugins } from "./registry.ts";
+import { sourcesFor, type ThreadSource } from "../sources/ThreadSources.ts";
 
 export const threadPlugins = Effect.fn("SoloPlugins.thread")(function* (
   threadId: ThreadId,
@@ -17,14 +18,24 @@ export const threadPlugins = Effect.fn("SoloPlugins.thread")(function* (
   const thread = yield* (yield* ProjectionStoreV2).getThread(threadId);
   return yield* pluginsForThread(thread, environmentId);
 });
+/** A Solo plugin, or with `company` set, a company source of an Enterprise workspace. */
+export type ThreadPlugin =
+  | (Effect.Success<ReturnType<typeof readPlugins>>[number] & { readonly company?: undefined })
+  | ThreadSource;
 export const pluginsForThread = Effect.fn(function* (
   thread: OrchestrationV2AppThread,
   environmentId: EnvironmentId,
 ) {
   if (!thread || thread.guestShare || thread.linkOrigin || thread.deletedAt || thread.archivedAt)
-    return [];
+    return [] as ReadonlyArray<ThreadPlugin>;
   const owner = (yield* threadWorkspace(thread.id, thread.projectId, environmentId))?.owner;
-  return owner?.kind === "solo" ? yield* readPlugins(owner.id) : [];
+  const plugins: ReadonlyArray<ThreadPlugin> =
+    owner?.kind === "solo"
+      ? yield* readPlugins(owner.id)
+      : owner?.relay
+        ? yield* sourcesFor(owner.relay.origin)
+        : [];
+  return plugins;
 });
 
 export type McpSessionRegistry = Registry.McpSessionRegistry;
@@ -57,11 +68,12 @@ export const McpSessionRegistry = Effect.gen(function* () {
         Effect.provideContext(services),
         Effect.orElseSucceed(() => []),
       );
-      const servers = plugins.map(({ manifest }) => {
+      const servers = plugins.map(({ manifest, company }) => {
         const url = new URL("/banneret/plugins/" + manifest.source, session.endpoint).href;
         const headers = { Authorization: session.authorizationHeader };
         return {
-          name: "banneret-plugin-" + manifest.source,
+          // A company source keeps the `co-<source>` name the join file and task linking use.
+          name: company ? manifest.source : "banneret-plugin-" + manifest.source,
           claude: { type: "http" as const, url, headers },
           codex: { url, http_headers: headers },
         };

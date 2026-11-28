@@ -26,6 +26,7 @@ import { approvalStore, type Approval, type Choice } from "./approvalStore.ts";
 import { classify, levelFor, pluginSource, toolkitSource } from "./levels.ts";
 import { threadWorkspace } from "./workspace.ts";
 import { pluginsForThread } from "./session.ts";
+import { isPersonTool, offeredToThread } from "../sources/filters.ts";
 
 const isApprovalError = Schema.is(McpSchema.InvalidParams);
 const error = (message: string) => new McpSchema.InvalidParams({ message });
@@ -200,7 +201,17 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
           if (!transport) return yield* error("The stored transport is unavailable.");
           const wire = yield* decodeWire(transport.body);
           yield* permitted;
-          if (isPluginMemoryTool(row.name, plugin.manifest.toolPrefix) && !(yield* memoryEnabled))
+          // Owners may have changed since the call was held.
+          if (
+            isPersonTool(row.name) ||
+            (plugin.company && !(plugin.signedIn && offeredToThread(row.name, plugin.company)))
+          )
+            return yield* error("The tool source changed.");
+          if (
+            !plugin.company &&
+            isPluginMemoryTool(row.name, plugin.manifest.toolPrefix) &&
+            !(yield* memoryEnabled)
+          )
             return yield* error("Banneret memory is off on this machine.");
           const response = yield* Effect.tryPromise({
             try: async (signal) =>
