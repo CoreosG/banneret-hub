@@ -2970,10 +2970,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       machineId: h.view.machine.id,
       threadRef: h.threadRef,
       wake: h.view.wake,
+      // A result always wakes. A nobody agent wakes for an ask only after its owner's click.
       wakes:
-        reason === "ask" && message.ask?.state !== "open"
-          ? false
-          : !companyPaused && !paused.has(h.view.owner.id),
+        !companyPaused &&
+        !paused.has(h.view.owner.id) &&
+        (reason === "ask_result" ||
+          (message.ask?.state === "open" && (h.view.wake !== "nobody" || !!message.ask.decidedBy))),
       fromOwner: false,
       state: "pending",
       expiresAt: reason === "ask" ? message.ask!.expiresAt : iso(Date.now() + deliveryLifetime),
@@ -2987,7 +2989,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       row.machineId,
     );
   }
-  function changeAsk(message: ChatMessage, patch: Partial<ChatAsk>) {
+  // The actor names the thread line. It is not stored: decidedBy records only a person's click.
+  function changeAsk(
+    message: ChatMessage,
+    patch: Partial<ChatAsk>,
+    actor = patch.decidedBy?.login ?? "Relay",
+  ) {
     const ask = { ...message.ask!, ...patch };
     if (ask.kind === "review" && ask.state === "answered") ask.answerMessageId = message.id;
     const channel = channels.get(message.conversationId)!;
@@ -3017,7 +3024,6 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       askDelivery(updated, ask.to.handle, "ask");
     chatChange(channel, { kind: "message.edited", seq: ++chatSeq, message: updated });
     if (ask.to.kind === "agent") {
-      const actor = patch.decidedBy?.login ?? "Relay";
       const root = messages.get(message.threadRootId ?? "");
       if (root && !root.deleted)
         systemMessage(
@@ -3167,6 +3173,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       .filter(
         (d) =>
           !d.wakes &&
+          // An ask shows only as its agent_ask item.
+          d.reason !== "ask" &&
           d.state === "pending" &&
           Date.parse(d.expiresAt) > Date.now() &&
           handles.get(d.handleId)?.view.owner.id === person.id &&
@@ -4015,9 +4023,16 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!activeAsk(a)) throw closed();
           const decidedBy = personRef(person);
           if (action === "cancel") {
-            if (query.has("asHandle") && owned(query.get("asHandle")!).view.id !== a.from.handle)
+            if (reader && reader.view.id !== a.from.handle)
               throw new RelayError("forbidden", "Only the asker can cancel.");
-            return send("ChatAsk", changeAsk(m, { state: "cancelled", decidedBy }));
+            return send(
+              "ChatAsk",
+              changeAsk(
+                m,
+                { state: "cancelled", ...(!reader && { decidedBy }) },
+                reader && label(reader.view),
+              ),
+            );
           }
           if (target && action === "decision") {
             if (a.state !== "waiting_owner") throw closed();
@@ -4080,11 +4095,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 throw new RelayError("forbidden", "Only the target handle may answer.");
               if (a.state !== "open") throw closed();
             } else if (a.state !== "waiting_owner") throw closed();
+            const agent = input.asHandle ? label(handles.get(input.asHandle)!.view) : undefined;
+            const move = (patch: Partial<ChatAsk>) =>
+              changeAsk(m, { ...patch, ...(!agent && { decidedBy }) }, agent);
             if ("none" in input)
-              return send(
-                "ChatAsk",
-                changeAsk(m, { state: "unanswered", reason: input.reason, decidedBy }),
-              );
+              return send("ChatAsk", move({ state: "unanswered", reason: input.reason }));
             if (input.choice && !a.choices.includes(input.choice))
               throw new RelayError("malformed", "Choose an offered answer.");
             if (a.kind === "review" && (!input.verdict || !input.headSha))
@@ -4096,10 +4111,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               a.kind === "review" &&
               (input.headSha !== a.pr?.headSha || (currentHead && currentHead !== a.pr?.headSha))
             )
-              return send(
-                "ChatAsk",
-                changeAsk(m, { state: "unanswered", reason: "head_moved", decidedBy }),
-              );
+              return send("ChatAsk", move({ state: "unanswered", reason: "head_moved" }));
             if (input.receipt && input.receipt.handle !== target.handle)
               throw new RelayError("malformed", "Receipt belongs to another handle.");
             const { text, choice, verdict, headSha } = input;
@@ -4114,12 +4126,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             const receipts = input.receipt ? [...a.receipts, input.receipt] : a.receipts;
             if (a.mode === "draft") {
               drafts.set(id, answer);
-              return send("ChatAsk", changeAsk(m, { state: "draft", receipts }));
+              return send("ChatAsk", move({ state: "draft", receipts }));
             }
-            return send(
-              "ChatAsk",
-              changeAsk(m, { state: "answered", answer, receipts, decidedBy }),
-            );
+            return send("ChatAsk", move({ state: "answered", answer, receipts }));
           }
         }
       }
@@ -4464,7 +4473,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!state) throw new RelayError("malformed", "This delivery has already closed.");
           d.row = { ...d.row, state };
           d.claimedAt = now;
-          if (state === "refused") notDelivered(d.row);
+          if (state === "refused") {
+            notDelivered(d.row);
+            const refused = messages.get(d.row.messageId)!;
+            if (d.row.reason === "ask" && refused.ask?.state === "open")
+              changeAsk(refused, { state: "unanswered", reason: "not_delivered" });
+          }
           return send("ChatDelivery", current(d.row));
         }
       }
@@ -4657,10 +4671,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 r.ask.to.kind === "agent" &&
                 r.ask.to.owner.id === to.id,
             );
+            const sameOwner = person.id === to.id;
             if (
-              pair.filter((r) => activeAsk(r.ask)).length >= askLimits.pairOpen ||
-              pair.filter((r) => Date.now() - Date.parse(r.ask.createdAt) < 86400000).length >=
-                askLimits.pairPerDay
+              !sameOwner &&
+              (pair.filter((r) => activeAsk(r.ask)).length >= askLimits.pairOpen ||
+                pair.filter((r) => Date.now() - Date.parse(r.ask.createdAt) < 86400000).length >=
+                  askLimits.pairPerDay)
             )
               reject("agent_ask_capped");
             if (
@@ -4710,7 +4726,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               )
                 reject("agent_ask_capped");
             }
+            const hops = agentHops.get(root!.id) ?? 0;
+            if (hops >= 4)
+              throw new RelayError("rate_limited", "Ask a person to continue this thread.");
+            agentHops.set(root!.id, hops + 1);
             auto =
+              !sameOwner &&
               usageAllows(policy, target.machine.id, target.provider) &&
               policy.auto.some(
                 (r) =>
@@ -4742,7 +4763,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 (ask.timeoutSeconds ?? (target ? askLimits.defaultTimeoutSeconds : 604800)) * 1000,
             ),
             state: target && person.id !== to.id && !auto ? "waiting_owner" : "open",
-            ...(auto ? { reason: "auto_accepted", mode: "answer" as const } : {}),
+            ...(auto
+              ? { reason: "auto_accepted", mode: "answer" as const, byRule: true as const }
+              : {}),
             ...(ask.context !== undefined && { context: ask.context }),
             ...(ask.doneWhen && { doneWhen: ask.doneWhen }),
             ...(ask.pr && { pr: ask.pr }),

@@ -1449,7 +1449,7 @@ describe("agent lease tools against the fake relay", () => {
     });
 
   /** Joins the fake as ada-example and waits for the board with its seeded task. */
-  const joinWithBoard = (fake: FakeRelay, relay: Forwarder) =>
+  const joinWithBoard = (fake: FakeRelay, relay: Forwarder, role = "staff") =>
     Effect.gen(function* () {
       yield* control(fake, "/board/seed", { tasks: [{ id: "t_free", title: "Rate limits" }] });
       const enrolment = yield* Enrolment.BanneretEnrolment;
@@ -1458,7 +1458,7 @@ describe("agent lease tools against the fake relay", () => {
         label: "Ada laptop",
         kind: "laptop",
       });
-      fake.approve(view.confirmCode!, { login: ME, role: "staff" });
+      fake.approve(view.confirmCode!, { login: ME, role });
       const feed = yield* RelayFeed.BanneretRelayFeed;
       yield* feed.events(relay.origin).pipe(
         Stream.filter((state) => allBoardCards(state.board?.value).length > 0),
@@ -1713,6 +1713,59 @@ describe("agent lease tools against the fake relay", () => {
             });
             expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
               items: [{ reason: "ask_result" }],
+            });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
+
+  it.live("tells the asker the result of a question whose message was deleted", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            // Only a relay admin may delete an agent's message.
+            yield* joinWithBoard(fake, relay, "founder");
+            const device = (yield* (yield* Enrolment.BanneretEnrolment).relay(relay.origin))!;
+            const root = yield* call("banneret_chat_post", {
+              conversation: "c_general",
+              key: "root",
+              text: "Release checks",
+            });
+            const ask = yield* call("banneret_agent_ask", {
+              thread: root.messageId,
+              to: handleId(COMPANY_THREAD),
+              question: "Which private upload?",
+              context: "Upload release",
+              doneWhen: "Name a check.",
+              key: "deleted",
+            });
+            const thread = (yield* call("banneret_chat_read", {
+              thread: String(root.messageId),
+            })) as { items: Array<{ id: string; ask?: { id: string } }> };
+            const message = thread.items.find((m) => m.ask?.id === ask.askId)!;
+            yield* device.signedChat("DELETE", "messages/" + message.id);
+            const sent: string[] = [];
+            const service = yield* ThreadManagementService.ThreadManagementService;
+            const deliveries = yield* makeDeliveries.pipe(
+              Effect.provideService(ThreadManagementService.ThreadManagementService, {
+                ...service,
+                hasReceipt: () => Effect.succeed(false),
+                sendToThread: (input) =>
+                  Effect.sync(() => {
+                    sent.push(input.text);
+                    return {} as ThreadManagementService.ThreadManagementSendResult;
+                  }),
+              }),
+            );
+            yield* deliveries.reconcile(device);
+            expect(sent).toEqual([expect.stringContaining("The question was deleted.")]);
+            expect(sent[0]).toContain('"state":"orphaned"');
+            expect(sent[0]).not.toContain("Which private upload?");
+            expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
+              items: [],
             });
           }),
         ),

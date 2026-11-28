@@ -3541,6 +3541,305 @@ describe("chat contract", () => {
       items: expect.arrayContaining([expect.objectContaining({ id: to.id, paused: true })]),
     });
   });
+  type AskThread = Awaited<ReturnType<typeof sharedAskThread>>;
+  type AskRow = { id: string; state: string };
+  const postAsk = async (t: AskThread, extra: Record<string, unknown> = {}) => {
+    const reply = await call(t.asker, "POST", t.chat + "asks", { ...t.newAsk, ...extra });
+    expectSchema("ChatAsk", reply.body);
+    return reply.body as AskRow;
+  };
+  const waking = async (t: AskThread, machine: Enrolled) =>
+    (
+      (await call(machine, "GET", t.chat + "deliveries")).body as {
+        items: {
+          id: string;
+          reason: string;
+          wakes: boolean;
+          message: { id: string; text: string; deleted: boolean; ask?: AskRow };
+        }[];
+      }
+    ).items;
+  const allowFrom = async (t: AskThread) => {
+    const settings = (await call(t.answerer, "GET", t.chat + "me/settings")).body as {
+      agentAsks: object;
+    };
+    const saved = await call(t.answerer, "PUT", t.chat + "me/settings", {
+      ...settings,
+      agentAsks: {
+        ...settings.agentAsks,
+        auto: [{ from: { agent: t.from.id }, kinds: ["question"] }],
+      },
+    });
+    expect(saved.status).toBe(200);
+  };
+  const needs = async (machine: Enrolled) =>
+    ((await call(machine, "GET", "/relay/v1/needs")).body as { items: { kind: string }[] }).items;
+  const threadText = async (t: AskThread) =>
+    JSON.stringify((await call(t.asker, "GET", t.chat + "threads/" + t.threadRootId)).body);
+
+  it("serves an ask to a person in the tagged shape, in a thread or a DM", async () => {
+    const t = await sharedAskThread();
+    const to = { kind: "person", person: t.to.owner.id };
+    for (const threadRootId of [t.threadRootId, undefined]) {
+      const ask = await postAsk(t, { to, threadRootId, key: "person_" + randomText(4) });
+      expect(ask).toMatchObject({ state: "open", to: { kind: "person", person: t.to.owner } });
+      expect(await needs(t.answerer)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: "chat_ask", ask })]),
+      );
+      const answered = await call(t.answerer, "POST", t.chat + "asks/" + ask.id + "/answer", {
+        text: "The release file.",
+      });
+      expectSchema("ChatAsk", answered.body);
+      expect(answered.body).toMatchObject({ state: "answered", decidedBy: t.to.owner });
+      expect(await waking(t, t.asker)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ reason: "answer" })]),
+      );
+    }
+  });
+
+  it("shows a waiting ask once in Needs you, as agent_ask and not as agent_inbox", async () => {
+    const t = await sharedAskThread();
+    await postAsk(t);
+    const waiting = await needs(t.answerer);
+    expect(waiting.filter((i) => i.kind === "agent_ask")).toHaveLength(1);
+    expect(waiting.filter((i) => i.kind === "agent_inbox")).toEqual([]);
+    await call(t.asker, "POST", t.chat + "messages", {
+      conversationId: t.conversationId,
+      threadRootId: t.threadRootId,
+      text: "@" + t.to.owner.login + "/reader heads up",
+      asHandle: t.from.id,
+      key: "mention",
+    });
+    expect((await needs(t.answerer)).filter((i) => i.kind === "agent_inbox")).toEqual([
+      expect.objectContaining({ handleId: t.to.id, count: 1 }),
+    ]);
+  });
+
+  it("records decidedBy for a person's click only, and byRule for a rule", async () => {
+    const t = await sharedAskThread();
+    const path = (ask: AskRow) => t.chat + "asks/" + ask.id;
+    const byAgent = await call(
+      t.asker,
+      "POST",
+      path(await postAsk(t, { question: "One?", key: "one" })) + "/cancel?asHandle=" + t.from.id,
+    );
+    expect(byAgent.body).toMatchObject({ state: "cancelled" });
+    expect(byAgent.body).not.toHaveProperty("decidedBy");
+    const byPerson = await call(
+      t.asker,
+      "POST",
+      path(await postAsk(t, { question: "Two?", key: "two" })) + "/cancel",
+    );
+    expect(byPerson.body).toMatchObject({ state: "cancelled", decidedBy: t.from.owner });
+    const clicked = await postAsk(t, { question: "Three?", key: "three" });
+    expect(
+      (await call(t.answerer, "POST", path(clicked) + "/decision", { allow: "once" })).body,
+    ).toMatchObject({ state: "open", decidedBy: t.to.owner });
+    await allowFrom(t);
+    const ruled = await postAsk(t, { question: "Four?", key: "four" });
+    expect(ruled).toMatchObject({ state: "open", byRule: true, to: { owner: t.to.owner } });
+    expect(ruled).not.toHaveProperty("decidedBy");
+    expect(await threadText(t)).toContain("Auto-accepted by " + t.to.owner.login + "'s rule.");
+    const answered = await call(t.answerer, "POST", path(ruled) + "/answer", {
+      text: "release.yml",
+      asHandle: t.to.id,
+    });
+    expect(answered.body).toMatchObject({ state: "answered", byRule: true });
+    expect(answered.body).not.toHaveProperty("decidedBy");
+    expect(await threadText(t)).toContain(t.to.owner.login + "/reader set the ask to answered.");
+    expect(await threadText(t)).not.toContain(t.to.owner.login + " set the ask to answered.");
+    // Four asks fill the thread's hop cap. A person's reply starts it again.
+    await call(t.asker, "POST", t.chat + "messages", {
+      conversationId: t.conversationId,
+      threadRootId: t.threadRootId,
+      text: "Carry on.",
+      key: "carry-on",
+    });
+    const unanswered = await postAsk(t, { question: "Five?", key: "five" });
+    const none = await call(t.answerer, "POST", path(unanswered) + "/answer", {
+      none: true,
+      reason: "turn_ended",
+      asHandle: t.to.id,
+    });
+    expect(none.body).toMatchObject({ state: "unanswered", reason: "turn_ended" });
+    expect(none.body).not.toHaveProperty("decidedBy");
+  });
+
+  it("ends an ask as not_delivered as soon as its delivery is refused", async () => {
+    const t = await sharedAskThread();
+    const ask = await postAsk(t);
+    await call(t.answerer, "POST", t.chat + "asks/" + ask.id + "/decision", { allow: "once" });
+    const delivery = (await waking(t, t.answerer)).find((d) => d.reason === "ask")!;
+    const refused = await call(
+      t.answerer,
+      "POST",
+      t.chat + "deliveries/" + delivery.id + "/refuse",
+      { asHandle: t.to.id, reason: "thread_gone" },
+    );
+    expect(refused.body).toMatchObject({
+      state: "refused",
+      message: { ask: { state: "unanswered", reason: "not_delivered" } },
+    });
+    expect(await waking(t, t.asker)).toEqual([
+      expect.objectContaining({
+        reason: "ask_result",
+        wakes: true,
+        message: expect.objectContaining({
+          ask: expect.objectContaining({ state: "unanswered", reason: "not_delivered" }),
+        }),
+      }),
+    ]);
+  });
+
+  it("tells the asker what happened after the ask message is deleted", async () => {
+    const t = await sharedAskThread();
+    const ask = await postAsk(t);
+    const thread = (await call(t.asker, "GET", t.chat + "threads/" + t.threadRootId)).body as {
+      items: { id: string; ask?: AskRow }[];
+    };
+    const messageId = thread.items.find((m) => m.ask?.id === ask.id)!.id;
+    expect((await call(t.asker, "DELETE", t.chat + "messages/" + messageId)).status).toBe(200);
+    const result = await waking(t, t.asker);
+    expect(result).toEqual([
+      expect.objectContaining({
+        reason: "ask_result",
+        wakes: true,
+        message: expect.objectContaining({
+          deleted: true,
+          text: "",
+          ask: expect.objectContaining({ id: ask.id, state: "orphaned" }),
+        }),
+      }),
+    ]);
+    const claim = await call(t.asker, "POST", t.chat + "deliveries/" + result[0]!.id + "/claim", {
+      asHandle: t.from.id,
+    });
+    expectSchema("ChatDelivery", claim.body);
+    expect(claim.body).toMatchObject({ state: "claimed", message: { deleted: true } });
+  });
+
+  it("wakes a nobody agent for a clicked approval, never for a rule, and always for a result", async () => {
+    const t = await sharedAskThread();
+    for (const machine of [t.asker, t.answerer])
+      expect(
+        (await call(machine, "PUT", t.chat + "me/agents/wake", { wake: "nobody" })).status,
+      ).toBe(204);
+    const clicked = await postAsk(t, { question: "One?", key: "one" });
+    expect(await waking(t, t.answerer)).toEqual([]);
+    await call(t.answerer, "POST", t.chat + "asks/" + clicked.id + "/decision", {
+      allow: "once",
+    });
+    expect(await waking(t, t.answerer)).toEqual([
+      expect.objectContaining({
+        reason: "ask",
+        wakes: true,
+        message: expect.objectContaining({ ask: expect.objectContaining({ id: clicked.id }) }),
+      }),
+    ]);
+    await allowFrom(t);
+    const ruled = await postAsk(t, { question: "Two?", key: "two" });
+    expect(ruled.state).toBe("open");
+    expect((await waking(t, t.answerer)).map((d) => d.message.ask?.id)).toEqual([clicked.id]);
+    const inbox = await call(t.answerer, "POST", t.chat + "inbox", { asHandle: t.to.id });
+    expect(inbox.body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          reason: "ask",
+          wakes: false,
+          message: expect.objectContaining({ ask: expect.objectContaining({ id: ruled.id }) }),
+        }),
+      ]),
+    });
+    await call(t.asker, "POST", t.chat + "asks/" + ruled.id + "/cancel");
+    expect(await waking(t, t.asker)).toEqual([
+      expect.objectContaining({ reason: "ask_result", wakes: true }),
+    ]);
+  });
+
+  it("skips consent and pair caps between one owner's agents and keeps the loop limits", async () => {
+    const t = await sharedAskThread();
+    const own = async (name: string) => {
+      const id = "h_" + randomText(8);
+      await call(t.asker, "PUT", t.chat + "handles/" + id, {
+        threadRef: id,
+        name,
+        provider: "codex",
+        machineId: t.asker.machineId,
+      });
+      return id;
+    };
+    const helper = await own("helper"),
+      checker = await own("checker");
+    const toHelper = { to: { kind: "agent", handle: helper } };
+    // The same four asks across owners stop at the open pair cap.
+    for (const n of [1, 2, 3]) await postAsk(t, { question: n + "?", key: "cross" + n });
+    expectError(
+      await call(t.asker, "POST", t.chat + "asks", { ...t.newAsk, question: "4?", key: "cross4" }),
+      403,
+      "agent_ask_capped",
+    );
+    const root = async () => {
+      const reply = await call(t.asker, "POST", t.chat + "messages", {
+        conversationId: t.conversationId,
+        text: "Own agents",
+        key: randomText(6),
+      });
+      return (reply.body as { id: string }).id;
+    };
+    const cancel = (ask: AskRow) => call(t.asker, "POST", t.chat + "asks/" + ask.id + "/cancel");
+    for (const row of (
+      (await call(t.asker, "GET", t.chat + "asks?role=asker")).body as { items: AskRow[] }
+    ).items)
+      await cancel(row);
+    // Four open at once passes the pair cap of three. The thread hop cap stops the fifth.
+    const threadRootId = await root();
+    const mine: AskRow[] = [];
+    for (const n of [1, 2, 3, 4])
+      mine.push(await postAsk(t, { ...toHelper, threadRootId, question: n + "?", key: "own" + n }));
+    expect(mine.map((a) => a.state)).toEqual(["open", "open", "open", "open"]);
+    const fifth = { ...t.newAsk, ...toHelper, threadRootId, question: "5?", key: "own5" };
+    expectError(await call(t.asker, "POST", t.chat + "asks", fifth), 429, "rate_limited");
+    await call(t.asker, "POST", t.chat + "messages", {
+      conversationId: t.conversationId,
+      threadRootId,
+      text: "Carry on.",
+      key: randomText(6),
+    });
+    mine.push(await postAsk(t, fifth));
+    for (const ask of mine) await cancel(ask);
+    // The same question to the same agent in one thread stops at the fourth try.
+    const repeats = await root();
+    const same = { ...toHelper, threadRootId: repeats, question: "Same?" };
+    for (const n of [1, 2, 3]) await cancel(await postAsk(t, { ...same, key: "same" + n }));
+    expectError(
+      await call(t.asker, "POST", t.chat + "asks", { ...t.newAsk, ...same, key: "same4" }),
+      403,
+      "agent_ask_circle",
+    );
+    // A chain stops at depth two.
+    const chain = await root();
+    const first = await postAsk(t, { ...toHelper, threadRootId: chain, key: "chain1" });
+    const second = await postAsk(t, {
+      to: { kind: "agent", handle: checker },
+      asHandle: helper,
+      parentAskId: first.id,
+      threadRootId: chain,
+      key: "chain2",
+    });
+    expectError(
+      await call(t.asker, "POST", t.chat + "asks", {
+        ...t.newAsk,
+        to: { kind: "agent", handle: t.to.id },
+        asHandle: checker,
+        parentAskId: second.id,
+        threadRootId: chain,
+        key: "chain3",
+      }),
+      403,
+      "agent_ask_depth",
+    );
+  });
+
   it("checks the named hand-off rule again on the receiver machine and leaves a stalled take actionable", async () => {
     const { asker, answerer, chat, from, to, threadRootId } = await sharedAskThread();
     const taskId = "task_" + randomText(5);

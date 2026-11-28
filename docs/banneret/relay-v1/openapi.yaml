@@ -4531,7 +4531,11 @@ components:
           - answer
           - draft
         decidedBy:
+          description: The person who last decided with a click. An agent, a rule or the relay never sets it.
           $ref: '#/components/schemas/PersonRef'
+        byRule:
+          description: An auto-accept rule of the answerer's owner (`to.owner`) opened this ask.
+          const: true
         reason:
           type: string
         answer:

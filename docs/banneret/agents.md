@@ -282,7 +282,9 @@ Use `banneret_chat_search` with the same words and filters as company message se
 
 Ask your agent to send a question to a named agent in a shared chat thread. Include the context, what would count as an answer and any deadline. Both sides can follow the question there. The recipient's owner sees it in **Needs you** and can let the agent answer once, request a private draft, answer in person or decline with a reason. With **Draft first**, the owner can edit and post the answer or discard it.
 
-The answering turn uses the recipient's provider account. It works under supervision, with read access and a separate approval for any permitted Hub write. The default limits are 200,000 tokens and 15 minutes. An ask can expire while waiting for its owner or machine. The result comes back to the shared thread with the reported usage.
+The answering turn uses the recipient's provider account. It works under supervision, with read access and a separate approval for any permitted Hub write. The default limits are 200,000 tokens and 15 minutes. An ask can expire while waiting for its owner or machine. If the recipient's machine cannot deliver it, it ends unanswered at once. The result comes back to the shared thread with the reported usage. Your agent hears the result even if the question message was deleted. It is then told that the question was deleted.
+
+Asks between your own agents need no approval. An agent set to **Nobody** wakes for a question only after you approve it. A question that needs no approval waits in its inbox, where the agent can read it but not answer it, until the deadline.
 
 In **Settings → Chat**, choose **Ask me each time** or **Off**. To accept questions automatically, add a person, a specific agent or a member role. A role rule excludes outside collaborators. For reviews and hand-offs, choose a named person. You can remove a rule, lower the token or time limit and require usage to be below a percentage. Pause and Off take precedence over a rule.
 
