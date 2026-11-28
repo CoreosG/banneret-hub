@@ -1,4 +1,5 @@
 import type { Plugin } from "vite-plus";
+import type { PackUserConfig } from "vite-plus/pack";
 
 export declare const OFFICIAL_NAME: string;
 export declare const BRAND_NAME: string;
@@ -22,3 +23,6 @@ export declare function banneretBrandPlugin(options?: {
   readonly vite?: boolean;
   readonly cli?: boolean;
 }): Plugin;
+export declare function banneretDesktopPack(
+  entries: ReadonlyArray<PackUserConfig>,
+): PackUserConfig[];

@@ -276,3 +276,7 @@ export function banneretBrandPlugin({ vite = false, cli = false } = {}) {
     },
   };
 }
+
+/** Every desktop bundle gets the identity rewrite, ahead of its own plugins. */
+export const banneretDesktopPack = (entries) =>
+  entries.map((entry) => ({ ...entry, plugins: [banneretBrandPlugin(), entry.plugins] }));

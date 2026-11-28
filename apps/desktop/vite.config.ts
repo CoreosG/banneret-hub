@@ -6,7 +6,7 @@ import { Rolldown } from "vite-plus/pack";
 
 import { isDesktopRuntimeExternalDependency } from "../../scripts/lib/desktop-external-packages.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
-import { banneretDesktopPack } from "../../scripts/banneret/desktopPack.ts";
+import { banneretDesktopPack } from "../../scripts/banneret/brand.mjs";
 
 const repoEnv = loadRepoEnv();
 const domTests = ["src/preview/PickPreload.test.ts"];
