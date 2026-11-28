@@ -1,0 +1,71 @@
+{
+  "displayName": "Example Company",
+  "iconUrl": "https://relay.example.test/admin/hub/icon.png",
+  "enrolment": {
+    "start": "/relay/v1/enroll/start",
+    "browser": "/admin/hub/enroll"
+  },
+  "me": {
+    "id": "p_7Hq2xK",
+    "login": "ada-example",
+    "machineId": "m_4fT9wQ",
+    "role": {
+      "id": "founder",
+      "name": "Founder"
+    },
+    "admission": "member",
+    "permissions": [
+      "relay.admin",
+      "hub.team",
+      "channels.seePublic",
+      "scope.boards:all"
+    ]
+  },
+  "owners": {
+    "tasks": {
+      "owner": "external",
+      "source": "acme-jira",
+      "leases": "provider"
+    },
+    "skills": {
+      "owner": "banneret"
+    },
+    "memory": {
+      "owner": "banneret"
+    },
+    "chat": {
+      "owner": "off"
+    },
+    "search": {
+      "owner": "banneret"
+    },
+    "health": {
+      "owner": "off"
+    }
+  },
+  "sources": [
+    {
+      "id": "acme-jira",
+      "title": "Acme Jira",
+      "url": "https://mcp.example.test/jira",
+      "prefix": "jira__",
+      "provides": [
+        "tasks"
+      ],
+      "auth": {
+        "kind": "bearer_per_person",
+        "help": "Create a personal Jira token."
+      },
+      "check": {
+        "state": "ok",
+        "checkedAt": "2026-11-27T10:42:00Z",
+        "shape": {
+          "tasks": {
+            "required": "complete",
+            "optional": []
+          }
+        }
+      }
+    }
+  ]
+}

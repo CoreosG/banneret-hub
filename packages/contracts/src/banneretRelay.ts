@@ -420,3 +420,4 @@ export {
   type MemoryReviewNote,
   type MemoryPreferencesInput,
 } from "./banneretMemory.ts";
+export * from "./banneretCapabilityOwners.ts";

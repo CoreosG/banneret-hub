@@ -1,7 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off - a plain Node test double: it reads the canonical spec from disk.
 import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
 import * as NodeURL from "node:url";
 
+import type { RelayOwners, RelayOwnershipFields, RelayCapability } from "@t3tools/contracts";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import * as Yaml from "yaml";
@@ -78,6 +80,8 @@ export type SchemaName =
   | "ChatPromotion"
   | "ChatDefaultChannels"
   | "ChatLimits"
+  | "CapabilityOwners"
+  | "CapabilitySource"
   | "Capabilities"
   | "EnrolStartRequest"
   | "EnrolStartResponse"
@@ -171,12 +175,67 @@ export const readOpenApi = (): Record<string, unknown> =>
     unknown
   >;
 
+// HTTP sources must resolve by their literal address or tailnet name on every Hub.
+const privateNetworks = new NodeNet.BlockList();
+privateNetworks.addSubnet("10.0.0.0", 8);
+privateNetworks.addSubnet("172.16.0.0", 12);
+privateNetworks.addSubnet("192.168.0.0", 16);
+privateNetworks.addSubnet("100.64.0.0", 10);
+privateNetworks.addSubnet("fc00::", 7, "ipv6");
+
+function sourceUrlAllowed(value: string): boolean {
+  const url = URL.parse(value);
+  if (!url || url.username || url.password || url.hash || url.search) return false;
+  if (url.protocol === "https:") return true;
+  if (url.protocol !== "http:") return false;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (host.endsWith(".ts.net")) return true;
+  return (
+    NodeNet.isIP(host) !== 0 &&
+    privateNetworks.check(host, NodeNet.isIP(host) === 6 ? "ipv6" : "ipv4")
+  );
+}
+
+export function offersOwnedTool(owners: RelayOwners, name: string): boolean {
+  if (/^banneret_(board$|task$|lease_)/.test(name)) return owners.tasks.owner === "banneret";
+  if (/^banneret_(chat_|agent_(ask|answer)$|handoff_offer$)/.test(name))
+    return owners.chat.owner === "banneret";
+  if (name.startsWith("banneret_memory_")) return owners.memory.owner === "banneret";
+  if (name.startsWith("banneret_skills_")) return owners.skills.owner === "banneret";
+  if (name === "banneret_kb_search") return owners.search.owner === "banneret";
+  return true;
+}
+
+export function ownershipError({
+  owners,
+  sources = [],
+  mcpTools = [],
+}: RelayOwnershipFields & {
+  mcpTools?: readonly { name: string }[];
+}): string | null {
+  const byId = new Map(sources.map((source) => [source.id, source]));
+  if (byId.size !== sources.length) return "Each source needs a unique id.";
+  if (!owners) return null;
+  for (const capability of Object.keys(owners) as RelayCapability[]) {
+    const owner = owners[capability];
+    if (owner.owner === "external" && !byId.get(owner.source)?.provides.includes(capability))
+      return owner.source + " must declare that it provides " + capability + ".";
+  }
+  const hidden = mcpTools.find((tool) => !offersOwnedTool(owners, tool.name));
+  return hidden ? hidden.name + " belongs to a capability that Banneret does not own." : null;
+}
+
 export const loadSpec = (): SpecValidator => {
   const doc = readOpenApi();
   const components = doc.components as { schemas: Record<string, unknown> };
   const schemas = components.schemas;
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   addFormats.default(ajv);
+  ajv.addKeyword({
+    keyword: "x-sourceUrl",
+    type: "string",
+    validate: (_: boolean, url: string) => sourceUrlAllowed(url),
+  });
   ajv.addKeyword({
     keyword: "x-maxBytes",
     type: "string",
@@ -199,7 +258,8 @@ export const loadSpec = (): SpecValidator => {
     check: (name, value) => {
       const validate = compiled.get(name);
       if (!validate) throw new Error(`relay-v1 has no schema ${name}`);
-      return validate(value) ? null : describe(validate.errors);
+      if (!validate(value)) return describe(validate.errors);
+      return name === "Capabilities" ? ownershipError(value as RelayOwnershipFields) : null;
     },
   };
 };
@@ -259,6 +319,8 @@ export const exampleSchemas: Readonly<Record<string, SchemaName>> = {
   "chat-promotion.json": "ChatPromotion",
   "chat-limits.json": "ChatLimits",
   "capabilities-public.json": "Capabilities",
+  "source-missing-tools.json": "CapabilitySource",
+  "capabilities-external.json": "Capabilities",
   "capabilities.json": "Capabilities",
   "enroll-start-request.json": "EnrolStartRequest",
   "enroll-start-response.json": "EnrolStartResponse",
@@ -357,6 +419,9 @@ const baseInvalidExampleSchema = (file: string): SchemaName =>
                                     : "FactsRequest");
 
 export const invalidExampleSchema = (file: string): SchemaName => {
+  if (file.startsWith("ownership-")) return "Capabilities";
+  if (file.startsWith("source-")) return "CapabilitySource";
+  if (file.startsWith("owners-")) return "CapabilityOwners";
   if (file.startsWith("team-edit-")) return "TeamEdit";
   if (file.startsWith("team-meeting-")) return "TeamMeeting";
   if (file.startsWith("snapshot-team-room-")) return "SnapshotTeamRoom";

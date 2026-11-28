@@ -1,0 +1,23 @@
+{
+  "id": "acme-jira",
+  "title": "Acme Jira",
+  "url": "https://mcp.example.test/jira",
+  "prefix": "jira__",
+  "provides": [
+    "tasks"
+  ],
+  "auth": {
+    "kind": "bearer_per_person",
+    "help": "Create a personal Jira token."
+  },
+  "check": {
+    "state": "shape_missing",
+    "checkedAt": "2026-11-27T10:42:00Z",
+    "shape": {
+      "tasks": {
+        "required": "complete",
+        "optional": []
+      }
+    }
+  }
+}

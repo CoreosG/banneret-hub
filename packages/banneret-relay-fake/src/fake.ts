@@ -17,6 +17,8 @@ import {
 
 import type { TeamPresenceEdit, TeamPresenceValues } from "@t3tools/contracts";
 import type {
+  RelayOwners,
+  RelayOwnershipFields,
   ChatAnswer,
   ChatAsk,
   AgentAskPolicy,
@@ -55,7 +57,7 @@ import type {
 import { createPool } from "./pool.ts";
 import { openAlarmStore, type Alarm } from "./alarms.ts";
 import { rawPublicKey, publicKeyFromBase64, verify } from "./signing.ts";
-import { loadSpec, type SchemaName } from "./spec.ts";
+import { loadSpec, offersOwnedTool, ownershipError, type SchemaName } from "./spec.ts";
 import { checkStagePlan, type StagePlan } from "./stage-plan.ts";
 
 /**
@@ -174,7 +176,7 @@ interface HealthSource {
   };
 }
 
-export interface FakeRelayOptions {
+export interface FakeRelayOptions extends RelayOwnershipFields {
   readonly skills?: ReadonlyArray<{
     name: string;
     description: string;
@@ -842,8 +844,23 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     options.publicOrigin === undefined ? undefined : parsePublicOrigin(options.publicOrigin);
   if (options.pool && spec.check("PoolConfig", options.pool))
     throw new Error("Invalid pool configuration.");
-  const chatConfig = typeof options.chat === "object" ? options.chat : undefined;
-  const defaultNames = chatConfig?.defaultChannels ?? (options.chat ? ["general"] : []);
+  const owners: RelayOwners = options.owners ?? {
+    tasks: { owner: "banneret", leases: "banneret" },
+    skills: { owner: "banneret" },
+    memory: { owner: "banneret" },
+    search: { owner: "banneret" },
+    chat: { owner: options.chat ? "banneret" : "off" },
+    health: { owner: options.healthSources?.length ? "banneret" : "off" },
+  };
+  const pluginSources = options.sources ?? [];
+  const invalid =
+    spec.check("CapabilityOwners", owners) ??
+    pluginSources.map((source) => spec.check("CapabilitySource", source)).find(Boolean) ??
+    ownershipError({ owners, sources: pluginSources });
+  if (invalid) throw new Error(invalid);
+  const chatEnabled = owners.chat.owner === "banneret";
+  const chatConfig = chatEnabled && typeof options.chat === "object" ? options.chat : undefined;
+  const defaultNames = chatConfig?.defaultChannels ?? (chatEnabled ? ["general"] : []);
   const duration = (value: string) => {
     const match = /^(\d+)(s|m|h|d)$/.exec(value);
     if (!match) throw new Error("Invalid chat duration: " + value);
@@ -855,6 +872,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const agentAsksEnabled = chatConfig?.agentAsks?.enabled === true;
   const handoffsEnabled = chatConfig?.handoffs?.enabled === true;
   const reviewsEnabled = agentAsksEnabled && chatConfig?.reviews?.enabled === true;
+  const chatToolFlags = new Map<string, boolean>([
+    ["banneret_agent_ask", agentAsksEnabled],
+    ["banneret_agent_answer", agentAsksEnabled],
+    ["banneret_handoff_offer", handoffsEnabled],
+  ]);
   const cfg = chatConfig?.agentAsks;
   const askLimits = {
     pairOpen: cfg?.pairOpen ?? 3,
@@ -3477,6 +3499,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         "Capabilities",
         {
           ...publicCapabilities(),
+          owners,
+          sources: pluginSources,
           ...(options.skills && { skills: { registry: true } }),
           me: {
             id: caller.person.id,
@@ -3488,7 +3512,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             ),
             machineId: caller.machine.id,
           },
-          ...(options.chat
+          ...(chatEnabled
             ? {
                 chat: {
                   ...(typeof options.chat === "object" &&
@@ -3513,7 +3537,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             ...(has(caller.person, "relay.admin")
               ? [{ id: "roles", kind: "roles", version: 1, flags: [] }]
               : []),
-            ...(options.chat
+            ...(chatEnabled
               ? [
                   {
                     id: "chat",
@@ -3583,28 +3607,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               stoppedKeptSeconds: 3600,
             },
           }),
-          // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
-          mcpTools: [
-            ...[
-              ...(agentAsksEnabled ? ["banneret_agent_ask", "banneret_agent_answer"] : []),
-              ...(handoffsEnabled ? ["banneret_handoff_offer"] : []),
-            ].map((name) => ({
-              name,
-              description: "Work in a shared chat thread.",
-              requires: "agents.ask",
-            })),
-            ...BANNERET_AGENT_TOOLS.filter(
-              (name) =>
-                (options.chat || !name.startsWith("banneret_chat_")) &&
-                ((options.pool?.enabled && has(caller.person, "hub.pool")) ||
-                  !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
-            ).map((name) => ({
-              name,
-              description: "A Banneret Hub agent tool.",
-              ...(name === "banneret_team" && { requires: "hub.team" }),
-              ...(BANNERET_POOL_TOOLS.some((tool) => tool === name) && { requires: "hub.pool" }),
-            })),
-          ],
+          mcpTools: BANNERET_AGENT_TOOLS.filter(
+            (name) =>
+              offersOwnedTool(owners, name) &&
+              chatToolFlags.get(name) !== false &&
+              ((options.pool?.enabled && has(caller.person, "hub.pool")) ||
+                !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
+          ).map((name) => ({
+            name,
+            description: chatToolFlags.has(name)
+              ? "Work in a shared chat thread."
+              : "A Banneret Hub agent tool.",
+            ...(chatToolFlags.has(name) && { requires: "agents.ask" }),
+            ...(name === "banneret_team" && { requires: "hub.team" }),
+            ...(BANNERET_POOL_TOOLS.some((tool) => tool === name) && { requires: "hub.pool" }),
+          })),
           adapters: [
             { role: "work_tracker", kind: "none" },
             { role: "staff_directory", kind: "none" },
@@ -3867,7 +3884,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         );
     }
 
-    if (options.chat && route.startsWith("/chat/")) {
+    if (route.startsWith("/chat/")) {
+      if (!chatEnabled) throw new RelayError("not_found", "Chat is disabled.");
       sweepWork();
       settleRequests();
       const { person } = caller;

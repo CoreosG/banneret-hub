@@ -27,6 +27,8 @@ const settings: {
   };
 } & Pick<
   FakeRelayOptions,
+  | "owners"
+  | "sources"
   | "officeFixture"
   | "pool"
   | "healthSources"
@@ -36,6 +38,8 @@ const settings: {
   | "alarmDatabase"
 > = values.config === undefined ? {} : JSON.parse(NodeFS.readFileSync(values.config, "utf8"));
 const relay = await startFakeRelay({
+  ...(settings.owners !== undefined && { owners: settings.owners }),
+  ...(settings.sources !== undefined && { sources: settings.sources }),
   ...(settings.officeFixture && { officeFixture: settings.officeFixture }),
   ...(settings.pool && { pool: settings.pool }),
   ...(settings.healthSources && { healthSources: settings.healthSources }),

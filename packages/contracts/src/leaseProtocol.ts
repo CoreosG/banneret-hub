@@ -27,7 +27,7 @@ export type LeaseSystemReason = (typeof LEASE_SYSTEM_REASONS)[number];
  * The agent tools the Hub serves over MCP (docs/banneret/agents.md). A relay enables each one by naming it in
  * its capabilities `mcpTools`; the Hub keeps its own description and schema.
  */
-const BANNERET_CHAT_TOOLS = [
+export const BANNERET_CHAT_TOOLS = [
   "banneret_chat_read",
   "banneret_chat_search",
   "banneret_chat_post",
