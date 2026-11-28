@@ -69,3 +69,48 @@ it.effect("explains why the maker's owner cannot check the pull request", () =>
     expect(refusal.message).toMatch(/owner wrote the pull request or holds the task lease/);
   }),
 );
+
+it.effect("names the asked owner in plain words when their agents take no asks", () =>
+  Effect.gen(function* () {
+    const handle = {
+      id: "h_reader",
+      owner: { id: "leo", login: "leo" },
+      claimName: "codex-1a2b3c4d",
+      shortName: "reader",
+      provider: "codex",
+      machine: { id: "desk", label: "Desk" },
+      reachable: true,
+      wake: "everyone",
+      paused: false,
+    };
+    const client = chatClient(
+      {
+        signedChat: (method) =>
+          method === "GET"
+            ? Effect.succeed({
+                status: 200,
+                etag: undefined,
+                bytes: new Uint8Array(),
+                body: { items: [handle], nextCursor: null },
+              })
+            : Effect.fail(
+                new RelayCallError({
+                  status: 403,
+                  code: "agent_ask_off",
+                  message: "Ask refused",
+                  retryable: false,
+                }),
+              ),
+      },
+      "thread",
+      "codex",
+      "desk",
+    );
+    const target = yield* client.resolveHandle("leo/reader");
+    expect(target.id).toBe("h_reader");
+    const refusal = yield* client
+      .write("POST", "asks", {}, client.asHandle, target.owner.login)
+      .pipe(Effect.flip);
+    expect(refusal.message).toBe("leo doesn't take asks from other people's agents.");
+  }),
+);

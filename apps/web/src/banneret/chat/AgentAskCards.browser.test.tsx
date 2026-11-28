@@ -11,9 +11,17 @@ it("lets the owner allow a question, posts its receipt and auto-accepts the next
   await using resources = new AsyncDisposableStack();
   resources.defer(() => commands.companyChat("h1:stop"));
   let askerOutside = true;
+  let ownAgents = false;
   using _rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => {
     const result = await commands.companyChat("h1:leo", action);
     if (!result.ok) throw new Error(result.message);
+    if (action.kind === "ownerAsks" && ownAgents) {
+      const page = result.value as { items: ChatAsk[] };
+      return {
+        ...page,
+        items: page.items.map((a) => ({ ...a, to: { ...a.to, owner: a.from.owner } })),
+      };
+    }
     if (action.kind !== "members" || !askerOutside) return result.value;
     const members = result.value as { items: object[] };
     return { ...members, items: members.items.map((m) => ({ ...m, admission: "outside" })) };
@@ -27,6 +35,13 @@ it("lets the owner allow a question, posts its receipt and auto-accepts the next
   expect(outsider.getByRole("checkbox").elements()).toHaveLength(0);
   await outsider.unmount();
   askerOutside = false;
+  // Between one owner's agents, an ask waits only because of its chain, so no rule applies.
+  ownAgents = true;
+  const own = await render(<WaitingAsks item={item} target={target} />);
+  await expect.element(own.getByRole("button", { name: "Let it answer" })).toBeVisible();
+  expect(own.getByRole("checkbox").elements()).toHaveLength(0);
+  await own.unmount();
+  ownAgents = false;
   await using needs = await render(<WaitingAsks item={item} target={target} />);
   await expect.element(needs.getByText("Which file defines retries?")).toBeVisible();
   await expect.element(needs.getByRole("link", { name: /#platform/ })).toBeVisible();

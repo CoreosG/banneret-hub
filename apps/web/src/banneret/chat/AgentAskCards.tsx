@@ -380,7 +380,11 @@ export function WaitingAsks({
             ask={ask}
             change={change}
             busy={busy}
-            canAlways={data.value!.insiders.has(ask.from.owner.id)}
+            // An ask between your own agents waits only because of its chain, so no rule applies.
+            canAlways={
+              data.value!.insiders.has(ask.from.owner.id) &&
+              !(ask.to.kind === "agent" && ask.to.owner.id === ask.from.owner.id)
+            }
           />
         </AskCard>
       ))}

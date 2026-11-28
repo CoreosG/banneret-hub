@@ -113,6 +113,7 @@ type ErrorCode =
   | "ask_closed"
   | "handoff_closed"
   | "handoff_open"
+  | "handoff_key_reused"
   | "role_permission_missing"
   | "chat_post_restricted"
   | "chat_not_member"
@@ -239,6 +240,8 @@ export interface FakeRelayOptions extends RelayOwnershipFields {
   readonly sseCommentMs?: number;
   /** The clock that ages the event log for the 24-hour resume bound. Tests move it to prove the reset. */
   readonly eventClock?: () => number;
+  /** The clock that ages finished hand-offs for the 30-day removal. Tests move it. */
+  readonly handoffClock?: () => number;
   /** Prints refused requests and invalid responses. */
   readonly log?: (line: string) => void;
 }
@@ -589,6 +592,7 @@ const STATUS: Record<ErrorCode, number> = {
   ask_closed: 409,
   handoff_closed: 409,
   handoff_open: 409,
+  handoff_key_reused: 409,
   role_permission_missing: 403,
   chat_post_restricted: 403,
   chat_not_member: 403,
@@ -619,6 +623,7 @@ const TEAM_SESSIONS_MAX = 300;
 const HEARTBEAT_SECONDS = 30;
 const EVENT_LOG_SIZE = 1000;
 const EVENT_RETENTION_MS = 24 * 60 * 60 * 1000;
+const HANDOFF_KEPT_MS = 30 * 24 * 60 * 60 * 1000;
 const TODAY_BLOCK_MAX = 20;
 const COUNTER_MAX = 9223372036854775807n;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -971,6 +976,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const events: RelayEvent[] = [];
   const streams = new Set<Stream>();
   const eventClock = options.eventClock ?? (() => Date.now());
+  const handoffClock = options.handoffClock ?? (() => Date.now());
   let nextEventId = 1;
   let nextNeedsSeq = 1;
   const repositories: RepositoryItem[] = [];
@@ -3102,25 +3108,39 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   }
   function settleHandoffs() {
     for (const h of handoffs.values()) {
-      if (h.state !== "offered" && h.state !== "accepted") continue;
+      if (h.state !== "offered" && h.state !== "accepted") {
+        if (handoffClock() - Date.parse(h.closedAt!) < HANDOFF_KEPT_MS) continue;
+        handoffs.delete(h.id);
+        stepSince.delete(h.id);
+        stalledNotified.delete(h.id);
+        for (const [key, id] of offerKeys) if (id === h.id) offerKeys.delete(key);
+        continue;
+      }
       const task = boardTasks.find((t) => t.id === h.taskId),
-        holder = task && leaseOf(task, Date.now())?.holder.id;
+        lease = task && leaseOf(task, Date.now()),
+        // An incomplete lease names someone who may have no claim, so it decides nothing.
+        incomplete = lease?.state === "incomplete",
+        holder = lease?.holder.id;
       const lostAccess = [h.from, h.to].some((p) => {
         const person = people.get(p.id);
         return !person || person.removed || !task || !taskAllowed(person, task);
       });
-      if (lostAccess || task?.closedAt != null || (h.state === "offered" && holder !== h.from.id))
+      if (
+        lostAccess ||
+        task?.closedAt != null ||
+        (h.state === "offered" && !incomplete && holder !== h.from.id)
+      )
         moveHandoff(h, { state: "void" }, "Hand-off void.");
       else if (h.state === "offered" && Date.parse(h.expiresAt) <= Date.now())
         moveHandoff(h, { state: "expired" }, "Hand-off expired.");
       else if (h.state === "accepted") {
-        if (holder && holder !== h.from.id)
+        if (!incomplete && holder && holder !== h.from.id)
           moveHandoff(
             h,
             { state: "closed", outcome: holder === h.to.id ? "done" : "lost" },
             "Hand-off closed.",
           );
-        else if (!holder && h.step !== "waiting_take") {
+        else if (!incomplete && !holder && h.step !== "waiting_take") {
           handoffs.set(h.id, { ...h, step: "waiting_take" });
           stepSince.set(h.id, Date.now());
           stalledNotified.delete(h.id);
@@ -3202,8 +3222,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       .filter(
         (d) =>
           !d.wakes &&
-          // An ask shows only as its agent_ask item.
-          d.reason !== "ask" &&
+          // A held ask counts once it is open. While it waits for approval it shows as agent_ask.
+          (d.reason !== "ask" || messages.get(d.messageId)?.ask?.state === "open") &&
           d.state === "pending" &&
           Date.parse(d.expiresAt) > Date.now() &&
           handles.get(d.handleId)?.view.owner.id === person.id &&
@@ -4081,7 +4101,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (a.kind === "review" && decision.allow === "draft")
               throw new RelayError("malformed", "Reviews return findings directly.");
             if (decision.allow === "always") {
-              if (outside(a.from.owner.id))
+              // The second case waits only because of its chain: a rule naming yourself is empty.
+              if (
+                outside(a.from.owner.id) ||
+                (a.from.owner.id === person.id && outside(a.onBehalfOf.id))
+              )
                 throw new RelayError(
                   "auto_accept_scope",
                   "An outside collaborator's ask needs your click each time.",
@@ -4206,8 +4230,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           };
           if (!has(person, "agents.ask")) fail("role_permission_missing");
           const key = JSON.stringify([person.id, input.asHandle, input.key]);
-          const prior = offerKeys.get(key);
-          if (prior) return send("Handoff", handoffs.get(prior));
+          const prior = handoffs.get(offerKeys.get(key) ?? "");
+          if (prior) {
+            if (prior.taskId !== input.taskId || prior.to.id !== input.to.id)
+              fail("handoff_key_reused");
+            return send("Handoff", prior);
+          }
           const task = boardTasks.find((t) => t.id === input.taskId);
           if (!task || !taskAllowed(person, task))
             throw new RelayError("not_found", "Unknown task.");
@@ -4271,6 +4299,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           if (!h) throw new RelayError("not_found", "Unknown hand-off.");
           if ((action === "withdraw" ? h.from : h.to).id !== person.id)
             throw new RelayError("forbidden", "This decision belongs to another owner.");
+          if (action === "withdraw" && h.state === "accepted") {
+            const task = boardTasks.find((t) => t.id === h.taskId);
+            if (task && leaseOf(task, Date.now())?.state === "incomplete")
+              throw new RelayError("unavailable", "The lease is incomplete. Try again later.");
+          }
           if (
             h.state !== "offered" &&
             !(action === "withdraw" && h.state === "accepted" && h.step === "waiting_release")
@@ -4558,7 +4591,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             owner: personRef(person),
             account: account(person),
           });
-        if (ask && (!to || to.removed))
+        // A person the owner cannot see answers like one who does not exist.
+        if (
+          ask &&
+          (!to || to.removed || (ask.to.kind === "person" && !peopleAllowed(person, to.id)))
+        )
           throw new RelayError("not_found", "Choose a current staff member.");
         if (ask && !ask.threadRootId && to) {
           if (
@@ -4687,6 +4724,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 Date.now() - Date.parse(r.ask.closedAt!) < askLimits.declineCooloffSeconds * 1000,
             );
           let auto = false;
+          let ownAsk = false;
           if (target) {
             if (
               !rights(c, people.get(origin.id)!).reply ||
@@ -4717,11 +4755,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               reject("agent_ask_no_home");
             if (paused.has(to.id) || companyPaused) reject("agent_ask_paused");
             const policy = policyFor(to.id);
-            if (policy.default === "off" && person.id !== to.id) reject("agent_ask_off");
+            const sameOwner = person.id === to.id;
+            // One owner's agents need no consent, except on a chain another outsider started.
+            ownAsk = sameOwner && (origin.id === to.id || !outside(origin.id));
+            if (policy.default === "off" && !ownAsk) reject("agent_ask_off");
             if (depth > askLimits.maxDepth) reject("agent_ask_depth");
             for (let a = parent; a; a = all.find((r) => r.ask.id === a?.parentAskId)?.ask)
               if (a.from.handle === target.id) reject("agent_ask_cycle");
-            const sameOwner = person.id === to.id;
             if (!sameOwner && pairCapped()) reject("agent_ask_capped");
             if (
               all.filter(
@@ -4827,7 +4867,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               Date.now() +
                 (ask.timeoutSeconds ?? (target ? askLimits.defaultTimeoutSeconds : 604800)) * 1000,
             ),
-            state: target && person.id !== to.id && !auto ? "waiting_owner" : "open",
+            state: target && !ownAsk && !auto ? "waiting_owner" : "open",
             ...(auto
               ? { reason: "auto_accepted", mode: "answer" as const, byRule: true as const }
               : {}),

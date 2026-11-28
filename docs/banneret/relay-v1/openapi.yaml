@@ -1199,6 +1199,9 @@ paths:
       tags:
       - chat
       operationId: discussTask
+      description: >-
+        Relay slice CR5, with the task thread's root and lease system replies. A relay without it does not
+        advertise task_links.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -1223,6 +1226,7 @@ paths:
       tags:
       - chat
       operationId: linkTask
+      description: Relay slice CR5, with task threads.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -1252,6 +1256,7 @@ paths:
       tags:
       - chat
       operationId: unlinkTask
+      description: Relay slice CR5, with task threads.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -1478,6 +1483,9 @@ paths:
       tags:
       - chat
       operationId: offerHandoff
+      description: >-
+        With no threadRootId, the relay looks up the task's linked thread itself (relay slice CR5). A reused
+        key with another task or receiver returns 409 handoff_key_reused.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -5631,7 +5639,11 @@ components:
                 chat_request_closed, chat_manage_restricted, chat_dm_restricted, chat_agent_capped, chat_post_restricted, chat_invite_restricted, chat_not_member.
                 Agent work codes: agent_ask_off, agent_ask_paused, agent_ask_capped, agent_ask_depth, agent_ask_cycle,
                 agent_ask_circle, agent_ask_declined_recently, agent_ask_no_home, auto_accept_scope, review_same_owner,
-                handoff_not_holder, handoff_cannot_take, ask_closed, handoff_closed, handoff_open.
+                handoff_not_holder, handoff_cannot_take, ask_closed, handoff_closed, handoff_open,
+                handoff_key_reused.
+                agent_ask_off is 403: the target owner turned asks off. It refuses another owner's ask, including an
+                outside collaborator's direct ask, and an ask between the owner's own agents on a chain another
+                outside collaborator started.
                 Outside token_revoked reasons: outside_grant_lost, outside_entry_removed, outside_2fa_off, outside_identity_mismatch.
                 A retryable unavailable response uses outside_check_pending.
                 Not a closed enum: a client treats an unknown code by its

@@ -1,3 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off - isolated git repositories and an SSH transport fixture.
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import {
   type Handoff,
   type BanneretTaskRead,
@@ -126,10 +131,10 @@ it.effect(
       expect(writes).toEqual([{ machineId: "desk", byRule: true }]);
       tracker.viewer = ME;
       const advance = { kind: "advanceHandoff", id: h.id } as const;
-      yield* receiver().act(device(OTHER), read, advance);
+      yield* receiver().act(device(OTHER), read, advance, false);
       expect(tracker.comments).toHaveLength(1);
-      yield* giver.act(device(ME), read, advance);
-      yield* giver.act(device(ME), read, advance);
+      yield* giver.act(device(ME), read, advance, false);
+      yield* giver.act(device(ME), read, advance, false);
       expect(tracker.comments.map((c) => c.body)).toEqual([
         expect.stringContaining("claim:"),
         expect.stringContaining("to @" + OTHER),
@@ -146,10 +151,89 @@ it.effect(
           }),
       };
       tracker.viewer = OTHER;
-      yield* receiver().act(receiving, read, advance);
-      yield* receiver().act(receiving, read, advance);
+      yield* receiver().act(receiving, read, advance, false);
+      yield* receiver().act(receiving, read, advance, false);
       expect(tracker.assignees).toEqual([OTHER]);
       expect(messages).toEqual(["Goal: Limit invites\nDone: Test\nNext: Review"]);
       expect(tracker.comments).toHaveLength(3);
     }),
+);
+
+/** A checkout whose branch is pushed to the task's repository, and its head. */
+function pushedCheckout(root: string) {
+  const git = (...args: string[]) =>
+    NodeChildProcess.execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  git("init", "--quiet", "-b", "work");
+  git("init", "--bare", "--quiet", "remote.git");
+  const author = ["-c", "user.name=A", "-c", "user.email=a@example.org"];
+  git(...author, "commit", "--quiet", "--allow-empty", "-m", "work");
+  const remoteUrl = "git@github.com:example-org/example-app.git";
+  git("remote", "add", "origin", remoteUrl);
+  git("config", "core.sshCommand", "git-upload-pack ./remote.git #");
+  git("push", "--quiet", "./remote.git", "work");
+  return { remoteUrl, head: git("rev-parse", "HEAD") };
+}
+
+it.effect("opens the task thread before an offer only on a relay with task threads", () =>
+  Effect.gen(function* () {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "handoff-offer-"));
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true })),
+    );
+    const { remoteUrl, head } = pushedCheckout(root);
+    const tracker = newTracker();
+    const give = yield* leases(tracker);
+    yield* give.take(ref);
+    // Only the checkout and its remote are read from a project here.
+    const shell = { workspaceRoot: root, repositoryIdentity: { locator: { remoteUrl } } };
+    const projects = { listShells: () => Effect.succeed([shell] as never) };
+    const giver = handoffsForMachine(give, projects, () => Effect.void);
+    const calls: string[] = [];
+    const relay = {
+      origin: ref.relayOrigin,
+      status: Effect.succeed<BanneretEnrolmentView>({ state: "none" } as BanneretEnrolmentView),
+      signedChat: (method: string, path: string) =>
+        Effect.sync(() => {
+          calls.push(method + " " + path);
+          return { status: 200, etag: undefined, bytes: new Uint8Array(), body: {} };
+        }),
+    };
+    const read = () =>
+      Effect.succeed<BanneretTaskRead>({
+        joined: true,
+        fetchedAt: null,
+        value: {
+          task: {
+            id: "t1",
+            title: "Invites",
+            openedAt: "today",
+            closedAt: null,
+            ref: { ...ref, url: "https://github.com/example-org/example-app/issues/7" },
+          },
+          kind: "issue",
+          column: "taken",
+          status: "planned",
+          statusWhy: "Open",
+          prs: [],
+          assignees: [],
+          restsOn: [],
+        },
+      });
+    const offer = {
+      kind: "offerHandoff",
+      offer: {
+        taskId: "t1",
+        to: { id: OTHER, login: OTHER },
+        note: { goal: "Limit invites", done: "Test", next: "Review" },
+        branch: "work",
+        headSha: head,
+        key: "offer",
+      },
+    } as const;
+    expect(yield* giver.act(relay, read, offer, false)).toMatchObject({ ok: true });
+    expect(calls).toEqual(["POST handoffs"]);
+    calls.length = 0;
+    expect(yield* giver.act(relay, read, offer, true)).toMatchObject({ ok: true });
+    expect(calls).toEqual(["PUT tasks/t1/thread", "POST handoffs"]);
+  }),
 );

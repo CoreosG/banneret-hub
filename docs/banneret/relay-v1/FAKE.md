@@ -42,7 +42,8 @@ change, and on every read of the head, so a head it serves is always current and
 a file checks the caller's own retained heads (their last 16, plus any replaced less than 10 minutes ago), so
 shared storage never grants access. `eventClock` replaces the clock that ages
 the event log, so a test can prove the 24-hour `Last-Event-ID` bound and its `reset` event without waiting a
-day.
+day. `handoffClock` replaces the clock that ages finished hand-offs, so a test can show their removal after 30
+days.
 
 ## Run the conformance suite
 
@@ -64,8 +65,10 @@ For the shared machine cases, set the config key `pool` to the contents of `exam
 Host pairings always wait for founder confirmation, including on an auto-approving fake.
 
 That relay must run with the network identity check off, and it must expose the control surface below.
-Three tests run only against the fake, because they need a fresh store or a different configuration: the
-empty-store start, the network identity check and the 24-hour event retention bound.
+Some tests run only against the fake. These need their own store, clock or switches: the empty-store start,
+the network identity check, the 24-hour event retention bound, the Team scale fixtures, the 30-day hand-off
+removal and the asks and hand-off switches. The tests named "pending relay slice" wait for CR5 (task threads) or CR6 (agent reads:
+owner-DM reads, search, promotion).
 
 ## Control surface (tests only)
 

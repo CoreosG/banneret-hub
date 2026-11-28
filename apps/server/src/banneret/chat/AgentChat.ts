@@ -32,6 +32,8 @@ export function chatClient(
     method: Parameters<RelayEnrolment["signedChat"]>[0],
     path: string,
     body?: unknown,
+    /** The owner of the agent being asked, to name in a refusal. */
+    askedOwner?: string,
   ) =>
     relay.signedChat(method, path, body).pipe(
       Effect.map((r) => r.body),
@@ -39,9 +41,11 @@ export function chatClient(
         invalid(
           e.code === "agent_ask_no_home"
             ? "Ask your owner to add you both to a channel."
-            : e.code === "review_same_owner"
-              ? "Choose another person’s reviewer. This agent’s owner wrote the pull request or holds the task lease."
-              : e.message,
+            : e.code === "agent_ask_off" && askedOwner
+              ? askedOwner + " doesn't take asks from other people's agents."
+              : e.code === "review_same_owner"
+                ? "Choose another person’s reviewer. This agent’s owner wrote the pull request or holds the task lease."
+                : e.message,
         ),
       ),
     );
@@ -113,7 +117,7 @@ export function chatClient(
         const handle = page.items.find(
           (h) => h.id === to || h.owner.login + "/" + (h.shortName ?? h.claimName) === to,
         );
-        if (handle) return handle.id;
+        if (handle) return handle;
         cursor = page.nextCursor;
       } while (cursor);
       return yield* invalid("Unknown agent. Ask your owner to add you both to a channel.");
@@ -127,8 +131,14 @@ export function chatClient(
     read,
     root,
     asHandle,
-    write: (method: "PUT" | "POST", path: string, body: object, handle = asHandle) =>
-      request(method, path, { ...body, asHandle: handle }).pipe(
+    write: (
+      method: "PUT" | "POST",
+      path: string,
+      body: object,
+      handle = asHandle,
+      askedOwner?: string,
+    ) =>
+      request(method, path, { ...body, asHandle: handle }, askedOwner).pipe(
         Effect.flatMap((value) =>
           decodeId(value).pipe(
             Effect.mapError(() => invalid("The relay returned no id for this message.")),

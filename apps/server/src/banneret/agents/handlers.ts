@@ -477,14 +477,20 @@ const make = Effect.gen(function* () {
           (yield* runReceipt(threads, run, client.asHandle).pipe(
             Effect.mapError(() => invalid("Cannot read this turn's usage.")),
           ));
-        const result = yield* client.write("POST", "asks", {
-          ...ask,
-          kind: ask.pr ? "review" : "question",
-          to: { kind: "agent", handle: target },
-          threadRootId: thread,
-          parentAskId,
-          receipt,
-        });
+        const result = yield* client.write(
+          "POST",
+          "asks",
+          {
+            ...ask,
+            kind: ask.pr ? "review" : "question",
+            to: { kind: "agent", handle: target.id },
+            threadRootId: thread,
+            parentAskId,
+            receipt,
+          },
+          client.asHandle,
+          target.owner.login,
+        );
         return { askId: result.id };
       }),
     ),
@@ -563,7 +569,7 @@ const make = Effect.gen(function* () {
           .listShells()
           .pipe(Effect.mapError(() => invalid("Cannot read projects.")));
         yield* verifyPushedWork(roots, ref, offer.branch, offer.headSha);
-        if (!offer.threadRootId) {
+        if (!offer.threadRootId && (yield* feedState(relay))?.chatFlags?.includes("task_links")) {
           const linked = yield* feed.chat(relay.relayOrigin, { kind: "discuss", id: offer.taskId });
           if (!linked.ok) return yield* invalid(linked.message);
         }
