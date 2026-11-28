@@ -479,8 +479,8 @@ describe("company sources in a thread", () => {
         const t = yield* hub({ threadId, url: company.url });
         const refused = yield* t.rpc("initialize");
         expect(refused.status).toBe(200);
-        expect(refused.json.error?.message).toContain("Acme gateway needs you to sign in");
-        expect((yield* t.rpc("tools/list")).text).toContain("needs you to sign in");
+        expect(refused.json.error?.message).toContain("Acme gateway needs a sign-in");
+        expect((yield* t.rpc("tools/list")).text).toContain("needs a sign-in");
         expect(company.state.calls).toHaveLength(1);
       }),
     );
@@ -498,7 +498,7 @@ describe("company sources in a thread", () => {
           // The entry stays, so signing in later does not change the thread's MCP set.
           expect(Object.keys((yield* t.issue)?.pluginClaude ?? {})).toEqual(["co-acme-gw"]);
           for (const method of ["initialize", "tools/list"])
-            expect((yield* t.rpc(method)).json.error?.message).toContain("needs you to sign in");
+            expect((yield* t.rpc(method)).json.error?.message).toContain("needs a sign-in");
           expect(company.state.calls).toEqual([]);
         }),
       );

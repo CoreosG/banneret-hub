@@ -47,9 +47,9 @@ export function transition(from: SourceState, event: SourceEvent): SourceState {
 /** The plain message a thread gets while a source cannot be used; undefined while it can. */
 export const sourceNotice = (title: string, state: SourceState) =>
   state.state === "sign_in_needed"
-    ? `${title} needs you to sign in, and this Hub version cannot sign you in yet. Tell your person.`
+    ? `${title} needs a sign-in, and this Hub version cannot do that yet. Tell your person.`
     : state.state === "failed"
-      ? `${title} is unavailable in this chat (${state.reason}). The Hub tries again next turn. Tell your person, and do not use another tool in its place.`
+      ? `${title} is unavailable in this chat (${state.reason}). A new chat tries again. Tell your person, and do not use another tool in its place.`
       : undefined;
 
 export interface SourceSlot {

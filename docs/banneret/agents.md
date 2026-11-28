@@ -89,8 +89,7 @@ is never in the middle, and the thread's own Hub token is never sent on. Shared 
 - **Banneret's own switches do not apply.** The Banneret memory switch does not hide a company's memory, and the
   Hub adds no local skills to a company's skills.
 - **Sign-in is not built yet.** The Hub can connect only to sources whose `auth.kind` is `none`. For `oauth` and
-  `bearer_per_person` the server is listed, the Hub does not contact it, and its calls say that you need to sign
-  in.
+  `bearer_per_person` the server is listed, the Hub does not contact it, and its calls say that a sign-in is needed.
 - **When a server joins a thread.** The list of servers is set when the thread's agent session starts. A source
   the relay adds reaches the next new session. A source that stops owning anything, or a tool that stops being
   offered, is gone on the next call.
@@ -113,7 +112,8 @@ The Hub keeps one state for each thread and source, in memory only.
 | Any                     | The Hub restarts                                            | None                     |
 
 In Sign-in needed and Failed, the Hub does not contact the server again in that turn. It answers with a message
-the agent can pass on to you. It never falls back to a Banneret tool.
+the agent can pass on to you. It never falls back to a Banneret tool. Claude and Codex list tools when their
+session starts, so after a failed start, use a new chat to try again.
 
 ### Solo workspaces
 
