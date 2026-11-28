@@ -477,14 +477,20 @@ const make = Effect.gen(function* () {
           (yield* runReceipt(threads, run, client.asHandle).pipe(
             Effect.mapError(() => invalid("Cannot read this turn's usage.")),
           ));
-        const result = yield* client.write("POST", "asks", {
-          ...ask,
-          kind: ask.pr ? "review" : "question",
-          to: { kind: "agent", handle: target },
-          threadRootId: thread,
-          parentAskId,
-          receipt,
-        });
+        const result = yield* client.write(
+          "POST",
+          "asks",
+          {
+            ...ask,
+            kind: ask.pr ? "review" : "question",
+            to: { kind: "agent", handle: target.id },
+            threadRootId: thread,
+            parentAskId,
+            receipt,
+          },
+          client.asHandle,
+          target.owner.login,
+        );
         return { askId: result.id };
       }),
     ),

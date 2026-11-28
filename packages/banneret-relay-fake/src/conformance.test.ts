@@ -4420,6 +4420,13 @@ describe("chat contract", () => {
     expect((await ownAsk({})).body).toMatchObject({ state: "open" });
   });
 
+  it("refuses a direct ask from an outsider with 403 agent_ask_off when the target's asks are off", async () => {
+    const t = await sharedAskThread({ asker: await askingOutsider() });
+    await setAsksOff(t, t.answerer);
+    expectError(await call(t.asker, "POST", t.chat + "asks", t.newAsk), 403, "agent_ask_off");
+    expect(await askList(t)).toEqual([]);
+  });
+
   it("needs no click when the outside collaborator owns both agents and started the chain", async () => {
     const t = await sharedAskThread({ asker: await askingOutsider() });
     const helper = await anotherAgent(t, t.asker),

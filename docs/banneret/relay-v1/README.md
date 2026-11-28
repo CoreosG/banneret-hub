@@ -1243,7 +1243,7 @@ A new ask names either `{kind: person, person: id}` or `{kind: agent, handle: id
 | Stored state | Event | New state and effect |
 |---|---|---|
 | New | Same owner, and the chain was started by that owner or by a member | Open and deliver an ask. No consent is needed. |
-| New | Same owner, and the chain was started by an outside collaborator who is not that owner | Waiting_owner, as in the owner approval row. No rule opens it. With the owner's asks off, refuse with `agent_ask_off`. |
+| New | Same owner, and the chain was started by an outside collaborator who is not that owner | Waiting_owner, as in the owner approval row. No rule opens it. With the owner's asks off, refuse with 403 `agent_ask_off`. |
 | New | Matching auto rule of another owner, and neither the asker nor the chain's origin is an outside collaborator | Open with `byRule: true` and reason `auto_accepted`, and deliver an ask. Record the rule decision in the thread. |
 | New | Owner approval required | Waiting_owner. Emit a Needs change and a machine delivery. Keep the delivery inbox-only. |
 | Waiting_owner | Owner allows once, always or draft | Open. Deliver to the answerer. Save an always rule in the same commit. |
@@ -1286,7 +1286,7 @@ An ask read from the inbox runs like a woken ask. The reading turn gets none of 
 
 No auto rule accepts an ask when the asker, or the person the chain started from (`onBehalfOf`), is an outside collaborator. Only the answering owner's click opens it, also between one owner's agents on such a chain. The one exception is an outside collaborator who owns both agents and started the chain: a click would only ask the same person, so the ask opens at once. `allow: "always"` on an ask from an outside collaborator returns 403 `auto_accept_scope`. So does `allow: "always"` on a same-owner ask that waits because of its chain: a rule naming yourself would change nothing. The ask stays waiting and no rule is saved. A client offers no "Always allow" for these asks. On a later hop between two owners, where a member's agent asks, "always" still saves a rule for that member, and no rule ever opens an outside collaborator's chain. A configured usage threshold falls back to owner approval when below-threshold usage cannot be established. Each handle exposes its owner's `agentsPaused` as `paused`. A relay administrator can set company wake pause with `PUT /chat/agents/pause`.
 
-Asks between one owner's agents skip the two directed-pair limits on every chain. They also skip consent and the owner's `off` setting, except on a chain that another outside collaborator started. There the ask needs the owner's click, and `off` refuses it with `agent_ask_off`, like a direct ask from an outsider. A pause and every other limit apply to them.
+Asks between one owner's agents skip the two directed-pair limits on every chain. They also skip consent and the owner's `off` setting, except on a chain that another outside collaborator started. There the ask needs the owner's click, and `off` refuses it with 403 `agent_ask_off`, like a direct ask from an outsider. A pause and every other limit apply to them.
 
 | Limit | Default | Refusal |
 |---|---|---|
@@ -1301,6 +1301,8 @@ Asks between one owner's agents skip the two directed-pair limits on every chain
 | Same question to the declined owner's agents | Wait 1 hour | agent_ask_declined_recently |
 | Missing common home | Required | agent_ask_no_home |
 | Off or paused target | Refuse | agent_ask_off or agent_ask_paused |
+
+A target owner who turned asks off gets 403 `agent_ask_off` for an ask from another owner's agent, including an outside collaborator's direct ask. The same code refuses an ask between that owner's own agents on a chain another outside collaborator started. A Hub says `<owner> doesn't take asks from other people's agents.`
 
 An `ask_result` and an answer add nothing to the hop cap or the pair limit. Read these counts from stored rows. Existing thread hop and posting limits still apply. The signed capabilities response publishes `chat.rate.agentAsks` and `chat.rate.handoffs`. Derive class 2 `agent_ask` by asking owner and count across waiting and draft rows. Each waiting review gives one `review_request` with its ask ID.
 
