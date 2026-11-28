@@ -26,6 +26,7 @@ import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import * as KnownWorkspaces from "./KnownWorkspaces.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
+import type { WorkspaceWriteGuard } from "./WorkspaceFiles.ts";
 import { fileHeaderMimeType } from "./fileHeaderMimeType.ts";
 import { toHostDrivePath } from "./hostDrivePath.ts";
 
@@ -132,17 +133,7 @@ export class WorkspaceFileSystem extends Context.Service<
       | WorkspacePaths.WorkspacePathOutsideRootError
       | KnownWorkspaces.UnknownWorkspaceError
     >;
-    /** Banneret Hub: the write guard alone, for file-explorer operations. */
-    readonly resolveWritablePath: (input: {
-      readonly cwd: string;
-      readonly relativePath: string;
-    }) => Effect.Effect<
-      { readonly relativePath: string; readonly realTargetPath: string },
-      | WorkspaceFileSystemError
-      | WorkspacePaths.WorkspacePathOutsideRootError
-      | KnownWorkspaces.UnknownWorkspaceError
-    >;
-  }
+  } & WorkspaceWriteGuard
 >()("t3/workspace/WorkspaceFileSystem") {}
 
 const UTF8_BOM = "\uFEFF";

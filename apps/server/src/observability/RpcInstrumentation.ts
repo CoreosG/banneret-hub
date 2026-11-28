@@ -1,5 +1,5 @@
 import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@t3tools/contracts";
-import { BANNERET_RELAY_RPC_AGGREGATES } from "@t3tools/contracts";
+import { rpcAggregates } from "../banneret/rpcAggregates.ts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -198,18 +198,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectsSearchContents]: "workspace",
   [WS_METHODS.projectsSearchEntries]: "workspace",
   [WS_METHODS.projectsWriteFile]: "workspace",
-  // Banneret Hub file explorer operations.
-  "workspaceFiles.move": "workspace",
-  "workspaceFiles.delete": "workspace",
-  "workspaceFiles.makeDirectory": "workspace",
-  "workspaceFiles.createUploadUrl": "workspace",
-  "workspaceFiles.createDownloadUrl": "workspace",
-  "banneretPorts.list": "preview",
-  "banneretWorkspaces.list": "orchestration",
-  "banneretWorkspaces.put": "orchestration",
-  ...BANNERET_RELAY_RPC_AGGREGATES,
-  "banneretPause.status": "orchestration",
-  "banneretPause.change": "orchestration",
+  ...rpcAggregates,
   [WS_METHODS.projectsEnsureScratch]: "orchestration",
   [WS_METHODS.projectsCreateNew]: "orchestration",
   [WS_METHODS.projectsCreateFromThread]: "orchestration",

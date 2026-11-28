@@ -52,17 +52,26 @@ function itemPathFromEvent(event: DragEvent<HTMLElement>): string | null {
 const dropDirectoryOf = (itemPath: string | null) =>
   itemPath === null ? "" : itemPath.endsWith("/") ? stripSlash(itemPath) : parentOf(itemPath);
 
-export function useWorkspaceFileOperations(options: {
-  readonly environmentId: EnvironmentId;
-  readonly cwd: string;
-  readonly enabled: boolean;
-  readonly knownPaths: { has(path: string): boolean };
-  readonly reload: (directories: readonly string[]) => Promise<void>;
-  readonly tree: () => TreeHandle;
+export function useWorkspaceFileOperations({
+  environmentId,
+  cwd,
+  hostFolder,
+  entryKinds,
+  load,
+  tree,
+}: {
+  environmentId: EnvironmentId;
+  cwd: string;
+  hostFolder: boolean;
+  entryKinds: { has(path: string): boolean };
+  load: (directory: string, refresh: boolean) => Promise<void>;
+  tree: () => TreeHandle;
 }) {
-  const { environmentId, cwd } = options;
-  const canWrite = useEnvironmentScope(environmentId, AuthFilesystemWriteScope) && options.enabled;
-  const canRead = useEnvironmentScope(environmentId, AuthFilesystemReadScope) && options.enabled;
+  const reload = async (directories: readonly string[]) => {
+    await Promise.all([...new Set(directories)].map((directory) => load(directory, true)));
+  };
+  const canWrite = useEnvironmentScope(environmentId, AuthFilesystemWriteScope) && !hostFolder;
+  const canRead = useEnvironmentScope(environmentId, AuthFilesystemReadScope) && !hostFolder;
   const [dropDirectory, setDropDirectory] = useState<string | null>(null);
   // Where the conflict menu opens: the drop point, or the cursor (undefined) for menu uploads.
   const dropPointRef = useRef<{ x: number; y: number } | undefined>(undefined);
@@ -142,7 +151,7 @@ export function useWorkspaceFileOperations(options: {
       reportError("Upload failed", error);
     }
     // The catch above swallows every error, so this runs after success and failure alike.
-    await options.reload([targetDirectory]);
+    await reload([targetDirectory]);
   };
 
   const pickAndUpload = (targetDirectory: string) => {
@@ -171,16 +180,16 @@ export function useWorkspaceFileOperations(options: {
 
   const newFolder = async (parent: string) => {
     let name = "New folder";
-    for (let index = 2; options.knownPaths.has(joinWorkspacePath(parent, name)); index++) {
+    for (let index = 2; entryKinds.has(joinWorkspacePath(parent, name)); index++) {
       name = `$New folder ${index}`;
     }
     const relativePath = joinWorkspacePath(parent, name);
     try {
       await runWorkspaceFilesCommand("makeDirectory", environmentId, { cwd, relativePath });
-      const parentItem = parent ? options.tree().getItem(`${parent}/`) : null;
+      const parentItem = parent ? tree().getItem(`${parent}/`) : null;
       if (parentItem && "expand" in parentItem) parentItem.expand();
       pendingRenameRef.current = `${relativePath}/`;
-      await options.reload([parent]);
+      await reload([parent]);
     } catch (error) {
       reportError("Could not create the folder", error);
     }
@@ -200,7 +209,7 @@ export function useWorkspaceFileOperations(options: {
     } catch (error) {
       reportError(`Could not delete ${baseName(relativePath)}`, error);
     }
-    await options.reload([parentOf(relativePath)]);
+    await reload([parentOf(relativePath)]);
   };
 
   return {
@@ -226,9 +235,9 @@ export function useWorkspaceFileOperations(options: {
     /** Starts the inline rename a new folder asked for, once its row exists. */
     flushPendingRename: useStableCallback(() => {
       const path = pendingRenameRef.current;
-      if (path === null || !options.tree().getItem(path)) return;
+      if (path === null || !tree().getItem(path)) return;
       pendingRenameRef.current = null;
-      requestAnimationFrame(() => options.tree().startRenaming(path));
+      requestAnimationFrame(() => tree().startRenaming(path));
     }),
 
     dragAndDrop: {
@@ -243,7 +252,7 @@ export function useWorkspaceFileOperations(options: {
             if (parentOf(source) === target) continue;
             await move(source, joinWorkspacePath(target, baseName(source)));
           }
-          await options.reload([target, ...sources.map(parentOf)]);
+          await reload([target, ...sources.map(parentOf)]);
         })();
       },
       onDropError: (message: string) =>
@@ -256,7 +265,7 @@ export function useWorkspaceFileOperations(options: {
         treeResetRef.current = true;
         const from = stripSlash(event.sourcePath);
         const to = stripSlash(event.destinationPath);
-        void move(from, to).then(() => options.reload([parentOf(from), parentOf(to)]));
+        void move(from, to).then(() => reload([parentOf(from), parentOf(to)]));
       },
       onError: (message: string) =>
         toastManager.add({ type: "error", title: "Could not rename", description: message }),
@@ -299,7 +308,7 @@ export function useWorkspaceFileOperations(options: {
           pickAndUpload(folder);
           return true;
         case "banneret:rename":
-          options.tree().startRenaming(treePath);
+          tree().startRenaming(treePath);
           return true;
         case "banneret:download":
           void downloadEntry({ environmentId, cwd, relativePath, isDirectory }).catch((error) =>

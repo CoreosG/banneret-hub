@@ -1,5 +1,7 @@
 // Banneret Hub: "Switch workspace…", "New workspace…", "Show/Hide tabs bar" and, while a company is
 // shown, "Search the company…" in the command palette.
+import type { ScopedThreadRef } from "@t3tools/contracts";
+import { useCommandPaletteShowPortsItem } from "../components/ports/showPortsCommand";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { changePause, usePause } from "./Pause";
 import { PauseIcon, LayersIcon, PanelTopIcon, PlusIcon, SearchIcon } from "lucide-react";
@@ -36,9 +38,10 @@ function paletteGone(): Promise<void> {
   });
 }
 
-export function useCommandPaletteWorkspaceItems(): Array<
-  CommandPaletteActionItem | CommandPaletteSubmenuItem
-> {
+export function useBanneretPaletteItems(
+  panelRef: ScopedThreadRef | null,
+): Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> {
+  const showPorts = useCommandPaletteShowPortsItem({ panelRef });
   const machine = usePrimaryEnvironmentId();
   const pause = usePause((s) => machine && s[machine]?.status);
   const workspaces = useWorkspaces();
@@ -68,6 +71,7 @@ export function useCommandPaletteWorkspaceItems(): Array<
       ]
     : [];
   return [
+    ...(showPorts ? [showPorts] : []),
     ...search,
     ...(machine && pause
       ? [

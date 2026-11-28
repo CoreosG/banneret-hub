@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// Banneret Hub: counts the lines we changed in upstream T3 Code files, against the upstream tag in
-// scripts/banneret/UPSTREAM_TAG. New behaviour belongs in new files; upstream files get only
-// one-line hooks, so this number should stay small. Fails when it grows past the baseline.
-//   node scripts/banneret/hook-budget.mjs            # check
-//   node scripts/banneret/hook-budget.mjs --update   # accept the current totals as the baseline
-// Needs the upstream tag fetched into refs/upstream-tags/ (see docs/banneret/maintaining.md).
+// Measures changes to upstream-owned files against the pinned upstream tag.
+// --update records the measured totals. --summary [previous-release-tag] prints the release delta.
+// Fetch the pinned tags into refs/upstream-tags/ first (docs/banneret/maintaining.md).
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -26,11 +23,7 @@ const repoRoot = NodePath.resolve(
   "../..",
 );
 const baselinePath = NodePath.join(repoRoot, "scripts/banneret/hook-budget.json");
-const tag = NodeFS.readFileSync(
-  NodePath.join(repoRoot, "scripts/banneret/UPSTREAM_TAG"),
-  "utf8",
-).trim();
-const upstreamRef = `refs/upstream-tags/${tag}`;
+const maxLines = 900;
 
 const git = (args) =>
   NodeChildProcess.execFileSync("git", args, {
@@ -39,39 +32,68 @@ const git = (args) =>
     maxBuffer: 256 * 1024 * 1024,
   });
 
-try {
-  git(["rev-parse", "--verify", "--quiet", `${upstreamRef}^{tree}`]);
-} catch {
-  console.error(`Missing ${upstreamRef}. Fetch it first:`);
-  console.error(
-    `  git fetch --no-tags https://github.com/pingdotgg/t3code.git '+refs/tags/${tag}:${upstreamRef}'`,
+function measure(revision, tag) {
+  const upstreamRef = `refs/upstream-tags/${tag}`;
+  try {
+    git(["rev-parse", "--verify", "--quiet", `${upstreamRef}^{tree}`]);
+  } catch {
+    console.error(`Missing ${upstreamRef}. Fetch it first:`);
+    console.error(
+      `  git fetch --no-tags https://github.com/pingdotgg/t3code.git '+refs/tags/${tag}:${upstreamRef}'`,
+    );
+    process.exit(1);
+  }
+
+  const upstreamFiles = new Set(
+    git(["ls-tree", "-r", "-z", "--name-only", upstreamRef]).split("\0").filter(Boolean),
   );
+
+  // -z numstat: "<added>\t<deleted>\t<path>\0"; binary files report "-" for both counts.
+  const rows = git(["diff", "--numstat", "-z", "--no-renames", upstreamRef, revision])
+    .split("\0")
+    .filter(Boolean)
+    .map((entry) => {
+      const [added, deleted, ...rest] = entry.split("\t");
+      return {
+        file: rest.join("\t"),
+        added: added === "-" ? null : Number(added),
+        deleted: deleted === "-" ? null : Number(deleted),
+      };
+    })
+    .filter(({ file }) => upstreamFiles.has(file) && !excluded.some((regex) => regex.test(file)))
+    .sort((a, b) => a.file.localeCompare(b.file));
+
+  return {
+    rows,
+    totals: {
+      files: rows.length,
+      lines: rows.reduce((sum, row) => sum + (row.added ?? 0) + (row.deleted ?? 0), 0),
+    },
+  };
+}
+const tagAt = (revision) => git(["show", `${revision}:scripts/banneret/UPSTREAM_TAG`]).trim();
+const tag = tagAt("HEAD");
+const { rows, totals } = measure("HEAD", tag);
+
+if (totals.lines > maxLines) {
+  console.error(`Hook budget ceiling exceeded: ${totals.lines} lines (maximum ${maxLines}).`);
   process.exit(1);
 }
 
-const upstreamFiles = new Set(
-  git(["ls-tree", "-r", "-z", "--name-only", upstreamRef]).split("\0").filter(Boolean),
-);
-
-// -z numstat: "<added>\t<deleted>\t<path>\0"; binary files report "-" for both counts.
-const rows = git(["diff", "--numstat", "-z", "--no-renames", upstreamRef, "HEAD"])
-  .split("\0")
-  .filter(Boolean)
-  .map((entry) => {
-    const [added, deleted, ...rest] = entry.split("\t");
-    return {
-      file: rest.join("\t"),
-      added: added === "-" ? null : Number(added),
-      deleted: deleted === "-" ? null : Number(deleted),
+if (process.argv[2] === "--summary") {
+  const previous = process.argv[3];
+  let summary = `Upstream patch: ${totals.files} files / ${totals.lines} lines`;
+  if (previous) {
+    const before = measure(previous, tagAt(previous)).totals;
+    const change = (unit) => {
+      const delta = totals[unit] - before[unit];
+      return `${delta > 0 ? "+" : ""}${delta} ${Math.abs(delta) === 1 ? unit.slice(0, -1) : unit}`;
     };
-  })
-  .filter(({ file }) => upstreamFiles.has(file) && !excluded.some((regex) => regex.test(file)))
-  .sort((a, b) => a.file.localeCompare(b.file));
-
-const totals = {
-  files: rows.length,
-  lines: rows.reduce((sum, row) => sum + (row.added ?? 0) + (row.deleted ?? 0), 0),
-};
+    summary += ` (${change("files")} / ${change("lines")} since ${previous})`;
+  }
+  console.log(summary);
+  process.exit(0);
+}
 
 const show = (count) => (count === null ? "bin" : String(count));
 const width = Math.max(4, ...rows.map((row) => row.file.length));

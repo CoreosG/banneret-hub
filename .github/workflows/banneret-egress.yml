@@ -13,6 +13,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Check upstream patch budget
+        run: |
+          tag="$(cat scripts/banneret/UPSTREAM_TAG)"
+          git fetch --no-tags --depth=1 https://github.com/pingdotgg/t3code.git "+refs/tags/$tag:refs/upstream-tags/$tag"
+          node scripts/banneret/hook-budget.mjs
       - uses: ./.github/actions/setup-ci-deps
         with:
           save-pnpm-store: "false"
