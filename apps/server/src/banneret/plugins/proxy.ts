@@ -1,5 +1,6 @@
-import { answeringAsk } from "../chat/AnswerTurn.ts";
 // @effect-diagnostics globalFetch:off - Streamable HTTP responses pass through as Web streams with redirects disabled.
+import { activeRun, answeringAsk } from "../chat/AnswerTurn.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -63,10 +64,7 @@ const proxy = Effect.gen(function* () {
     const thread = invocation.thread.threadId;
     const key = pluginSource(plugin.manifest.source);
     const isAnswering = Effect.gen(function* () {
-      const store = yield* ProjectionStore.ProjectionStoreV2;
-      const active = (yield* store.getThreadShell(thread))?.activeRunId;
-      const run =
-        active && (yield* store.getThreadRecords(thread, ["runs"], { runIds: [active] })).runs[0];
+      const run = yield* activeRun(yield* ThreadManagementService, thread);
       return !!run && !!answeringAsk(run.userMessageId);
     });
     const level = () => levelFor(thread, key);
@@ -165,8 +163,9 @@ const proxy = Effect.gen(function* () {
 
 export const pluginRoute = HttpRouter.add("*", "/banneret/plugins/:source", proxy).pipe(
   HttpRouter.provideRequest(
-    Layer.merge(
+    Layer.mergeAll(
       Layer.effect(ProjectionStore.ProjectionStoreV2, ProjectionStore.ProjectionStoreV2),
+      Layer.effect(ThreadManagementService, ThreadManagementService),
       Layer.effect(PreviewAgentActivity, PreviewAgentActivity),
     ),
   ),
