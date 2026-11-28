@@ -492,6 +492,121 @@ describe("BanneretEnrolment", () => {
     ),
   );
 
+  it.live("refreshes a saved string-role identity after restart without rejoining", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const base = yield* makeBaseDir;
+        const joined = yield* join(fake, relay).pipe(Effect.provide(hubLayer(base)));
+        const fs = yield* FileSystem.FileSystem;
+        const file =
+          base + "/userdata/banneret/relays/" + Enrolment.relayHash(relay.origin) + ".json";
+        const saved = JSON.parse(yield* fs.readFileString(file));
+        yield* fs.writeFileString(
+          file,
+          JSON.stringify({
+            ...saved,
+            me: { login: joined.me!.login, id: joined.me!.id, role: "founder" },
+          }),
+        );
+        relay.requests.length = 0;
+        const refreshed = yield* waitFor(
+          status,
+          (view) => view.me?.role.name === joined.me!.role.name,
+        ).pipe(Effect.provide(hubLayer(base)));
+        expect(refreshed.machineId).toBe(joined.machineId);
+        expect(refreshed.label).toBe(joined.label);
+        expect(relay.requests.some((r) => r.url === "/relay/v1/facts" && r.status === 200)).toBe(
+          true,
+        );
+        expect(JSON.parse(yield* fs.readFileString(file)).me).toEqual(joined.me);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
+  it.live("keeps the canonical re-join when a 1301 sibling names the same relay", () =>
+    withFake((fake, relay) =>
+      Effect.gen(function* () {
+        const base = yield* makeBaseDir;
+        const fs = yield* FileSystem.FileSystem;
+        const dir = base + "/userdata/banneret/relays";
+        const sibling = Enrolment.relayHash(relay.origin + "/") + ".json";
+        const stale = JSON.stringify({
+          state: "configured",
+          relayOrigin: relay.origin,
+          label: "Old machine",
+          machineId: "old-machine",
+          displayName: "Example Company",
+          kind: "laptop",
+          me: { id: "old-account", login: "old-login", role: "founder" },
+        });
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(dir + "/" + sibling, stale);
+        const joined = yield* join(fake, relay).pipe(Effect.provide(hubLayer(base)));
+        const logs: Array<Logger.Options<unknown>> = [];
+        relay.requests.length = 0;
+        yield* Effect.gen(function* () {
+          const service = yield* Enrolment.BanneretEnrolment;
+          yield* waitFor(status, (view) => view.health === "healthy");
+          expect(yield* service.list).toEqual([
+            expect.objectContaining({
+              machineId: joined.machineId,
+              label: joined.label,
+              me: joined.me,
+            }),
+          ]);
+          expect(yield* service.unreadableWorkspaces).toEqual([]);
+          expect(
+            relay.requests.some(
+              (r) =>
+                r.url === "/relay/v1/facts" && r.headers["x-banneret-device"] === joined.machineId,
+            ),
+          ).toBe(true);
+        }).pipe(
+          Effect.provide(
+            hubLayer(base).pipe(
+              Layer.provideMerge(
+                Logger.layer([Logger.make((entry) => logs.push(entry))], {
+                  mergeWithExisting: false,
+                }),
+              ),
+            ),
+          ),
+        );
+        expect(yield* fs.readFileString(dir + "/" + sibling)).toBe(stale);
+        const warning = logs
+          .map((entry) => Logger.formatLogFmt.log(entry))
+          .find((line) => line.includes("duplicate saved company join"));
+        expect(warning).toContain(sibling);
+        expect(warning).toContain(Enrolment.relayHash(relay.origin) + ".json");
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
+  it.live("reports an unreadable saved join and preserves it during recovery", () =>
+    withFake((_fake, relay) =>
+      Effect.gen(function* () {
+        const base = yield* makeBaseDir;
+        const fs = yield* FileSystem.FileSystem;
+        const dir = base + "/userdata/banneret/relays";
+        const hash = Enrolment.relayHash(relay.origin);
+        const file = dir + "/" + hash + ".json";
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(file, "{broken");
+        yield* Effect.gen(function* () {
+          const service = yield* Enrolment.BanneretEnrolment;
+          expect(yield* service.unreadableWorkspaces).toEqual(["ent-" + hash]);
+          expect(yield* fs.readFileString(file)).toBe("{broken");
+          yield* start(relay.origin);
+          expect(yield* service.unreadableWorkspaces).toEqual([]);
+          const backup = (yield* fs.readDirectory(dir)).find((name) =>
+            name.startsWith(hash + ".json.unreadable-"),
+          );
+          expect(yield* fs.readFileString(dir + "/" + backup)).toBe("{broken");
+        }).pipe(Effect.provide(hubLayer(base)));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    ),
+  );
+
   it.live("resumes polling after a restart mid-request", () =>
     withFake((fake, relay) =>
       Effect.gen(function* () {

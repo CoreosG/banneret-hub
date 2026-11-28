@@ -143,6 +143,7 @@ export const BanneretEnrolmentView = Schema.Struct({
   /** The same in plain words. */
   message: Schema.optional(Schema.String),
   me: Schema.optional(RelayMe),
+  staleLogin: Schema.optional(Schema.String),
   replacedLabel: Schema.optional(Schema.String),
   health: Schema.optional(BanneretRelayHealth),
   lastOkAt: Schema.optional(Schema.String),
@@ -162,6 +163,7 @@ export type BanneretEnrolmentMachine = typeof BanneretEnrolmentMachine.Type;
 /** Every relay this environment has joined, is joining, or last tried. */
 export const BanneretEnrolmentList = Schema.Struct({
   enrolments: Schema.Array(BanneretEnrolmentView),
+  unreadableWorkspaces: Schema.optional(Schema.Array(Schema.String)),
   machine: BanneretEnrolmentMachine,
 });
 export type BanneretEnrolmentList = typeof BanneretEnrolmentList.Type;

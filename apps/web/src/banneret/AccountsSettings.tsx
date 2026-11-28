@@ -1,3 +1,4 @@
+import { staleIdentityLine } from "./enterprise.logic";
 import { WorkspaceRoles } from "./chat/Roles";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
@@ -61,8 +62,12 @@ function MachineAccounts({
             <div key={view.relayOrigin} className="mt-2">
               <p>
                 {view.displayName ?? view.relayOrigin} · Relay:{" "}
-                {view.me ? `${view.me.login} · ${view.me.role.name}` : "Not available"} · Machine:{" "}
-                {view.label ?? "Not available"}
+                {view.me
+                  ? `${view.me.login} · ${view.me.role.name}`
+                  : view.staleLogin === undefined
+                    ? "Not available"
+                    : staleIdentityLine(view.staleLogin)}{" "}
+                · Machine: {view.label ?? "Not available"}
               </p>
               <p className={match === false ? "text-warning" : "text-muted-foreground"}>
                 {match === null

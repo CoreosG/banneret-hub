@@ -36,6 +36,7 @@ import {
 import type { Project } from "../types";
 import { WorkspaceNoThreads } from "./WorkspaceNoThreads";
 import { WorkspacesHost } from "./WorkspacesHost";
+import { useEnrolmentStore } from "./enrolmentStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { workspaceProjectKey } from "./workspaces.logic";
 import { loadEnvironmentWorkspaces, useWorkspacesStore, workspacesRpc } from "./workspacesStore";
@@ -155,6 +156,21 @@ const clientWork = (projectKeys: string[]): BanneretWorkspace => ({
 });
 
 describe("WorkspaceSwitcher", () => {
+  it("opens the join wizard for an unreadable saved join with no workspace", async () => {
+    using stack = new DisposableStack();
+    await prepareScreen(stack);
+    setup();
+    useEnrolmentStore.setState({ unreadable: { [LOCAL]: ["ent-unreadable"] } });
+    stack.defer(() => useEnrolmentStore.setState({ unreadable: {} }));
+    const router = createThreadRouter();
+    await using _screen = await render(<RouterProvider router={router} />, { router: false });
+    await userEvent.click(page.getByRole("button", { name: "Switch workspace" }));
+    await userEvent.click(
+      page.getByRole("menuitem", { name: /This company's saved join could not be read · Re-join/ }),
+    );
+    expect(useWorkspacesStore.getState().dialog).toEqual({ kind: "enterprise" });
+  });
+
   it("scopes the sidebar to a new workspace, switches back, and follows an opened thread", async () => {
     using stack = new DisposableStack();
     await prepareScreen(stack);
