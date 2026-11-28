@@ -35,6 +35,13 @@ import { TaskPanel } from "./TaskPanel";
 import { taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
 import { singleBoard } from "./boards.testkit";
+import { keepBrowserStorage } from "./test/browserStorage";
+import {
+  expectClickable,
+  expectNoPageScroll,
+  expectUnclipped,
+  forEachViewport,
+} from "./test/viewports";
 
 vi.mock(import("~/environments/primary/target"), async (original) => ({
   ...(await original()),
@@ -954,5 +961,157 @@ describe("Machines", () => {
     await expect.element(button("Take on desk")).toBeVisible();
     expect(rpc.check).toHaveBeenCalledTimes(1);
     expect(rpc.take).not.toHaveBeenCalled();
+  });
+});
+
+describe("A company's own tracker", () => {
+  const TITLE = "Acme Jira";
+  const external = card({
+    task: {
+      id: "t_2",
+      title: "Guild invites",
+      ref: {
+        tracker: "acme_jira",
+        scope: "PLAT",
+        key: "PLAT-2",
+        url: "https://jira.example.test/browse/PLAT-2",
+      },
+      openedAt: "2026-11-20T09:00:00.000Z",
+      closedAt: null,
+    },
+  });
+  /** For the layout: a card whose words agree with a held task. */
+  const heldCard: BanneretBoardCard = {
+    ...external,
+    status: "built",
+    statusWhy: "Someone holds it at the company's tracker.",
+  };
+  /** The relay's board for external tasks: no Banneret leases, and a source that owns the claims. */
+  const companyFeed = (
+    owner: { title?: string; leases?: "unsupported" } = {},
+    shown = external,
+  ): BanneretFeedState => ({
+    ...feed([shown], false),
+    elsewhere: {
+      tasks: { owner: "external", source: "acme-jira", title: TITLE, prefix: "", ...owner },
+    },
+  });
+  const sourceStatus = (extra: Partial<TaskLeaseStatus> = {}) =>
+    leaseStatus({ viewer: null, ...extra });
+  const held = (holder: string) =>
+    sourceStatus({
+      lease: { holder, state: "active", since: null, claimants: [holder] },
+      actions: { ...NO_ACTIONS, release: true },
+    });
+
+  it("takes and releases at the source, with no hand-off and no GitHub wording", async () => {
+    const { emit, rpc } = setup({ issues: false });
+    rpc.check.mockResolvedValue(ok(sourceStatus()));
+    const take = deferred<TaskLeaseResult>();
+    rpc.take.mockReturnValue(take.promise);
+    rpc.release.mockResolvedValue(result("released", sourceStatus()));
+    await using _task = await openTask(external);
+    await emit(companyFeed());
+
+    await expect
+      .element(page.getByTestId("lease-source"))
+      .toHaveTextContent("Take and release use your sign-in to Acme Jira on desk.");
+    await expect
+      .element(page.getByTestId("owner-from-source"))
+      .toHaveTextContent("Nobody holds it, says Acme Jira");
+    await userEvent.click(button("Take on desk"));
+    // The press is the whole question: no machine or hand-off dialog.
+    expect(document.querySelector('[data-testid="lease-confirm-dialog"]')).toBeNull();
+    expect(rpc.take).toHaveBeenCalledWith(
+      RELAY,
+      expect.objectContaining({ taskId: "t_2" }),
+      "desk",
+      undefined,
+    );
+    await expect
+      .element(page.getByTestId("lease-progress"))
+      .toHaveTextContent("Waiting for Acme Jira…");
+    expect(document.querySelector('[data-slot="read-back-bar"]')).toBeNull();
+
+    await act(() => take.resolve(result("taken", held("alice-at-jira"))));
+    await expect
+      .element(page.getByTestId("owner-from-source"))
+      .toHaveTextContent("alice-at-jira, says Acme Jira");
+    await expect.element(button("Hand off…")).not.toBeInTheDocument();
+    await expect.element(page.getByText("Open on Acme Jira")).toBeVisible();
+
+    await userEvent.click(button("Release…"));
+    await userEvent.click(page.getByRole("radio", { name: "Done" }));
+    await userEvent.click(button("Release"));
+    expect(rpc.release).toHaveBeenCalledWith(
+      RELAY,
+      expect.objectContaining({ taskId: "t_2", reason: "done" }),
+    );
+    await expect.element(page.getByText("Released.")).toBeVisible();
+  });
+
+  it("shows the source's refusal and a silent source by name", async () => {
+    const { emit, rpc } = setup({ issues: false });
+    rpc.check.mockResolvedValue(ok(sourceStatus()));
+    rpc.take.mockResolvedValue({
+      ok: false,
+      message: "Acme Jira did not answer. Your claim may have gone through. Try again.",
+    });
+    await using _task = await openTask(external);
+    await emit(companyFeed());
+    await userEvent.click(button("Take on desk"));
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent("Acme Jira did not answer. Your claim may have gone through. Try again.");
+  });
+
+  it("offers nothing, and says why, when the relay does not leave claims to the source", async () => {
+    const { emit, rpc } = setup({ issues: false });
+    await using _task = await openTask(external);
+    await emit(companyFeed({ leases: "unsupported" }));
+    await expect
+      .element(page.getByTestId("lease-source-off"))
+      .toHaveTextContent(
+        "Acme Jira owns tasks, but the relay does not leave claims to it, so take and release are off.",
+      );
+    await expect.element(button("Take on desk")).not.toBeInTheDocument();
+    expect(rpc.check).not.toHaveBeenCalled();
+  });
+
+  forEachViewport("company tracker take and release", async (at) => {
+    using _storage = keepBrowserStorage();
+    const { emit, rpc } = setup({ issues: false });
+    const title = "Acme Corporation Engineering Programme Tracker for Platform";
+    rpc.check.mockResolvedValue(ok(held("alexandria-platform-engineering-rotation")));
+    rpc.release.mockResolvedValue({
+      ok: false,
+      message: `${title} says you do not hold this task. An earlier try may have released it.`,
+    });
+    const style = document.createElement("style");
+    style.textContent = appCss;
+    document.head.append(style);
+    try {
+      await using screen = await render(
+        <div style={{ height: "100vh" }}>
+          <TaskPanel surface={taskSurface(RELAY, external.task)} threadRef={null} />
+          <ReleaseDialogHost />
+        </div>,
+      );
+      await emit(companyFeed({ title }, heldCard));
+      await expect.element(screen.getByTestId("lease-source")).toBeVisible();
+      await userEvent.click(button("Release…"));
+      await userEvent.click(page.getByRole("radio", { name: "Done" }));
+      await userEvent.click(button("Release"));
+      await expect.element(page.getByTestId("release-dialog").getByRole("alert")).toBeVisible();
+      await userEvent.click(button("Cancel"));
+      await expect.element(page.getByTestId("release-dialog")).not.toBeInTheDocument();
+      expectClickable(button("Release…").element(), "Release");
+      for (const id of ["lease-source", "owner-from-source", "lease-notice"])
+        expectUnclipped(page.getByTestId(id).element(), id, "x");
+      expectNoPageScroll();
+      await at.screenshot();
+    } finally {
+      style.remove();
+    }
   });
 });

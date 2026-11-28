@@ -28,6 +28,8 @@ import { threadWorkspace } from "./workspace.ts";
 import { pluginsForThread } from "./session.ts";
 import { isPersonTool, offeredToThread } from "../sources/filters.ts";
 import { applyCredential, sourceAccess } from "../sources/tokens.ts";
+import { followClaim } from "../sources/taskLink.ts";
+import { ThreadIssueService } from "../../orchestration-v2/ThreadIssueService.ts";
 
 const isApprovalError = Schema.is(McpSchema.InvalidParams);
 const error = (message: string) => new McpSchema.InvalidParams({ message });
@@ -129,6 +131,7 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
       const threads = yield* ThreadManagementService;
       const activity = yield* PreviewAgentActivity;
       const server = yield* mcp;
+      const threadIssues = yield* Effect.serviceOption(ThreadIssueService);
       const path = yield* Path.Path;
       const dir = path.dirname(yield* workspacesFilePath);
       yield* (yield* FileSystem.FileSystem).makeDirectory(dir, { recursive: true });
@@ -244,7 +247,25 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
             catch: () => error("The plugin did not return a tool result."),
           });
           if (response.error) return resultError(String(response.error.message));
-          return yield* decodeToolResult(response.result);
+          const called = yield* decodeToolResult(response.result);
+          const missed = plugin.company
+            ? yield* followClaim({
+                threadId: thread,
+                relayOrigin: plugin.relayOrigin,
+                source: plugin.company,
+                tool: row.name,
+                args,
+                result: response.result,
+                issues: threadIssues,
+                threads,
+              })
+            : undefined;
+          return missed
+            ? new McpSchema.CallToolResult({
+                ...called,
+                content: [...called.content, { type: "text", text: missed }],
+              })
+            : called;
         },
         Effect.provideContext(services),
         Effect.match({

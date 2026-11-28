@@ -64,6 +64,11 @@ export const ElsewhereOwner = Schema.Union([
     title: Schema.String,
     /** The source's tool prefix, empty when it has none. */
     prefix: Schema.String,
+    /**
+     * Tasks only: the relay did not say the source's own claims count (`leases: provider`), so the Hub
+     * offers no Take or Release.
+     */
+    leases: Schema.optionalKey(Schema.Literal("unsupported")),
   }),
   Schema.Struct({ owner: Schema.Literal("off") }),
 ]);
@@ -115,6 +120,9 @@ export function elsewhereOwners(capabilities: unknown): ElsewhereOwners | null {
       source: id,
       title: oneLine(source?.title, 80) || id,
       prefix: /^[a-z0-9_]{1,31}_$/.test(prefix) ? prefix : "",
+      ...(capability === "tasks" && entry.leases !== "provider"
+        ? { leases: "unsupported" as const }
+        : {}),
     };
   }
   return result;

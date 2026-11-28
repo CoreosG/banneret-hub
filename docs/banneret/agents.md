@@ -39,7 +39,7 @@ only offers what Banneret owns. See
 
 | Owned elsewhere | What goes from the Hub                                                                                                              | What the person sees                                                                        |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `tasks`         | Board, task and lease tools, task prompts, hand-off offers, Take and Release. With `off`, the board too.                            | "Tasks: owned by Acme Jira." beside the Board                                               |
+| `tasks`         | Board, task and lease tools, task prompts, hand-offs, Banneret's own Take and Release. With `off`, the board too.                   | "Tasks: owned by Acme Jira." beside the Board                                               |
 | `skills`        | Skill tools, `skill://` resources, and Banneret's default and company skills                                                        | A note under Settings, Chat                                                                 |
 | `memory`        | Memory tools, skill proposals (each is stored as a note), the memory index, rule reminders, correction nudges and the weekly review | "Memory is managed by Acme." in the memory strip. Your notes stay readable on your machine. |
 | `chat`          | Chat tools, channels, DMs and agent deliveries                                                                                      | "Chat: owned by Acme Slack." where the channels were                                        |
@@ -220,6 +220,68 @@ A waiting `oauth` sign-in is kept in memory only.
 | Finishing | The company gives a token                        | None, and Signed in                   |
 | Finishing | The company refuses, or does not answer          | None, with the reason                 |
 | Any       | Sign out, 10 minutes, or the Hub restarts        | None                                  |
+
+### Take and Release against a company's tracker
+
+When a company source owns tasks (`leases: provider`), **Take** and **Release** on the Task tab call that
+server's `tasks_claim` and `tasks_release`. The source's claim is the record. Banneret writes no claim comment,
+assignee or label, and its lease clocks do not apply.
+
+- **Your own sign-in, from this machine.** The call uses the sign-in of the machine you read the board on. The
+  relay is not in the middle. **Tool access** levels and call approvals are for agents. Your own button press
+  needs neither.
+- **Only a task the source shows you.** Before every write the Hub reads the task with your sign-in and
+  compares its reference with the board's. If the source does not show it to you, nothing is written. The Hub
+  tries the board's task id first, then looks through your boards at the source.
+- **The source says who holds it.** The tracker contract cannot say which account is yours. So **Release**
+  shows whenever someone holds the task, and the source refuses it if the holder is not you.
+- **Take only claims.** It starts no hand-off to an orchestrator chat. Hand-offs, Finish and Withdraw are for
+  Banneret's leases only.
+- **Other relays.** If a relay names a company source for tasks without `leases: provider`, the Hub offers no
+  Take or Release and says why.
+- **For now,** Take and Release are on the Task tab only, not in a Board card's menu.
+
+Each write carries an `idempotencyKey`. A server that does not know it ignores it, and the contract already
+lets the holder claim again. The Hub keeps this state for each task, in memory only.
+
+| State   | Event                                                         | Next state                                               |
+| ------- | ------------------------------------------------------------- | -------------------------------------------------------- |
+| Idle    | Take or Release                                               | Sending, with a new key                                  |
+| Sending | Another Take or Release of the same task                      | Sending. The second one is refused as busy               |
+| Sending | The server cannot be reached or read before the write         | As before. Nothing was written                           |
+| Sending | The server answers the write, or refuses that call            | Idle                                                     |
+| Sending | No answer in 15 seconds, or an answer that cannot be read     | Sends once more, with the same key                       |
+| Sending | The second try gets no definite answer                        | Unsure. The message says the write may have gone through |
+| Sending | Any other failure on the first try, such as a refused sign-in | Idle                                                     |
+| Unsure  | The same change again, within 10 minutes                      | Sending, with the same key                               |
+| Unsure  | A different change, or the same one after 10 minutes          | Sending, with a new key                                  |
+| Any     | The Hub restarts                                              | Idle. A repeated claim by the holder still succeeds      |
+
+After a write the Hub reads the task again and shows the source's answer.
+
+#### Which chat is on which task
+
+When an agent in a thread claims a task at the company's server, the Hub links the thread to it, so the Board
+and Team show the work. Only the answer to the server's own `tasks_claim` and `tasks_release` tools counts.
+Nothing written in the chat links a task. Both tools always count as writes, whatever the server says about
+them, so they need **Read + write** and your approval.
+
+The link is the thread's ordinary linked issue, so it survives a restart and you can remove it. The Hub reads
+the task with your sign-in before it links, and takes the title and address from that answer. Links you made
+yourself are never changed. A "claim link" below is a link an agent made to a task on the same tracker.
+
+| Thread state | Event                                       | Next state                         |
+| ------------ | ------------------------------------------- | ---------------------------------- |
+| Unlinked     | `tasks_claim` answers `claimed`             | Linked to that task                |
+| Linked to A  | `tasks_claim` for A answers `claimed`       | Linked to A                        |
+| Linked to A  | `tasks_claim` for B answers `claimed`       | Linked to B. The link to A is gone |
+| Linked to A  | `tasks_release` for A answers `released`    | Unlinked                           |
+| Linked to A  | `tasks_release` for B answers `released`    | Linked to A                        |
+| Any          | `conflict`, `not_holder`, an error, or text | Unchanged                          |
+| Any          | The Hub restarts                            | Unchanged                          |
+
+If the Hub cannot follow an answer, it adds one line to the tool's result that says why. A tracker name with
+`_` is saved with `-` in the link. Releasing with your own button changes no thread's link.
 
 ### Solo workspaces
 

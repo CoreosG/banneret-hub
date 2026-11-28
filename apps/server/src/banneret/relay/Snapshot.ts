@@ -631,6 +631,9 @@ export const boardTaskIndex = (boards: BanneretBoards): ReadonlyArray<BoardTaskE
 const same = (left: string, right: string) =>
   left.trim().toLowerCase() === right.trim().toLowerCase();
 
+/** A thread's issue link takes `-` where a relay's tracker name has `_`. */
+export const linkTracker = (tracker: string) => tracker.replaceAll("_", "-");
+
 /**
  * The board task id of the first linked issue that is on the board, compared as upstream's
  * `threadIssueKeyOf` does. A card without a host matches on tracker, scope and key.
@@ -642,7 +645,7 @@ export function taskIdForLinks(
   for (const link of links) {
     const match = index.find(
       (entry) =>
-        entry.tracker === link.tracker &&
+        linkTracker(entry.tracker) === link.tracker &&
         (entry.host === undefined || same(entry.host, link.host)) &&
         same(entry.scope, link.scope) &&
         entry.key.trim() === link.key.trim(),

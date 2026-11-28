@@ -1,7 +1,13 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { leaseRoute, machineAgent, routeProblem, type LeaseRouteInput } from "./leaseRoute.logic";
+import {
+  leaseRoute,
+  machineAgent,
+  routeProblem,
+  sourceRoute,
+  type LeaseRouteInput,
+} from "./leaseRoute.logic";
 
 const DESK = EnvironmentId.make("desk");
 const SERVER = EnvironmentId.make("server");
@@ -81,5 +87,38 @@ describe("leaseRoute", () => {
     expect(chosen({ preferred: [SERVER], heldOn: DESK })).toBe(DESK);
     // A remembered machine that no longer qualifies is skipped.
     expect(chosen({ preferred: [EnvironmentId.make("gone")] })).toBe(DESK);
+  });
+});
+
+describe("sourceRoute", () => {
+  const environmentId = EnvironmentId.make("desk");
+  const input = {
+    page: { environmentId, relayOrigin: "https://relay.example.com" },
+    taskId: "t_9",
+    taskRef: { tracker: "acme_jira", scope: "", key: "PLAT-9", url: "https://jira.example.test/9" },
+    source: "Acme Jira",
+  };
+
+  it("runs on the page's own machine and names the task by the relay's id", () => {
+    const route = sourceRoute({
+      ...input,
+      environments: [{ environmentId, label: "Desktop", issues: false, enrolments: [] }],
+    });
+    expect(route).toMatchObject({
+      kind: "ready",
+      source: "Acme Jira",
+      held: false,
+      chosen: {
+        environmentId,
+        label: "Desktop",
+        // Well formed for the call, though the tracker's name and the empty scope are not.
+        ref: { tracker: "external", scope: "-", key: "PLAT-9", taskId: "t_9" },
+      },
+    });
+    expect(route.kind === "ready" && route.machines).toHaveLength(1);
+  });
+
+  it("waits for the page's machine to answer", () => {
+    expect(sourceRoute({ ...input, environments: [] })).toEqual({ kind: "loading" });
   });
 });

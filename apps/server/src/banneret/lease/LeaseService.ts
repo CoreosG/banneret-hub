@@ -49,6 +49,7 @@ import * as Schema from "effect/Schema";
 import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
 import { offeredTools } from "../agents/AgentRelays.ts";
 import * as Orchestrator from "../Orchestrator.ts";
+import * as ProviderLeases from "../sources/providerLeases.ts";
 import * as LeaseTracker from "./LeaseTracker.ts";
 import * as BanneretEnrolment from "../relay/Enrolment.ts";
 import * as CommentEdits from "./CommentEdits.ts";
@@ -974,11 +975,17 @@ export const rpcHandlers = {
   [TASK_LEASE_WS_METHODS.check]: Effect.fn("LeaseService.rpc.check")(function* (
     input: TaskLeaseRef,
   ) {
-    return yield* (yield* LeaseService).check(input);
+    const owner = yield* ProviderLeases.externalTasks(input.relayOrigin);
+    return owner
+      ? yield* ProviderLeases.check(input, owner)
+      : yield* (yield* LeaseService).check(input);
   }),
   [TASK_LEASE_WS_METHODS.take]: Effect.fn("LeaseService.rpc.take")(function* (
     input: TaskLeaseTakeInput,
   ) {
+    const owner = yield* ProviderLeases.externalTasks(input.relayOrigin);
+    // A company's claim only claims: no hand-off to an orchestrator chat follows it.
+    if (owner) return yield* ProviderLeases.take(input, owner);
     const { handoff, ...result } = yield* (yield* LeaseService).take(input);
     if (!handoff) return result;
     return yield* Orchestrator.sendTask(input, handoff).pipe(
@@ -998,17 +1005,26 @@ export const rpcHandlers = {
   [TASK_LEASE_WS_METHODS.release]: Effect.fn("LeaseService.rpc.release")(function* (
     input: TaskLeaseReleaseInput,
   ) {
-    return yield* (yield* LeaseService).release(input);
+    const owner = yield* ProviderLeases.externalTasks(input.relayOrigin);
+    return owner
+      ? yield* ProviderLeases.release(input, owner)
+      : yield* (yield* LeaseService).release(input);
   }),
   [TASK_LEASE_WS_METHODS.finish]: Effect.fn("LeaseService.rpc.finish")(function* (
     input: TaskLeaseRef,
   ) {
-    return yield* (yield* LeaseService).finish(input);
+    const owner = yield* ProviderLeases.externalTasks(input.relayOrigin);
+    return owner
+      ? yield* ProviderLeases.noRepair(owner)
+      : yield* (yield* LeaseService).finish(input);
   }),
   [TASK_LEASE_WS_METHODS.withdraw]: Effect.fn("LeaseService.rpc.withdraw")(function* (
     input: TaskLeaseRef,
   ) {
-    return yield* (yield* LeaseService).withdraw(input);
+    const owner = yield* ProviderLeases.externalTasks(input.relayOrigin);
+    return owner
+      ? yield* ProviderLeases.noRepair(owner)
+      : yield* (yield* LeaseService).withdraw(input);
   }),
 };
 

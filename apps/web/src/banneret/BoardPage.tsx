@@ -233,7 +233,9 @@ function BoardCard(props: {
           </Link>
         </p>
       )}
-      {props.review ? <ClaimReviewActions target={props.target} card={card} /> : null}
+      {props.review && props.leases ? (
+        <ClaimReviewActions target={props.target} card={card} />
+      ) : null}
     </li>
   );
 }
