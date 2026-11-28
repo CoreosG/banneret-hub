@@ -14,6 +14,23 @@ Banneret Hub is upstream T3 Code plus a thin layer of our own commits. Keep that
 
 - **Mobile-compatible.** CI runs the stock client from upstream v0.1.13 against the built Hub server. It pairs, opens a company project thread, sends a message and answers a provider request. Run `bash scripts/banneret/mobile/check.sh` when changing these paths. Update the pinned client only when changing the supported mobile release.
 
+## Layout tests
+
+A browser test whose assertions depend on layout runs across the viewport matrix: 900×700,
+1920×1080, 2560×1080, 3440×1440 and 3840×2160 at scale 1, and 3840×2160 at scale 2. A narrow window
+or an ultrawide one breaks layouts that look right at one desktop size.
+
+- Declare it with `forEachViewport` from `apps/web/src/banneret/test/viewports.ts`. That call is the
+  layout tag: it names each case `[layout] … at <size>`, so `-t "\[layout\]"` runs only those.
+  Every other browser test runs once, at its own size.
+- Mount at the size the matrix set. A shared harness must not resize the window for a layout test.
+- Use the helper's assertions for overlap, clipping, clickability, line length and centring.
+- Each size captures one screenshot to `.vitest-viewports/<test>/<size>.png` at the repository root.
+  CI uploads that folder as the `layout-screenshots` artifact. A PR that changes layout shows the
+  per-size screenshots. Look at them: the assertions do not catch everything.
+- Capture once or twice per case. A 4K capture at scale 2 takes seconds, and the case has the usual
+  test timeout.
+
 ## Identity
 
 |                               | Value                                                                                                                             |
