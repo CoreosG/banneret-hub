@@ -15,13 +15,15 @@ import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import stylesheet from "~/index.css?inline";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { getRouter } from "~/router";
-import {
-  ENVIRONMENT_ID,
-  installFakeEnvironment,
-  threadWithHistory,
-  type FakeDriver,
-} from "../../test/fakeEnvironment";
+import { ENVIRONMENT_ID, type FakeDriver } from "../../test/fakeEnvironment";
 import { act, render } from "../../test/render";
+
+// App imports start primary discovery, so its HTTP fixture must already be installed.
+const { thread, environment } = await vi.hoisted(async () => {
+  const { installFakeEnvironment, threadWithHistory } = await import("../../test/fakeEnvironment");
+  const thread = threadWithHistory("thread-column", 6);
+  return { thread, environment: installFakeEnvironment([thread]) };
+});
 
 vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
   const [actual, { fakeDriver }, Layer] = await Promise.all([
@@ -74,9 +76,8 @@ it("keeps the chat column and the composer in one centred lane", async () => {
   style.textContent = stylesheet;
   document.head.append(style);
   using _style = { [Symbol.dispose]: () => style.remove() };
-  const thread = threadWithHistory("thread-column", 6);
   const ref = scopeThreadRef(ENVIRONMENT_ID, thread.id);
-  using _environment = installFakeEnvironment([thread]);
+  using _environment = environment;
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",

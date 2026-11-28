@@ -6,6 +6,11 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { render } from "../../../test/render";
 import { RightPanelTabs, type RightPanelTabsProps } from "../RightPanelTabs";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 const state = vi.hoisted(() => ({ forwards: [] as ReadonlyArray<{ remotePort: number }> }));
 vi.mock("~/state/portForwards", async (original) => ({
   ...(await original<typeof import("~/state/portForwards")>()),
