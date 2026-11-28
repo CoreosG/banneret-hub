@@ -1629,7 +1629,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           action.kind === "advanceHandoff" ||
           action.kind === "withdrawHandoff"
           ? handoffs && chatFlags.includes("handoffs")
-            ? handoffs.act(enrolment, readTask, action)
+            ? handoffs.act(enrolment, readTask, action, chatFlags.includes("task_links"))
             : Effect.succeed(chatUnavailable)
           : action.kind === "threadChat"
             ? agents && chatFlags.includes("agents")

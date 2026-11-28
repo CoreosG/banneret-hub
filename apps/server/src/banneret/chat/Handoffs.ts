@@ -174,6 +174,7 @@ export function handoffsForMachine(
     relay: RelayEnrolment,
     read: ReadTask,
     action: Action,
+    taskLinks: boolean,
   ): Effect.Effect<ChannelResult> =>
     lock
       .withPermits(1)(
@@ -185,7 +186,9 @@ export function handoffsForMachine(
               return yield* invalid("You must hold this task to offer it.");
             yield* handoffNote(o.note);
             yield* verifyPushedWork(yield* projects.listShells(), ref, o.branch, o.headSha);
-            if (!o.threadRootId) yield* relay.signedChat("PUT", "tasks/" + o.taskId + "/thread");
+            // The relay finds the task's thread itself. A relay without task threads has no such call.
+            if (taskLinks && !o.threadRootId)
+              yield* relay.signedChat("PUT", "tasks/" + o.taskId + "/thread");
             return (yield* relay.signedChat("POST", "handoffs", o)).body;
           }
           const h = (yield* list(relay)).find((row) => row.id === action.id);

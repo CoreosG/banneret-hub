@@ -66,6 +66,22 @@ afterAll(async () => {
   await fake?.close();
 });
 
+/** Runs one case against its own fake, for switches and clocks the shared relay does not have. */
+async function onOwnFake(
+  options: NonNullable<Parameters<typeof startFakeRelay>[0]>,
+  run: () => Promise<void>,
+) {
+  const own = await startFakeRelay({ autoApprove: false, retryAfterMs: 0, ...options });
+  const shared = client;
+  client = new RelayClient(own.url);
+  try {
+    await run();
+  } finally {
+    client = shared;
+    await own.close();
+  }
+}
+
 const vectorSeed = Uint8Array.from({ length: 32 }, (_, index) => index);
 const randomText = (bytes: number) => NodeCrypto.randomBytes(bytes).toString("hex");
 const newLogin = () => `c-${randomText(5)}`;
@@ -3746,6 +3762,10 @@ describe("chat contract", () => {
     const ruled = await postAsk(t, { question: "Two?", key: "two" });
     expect(ruled.state).toBe("open");
     expect((await waking(t, t.answerer)).map((d) => d.message.ask?.id)).toEqual([clicked.id]);
+    // Held without a click, it counts in the inbox item until it is read.
+    expect((await needs(t.answerer)).filter((i) => i.kind === "agent_inbox")).toEqual([
+      expect.objectContaining({ handleId: t.to.id, count: 1 }),
+    ]);
     const inbox = await call(t.answerer, "POST", t.chat + "inbox", { asHandle: t.to.id });
     expect(inbox.body).toMatchObject({
       items: expect.arrayContaining([
@@ -4319,6 +4339,321 @@ describe("chat contract", () => {
     expect(await postAsk(member)).toMatchObject({ state: "waiting_owner" });
   });
 
+  /** Another agent of one of the thread's owners. */
+  const anotherAgent = async (t: AskThread, machine: Enrolled, wake?: "nobody") => {
+    const id = "h_" + randomText(8);
+    const reply = await call(machine, "PUT", t.chat + "handles/" + id, {
+      threadRef: id,
+      name: "helper-" + randomText(3),
+      provider: "codex",
+      machineId: machine.machineId,
+      ...(wake && { wake }),
+    });
+    expectSchema("ChatHandle", reply.body);
+    return id;
+  };
+  const setAsksOff = async (t: AskThread, machine: Enrolled) => {
+    const settings = await policyOf(t, machine);
+    const saved = await call(machine, "PUT", t.chat + "me/settings", {
+      ...settings,
+      agentAsks: { ...settings.agentAsks, default: "off" },
+    });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+  };
+  /**
+   * An outsider's question, approved by the answerer. `onward` is the answering agent's next ask,
+   * to another agent of the answerer, which is set to wake for nobody.
+   */
+  const outsiderChain = async () => {
+    const t = await sharedAskThread({ asker: await askingOutsider() });
+    const helper = await anotherAgent(t, t.answerer, "nobody");
+    const direct = await postAsk(t);
+    await call(t.answerer, "POST", t.chat + "asks/" + direct.id + "/decision", { allow: "once" });
+    const ownAsk = (extra: Record<string, unknown>) =>
+      call(t.answerer, "POST", t.chat + "asks", {
+        ...t.newAsk,
+        to: { kind: "agent", handle: helper },
+        asHandle: t.to.id,
+        question: "Own " + randomText(4) + "?",
+        key: randomText(8),
+        ...extra,
+      });
+    const onward = () => ownAsk({ parentAskId: direct.id });
+    return { t, helper, ownAsk, onward };
+  };
+
+  it("waits for the owner's click between one owner's agents on a chain an outsider started", async () => {
+    const { t, helper, ownAsk, onward } = await outsiderChain();
+    const sub = await onward();
+    expectSchema("ChatAsk", sub.body);
+    expect(sub.body).toMatchObject({ state: "waiting_owner", depth: 2, onBehalfOf: t.from.owner });
+    expect(sub.body).not.toHaveProperty("byRule");
+    const id = (sub.body as AskRow).id;
+    expect((await needs(t.answerer)).filter((i) => i.kind === "agent_ask")).toEqual([
+      expect.objectContaining({ owner: t.to.owner, count: 1 }),
+    ]);
+    const decide = (allow: string) =>
+      call(t.answerer, "POST", t.chat + "asks/" + id + "/decision", { allow });
+    expectError(await decide("always"), 403, "auto_accept_scope");
+    expect((await policyOf(t, t.answerer)).agentAsks.auto).toEqual([]);
+    expect((await decide("once")).body).toMatchObject({ state: "open", decidedBy: t.to.owner });
+    // The click wakes even an agent set to nobody.
+    expect(await waking(t, t.answerer)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "ask",
+          wakes: true,
+          message: expect.objectContaining({ ask: expect.objectContaining({ id }) }),
+        }),
+      ]),
+    );
+    // The relay knows a chain only through parentAskId. Without it, this starts the owner's own chain.
+    expect(helper).not.toBe(t.to.id);
+    expect((await ownAsk({})).body).toMatchObject({ state: "open", onBehalfOf: t.to.owner });
+  });
+
+  it("refuses an ask between one owner's agents on an outsider's chain when that owner's asks are off", async () => {
+    const { t, ownAsk, onward } = await outsiderChain();
+    await setAsksOff(t, t.answerer);
+    expectError(await onward(), 403, "agent_ask_off");
+    // The owner's own chain still ignores the setting.
+    expect((await ownAsk({})).body).toMatchObject({ state: "open" });
+  });
+
+  it("needs no click when the outside collaborator owns both agents and started the chain", async () => {
+    const t = await sharedAskThread({ asker: await askingOutsider() });
+    const helper = await anotherAgent(t, t.asker),
+      checker = await anotherAgent(t, t.asker);
+    const first = await postAsk(t, { to: { kind: "agent", handle: helper } });
+    expect(first).toMatchObject({ state: "open", onBehalfOf: t.from.owner });
+    const second = await postAsk(t, {
+      to: { kind: "agent", handle: checker },
+      asHandle: helper,
+      parentAskId: first.id,
+      question: "And the test?",
+      key: "second",
+    });
+    expect(second).toMatchObject({ state: "open", depth: 2, onBehalfOf: t.from.owner });
+  });
+
+  it("counts an open ask held in the inbox in agent_inbox, and a waiting one only as agent_ask", async () => {
+    const t = await sharedAskThread();
+    const held = async (machine: Enrolled) =>
+      (await needs(machine)).filter((i) => i.kind === "agent_inbox");
+    // Between one owner's agents, to one set to nobody: open at once, and unread.
+    const helper = await anotherAgent(t, t.asker, "nobody");
+    await postAsk(t, { to: { kind: "agent", handle: helper }, question: "Own?", key: "own" });
+    expect(await held(t.asker)).toEqual([expect.objectContaining({ handleId: helper, count: 1 })]);
+    await call(t.asker, "POST", t.chat + "inbox", { asHandle: helper });
+    expect(await held(t.asker)).toEqual([]);
+    // Between owners: nothing while it waits or while its delivery wakes, then one under a pause.
+    const ask = await postAsk(t);
+    expect(await held(t.answerer)).toEqual([]);
+    await call(t.answerer, "POST", t.chat + "asks/" + ask.id + "/decision", { allow: "once" });
+    expect(await held(t.answerer)).toEqual([]);
+    await setPaused(t, t.answerer, true);
+    expect(await held(t.answerer)).toEqual([
+      expect.objectContaining({ handleId: t.to.id, count: 1 }),
+    ]);
+    expect((await needs(t.answerer)).filter((i) => i.kind === "agent_ask")).toEqual([]);
+    await call(t.asker, "POST", t.chat + "asks/" + ask.id + "/cancel");
+    expect(await held(t.answerer)).toEqual([]);
+  });
+
+  it("answers 404 for a question to a person the asking owner cannot see", async () => {
+    // An outsider sees only people who share a channel with them.
+    const t = await sharedAskThread({ asker: await askingOutsider() });
+    const stranger = await enrol();
+    const { me } = (await call(stranger, "GET", "/relay/v1/capabilities")).body as {
+      me: { id: string };
+    };
+    for (const person of [me.id, stranger.login])
+      for (const threadRootId of [t.threadRootId, undefined])
+        expectError(
+          await call(t.asker, "POST", t.chat + "asks", {
+            ...t.newAsk,
+            to: { kind: "person", person },
+            threadRootId,
+            doneWhen: undefined,
+            key: randomText(8),
+          }),
+          404,
+          "not_found",
+        );
+    expect(await askPersonIn(t, t.to.owner.id)).toMatchObject({ state: "open" });
+  });
+
+  /** A task the asker holds, as the tracker shows it, and an offer of it to the answerer. */
+  const trackedOffer = async () => {
+    const t = await sharedAskThread();
+    const taskId = "task_" + randomText(5);
+    // Fixed past times, in order. All are older than the minute a take is given to finish.
+    const at = (minute: number) => "2026-01-05T10:0" + minute + ":00Z";
+    await client.control("/board/seed", {
+      tasks: [
+        {
+          id: taskId,
+          title: "Tracked hand-off",
+          comments: [
+            { author: t.asker.login, body: "claim: " + t.asker.login + "/hub", createdAt: at(1) },
+          ],
+          assignees: [t.asker.login],
+          labels: ["claimed"],
+        },
+      ],
+    });
+    const tracker = (comment: [Enrolled, string, number] | null, holder?: Enrolled) =>
+      client.control("/board/tracker", {
+        taskId,
+        comments: comment
+          ? [{ author: comment[0].login, body: comment[1], createdAt: at(comment[2]) }]
+          : [],
+        assignees: holder ? [holder.login] : [],
+        labels: holder ? ["claimed"] : [],
+      });
+    const offer = {
+      taskId,
+      to: t.to.owner,
+      note: { goal: "Release", done: "Built", next: "Review" },
+      key: "offer",
+    };
+    const created = await call(t.asker, "POST", t.chat + "handoffs", offer);
+    expectSchema("Handoff", created.body);
+    const id = (created.body as { id: string }).id;
+    const read = async () =>
+      (
+        (await call(t.answerer, "GET", t.chat + "handoffs?role=receiver")).body as {
+          items: { id: string; state: string; step?: string; outcome?: string }[];
+        }
+      ).items.find((h) => h.id === id);
+    return { t, taskId, tracker, offer, id, read };
+  };
+
+  it("keeps a hand-off waiting while the lease is incomplete, then reports it stalled", async () => {
+    const { t, tracker, id, read } = await trackedOffer();
+    const path = t.chat + "handoffs/" + id;
+    expect(
+      (await call(t.answerer, "POST", path + "/accept", { machineId: t.answerer.machineId })).body,
+    ).toMatchObject({ state: "accepted", step: "waiting_release" });
+    await tracker([t.asker, "release: handing_over", 2]);
+    expect(await read()).toMatchObject({ state: "accepted", step: "waiting_take" });
+    // The receiver's take did not finish: a claim with no assignee or label, older than a minute.
+    await tracker([t.answerer, "claim: " + t.answerer.login + "/hub", 3]);
+    expect(await read()).toMatchObject({ state: "accepted", step: "waiting_take" });
+    expect(await read()).not.toHaveProperty("outcome");
+    expect((await call(t.asker, "POST", path + "/withdraw", {})).status).toBe(503);
+    // An external relay keeps its own stall time, 30 minutes by default.
+    if (!external)
+      await expect
+        .poll(async () => needs(t.answerer), { timeout: 5000 })
+        .toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: "handoff_stalled",
+              handoffId: id,
+              step: "waiting_take",
+            }),
+          ]),
+        );
+    expect(await read()).toMatchObject({ state: "accepted", step: "waiting_take" });
+    // The take finishes, so the lease is complete again.
+    await tracker(null, t.answerer);
+    expect(await read()).toMatchObject({ state: "closed", outcome: "done" });
+  });
+
+  it("never voids an offer for an incomplete lease that names someone else", async () => {
+    const { t, tracker, read } = await trackedOffer();
+    await tracker([t.asker, "release: handing_over", 2], t.answerer);
+    expect(await read()).toMatchObject({ state: "offered" });
+    // The same board without the leftover assignee and label is free, so the offer is void.
+    await tracker(null);
+    expect(await read()).toMatchObject({ state: "void" });
+  });
+
+  it("returns the stored offer for a retry, and handoff_key_reused for another offer", async () => {
+    const { t, offer, id } = await trackedOffer();
+    const send = (extra: object) =>
+      call(t.asker, "POST", t.chat + "handoffs", { ...offer, ...extra });
+    expect((await send({})).body).toMatchObject({ id, state: "offered" });
+    const third = await enrol();
+    const { me } = (await call(third, "GET", "/relay/v1/capabilities")).body as {
+      me: { id: string };
+    };
+    expectError(await send({ to: { id: me.id, login: third.login } }), 409, "handoff_key_reused");
+    expectError(await send({ taskId: "task_" + randomText(5) }), 409, "handoff_key_reused");
+  });
+
+  // Needs the fake's clock: a relay under test has no call that ages a finished hand-off.
+  it.skipIf(external)("removes a finished hand-off after 30 days", async () => {
+    let now = 0;
+    await onOwnFake(
+      { chat: { handoffs: { enabled: true } }, handoffClock: () => now },
+      async () => {
+        const { t, offer, id, read } = await trackedOffer();
+        const path = t.chat + "handoffs/" + id;
+        const withdrawn = await call(t.asker, "POST", path + "/withdraw", {});
+        const closedAt = Date.parse((withdrawn.body as { closedAt: string }).closedAt);
+        now = closedAt + 29 * 86_400_000;
+        expect(await read()).toMatchObject({ state: "withdrawn" });
+        now = closedAt + 30 * 86_400_000;
+        expect(await read()).toBeUndefined();
+        expectError(await call(t.answerer, "POST", path + "/accept", {}), 404, "not_found");
+        // Its key is free again.
+        const again = await call(t.asker, "POST", t.chat + "handoffs", offer);
+        expect(again.body).toMatchObject({ state: "offered" });
+        expect((again.body as { id: string }).id).not.toBe(id);
+      },
+    );
+  });
+
+  const chatFlags = async (machine: Enrolled) => {
+    const caps = (await call(machine, "GET", "/relay/v1/capabilities")).body as {
+      sections: { kind: string; flags: string[] }[];
+      mcpTools: { name: string }[];
+    };
+    return {
+      flags: caps.sections.find((s) => s.kind === "chat")!.flags,
+      tools: caps.mcpTools.map((tool) => tool.name),
+    };
+  };
+
+  it("advertises reviews only together with asks", async () => {
+    const { flags } = await chatFlags(await enrol());
+    if (flags.includes("reviews")) expect(flags).toContain("agent_asks");
+  });
+
+  // These need relays with other switches, so they start their own fakes.
+  it.skipIf(external)(
+    "switches asks and hand-offs independently, and reviews only with asks",
+    async () => {
+      await onOwnFake(
+        { chat: { handoffs: { enabled: true }, reviews: { enabled: true } } },
+        async () => {
+          const { t, offer } = await trackedOffer();
+          const { flags, tools } = await chatFlags(t.asker);
+          expect(flags).toContain("handoffs");
+          expect(flags).not.toContain("agent_asks");
+          expect(flags).not.toContain("reviews");
+          expect(tools).toContain("banneret_handoff_offer");
+          expect(tools).not.toContain("banneret_agent_ask");
+          expectError(await call(t.asker, "POST", t.chat + "asks", t.newAsk), 404, "not_found");
+          expect((await call(t.asker, "POST", t.chat + "handoffs", offer)).status).toBe(200);
+        },
+      );
+      await onOwnFake({ chat: { agentAsks: { enabled: true } } }, async () => {
+        const t = await sharedAskThread();
+        const { flags, tools } = await chatFlags(t.asker);
+        expect(flags).toContain("agent_asks");
+        expect(flags).not.toContain("handoffs");
+        expect(flags).not.toContain("reviews");
+        expect(tools).toContain("banneret_agent_ask");
+        expect(tools).not.toContain("banneret_handoff_offer");
+        expect(await postAsk(t)).toMatchObject({ state: "waiting_owner" });
+        expectError(await call(t.asker, "GET", t.chat + "handoffs"), 404, "not_found");
+      });
+    },
+  );
+
   it("checks the named hand-off rule again on the receiver machine and leaves a stalled take actionable", async () => {
     const { asker, answerer, chat, from, to, threadRootId } = await sharedAskThread();
     const taskId = "task_" + randomText(5);
@@ -4697,10 +5032,10 @@ describe("chat contract", () => {
       ],
     });
   });
-  // Pending the relay slice after person asks: fork F3 (an agent reads its owner's DMs), F6
-  // (message search) and P1 (promotion). Until a relay serves them, this runs against the fake.
+  // Pending relay slice CR6, "agent reads: owner-DM reads, search, promotion". Until a relay
+  // serves it, this runs against the fake.
   it.skipIf(external)(
-    "limits owner DM reads, and finds an agent's question in search but never promotes it (pending relay F3, F6 and P1)",
+    "limits owner DM reads, and finds an agent's question in search but never promotes it (pending relay slice CR6, agent reads: owner-DM reads, search, promotion)",
     async () => {
       const { owner, colleague, path, h, person, c, root, askColleague } = await namedAskThread();
       const dm = (
@@ -4744,7 +5079,8 @@ describe("chat contract", () => {
       ).toBe(403);
     },
   );
-  it("opens one discussion per task and echoes lease transitions only while linked", async () => {
+  /** A task with its discussion opened, and a member who joined that channel. */
+  async function taskDiscussion() {
     const member = await enrol();
     const taskId = "t_" + randomText(6);
     const path = "/relay/v1/chat/";
@@ -4754,7 +5090,6 @@ describe("chat contract", () => {
     const open = () => call(member, "PUT", path + "tasks/" + taskId + "/thread");
     const location = await open();
     expectSchema("ChatThreadLocation", location.body);
-    expect((await open()).body).toEqual(location.body);
     const { conversationId, threadRootId } = location.body as {
       conversationId: string;
       threadRootId: string;
@@ -4765,13 +5100,6 @@ describe("chat contract", () => {
       (await call(member, "PUT", path + "conversations/" + conversationId + "/members/" + personId))
         .status,
     ).toBe(200);
-    const other = await call(member, "POST", path + "messages", {
-      conversationId,
-      text: "Another root",
-      key: randomText(6),
-    });
-    const otherLink = path + "threads/" + (other.body as { id: string }).id + "/task";
-    expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual(location.body);
     const tracker = (body: string, held: boolean) =>
       client.control("/board/tracker", {
         taskId,
@@ -4779,79 +5107,129 @@ describe("chat contract", () => {
         assignees: held ? [member.login] : [],
         labels: held ? ["claimed"] : [],
       });
-    for (const reason of ["done", "handing_over"]) {
-      await tracker("claim: " + member.login + "/hub", true);
-      await tracker("release: " + reason, false);
-    }
-    const thread = path + "threads/" + threadRootId;
-    expect((await call(member, "GET", thread)).body).toMatchObject({
-      items: [
-        { kind: "system", systemEvent: "lease_taken" },
-        { systemEvent: "lease_released", text: expect.stringContaining("done") },
-        { systemEvent: "lease_taken" },
-        { systemEvent: "lease_handed_over" },
-      ],
-    });
-    const text = "needle" + randomText(6);
-    const reply = await call(member, "POST", path + "messages", {
-      conversationId,
-      threadRootId,
-      text,
-      key: text,
-    });
-    const msg = (reply.body as { id: string }).id;
-    const search = async (filter: string) => {
-      const page = await call(
-        member,
-        "GET",
-        path + "search?q=" + encodeURIComponent(text + " " + filter),
+    return { member, taskId, path, open, location, conversationId, threadRootId, tracker };
+  }
+
+  // Task threads are relay slice CR5. Until a relay serves them, these two run against the fake.
+  it.skipIf(external)(
+    "opens one discussion per task and echoes lease transitions only while linked (pending relay slice CR5)",
+    async () => {
+      const { member, taskId, path, open, location, conversationId, threadRootId, tracker } =
+        await taskDiscussion();
+      expect((await open()).body).toEqual(location.body);
+      const other = await call(member, "POST", path + "messages", {
+        conversationId,
+        text: "Another root",
+        key: randomText(6),
+      });
+      const otherLink = path + "threads/" + (other.body as { id: string }).id + "/task";
+      expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual(
+        location.body,
       );
-      expectSchema("ChatSearch", page.body);
-      return (page.body as { items: unknown[] }).items;
-    };
-    for (const filter of [
-      "in:#general",
-      "from:@" + member.login,
-      "is:human",
-      "has:task",
-      "task:#1",
-      "after:2000-01-01",
-      "before:2100-01-01",
-    ]) {
-      expect(await search(filter)).toMatchObject([
-        {
-          messageId: msg,
-          conversationId,
-          conversationName: "#general",
-          threadRootId,
-          author: { login: member.login },
-          createdAt: expect.any(String),
-        },
-      ]);
-    }
-    for (const filter of [
-      "kind:ask",
-      "is:agent",
-      "from:" + member.login + "/builder",
-      "before:2000-01-01",
-      "after:2100-01-01",
-      "task:#99",
-    ])
-      expect(await search(filter)).toEqual([]);
-    const promote = path + "messages/" + msg + "/promote";
-    expect((await call(member, "POST", promote)).body).toEqual({
-      text,
-      link: "/channels/" + conversationId + "?thread=" + threadRootId + "&message=" + msg,
-    });
-    await call(member, "DELETE", path + "messages/" + msg);
-    expect(await search("")).toEqual([]);
-    expect((await call(member, "POST", promote)).status).toBe(404);
-    expect((await call(member, "DELETE", thread + "/task")).status).toBe(204);
-    expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual({
-      conversationId,
-      threadRootId: (other.body as { id: string }).id,
-    });
-  });
+      for (const reason of ["done", "handing_over"]) {
+        await tracker("claim: " + member.login + "/hub", true);
+        await tracker("release: " + reason, false);
+      }
+      const thread = path + "threads/" + threadRootId;
+      expect((await call(member, "GET", thread)).body).toMatchObject({
+        items: [
+          { kind: "system", systemEvent: "lease_taken" },
+          { systemEvent: "lease_released", text: expect.stringContaining("done") },
+          { systemEvent: "lease_taken" },
+          { systemEvent: "lease_handed_over" },
+        ],
+      });
+      expect((await call(member, "DELETE", thread + "/task")).status).toBe(204);
+      expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual({
+        conversationId,
+        threadRootId: (other.body as { id: string }).id,
+      });
+    },
+  );
+  it.skipIf(external)(
+    "records the task's thread on a hand-off offered without one (pending relay slice CR5)",
+    async () => {
+      const { member, taskId, path, threadRootId, tracker } = await taskDiscussion();
+      const receiver = await enrol();
+      const { me } = (await call(receiver, "GET", "/relay/v1/capabilities")).body as {
+        me: { id: string };
+      };
+      await tracker("claim: " + member.login + "/hub", true);
+      const offer = await call(member, "POST", path + "handoffs", {
+        taskId,
+        to: { id: me.id, login: receiver.login },
+        note: { goal: "Upload", done: "Built", next: "Review" },
+        key: "offer",
+      });
+      expectSchema("Handoff", offer.body);
+      expect(offer.body).toMatchObject({ state: "offered", threadRootId });
+      expect((await call(member, "GET", path + "threads/" + threadRootId)).body).toMatchObject({
+        items: expect.arrayContaining([
+          expect.objectContaining({ systemEvent: "handoff_offered" }),
+        ]),
+      });
+    },
+  );
+  it.skipIf(external)(
+    "searches messages by filter and returns a promotable text and link (pending relay slice CR6, agent reads: owner-DM reads, search, promotion; its task filters need CR5)",
+    async () => {
+      const { member, path, conversationId, threadRootId } = await taskDiscussion();
+      const text = "needle" + randomText(6);
+      const reply = await call(member, "POST", path + "messages", {
+        conversationId,
+        threadRootId,
+        text,
+        key: text,
+      });
+      const msg = (reply.body as { id: string }).id;
+      const search = async (filter: string) => {
+        const page = await call(
+          member,
+          "GET",
+          path + "search?q=" + encodeURIComponent(text + " " + filter),
+        );
+        expectSchema("ChatSearch", page.body);
+        return (page.body as { items: unknown[] }).items;
+      };
+      for (const filter of [
+        "in:#general",
+        "from:@" + member.login,
+        "is:human",
+        "has:task",
+        "task:#1",
+        "after:2000-01-01",
+        "before:2100-01-01",
+      ]) {
+        expect(await search(filter)).toMatchObject([
+          {
+            messageId: msg,
+            conversationId,
+            conversationName: "#general",
+            threadRootId,
+            author: { login: member.login },
+            createdAt: expect.any(String),
+          },
+        ]);
+      }
+      for (const filter of [
+        "kind:ask",
+        "is:agent",
+        "from:" + member.login + "/builder",
+        "before:2000-01-01",
+        "after:2100-01-01",
+        "task:#99",
+      ])
+        expect(await search(filter)).toEqual([]);
+      const promote = path + "messages/" + msg + "/promote";
+      expect((await call(member, "POST", promote)).body).toEqual({
+        text,
+        link: "/channels/" + conversationId + "?thread=" + threadRootId + "&message=" + msg,
+      });
+      await call(member, "DELETE", path + "messages/" + msg);
+      expect(await search("")).toEqual([]);
+      expect((await call(member, "POST", promote)).status).toBe(404);
+    },
+  );
   it("opens the same private DM for either participant and resolves its inbox item on read", async () => {
     const sender = await enrol(),
       recipient = await enrol(),

@@ -563,7 +563,7 @@ const make = Effect.gen(function* () {
           .listShells()
           .pipe(Effect.mapError(() => invalid("Cannot read projects.")));
         yield* verifyPushedWork(roots, ref, offer.branch, offer.headSha);
-        if (!offer.threadRootId) {
+        if (!offer.threadRootId && (yield* feedState(relay))?.chatFlags?.includes("task_links")) {
           const linked = yield* feed.chat(relay.relayOrigin, { kind: "discuss", id: offer.taskId });
           if (!linked.ok) return yield* invalid(linked.message);
         }

@@ -971,8 +971,8 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `DELETE /chat/messages/{id}` | Delete (author; founders) |
 | `PUT /chat/messages/{id}/progress` | Create or edit the caller agent's progress message in a thread |
 | `PUT /chat/messages/{id}/reactions/{emoji}` / `DELETE` | React |
-| `PUT /chat/tasks/{taskId}/thread` | Open or create the board task's canonical discussion; no request body |
-| `PUT /chat/threads/{rootId}/task` / `DELETE` | Associate a current root with a board task, or remove its association (204) |
+| `PUT /chat/tasks/{taskId}/thread` | Open or create the board task's canonical discussion; no request body (relay slice CR5) |
+| `PUT /chat/threads/{rootId}/task` / `DELETE` | Associate a current root with a board task, or remove its association (204) (relay slice CR5) |
 | `PUT /chat/threads/{rootId}/follow` / `DELETE` | Follow or unfollow |
 | `POST /chat/read` | Move read cursors `{conversationId, threadRootId?, seq}` |
 | `GET /chat/search` | `q`, `limit`, `cursor`, optional `asHandle`. Each hit includes `conversationName`, `author` (ChatAuthor), `createdAt` (UTC timestamp), snippet and location. |
@@ -1055,7 +1055,7 @@ Persist requests and decisions. Sweep on restart. Cap pending requests at five p
 
 DM participants must satisfy each other's dm.start rule. Crossing the admission boundary needs a shared channel. Starting a DM to an outsider also requires dm.outsiders. Outsiders cannot start group DMs or DM another person's agent. Losing the shared channel closes the composer and preserves history.
 
-Every mention, DM, followed reply and ask answer creates an inbox delivery. Its wakes flag is decided at write, and only a pause changes it later. Across owners, agent-written messages stay inbox-only unless the delivery belongs to an open ask or is an ask_result. Outside collaborators never wake another person's agent, including through a reply or an answer to a question. So an `ask_result` whose answerer (`to.owner`, or `to.person`) is an outside collaborator is inbox-only, unless that answerer owns the asking agent. The same holds for a person's answer (reason `answer`). An answerer the relay does not know counts as outside. Paused deliveries are inbox-only. A personal or company pause also turns waking deliveries that are still pending into inbox-only, for the paused owner's handles or for all handles. A claimed delivery keeps its wake. If it returns to pending during the pause, it becomes inbox-only too. Ending the pause restores no wake. An `ask` delivery turned this way keeps the ask's deadline. Any other expires one inbox lifetime after it was written. Asks and their results have their own wake rules (see Requests between agents). So does a person's answer to an agent's question (see Ask to a person). For other messages, Everyone allows the owner and senders with agents.wakeOthers. Owner permits only the owner. Nobody disables all wakes. Outside collaborators cannot wake other people's agents. A mention alone authorizes no action. GET and PUT /chat/me/settings include agentWakeDefault (everyone by default). PUT /chat/me/agents/wake takes {wake} and updates existing owned handles. An owner sees one class 3 agent_inbox need per handle with handleId and count. It skips `ask` deliveries: a waiting ask shows only as `agent_ask`. The MCP tool banneret_chat_inbox uses POST /chat/inbox {asHandle} to read and consume a batch of waiting deliveries on the owning machine. Repeat until empty. It never hands an `ask` delivery to the turn that reads it (see Requests between agents). Waking deliveries expire after 24 hours, inbox-only deliveries after seven days.
+Every mention, DM, followed reply and ask answer creates an inbox delivery. Its wakes flag is decided at write, and only a pause changes it later. Across owners, agent-written messages stay inbox-only unless the delivery belongs to an open ask or is an ask_result. Outside collaborators never wake another person's agent, including through a reply or an answer to a question. So an `ask_result` whose answerer (`to.owner`, or `to.person`) is an outside collaborator is inbox-only, unless that answerer owns the asking agent. The same holds for a person's answer (reason `answer`). An answerer the relay does not know counts as outside. Paused deliveries are inbox-only. A personal or company pause also turns waking deliveries that are still pending into inbox-only, for the paused owner's handles or for all handles. A claimed delivery keeps its wake. If it returns to pending during the pause, it becomes inbox-only too. Ending the pause restores no wake. An `ask` delivery turned this way keeps the ask's deadline. Any other expires one inbox lifetime after it was written. Asks and their results have their own wake rules (see Requests between agents). So does a person's answer to an agent's question (see Ask to a person). For other messages, Everyone allows the owner and senders with agents.wakeOthers. Owner permits only the owner. Nobody disables all wakes. Outside collaborators cannot wake other people's agents. A mention alone authorizes no action. GET and PUT /chat/me/settings include agentWakeDefault (everyone by default). PUT /chat/me/agents/wake takes {wake} and updates existing owned handles. An owner sees one class 3 agent_inbox need per handle with handleId and count. It counts the deliveries held in that agent's inbox. An `ask` delivery counts only while its ask is `open` (see Requests between agents). An ask that waits for approval shows only as `agent_ask`, or as `review_request` for a review. The MCP tool banneret_chat_inbox uses POST /chat/inbox {asHandle} to read and consume a batch of waiting deliveries on the owning machine. Repeat until empty. It never hands an `ask` delivery to the turn that reads it (see Requests between agents). Waking deliveries expire after 24 hours, inbox-only deliveries after seven days.
 
 ### Message search and GitHub posting
 
@@ -1109,7 +1109,7 @@ Handle       { id, owner {id, login}, claimName, shortName?, provider, machine {
 | `agent_owner_dm_read` | People may turn on "My agents can read my DMs" |
 | `others_agents` | People can mention and DM other people's agents |
 | `asks` | Agent questions and answers |
-| `task_links` | Task threads, task chips and lease echoes |
+| `task_links` | Task threads, task chips and lease echoes (relay slice CR5) |
 | `reactions` | Reactions |
 | `search` | Message search |
 | `promote` | "Post to GitHub" on messages |
@@ -1154,6 +1154,9 @@ Banneret's preset sets `chat.enabled: true`, `chat.promote.enabled: true`, chann
 `ops`, and maps each board to its channel. Authenticated chat capabilities can publish those mappings as `chat.boards[]` entries with `board` and `channel`. The Hub resolves them against the channels visible to the caller. Nothing Banneret-specific is in code.
 
 
+**Task threads are relay slice CR5.** The slice covers both task PUTs, the task's root and the lease system
+replies below. A relay without it does not advertise `task_links`, and a Hub then calls neither task PUT.
+
 Both task PUTs return 200 `ChatThreadLocation {conversationId, threadRootId}`. A task has one linked root and a root has one linked task. Concurrent links return the existing location, including when the proposed root differs. An inaccessible destination returns 404 without its location. Explicit link and unlink require membership in the writable conversation. Unlink a root before assigning it to another task. Deleting the root frees its association.
 
 Opening an unlinked task creates a system root (`task_linked`, task title, `taskRef`) in its configured board channel, or the default public channel when unmapped. The fake uses its default general channel. Future counted takes, releases and handovers append system replies with `taskRef`, one line of text and `systemEvent` respectively `lease_taken`, `lease_released`, or `lease_handed_over`. The release line includes the release reason. No lease ages or human activity signals are sent. The Hub resolves chip state from its board snapshot.
@@ -1191,6 +1194,11 @@ The request names `to: {"kind": "person", "person": "<id or login>"}`. The store
 `to: {"kind": "person", "person": {"id", "login"}}`. `banneret_chat_ask` uses this shape. With no
 `threadRootId`, the ask opens a DM between the agent and that person.
 
+An agent asks only a person its owner can see. Under `scope.people: shared_channels`, that is someone who
+shares a channel with the owner. For anyone else the relay returns 404 `not_found`, by id or by login, whether
+or not the ask names a thread. This check comes before the DM and thread rules, so a refusal never confirms a
+hidden person.
+
 | From | Event | To |
 |---|---|---|
 | (none) | `POST /chat/asks` | `open` (+ Needs-you item `chat_ask` for that person) |
@@ -1223,13 +1231,19 @@ agent applies to every agent.
 
 ### Requests between agents
 
-Enable agent asks, hand-offs and reviews independently in chat configuration. Set `chat.agentAsks.enabled`, `chat.handoffs.enabled` and `chat.reviews.enabled` to enable each feature. Each defaults to false. The flags are `agent_asks`, `handoffs`, `reviews` and `agent_pause`. Reviews require agent asks. The role permission `agents.ask` belongs to Founder, Staff and Contractor by default. The advertised tools are `banneret_agent_ask`, `banneret_agent_answer` and `banneret_handoff_offer`, each requiring that permission.
+Agent asks, hand-offs and reviews each have a switch in chat configuration: `chat.agentAsks.enabled`, `chat.handoffs.enabled` and `chat.reviews.enabled`. Each defaults to false.
+
+- **The asks and hand-off switches are independent.** Hand-offs work with asks off, and asks work with hand-offs off.
+- **Reviews require asks.** With asks off, the relay advertises no `reviews` flag, whatever the review switch says.
+
+The flags are `agent_asks`, `handoffs`, `reviews` and `agent_pause`. With asks off, an ask to an agent returns 404 `not_found`. With hand-offs off, every hand-off call returns 404. The role permission `agents.ask` belongs to Founder, Staff and Contractor by default. The tools `banneret_agent_ask` and `banneret_agent_answer` come with asks, and `banneret_handoff_offer` comes with hand-offs. Each requires that permission.
 
 A new ask names either `{kind: person, person: id}` or `{kind: agent, handle: id}`. The stored row includes the resolved person or handle owner. Both agents need a shared thread where they may reply. Only the supplied question (6144 bytes), context (8192 bytes), completion condition (300 bytes), choices and task or PR references travel. Check the originating person's rights at every hop. A retry with the same handle and key returns its existing row.
 
 | Stored state | Event | New state and effect |
 |---|---|---|
-| New | Same owner | Open and deliver an ask. No consent is needed. |
+| New | Same owner, and the chain was started by that owner or by a member | Open and deliver an ask. No consent is needed. |
+| New | Same owner, and the chain was started by an outside collaborator who is not that owner | Waiting_owner, as in the owner approval row. No rule opens it. With the owner's asks off, refuse with `agent_ask_off`. |
 | New | Matching auto rule of another owner, and neither the asker nor the chain's origin is an outside collaborator | Open with `byRule: true` and reason `auto_accepted`, and deliver an ask. Record the rule decision in the thread. |
 | New | Owner approval required | Waiting_owner. Emit a Needs change and a machine delivery. Keep the delivery inbox-only. |
 | Waiting_owner | Owner allows once, always or draft | Open. Deliver to the answerer. Save an always rule in the same commit. |
@@ -1240,6 +1254,8 @@ A new ask names either `{kind: person, person: id}` or `{kind: agent, handle: id
 | Draft | Owner posts, optionally editing the text, or discards | Answered or declined |
 | Any active state | Asker cancels, deadline passes, or either side loses access | Cancelled, expired or orphaned |
 | Any final state | Another decision | Return 409 `ask_closed` with the first decision |
+
+**Where a chain starts.** The relay knows a chain's origin only through `parentAskId`: the new ask takes the parent's `onBehalfOf`. A Hub sends `parentAskId` for an ask made during the turn that answers another ask. An ask sent without it starts a new chain under the asking agent's owner, so the relay cannot apply the rules of an earlier chain to it.
 
 State values on the wire use lowercase. Creation, decisions and expiry update the thread and its derived Needs items. Each final transition writes exactly one `ask_result` to the asking handle in the same transaction if that handle still has access. A draft is private to the answerer's owner until confirmation. The asking handle can attach a receipt on create. The answering handle can attach one on answer. A hand-off collects the giver receipt on offer and the receiver receipt on accept. Receipts name the handle, token count, elapsed seconds and tool names. Tool arguments, results and prices stay out of receipts.
 
@@ -1253,15 +1269,24 @@ The Hub saves an answer run for each ask turn it starts, from a wake or from an 
 
 Push `needs.changed` to the owner and `chat.delivery` to the owning machine when the ask is written. On approval, issue the waking delivery. Reconnect with backoff starting at two seconds and drain after the event cursor. An offline machine can claim until the deadline. Owner wait time counts against the four-hour default, up to seven days.
 
-The answerer's wake setting applies to an ask as follows. An ask that its owner approved with a click wakes the answerer, even when the answerer is set to `nobody`. An ask that opened without a click, by a rule or between one owner's agents, stays in a `nobody` agent's inbox and wakes nothing. It has no Needs item. An `ask_result` wakes the asker, whatever its wake setting, unless the answerer is an outside collaborator who does not own the asking agent. Personal and company pause come first: a delivery written during a pause is inbox-only. That includes an `ask_result`, which waits in the asker's inbox.
+The answerer's wake setting applies to an ask as follows. An ask that its owner approved with a click wakes the answerer, even when the answerer is set to `nobody`. An ask that opened without a click, by a rule or between one owner's agents, stays in a `nobody` agent's inbox and wakes nothing. An `ask_result` wakes the asker, whatever its wake setting, unless the answerer is an outside collaborator who does not own the asking agent. Personal and company pause come first: a delivery written during a pause is inbox-only. That includes an `ask_result`, which waits in the asker's inbox.
+
+An ask shows in the answering owner's Needs you at most once:
+
+| Ask | Needs item |
+|---|---|
+| `waiting_owner` or `draft` | `agent_ask`, or `review_request` for a waiting review. It never counts in `agent_inbox`. |
+| `open`, with a delivery that wakes | None |
+| `open` and unread in the inbox: held by a pause, or opened without a click for a `nobody` agent | Counts in that agent's `agent_inbox` |
+| Read from the inbox, or ended | None |
 
 An ask read from the inbox runs like a woken ask. The reading turn gets none of its text. For each open ask addressed to that agent, the Hub queues one answer turn, unless its owner is paused. It has the same read-only rules, token and time limits and receipt, and `banneret_agent_answer` gives its one result. `banneret_chat_inbox` counts these turns in `answerTurns`. If the Hub or the owner (`agentsPaused`) is paused, it ends the ask as unanswered with reason `paused`. A Hub cannot see the company pause. If the turn cannot start, the reason is `start_failed`, or the same reason a woken ask would give. An ask that is not open, such as one still waiting for its owner, is withheld and starts nothing. Approval delivers it again.
 
 `agentAsks` in personal settings defaults to approve, an empty auto list, 200000 tokens and 900 seconds. Off and pause take precedence over auto rules. Questions may match a person, agent handle or member role. Reviews and hand-offs may match only a person. Reject an outsider role or an invalid source with `auto_accept_scope`. A person rule must name a current person who is not an outside collaborator. An agent rule must name an active handle whose owner is not one. A role rule must name a known role that is not for outside collaborators. The relay checks only sources that are new in the saved policy, so a stored source that has since gone blocks no later save, such as a pause.
 
-No auto rule accepts an ask when the asker, or the person the chain started from (`onBehalfOf`), is an outside collaborator. Only the answering owner's click opens it. `allow: "always"` on an ask from an outside collaborator returns 403 `auto_accept_scope`. The ask stays waiting and no rule is saved. A client offers no "Always allow" for such an ask. A configured usage threshold falls back to owner approval when below-threshold usage cannot be established. Each handle exposes its owner's `agentsPaused` as `paused`. A relay administrator can set company wake pause with `PUT /chat/agents/pause`.
+No auto rule accepts an ask when the asker, or the person the chain started from (`onBehalfOf`), is an outside collaborator. Only the answering owner's click opens it, also between one owner's agents on such a chain. The one exception is an outside collaborator who owns both agents and started the chain: a click would only ask the same person, so the ask opens at once. `allow: "always"` on an ask from an outside collaborator returns 403 `auto_accept_scope`. So does `allow: "always"` on a same-owner ask that waits because of its chain: a rule naming yourself would change nothing. The ask stays waiting and no rule is saved. A client offers no "Always allow" for these asks. On a later hop between two owners, where a member's agent asks, "always" still saves a rule for that member, and no rule ever opens an outside collaborator's chain. A configured usage threshold falls back to owner approval when below-threshold usage cannot be established. Each handle exposes its owner's `agentsPaused` as `paused`. A relay administrator can set company wake pause with `PUT /chat/agents/pause`.
 
-Asks between one owner's agents skip consent and the two directed-pair limits. Every other limit applies to them.
+Asks between one owner's agents skip the two directed-pair limits on every chain. They also skip consent and the owner's `off` setting, except on a chain that another outside collaborator started. There the ask needs the owner's click, and `off` refuses it with `agent_ask_off`, like a direct ask from an outsider. A pause and every other limit apply to them.
 
 | Limit | Default | Refusal |
 |---|---|---|
@@ -1283,16 +1308,22 @@ An `ask_result` and an answer add nothing to the hop cap or the pair limit. Read
 
 Create an offer with `POST /chat/handoffs` and list by giver or receiver with `GET /chat/handoffs`. The note carries goal, done, next and optional risks. The giver's Hub checks that its branch is pushed. Only the holder can offer and the named receiver must have access to take the task. Reject failures with `handoff_not_holder` or `handoff_cannot_take`. A second active offer for the task receives 409 `handoff_open`.
 
+A repeated offer from the same giver and handle with the same key, task and receiver returns the stored hand-off. The same key with another task or receiver returns 409 `handoff_key_reused`.
+
 | Stored state | Event | New state |
 |---|---|---|
 | New | Offer accepted for storage | Offered. Emit handoff_offered and derive handoff_offer for the receiver. |
 | Offered | Receiver accepts, or a matching personal auto rule passes the Take checks | Accepted. Emit handoff_accepted. |
 | Offered | Receiver declines, giver withdraws, 24-hour deadline passes | Declined, withdrawn or expired |
-| Offered | Giver loses the lease, task closes or a party loses access | Void |
+| Offered | Giver loses the lease | Void |
+| Offered or accepted | Task closes or a party loses access | Void |
 | Accepted | Giver withdraws before release | Withdrawn |
 | Accepted | Receiver holds the lease | Closed with outcome done |
 | Accepted | A third party takes the released task | Closed with outcome lost |
 | Final | Repeated decision | 409 handoff_closed |
+| Final | 30 days pass since it finished | Removed. It leaves the lists, a decision on it returns 404, and its key is free again. |
+
+**An `incomplete` lease never closes or voids a hand-off.** Its parts disagree, and the holder it names may have no claim. So it decides neither the step nor a change of holder. An accepted hand-off keeps its step, usually `waiting_take` after a take that did not finish. After the stall time, `handoff_stalled` tells the person whose write is next. Withdrawing an accepted hand-off on such a lease returns 503 `unavailable`. A closed task, lost access or the offer's deadline still end the hand-off. A giver that an `incomplete` lease names can still offer.
 
 The Office shows agent activity that your account can read. Floor and List show it as text. Select a robot to see its question and open the shared thread when available.
 
@@ -1305,7 +1336,7 @@ The Office shows agent activity that your account can read. Floor and List show 
 
 The Office rebuilds these indicators from current relay data and the machine's saved Pause setting when you reopen it. They add no activity history.
 
-Each offer records the signed giver device as `fromMachineId` and its resolved discussion as `threadRootId` when present. Only that giver device runs the release. Creation always leaves the offer pending. For automatic acceptance the receiver checks the tracker first, then sends `byRule: true` and its own `machineId` to `/accept`. The relay rechecks the named-person rule, usage and pause settings at that write. If the rule or its limits no longer allow the hand-off, return 403 `auto_accept_scope` and leave the offer open for a click. The signed receiver device must supply its own machine ID on rule acceptance. Persist `byRule: true` on the hand-off through all later transitions. Manual acceptances omit this audit field. A successful rule acceptance records “Auto-accepted by <login>'s rule.” in the thread.
+Each offer records the signed giver device as `fromMachineId` and its resolved discussion as `threadRootId` when present. When an offer names no thread, the relay looks up the task's linked thread itself (relay slice CR5). So a Hub opens the task thread first on a relay that advertises `task_links`, and does not add it to the offer. Only that giver device runs the release. Creation always leaves the offer pending. For automatic acceptance the receiver checks the tracker first, then sends `byRule: true` and its own `machineId` to `/accept`. The relay rechecks the named-person rule, usage and pause settings at that write. If the rule or its limits no longer allow the hand-off, return 403 `auto_accept_scope` and leave the offer open for a click. The signed receiver device must supply its own machine ID on rule acceptance. Persist `byRule: true` on the hand-off through all later transitions. Manual acceptances omit this audit field. A successful rule acceptance records “Auto-accepted by <login>'s rule.” in the thread.
 
 The receiver calls `/accept` with its selected machine (and `newThread: true` to start a new task thread there after take) or `/decline` with a reason. The giver calls `/withdraw`. Emit `handoff_declined` for decline and `handoff_closed` for other final outcomes. Keep the existing lease release event. Derive `waiting_release` while the giver holds the lease and `waiting_take` while the task is free. After 30 minutes in a step, derive class 2 `handoff_stalled` for the party that can advance it. Each Hub re-reads the fold before writing its release or claim. On restart, read accepted offers and recompute the step from the tracker.
 
