@@ -74,6 +74,9 @@ const packExecutableTargets = packExecutableTarget
     ]
   : undefined;
 
+// SEA can't import zod from disk, so inline it there. Cursor's SDK still loads its own from disk.
+const inlinedZod = (id: string) => packExecutable && /^zod(\/|$)/.test(id);
+
 // The root config's `projects` route repo-root runs to package configs,
 // including this one. Inheriting them would make this config a container.
 const { projects: _rootTestProjects, ...baseTestConfig } = baseConfig.test ?? {};
@@ -143,9 +146,10 @@ export default mergeConfig(
       alias: { "jsonc-parser": "jsonc-parser/lib/esm/main.js" },
       deps: {
         // alwaysBundle=false has no opinion; neverBundle must retain transitive native acceleration.
-        alwaysBundle: shouldBundleCliDependency,
+        alwaysBundle: (id: string) => inlinedZod(id) || shouldBundleCliDependency(id),
         neverBundle: (id: string) =>
-          (packBootstrap && id === "./binMain.ts") || isExternalCliDependency(id),
+          (packBootstrap && id === "./binMain.ts") ||
+          (isExternalCliDependency(id) && !inlinedZod(id)),
         onlyBundle: false,
       },
       banner: {
