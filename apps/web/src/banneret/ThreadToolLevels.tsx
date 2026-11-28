@@ -1,6 +1,8 @@
 import type { ThreadId, EnvironmentId, ToolLevel } from "@t3tools/contracts";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import { useState } from "react";
+import { Button } from "../components/ui/button";
+import { Popover, PopoverPopup, PopoverTrigger } from "../components/ui/popover";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useChatRead } from "./chat/client";
@@ -26,10 +28,7 @@ export function LevelsPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   return (
-    <fieldset
-      disabled={busy}
-      className="absolute left-0 z-30 grid w-72 gap-3 rounded-md border bg-popover p-3 shadow"
-    >
+    <fieldset disabled={busy} className="grid gap-3 text-xs">
       {(saved ?? state.value)?.map(({ source, level }) => (
         <label key={source} className="flex justify-between gap-2">
           {source === "banneret" ? "Banneret tools" : source.slice("plugin:".length)}
@@ -66,32 +65,32 @@ export function ThreadToolLevels({
   environmentId: EnvironmentId;
   threadId: ThreadId;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative text-xs">
-      <button aria-expanded={open} onClick={() => setOpen(!open)}>
-        Tool access
-      </button>
-      {open && (
-        <LevelsPanel
-          load={async () => {
-            const result = await runAtomCommand(appAtomRegistry, list, {
-              environmentId,
-              input: { threadId },
-            });
-            if (result._tag !== "Success") throw new Error("Could not read thread tool levels.");
-            return result.value;
-          }}
-          change={async (source, level) => {
-            const result = await runAtomCommand(appAtomRegistry, save, {
-              environmentId,
-              input: { threadId, source, level },
-            });
-            if (result._tag !== "Success") throw new Error("Could not save the tool level.");
-            return result.value;
-          }}
-        />
-      )}
+    // Outlined and padded off the breadcrumb: bare text flush against it read as a stuck tooltip.
+    <div className="ps-(--workspace-gutter-start) pt-1">
+      <Popover>
+        <PopoverTrigger render={<Button variant="outline" size="xs" />}>Tool access</PopoverTrigger>
+        <PopoverPopup align="start" width="md">
+          <LevelsPanel
+            load={async () => {
+              const result = await runAtomCommand(appAtomRegistry, list, {
+                environmentId,
+                input: { threadId },
+              });
+              if (result._tag !== "Success") throw new Error("Could not read thread tool levels.");
+              return result.value;
+            }}
+            change={async (source, level) => {
+              const result = await runAtomCommand(appAtomRegistry, save, {
+                environmentId,
+                input: { threadId, source, level },
+              });
+              if (result._tag !== "Success") throw new Error("Could not save the tool level.");
+              return result.value;
+            }}
+          />
+        </PopoverPopup>
+      </Popover>
     </div>
   );
 }

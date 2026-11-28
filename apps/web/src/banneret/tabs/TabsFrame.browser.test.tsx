@@ -240,8 +240,8 @@ describe("open tabs", () => {
     await vi.waitFor(() => expect(activeTab()?.textContent).toContain("Map"));
     const preview = activeTab()!;
     expect(preview.dataset.preview).toBe("");
-    await userEvent.hover(preview);
-    await page.getByRole("button", { name: /^Pin Map/ }).click();
+    await userEvent.click(preview, { button: "right" });
+    await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
     await vi.waitFor(() => {
       expect(preview.dataset.pinned).toBe("");
       expect(preview.dataset.preview).toBeUndefined();

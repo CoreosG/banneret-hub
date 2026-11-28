@@ -261,8 +261,13 @@ that tracker, the tab shows one row that links to the issue instead.
 A bar above the main view keeps your open threads and workspace pages (Today, Needs you, Board, Map, Feed, Team)
 as tabs. A page tab keeps the page's board and filters.
 
-- Click a tab to open it. Double-click keeps a preview tab. Pin keeps a tab for good.
-- Middle-click closes. Drag reorders.
+- Click a tab to open it. Double-click keeps a preview tab.
+- **×** or middle-click closes a tab. Drag reorders.
+- Right-click a tab, or press Shift+F10 or the context menu key on it, to close it, close the others or the
+  ones to its right, pin or unpin it, keep a preview tab, or copy its link. Arrow keys move between tabs.
+  Closing several at once leaves pinned tabs open. Pin keeps a tab for good.
+- A thread tab copies a link to the thread. A page tab copies this web app's address for the page, so it has
+  no link in the desktop app.
 - A tab shown in italics is a preview. Opening something else replaces it. Sending a message keeps it.
 - Up to 20 tabs are kept. Pinned tabs are never dropped.
 

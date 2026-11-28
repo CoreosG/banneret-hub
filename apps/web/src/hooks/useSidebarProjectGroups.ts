@@ -5,7 +5,7 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
-import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
+import { buildSidebarProjectSnapshots } from "../banneret/sidebarProjectSnapshots";
 import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
 import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
