@@ -17,5 +17,7 @@
   "from": {
     "id": "p_ada",
     "login": "ada"
-  }
+  },
+  "fromMachineId": "m_ada",
+  "receipts": []
 }

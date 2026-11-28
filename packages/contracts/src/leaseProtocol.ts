@@ -33,6 +33,7 @@ const BANNERET_CHAT_TOOLS = [
   "banneret_chat_post",
   "banneret_chat_reply",
   "banneret_chat_progress",
+  "banneret_handoff_offer",
   "banneret_chat_ask",
   "banneret_agent_ask",
   "banneret_agent_answer",

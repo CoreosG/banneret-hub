@@ -4300,6 +4300,8 @@ components:
           $ref: '#/components/schemas/Id'
     Handoff:
       allOf:
+      - if: {required: [byRule]}
+        then: {required: [machineId], properties: {state: {enum: [accepted, withdrawn, void, closed]}}}
       - if: {properties: {state: {const: accepted}}}
         then: {required: [step]}
         else: {not: {required: [step]}}
@@ -4316,12 +4318,17 @@ components:
       - id
       - taskId
       - from
+      - fromMachineId
       - to
       - note
       - state
       - createdAt
       - expiresAt
       properties:
+        newThread: {const: true}
+        byRule: {const: true}
+        fromMachineId: {$ref: '#/components/schemas/Id'}
+        threadRootId: {$ref: '#/components/schemas/Id'}
         receipts: {type: array, items: {$ref: '#/components/schemas/AskReceipt'}}
         id:
           $ref: '#/components/schemas/Id'
@@ -4384,9 +4391,14 @@ components:
         closedAt:
           $ref: '#/components/schemas/Timestamp'
     HandoffAccept:
+      allOf:
+      - if: {required: [byRule]}
+        then: {required: [machineId]}
       type: object
       additionalProperties: false
       properties:
+        newThread: {const: true}
+        byRule: {const: true}
         receipt: {$ref: '#/components/schemas/AskReceipt'}
         machineId:
           $ref: '#/components/schemas/Id'

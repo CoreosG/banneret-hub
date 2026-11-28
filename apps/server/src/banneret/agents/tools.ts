@@ -3,6 +3,7 @@
 // capabilities `mcpTools`. Reads come from the relay; lease writes go through LeaseService on the machine's
 // tracker login, exactly as the Board's Take and Release buttons do.
 import {
+  HandoffOfferInput,
   ChatCard,
   ChatNewAsk,
   ChatDeliveries,
@@ -578,6 +579,17 @@ export const AgentToolkit = Toolkit.make(
         "Return the answer to the question that started this turn. Share only facts suitable for its home thread. The owner confirms a requested draft.",
       parameters: Schema.Struct({ text: bounded(16384), choice: Schema.optional(Schema.String) }),
       success: Schema.Struct({ askId: ChatId }),
+    }),
+  ),
+  writes(
+    Tool.make("banneret_handoff_offer", {
+      description:
+        "Offer a task you hold to one named person. Supply the pushed branch and its full head SHA, the receiver from the company directory, and a Goal, Done, Next note. Reuse the key on retry. Keep the lease until acceptance.",
+      parameters: HandoffOfferInput,
+      success: Schema.Struct({ handoffId: ChatId }),
+      failure,
+      failureMode: "return",
+      dependencies,
     }),
   ),
   ChatAskTool,

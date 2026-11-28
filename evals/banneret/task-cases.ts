@@ -72,3 +72,32 @@ for (const example of examples) {
     }) + "\n",
   );
 }
+
+import { Tool } from "effect/ai";
+import { AgentToolkit } from "../../apps/server/src/banneret/agents/tools.ts";
+
+const description = Tool.getDescription(AgentToolkit.tools.banneret_handoff_offer);
+for (const [id, question, words] of [
+  ["unpushed", "The head exists only locally. Can I offer it now?", ["push"]],
+  [
+    "pending",
+    "My offer has been sent but the recipient has not accepted. Who keeps the lease?",
+    ["keep|giver|you|holder"],
+  ],
+] as const) {
+  process.stdout.write(
+    JSON.stringify({
+      id: "handoff-" + id,
+      area: "company-tasks",
+      kind: "guard",
+      privacy: "commit-safe",
+      source: { report: "Named hand-offs H2" },
+      experience: question,
+      pattern: "Keep the holder's lease until a pushed offer is accepted.",
+      setup: { role: "top" },
+      prompt: "Available tool: banneret_handoff_offer. " + description + "\n" + question,
+      expect: { finalTextMust: words, maxCalls: { exec_command: 0 } },
+      maxSteps: 2,
+    }) + "\n",
+  );
+}

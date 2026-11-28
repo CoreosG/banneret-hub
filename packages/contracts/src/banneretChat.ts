@@ -263,6 +263,10 @@ export const ChatNewHandoff = Schema.Struct({
 export type ChatNewHandoff = typeof ChatNewHandoff.Type;
 
 export const Handoff = Schema.Struct({
+  byRule: Schema.optionalKey(Schema.Literal(true)),
+  newThread: Schema.optionalKey(Schema.Literal(true)),
+  fromMachineId: Schema.String,
+  threadRootId: Schema.optionalKey(Schema.String),
   receipts: Schema.Array(AskReceipt),
   id: Schema.String,
   taskId: Schema.String,
@@ -293,13 +297,32 @@ export const Handoff = Schema.Struct({
   createdAt: Schema.String,
   expiresAt: Schema.String,
   closedAt: Schema.optionalKey(Schema.String),
-});
+}).check(
+  Schema.makeFilter(
+    (h) =>
+      !h.byRule ||
+      (!!h.machineId && ["accepted", "withdrawn", "void", "closed"].includes(h.state)) ||
+      "Rule acceptance requires a receiving machine and a prior acceptance.",
+  ),
+);
 export type Handoff = typeof Handoff.Type;
 
-export const HandoffAccept = Schema.Struct({
+const acceptOptions = {
+  newThread: Schema.optionalKey(Schema.Literal(true)),
   receipt: Schema.optionalKey(AskReceipt),
-  machineId: Schema.optionalKey(Schema.String),
-});
+};
+export const HandoffAccept = Schema.Union([
+  Schema.Struct({
+    ...acceptOptions,
+    byRule: Schema.Literal(true),
+    machineId: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    ...acceptOptions,
+    byRule: Schema.optionalKey(Schema.Never),
+    machineId: Schema.optionalKey(Schema.String),
+  }),
+]);
 export type HandoffAccept = typeof HandoffAccept.Type;
 
 export const HandoffReason = Schema.Struct({
@@ -722,7 +745,29 @@ export const RoleAction = Schema.Union([
   Schema.Struct({ op: Schema.Literal("save"), id: RoleId, role: RoleWrite }),
   Schema.Struct({ op: Schema.Literal("assign"), person: Id, roleId: RoleId }),
 ]);
+export const HandoffOfferInput = Schema.Struct({
+  taskId: Id,
+  to: ChatPerson,
+  note: ChatNewHandoff.fields.note,
+  branch: Schema.NonEmptyString,
+  headSha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+  expiresInSeconds: Schema.optionalKey(PositiveInt),
+  threadRootId: Schema.optionalKey(Id),
+  key: Id,
+});
 export const ChatAction = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("handoffs"), ...Page }),
+  Schema.Struct({ kind: Schema.Literal("offerHandoff"), offer: HandoffOfferInput }),
+  Schema.Struct({
+    kind: Schema.Literal("acceptHandoff"),
+    id: Id,
+    newThread: Schema.optionalKey(Schema.Literal(true)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literals(["advanceHandoff", "withdrawHandoff"]),
+    id: Id,
+  }),
+  Schema.Struct({ kind: Schema.Literal("declineHandoff"), id: Id, reason: Schema.NonEmptyString }),
   ThreadChatAction,
   Schema.Struct({ kind: Schema.Literal("directory"), ...Page }),
   Schema.Struct({ kind: Schema.Literal("requests"), id: Id, ...Page }),
@@ -818,6 +863,16 @@ export function callChannel<A>(
       : "?limit=100";
 
   switch (action.kind) {
+    case "handoffs":
+      return call("GET", "handoffs" + page);
+    case "declineHandoff":
+      return call("POST", "handoffs/" + action.id + "/decline", { reason: action.reason });
+    case "withdrawHandoff":
+      return call("POST", "handoffs/" + action.id + "/withdraw", {});
+    case "acceptHandoff":
+    case "advanceHandoff":
+    case "offerHandoff":
+      throw new Error("Hand-off requires the owning Hub.");
     case "roles": {
       const r = action.action;
       switch (r.op) {

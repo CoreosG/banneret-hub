@@ -1,5 +1,6 @@
 import { countLabel } from "../countLabel";
 import { AskCard } from "./AgentAskCards";
+import { HandoffCards } from "./HandoffCards";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { ChannelMembers } from "./ChannelMembers";
 import { RequestControl } from "./JoinRequests";
@@ -538,6 +539,9 @@ function Timeline({
   return (
     <>
       {read.error && <p role="alert">{read.error}</p>}
+      {root && flags.includes("handoffs") && (
+        <HandoffCards enterprise={enterprise} threadRootId={root} />
+      )}
       <div data-chat-scroll>
         {read.value?.more && (
           <button onClick={() => setPages((n) => n + 1)}>Load more messages</button>
