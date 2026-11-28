@@ -48,20 +48,72 @@ only offers what Banneret owns. See
 
 `banneret_needs` and `banneret_team` are views of the relay, so they stay while the relay offers them. A joined
 company thread always has `banneret://join`, even when Banneret owns nothing. The page names each owner and the
-`co-<source>` server to use. This Hub version does not add those servers to a thread yet, so add them to your
-Claude or Codex settings. A relay that publishes no owners changes nothing.
+`co-<source>` server to use. A relay that publishes no owners changes nothing.
 
-The Hub holds one owner value per joined relay, in memory.
+The Hub keeps the owners of each joined relay, with the sources they name, in
+`banneret/capability-owners/` in its state folder. The file holds no secret. If the Hub starts while the relay
+is down, it uses the saved owners. So it does not offer Banneret memory, skills or search that a company owns
+elsewhere.
 
-| State                     | Event                               | Next state            | What the Hub offers                                                             |
-| ------------------------- | ----------------------------------- | --------------------- | ------------------------------------------------------------------------------- |
-| Not read                  | Capabilities read, with `owners`    | Owners known          | Only what Banneret owns                                                         |
-| Not read                  | Capabilities read, without `owners` | No owners             | Everything, as before                                                           |
-| Not read                  | Read fails                          | Not read              | The relay's tools stay hidden. The Hub's own memory, skills and search stay on. |
-| Owners known or no owners | Capabilities read again             | From the new document | Running threads list their tools again                                          |
-| Owners known or no owners | Read fails                          | Unchanged             | Unchanged                                                                       |
-| Any                       | The machine leaves or joins again   | Not read              | As for Not read                                                                 |
-| Any                       | The Hub restarts                    | Not read              | As for Not read                                                                 |
+| State                     | Event                               | Next state                  | What the Hub offers                                                             |
+| ------------------------- | ----------------------------------- | --------------------------- | ------------------------------------------------------------------------------- |
+| Not read                  | Capabilities read, with `owners`    | Owners known, and saved     | Only what Banneret owns                                                         |
+| Not read                  | Capabilities read, without `owners` | No owners, nothing saved    | Everything                                                                      |
+| Not read                  | Read fails                          | Not read                    | The relay's tools stay hidden. The Hub's own memory, skills and search stay on. |
+| Owners known or no owners | Capabilities read again             | From the new document       | Running threads list their tools again                                          |
+| Owners known or no owners | Read fails                          | Unchanged                   | Unchanged                                                                       |
+| Owners known              | The Hub restarts                    | Owners known, from the file | Only what Banneret owns. The relay's tools wait for the relay.                  |
+| No owners                 | The Hub restarts                    | Not read                    | As for Not read                                                                 |
+| Any                       | The machine leaves, or is revoked   | Not read, file removed      | As for Not read                                                                 |
+| Any                       | The machine joins under a new id    | Not read, old file removed  | As for Not read                                                                 |
+
+A damaged file counts as no file.
+
+### The company's servers
+
+Each thread of a company workspace gets one MCP server named `co-<source>` for every source that owns something
+there. Claude and Codex talk to the Hub on the same machine, and the Hub talks to the company's server. The relay
+is never in the middle, and the thread's own Hub token is never sent on. Shared and linked threads get none.
+
+- **Tool access and approvals** work as for any plugin. Set each source to None, Read or Read + write under
+  **Tool access**. A write waits for your approval of that exact call. See
+  [plugins](plugins.md#thread-tool-access).
+- **Names decide what shows.** A tool is named `<prefix><capability>_<verb>`. If a source provides a
+  capability but does not own it here, its tools for that capability are hidden. Other tools pass through. No
+  agent ever sees a `memory_person_*` tool.
+- **Required tools.** A source that owns a capability must list these, with its prefix: tasks needs
+  `tasks_read`, `tasks_claim` and `tasks_release`. Skills needs `skills_list` and `skills_get`. Memory needs
+  `memory_search`, `memory_read`, `memory_use`, `memory_propose` and `memory_flag` (the
+  `banneret_memory_` spelling counts too). Search needs `search_query`. If one is missing, the whole source is
+  unavailable and the message names the tool.
+- **Banneret's own switches do not apply.** The Banneret memory switch does not hide a company's memory, and the
+  Hub adds no local skills to a company's skills.
+- **Sign-in is not built yet.** The Hub can connect only to sources whose `auth.kind` is `none`. For `oauth` and
+  `bearer_per_person` the server is listed, the Hub does not contact it, and its calls say that you need to sign
+  in.
+- **When a server joins a thread.** The list of servers is set when the thread's agent session starts. A source
+  the relay adds reaches the next new session. A source that stops owning anything, or a tool that stops being
+  offered, is gone on the next call.
+- **Your own copy.** If your Claude or Codex settings also list a company server, the agent sees that copy too.
+  The Hub's filters, tool access and approvals do not cover it. Remove it from your settings.
+
+The Hub keeps one state for each thread and source, in memory only.
+
+| State                   | Event                                                       | Next state               |
+| ----------------------- | ----------------------------------------------------------- | ------------------------ |
+| None                    | A request in a thread whose source owns something           | Configured               |
+| Configured              | The Hub has the sign-in it needs, or the source needs none  | Connecting               |
+| Configured              | A sign-in is needed and missing                             | Sign-in needed           |
+| Connecting              | Tools listed, with every required tool                      | Connected                |
+| Connecting or connected | Tools listed, with a required tool missing                  | Failed (`shape_missing`) |
+| Connecting or connected | The server answers 401                                      | Sign-in needed           |
+| Connecting              | The server cannot be reached, or takes more than 10 seconds | Failed (`unreachable`)   |
+| Any                     | A new turn, or a new address or owner for the source        | Configured               |
+| Any                     | The source owns nothing here any more                       | Gone                     |
+| Any                     | The Hub restarts                                            | None                     |
+
+In Sign-in needed and Failed, the Hub does not contact the server again in that turn. It answers with a message
+the agent can pass on to you. It never falls back to a Banneret tool.
 
 ### Solo workspaces
 

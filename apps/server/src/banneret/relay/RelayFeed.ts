@@ -64,6 +64,12 @@ import type { SourceControlDriverInstance } from "@t3tools/source-control-core/s
 import { catchUpChat, channelAction, chatUnavailable } from "./ChatSync.ts";
 import { ServerEnvironmentIdentity } from "../../environment/ServerEnvironment.ts";
 import { BanneretEnrolment, type RelayEnrolment } from "./Enrolment.ts";
+import {
+  ownedSources,
+  readSavedOwnership,
+  writeSavedOwnership,
+  type SavedOwnership,
+} from "../sources/ownership.ts";
 import { RelayCallError, type RelayReply } from "./RelayClient.ts";
 import {
   boardTaskIndex,
@@ -607,6 +613,10 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   github?: SourceControlDriverInstance,
   handoffs?: Effect.Success<typeof makeHandoffs>,
 ) {
+  const files =
+    yield* Effect.context<
+      Effect.Services<ReturnType<typeof writeSavedOwnership | typeof readSavedOwnership>>
+    >();
   const changes = yield* PubSub.unbounded<BanneretFeedState>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -626,7 +636,15 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   let dashboardSettings: Pick<BanneretFeedState, "dashboards" | "leaseClocks"> = {};
   let mcpTools: ReadonlyArray<RelayMcpTool> = [];
   // Capability owners: null until read, and for a relay without `owners`. A failed reread keeps the last.
+  // They are saved with their sources (sources/ownership.ts), so a restart with the relay down keeps them.
   let elsewhere: ElsewhereOwners | null = null;
+  let ownership: SavedOwnership | null = null;
+  const savedLock = yield* Semaphore.make(1);
+  // Writes whatever is current when its turn comes, so two reads finishing out of order cannot leave
+  // the older one on disk.
+  const saveOwnership = savedLock
+    .withPermits(1)(Effect.suspend(() => writeSavedOwnership(enrolment.origin, ownership)))
+    .pipe(Effect.provideContext(files));
   // The `ETag` of the capabilities last read: a heartbeat whose `capabilitiesVersion` differs means
   // the document changed, even when the stream missed `capabilities.changed` or the read failed.
   let sectionsVersion: string | undefined;
@@ -835,6 +853,11 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         Effect.suspend(() => {
           if (!stillJoined(key)) return Effect.void;
           elsewhere = elsewhereOwners(reply.body);
+          ownership = elsewhere && {
+            key,
+            owners: elsewhere,
+            sources: ownedSources(reply.body, elsewhere),
+          };
           const hidden = hiddenSections(elsewhere);
           const body = fields(reply.body);
           const advertised = {
@@ -897,7 +920,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
             fields(fields(reply.body)?.team)?.preset === "company" ? "company" : "community";
           snapshotOffered = fields(reply.body)?.snapshot !== undefined;
           wakeSnapshot();
-          return publishSnapshot;
+          return saveOwnership.pipe(Effect.andThen(publishSnapshot));
         }),
       ),
       Effect.ignore,
@@ -1512,12 +1535,25 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         sectionsVersion = undefined;
         mcpTools = [];
         elsewhere = null;
+        ownership = null;
         needsCount = null;
         today = null;
         needsFirst = null;
         problem = null;
         labels = new Map();
         labelsReadAt = Number.NEGATIVE_INFINITY;
+        // The owners saved for this same relay and machine apply until capabilities are read again.
+        if (next !== null) {
+          const saved = yield* readSavedOwnership(enrolment.origin).pipe(
+            Effect.provideContext(files),
+          );
+          if (saved?.key === next.key) {
+            ownership = saved;
+            elsewhere = saved.owners;
+          }
+        }
+        // Leaving, or another machine id, removes what was saved.
+        if (ownership === null) yield* saveOwnership;
         if (next !== null) {
           if (next.label !== undefined) labels.set(environmentId, next.label);
           yield* refreshSections(next.key);
@@ -1535,6 +1571,8 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     );
 
   yield* adopt(joinedOf(yield* enrolment.status));
+  // A start that finds no enrolment drops owners left by one that ended just before a stop.
+  if (joined === null) yield* saveOwnership;
 
   // One supervisor: follows the enrolment, so the stream runs only while configured.
   yield* Effect.forkIn(
@@ -1657,6 +1695,11 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
   const enrolment = yield* BanneretEnrolment;
   const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
   const layerScope = yield* Effect.scope;
+  // A feed added by a request still saves its owners with the layer's own services.
+  const files =
+    yield* Effect.context<
+      Effect.Services<ReturnType<typeof writeSavedOwnership | typeof readSavedOwnership>>
+    >();
   // One feed per relay instance of the enrolment, added when the enrolment adds the relay.
   const feeds = new Map<string, RelayFeedInstance>();
   const addLock = yield* Semaphore.make(1);
@@ -1676,7 +1719,7 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
           agents,
           github,
           handoffs,
-        );
+        ).pipe(Effect.provideContext(files));
         feeds.set(relay.origin, added);
         return added;
       }),
