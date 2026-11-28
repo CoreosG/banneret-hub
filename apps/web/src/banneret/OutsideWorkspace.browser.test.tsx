@@ -1,6 +1,11 @@
-import { expect, it } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { render } from "../../test/render";
 import { OutsideNotice } from "./OutsideWorkspace";
+
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
 
 const view = {
   workspaceId: "ent-rosa",

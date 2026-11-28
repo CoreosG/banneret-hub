@@ -2,6 +2,11 @@ import { expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { CallApprovalCard } from "./CallApprovals";
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 it("shows the stored arguments, omits always for a restricted call, and returns the winning decision", async () => {
   const call = {
     id: "call",

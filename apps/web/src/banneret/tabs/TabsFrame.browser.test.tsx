@@ -22,15 +22,23 @@ import { getRouter, type AppRouter } from "~/router";
 import {
   answerRpc,
   ENVIRONMENT_ID,
-  installFakeEnvironment,
   PROJECT_ID,
-  threadWithHistory,
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
 import { loadEnvironmentWorkspaces, useWorkspacesStore } from "../workspacesStore";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
 import { __reloadTabsForTests, setTabsHidden, useTabsStore } from "./tabsStore";
+
+// App imports start primary discovery, so its HTTP fixture must already be installed.
+const { THREAD, OTHER } = await vi.hoisted(async () => {
+  const { installFakeEnvironment, threadWithHistory } =
+    await import("../../../test/fakeEnvironment");
+  const THREAD = threadWithHistory("thread-tabs", 30);
+  const OTHER = threadWithHistory("thread-other", 2);
+  installFakeEnvironment([THREAD, OTHER]);
+  return { THREAD, OTHER };
+});
 
 vi.mock(
   "../../../../../packages/client-runtime/src/connection/driver.ts",
@@ -59,9 +67,6 @@ const workspace = (id: string, name: string): BanneretWorkspace => ({
 const ALPHA = workspace("ws-alpha", "Alpha");
 const BETA = workspace("ws-beta", "Beta");
 
-const THREAD = threadWithHistory("thread-tabs", 30);
-const OTHER = threadWithHistory("thread-other", 2);
-installFakeEnvironment([THREAD, OTHER]);
 answerRpc(BANNERET_WORKSPACES_WS_METHODS.list, () => Effect.succeed({ workspaces: [ALPHA, BETA] }));
 localStorage.removeItem(TABS_STORAGE_KEY);
 __reloadTabsForTests();

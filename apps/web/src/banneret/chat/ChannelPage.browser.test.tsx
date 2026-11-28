@@ -23,7 +23,7 @@ import { SidebarProvider } from "../../components/ui/sidebar";
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../../state/environments";
 import { storeEnrolmentView } from "../enrolmentStore";
 import { ChannelRows } from "./ChannelRows";
-import { useEnvironmentFeed, feedRpc } from "../relayFeedStore";
+import { useEnvironmentFeed, useRelayFeedStore, feedRpc } from "../relayFeedStore";
 import { useWorkspacesStore } from "../workspacesStore";
 import { EnterpriseSidebarRows } from "../EnterpriseSidebarRows";
 import { TabsFrame } from "../tabs/TabsFrame";
@@ -36,24 +36,34 @@ import { chatRpc } from "./client";
 const decodeConversation = Schema.decodeUnknownSync(ChatConversation);
 const decodeMessages = Schema.decodeUnknownSync(ChatMessages);
 const decodeConversations = Schema.decodeUnknownSync(ChatConversations);
+type ChatScenario = "messages" | "membership" | "direct";
 declare module "vite-plus/test/browser" {
   interface BrowserCommands {
     companyChat: {
       (op: "outsideStart"): Promise<typeof import("@t3tools/contracts").RelayMe.Type>;
       (
-        op: "start" | "roles:start" | "wake:start" | "h1:start",
+        op: "start" | `${ChatScenario | "roles" | "wake" | "h1"}:start`,
       ): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
       (
-        op: "call" | "roles:call" | "leo" | "wake:leo" | "h1:leo",
+        op:
+          | "call"
+          | `${ChatScenario | "roles"}:call`
+          | "leo"
+          | `${ChatScenario | "wake" | "h1"}:leo`,
         arg: ChannelAction,
       ): Promise<ChannelResult>;
       (op: "h1:agentAsk", key: string): Promise<{ ask: ChatAsk; item: BanneretFeedNeedsItem }>;
       (op: "h1:agentAnswer", id: string): Promise<ChatAsk>;
       (op: "ask"): Promise<BanneretFeedNeedsItem>;
-      (op: "stop" | "roles:stop" | "wake:stop" | "h1:stop"): Promise<void>;
+      (op: "stop" | `${ChatScenario | "roles" | "wake" | "h1"}:stop`): Promise<void>;
     };
   }
 }
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../../state/environments", { spy: true });
 it("answers a named agent question from its Needs you row", async () => {
   await commands.companyChat("start");
@@ -80,10 +90,11 @@ it("answers a named agent question from its Needs you row", async () => {
     answer: { choice: "Linux" },
   });
 });
-it("opens only when offered, reads the channel, posts, replies, edits and deletes through the fake relay", async () => {
-  const { root: message, people } = await commands.companyChat("start");
-  await using resources = new AsyncDisposableStack();
-  resources.defer(() => commands.companyChat("stop"));
+async function setupChannel(resources: AsyncDisposableStack, scenario: ChatScenario) {
+  const { root: message, people } = await commands.companyChat(`${scenario}:start`);
+  resources.defer(() => commands.companyChat(`${scenario}:stop`));
+  useRelayFeedStore.setState({ feeds: {} });
+  useTabsStore.setState(useTabsStore.getInitialState());
   const env = EnvironmentId.make("local"),
     origin = "https://chat.test",
     workspace = "ent-0123456789abcdef";
@@ -123,21 +134,27 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   });
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(env);
   vi.mocked(useConnectedEnvironmentIds).mockReturnValue([]);
-  vi.spyOn(feedRpc, "today").mockResolvedValue(null);
-  vi.spyOn(feedRpc, "needs").mockResolvedValue(null);
+  resources.use(vi.spyOn(feedRpc, "today")).mockResolvedValue(null);
+  resources.use(vi.spyOn(feedRpc, "needs")).mockResolvedValue(null);
+  const subscribed = Promise.withResolvers<void>();
   let publish: ((state: BanneretFeedState) => void) | undefined;
-  vi.spyOn(feedRpc, "subscribe").mockImplementation((_, fn) => {
+  resources.use(vi.spyOn(feedRpc, "subscribe")).mockImplementation((_, fn) => {
     publish = fn;
-    return () => {};
+    subscribed.resolve();
+    return () => {
+      if (publish === fn) publish = undefined;
+    };
   });
   let revision = 0;
-  let limited = true;
-  let rights: "normal" | "reply" | "readonly" | "hidden" = "normal";
+  const access = {
+    limited: scenario === "messages",
+    rights: "normal" as "normal" | "reply" | "readonly" | "hidden",
+  };
   const emit = (sections: string[]) =>
     publish?.({
       sections: ["today", "needs", "board", "map", "feed", "team", ...sections],
       sectionsKnown: true,
-      chatFlags: limited
+      chatFlags: access.limited
         ? ["channels", "threads", "private_channels"]
         : [
             "channels",
@@ -166,9 +183,9 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       graveyard: null,
       team: { value: { people }, fetchedAt: null },
     } as BanneretFeedState);
-  const rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (target, action) => {
+  const rpc = resources.use(vi.spyOn(chatRpc, "run")).mockImplementation(async (target, action) => {
     const result = await commands.companyChat(
-      target.environmentId === "manager" ? "leo" : "call",
+      target.environmentId === "manager" ? `${scenario}:leo` : `${scenario}:call`,
       action,
     );
     if (!result.ok) throw new Error(result.message);
@@ -178,26 +195,29 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       )
     )
       emit(["chat"]);
-    if (action.kind === "list" && rights !== "normal") {
+    if (action.kind === "list" && access.rights !== "normal") {
       const page = decodeConversations(result.value);
       return {
         ...page,
         items: page.items.flatMap<(typeof page.items)[number]>((c) =>
           c.kind !== "channel" || c.name !== "platform"
             ? [c]
-            : rights === "hidden"
+            : access.rights === "hidden"
               ? []
               : [
                   {
                     ...c,
                     access: { ...c.access, post: "roles", postRoles: ["founder"] },
-                    me: { ...c.me, can: { ...c.me.can, post: false, reply: rights === "reply" } },
+                    me: {
+                      ...c.me,
+                      can: { ...c.me.can, post: false, reply: access.rights === "reply" },
+                    },
                   },
                 ],
         ),
       };
     }
-    if (limited && action.kind === "messages") {
+    if (access.limited && action.kind === "messages") {
       const page = decodeMessages(result.value);
       return {
         ...page,
@@ -245,18 +265,45 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     ]),
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
+  return {
+    router,
+    access,
+    origin,
+    message,
+    rpc,
+    asLeo: (action: ChannelAction) => commands.companyChat(`${scenario}:leo`, action),
+    async show(sections: string[]) {
+      await subscribed.promise;
+      await act(() => emit(sections));
+    },
+  };
+}
+
+async function proof(view: string) {
+  if (!import.meta.env.VITE_CHAT_SCREENSHOTS) return;
+  for (const theme of ["light", "dark"]) {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    await page.screenshot({
+      path: import.meta.env.VITE_CHAT_SCREENSHOTS + "/" + view + "-" + theme + ".png",
+    });
+  }
+  document.documentElement.classList.remove("dark");
+}
+
+it("opens only when offered, reads the channel, posts, replies, edits and deletes through the fake relay", async () => {
+  await using resources = new AsyncDisposableStack();
+  const { router, message, access, show, asLeo } = await setupChannel(resources, "messages");
   await using screen = await render(<RouterProvider router={router} />, { router: false });
-  await vi.waitFor(() => expect(publish).toBeDefined());
-  await act(() => emit([]));
+  await show([]);
   expect(screen.getByText("Channels", { exact: true }).elements()).toHaveLength(0);
-  const created = await commands.companyChat("leo", {
+  const created = await asLeo({
     kind: "create",
     name: "design",
     purpose: "",
     template: "team",
   });
   if (!created.ok) throw new Error(created.message);
-  await act(() => emit(["chat"]));
+  await show(["chat"]);
   await screen.getByRole("button", { name: "design", exact: true }).click();
   await expect.element(screen.getByRole("heading", { name: "Welcome to #design" })).toBeVisible();
   await expect.element(screen.getByText("Join #design to post")).toBeVisible();
@@ -270,21 +317,11 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await expect
     .element(screen.getByRole("button", { name: "platform", exact: true }))
     .toHaveAttribute("data-unread", "false");
-  async function proof(view: string) {
-    if (!import.meta.env.VITE_CHAT_SCREENSHOTS) return;
-    for (const theme of ["light", "dark"]) {
-      document.documentElement.classList.toggle("dark", theme === "dark");
-      await page.screenshot({
-        path: import.meta.env.VITE_CHAT_SCREENSHOTS + "/" + view + "-" + theme + ".png",
-      });
-    }
-    document.documentElement.classList.remove("dark");
-  }
   expect(useTabsStore.getState().tabs.at(-1)).toMatchObject({ kind: "chat", kept: false });
   await proof("channel");
   for (const mode of ["reply", "readonly", "hidden"] as const) {
-    rights = mode;
-    await act(() => emit(["chat"]));
+    access.rights = mode;
+    await show(["chat"]);
     await expect
       .element(
         screen.getByText(
@@ -299,8 +336,8 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       .toBeVisible();
     expect(screen.getByRole("textbox", { name: "Channel message" }).elements()).toHaveLength(0);
   }
-  rights = "normal";
-  await act(() => emit(["chat"]));
+  access.rights = "normal";
+  await show(["chat"]);
   expect(screen.getByText("Direct messages", { exact: true }).elements()).toHaveLength(0);
   expect(screen.getByRole("textbox", { name: "Search conversation" }).elements()).toHaveLength(0);
   expect(screen.getByText("hidden-task").elements()).toHaveLength(0);
@@ -312,8 +349,8 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   expect(screen.getByRole("button", { name: "React with thumbs up" }).elements()).toHaveLength(0);
   expect(screen.getByText(/Only an explicit @mention/).elements()).toHaveLength(0);
   await actions.click();
-  limited = false;
-  await act(() => emit(["chat"]));
+  access.limited = false;
+  await show(["chat"]);
   await screen.getByRole("button", { name: "Channel settings" }).click();
   const settings = page.getByRole("dialog");
   await settings.getByRole("button", { name: "Announcement" }).click();
@@ -353,6 +390,14 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
     .click();
   await expect.element(screen.getByText("Message deleted")).toBeVisible();
   await expect.element(screen.getByRole("button", { name: /2 replies/ })).toBeVisible();
+});
+
+it("adds a channel member and approves a community join request", async () => {
+  await using resources = new AsyncDisposableStack();
+  const { router, origin, rpc, show, asLeo } = await setupChannel(resources, "membership");
+  await using screen = await render(<RouterProvider router={router} />, { router: false });
+  await show(["chat"]);
+  await screen.getByRole("button", { name: /^platform\b/ }).click();
   const roster = screen.getByRole("button", { name: /[0-9]+ people/ }).first();
   await roster.click();
   const sheet = page.getByRole("dialog", { name: "Members of #platform" });
@@ -365,7 +410,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await sheet.getByRole("button", { name: "Confirm add" }).click();
   await expect.element(sheet.getByText("Already in this channel.", { exact: true })).toBeVisible();
   await sheet.getByRole("button", { name: "Close" }).click();
-  const createdCommunity = await commands.companyChat("leo", {
+  const createdCommunity = await asLeo({
     kind: "create",
     name: "contributors",
     purpose: "Discuss patches",
@@ -403,7 +448,13 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
       .not.toBeInTheDocument();
     expect(rpc).toHaveBeenCalledWith(target, expect.objectContaining({ kind: "approve" }));
   }
-  await screen.getByRole("button", { name: "Browse channels" }).click();
+});
+
+it("opens group and agent DMs and shows who can read them", async () => {
+  await using resources = new AsyncDisposableStack();
+  const { router, show, asLeo } = await setupChannel(resources, "direct");
+  await using screen = await render(<RouterProvider router={router} />, { router: false });
+  await show(["chat"]);
   await screen.getByRole("button", { name: "Start direct message" }).click();
   await screen.getByRole("checkbox", { name: "kim" }).click();
   await screen.getByRole("checkbox", { name: "leo" }).click();
@@ -418,7 +469,7 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   await expect.element(optIn).not.toBeChecked();
   await optIn.click();
   await expect.element(screen.getByText("ada's agents can read this conversation.")).toBeVisible();
-  const otherClient = await commands.companyChat("leo", { kind: "list" });
+  const otherClient = await asLeo({ kind: "list" });
   if (!otherClient.ok) throw new Error(otherClient.message);
   const secondDm = decodeConversations(otherClient.value).items.find(
     (c) => c.kind === "dm" && c.members.some((m) => m.kind === "person" && m.login === "ada"),
@@ -435,7 +486,9 @@ it("opens only when offered, reads the channel, posts, replies, edits and delete
   const dm = screen.getByRole("textbox", { name: "Direct message" });
   await dm.fill("Can we review the release together?");
   await screen.getByRole("button", { name: "Send message" }).click();
-  await expect.element(messageRow("Can we review the release together?")).toBeVisible();
+  await expect
+    .element(screen.getByRole("article").filter({ hasText: "Can we review the release together?" }))
+    .toBeVisible();
   await proof("group-dm");
   await screen.getByRole("button", { name: "Start direct message" }).click();
   await screen.getByRole("checkbox", { name: /leo\/reviewer/ }).click();

@@ -40,6 +40,11 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { workspaceProjectKey } from "./workspaces.logic";
 import { loadEnvironmentWorkspaces, useWorkspacesStore, workspacesRpc } from "./workspacesStore";
 
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
 

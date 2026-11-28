@@ -2,6 +2,11 @@ import { MemoryContradictionCard } from "./MemoryContradictionCard";
 import { expect, it, vi } from "vite-plus/test";
 import { render } from "../../test/render";
 import { MemoryNotes } from "./MemoryReview";
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 const note = {
   key: "Format",
   text: "Two spaces",

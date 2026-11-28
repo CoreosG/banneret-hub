@@ -1,3 +1,4 @@
+import { selectOrchestrator } from "./orchestratorStore";
 import appCss from "../index.css?inline";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
@@ -31,7 +32,7 @@ import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/en
 import { chatRpc } from "./chat/client";
 import { BoardPage } from "./BoardPage";
 import { CompanySearchHost } from "./CompanySearch";
-import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
+import { enrolmentRpc, storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { EnterpriseSidebarRows } from "./EnterpriseSidebarRows";
 import { leaseRpc, useLeaseStore, type LeaseCall } from "./leaseStore";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
@@ -41,6 +42,11 @@ import { useWorkspacesStore } from "./workspacesStore";
 import { rememberedBoard } from "./boardChoice";
 import { boardEntry, singleBoard } from "./boards.testkit";
 import { FILTER_MEMORY_KEY, rememberedFilters } from "./filterMemory";
+
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
 
 vi.mock("../state/environments", { spy: true });
 vi.mock("../state/entities", { spy: true });
@@ -188,7 +194,14 @@ const state = (sections: string[], board: BanneretFeedBoardRead | null): Bannere
   team: null,
 });
 
+vi.mock("./orchestratorStore", { spy: true });
+
 function setup() {
+  vi.spyOn(enrolmentRpc, "resources").mockResolvedValue({
+    ok: false,
+    message: "No resource sample",
+  });
+  vi.mocked(selectOrchestrator).mockResolvedValue(null);
   useWorkspacesStore.setState({
     byEnvironment: {},
     local: [enterprise],

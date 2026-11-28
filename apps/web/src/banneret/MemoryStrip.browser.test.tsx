@@ -6,6 +6,11 @@ import { MemoryStrip } from "./MemoryStrip";
 import "~/index.css";
 
 const respond = vi.hoisted(() => vi.fn());
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("@t3tools/client-runtime/state/runtime", async (load) => {
   const original = await load<typeof import("@t3tools/client-runtime/state/runtime")>();
   const Atom = await import("effect/reactivity/Atom");

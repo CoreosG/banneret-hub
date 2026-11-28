@@ -1,3 +1,4 @@
+import { selectOrchestrator } from "./orchestratorStore";
 import company from "./offices/fixtures/company.csv?raw";
 import { chatRpc } from "./chat/client";
 import { restoredSearch } from "./filterMemory";
@@ -45,6 +46,11 @@ import { openTaskDialog } from "./taskStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { TeamPage } from "./TeamPage";
 import { useWorkspacesStore } from "./workspacesStore";
+
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
 
 vi.mock("../state/session", { spy: true });
 vi.mock("../state/environments", { spy: true });
@@ -283,7 +289,10 @@ const state = (sections: string[], team: BanneretTeamRead | null): BanneretFeedS
   team,
 });
 
+vi.mock("./orchestratorStore", { spy: true });
+
 function setup() {
+  vi.mocked(selectOrchestrator).mockResolvedValue(null);
   localStorage.removeItem("banneret.team.view." + WORKSPACE_ID);
   useWorkspacesStore.setState({
     byEnvironment: {},
@@ -1003,61 +1012,60 @@ it("opens the company office, reads only visible rooms and makes zero frame requ
     };
   });
   localStorage.removeItem("banneret.team.view." + WORKSPACE_ID);
-  await emit(
-    state(
-      ALL,
-      teamRead({
-        people,
-        office: {
-          ...office,
-          preset: "company",
-          summary: {
-            ...office.summary,
-            people: { total: 500 },
-            rooms,
-            agents: agents.slice(0, 400),
-            agentsNextCursor: "remaining",
-          },
-        },
-      }),
-    ),
-  );
   const map = page.getByRole("group", { name: /Office map/ });
-  await vi.waitFor(() =>
-    expect(
-      document.querySelector('[data-office-target="team.room.Platform/desk/p000"]'),
-    ).toBeTruthy(),
-  );
-  if (import.meta.env.VITE_SCALE_SCREENSHOTS) {
-    await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/office.png" });
-    await page.getByRole("button", { name: "Floor", exact: true }).click();
-    await page.getByRole("button", { name: /Platform.*desks/ }).click();
-    await expect.element(page.getByText("builder-000", { exact: true })).toBeVisible();
-    await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/floor.png" });
-    await page.getByRole("button", { name: "List", exact: true }).click();
-    await expect.element(page.getByRole("list", { name: "Team members" })).toBeVisible();
-    await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/list.png" });
-    await page.getByRole("button", { name: "Office", exact: true }).click();
-    await expect.element(map).toBeVisible();
-  }
-  const surface = map.element().querySelector("canvas")!;
-  await vi.waitFor(() =>
-    expect(
-      surface
-        .getContext("2d")!
-        .getImageData(0, 0, surface.width, surface.height)
-        .data.some((v) => v > 0),
-    ).toBe(true),
-  );
   {
-    using _clock = fakeTimers();
-    const requests = vi.spyOn(window, "requestAnimationFrame");
-    const paints = vi.spyOn(CanvasRenderingContext2D.prototype, "drawImage");
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(requests).toHaveBeenCalledTimes(0);
-    expect(paints).toHaveBeenCalledTimes(0);
-    requests.mockRestore();
-    paints.mockRestore();
+    using _frames = fakeTimers();
+    await emit(
+      state(
+        ALL,
+        teamRead({
+          people,
+          office: {
+            ...office,
+            preset: "company",
+            summary: {
+              ...office.summary,
+              people: { total: 500 },
+              rooms,
+              agents: agents.slice(0, 400),
+              agentsNextCursor: "remaining",
+            },
+          },
+        }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(
+        document.querySelector('[data-office-target="team.room.Platform/desk/p000"]'),
+      ).toBeTruthy(),
+    );
+    if (import.meta.env.VITE_SCALE_SCREENSHOTS) {
+      await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/office.png" });
+      await page.getByRole("button", { name: "Floor", exact: true }).click();
+      await page.getByRole("button", { name: /Platform.*desks/ }).click();
+      await expect.element(page.getByText("builder-000", { exact: true })).toBeVisible();
+      await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/floor.png" });
+      await page.getByRole("button", { name: "List", exact: true }).click();
+      await expect.element(page.getByRole("list", { name: "Team members" })).toBeVisible();
+      await page.screenshot({ path: import.meta.env.VITE_SCALE_SCREENSHOTS + "/list.png" });
+      await page.getByRole("button", { name: "Office", exact: true }).click();
+      await expect.element(map).toBeVisible();
+    }
+    // The viewport and room data can invalidate a previously painted map. Flush the
+    // queued paint after the desks appear before measuring an idle interval.
+    vi.advanceTimersToNextFrame();
+    const surface = map.element().querySelector("canvas")!;
+    const context = surface.getContext("2d")!;
+    expect(context.getImageData(0, 0, surface.width, surface.height).data.some((v) => v > 0)).toBe(
+      true,
+    );
+    {
+      using requests = vi.spyOn(window, "requestAnimationFrame");
+      using paints = vi.spyOn(context, "drawImage");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(requests).toHaveBeenCalledTimes(0);
+      expect(paints).toHaveBeenCalledTimes(0);
+    }
   }
   for (const label of ["full", "simple", "overview"]) {
     if (label !== "full") await userEvent.click(page.getByRole("button", { name: "Zoom out" }));

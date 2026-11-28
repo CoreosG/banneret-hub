@@ -21,13 +21,7 @@ import { AppRoot } from "~/AppRoot";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter, type AppRouter } from "~/router";
-import {
-  answerRpc,
-  ENVIRONMENT_ID,
-  installFakeEnvironment,
-  threadWithHistory,
-  type FakeDriver,
-} from "../../test/fakeEnvironment";
+import { answerRpc, ENVIRONMENT_ID, type FakeDriver } from "../../test/fakeEnvironment";
 import { act, render } from "../../test/render";
 import { chatRpc } from "./chat/client";
 import { useCompanySearchStore } from "./companySearchStore";
@@ -36,6 +30,12 @@ import { feedRpc } from "./relayFeedStore";
 import { TABS_STORAGE_KEY } from "./tabs/tabs.logic";
 import { __reloadTabsForTests } from "./tabs/tabsStore";
 import { useWorkspacesStore } from "./workspacesStore";
+
+// App imports start primary discovery, so its HTTP fixture must already be installed.
+await vi.hoisted(async () => {
+  const { installFakeEnvironment, threadWithHistory } = await import("../../test/fakeEnvironment");
+  installFakeEnvironment([threadWithHistory("thread-search", 2)]);
+});
 
 vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
   const [actual, { fakeDriver }, Layer] = await Promise.all([
@@ -91,7 +91,6 @@ const FEED: BanneretFeedState = {
   team: null,
 };
 
-installFakeEnvironment([threadWithHistory("thread-search", 2)]);
 answerRpc(BANNERET_WORKSPACES_WS_METHODS.list, () => Effect.succeed({ workspaces: [COMPANY] }));
 __setClientSettingsForTests({
   ...DEFAULT_CLIENT_SETTINGS,

@@ -5,6 +5,11 @@ import { render } from "../../../test/render";
 import { AgentThreadHeader } from "./AgentSettings";
 import { chatRpc } from "./client";
 const { useEnterpriseFeed } = vi.hoisted(() => ({ useEnterpriseFeed: vi.fn() }));
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
+
 vi.mock("../useEnterpriseFeed", () => ({ useEnterpriseFeed }));
 
 it("shows waiting deliveries and saves the agent's wake choice", async () => {

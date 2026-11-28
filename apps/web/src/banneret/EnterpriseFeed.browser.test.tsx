@@ -1,3 +1,4 @@
+import { chatRpc } from "./chat/client";
 import appCss from "../index.css?inline";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
@@ -33,6 +34,11 @@ import { feedRpc, refreshToday, useRelayFeedStore } from "./relayFeedStore";
 import { FILTER_MEMORY_KEY } from "./filterMemory";
 import { TodayPage } from "./TodayPage";
 import { useWorkspacesStore } from "./workspacesStore";
+
+vi.mock(import("~/environments/primary/target"), async (original) => ({
+  ...(await original()),
+  readPrimaryEnvironmentTarget: () => null,
+}));
 
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
@@ -280,6 +286,7 @@ describe("Enterprise Today and Needs you", () => {
     );
     vi.stubGlobal("desktopBridge", { revealWindow: vi.fn() });
     stack.defer(() => vi.unstubAllGlobals());
+    using _chat = vi.spyOn(chatRpc, "run").mockResolvedValue({ items: [], nextCursor: null });
     const state = snapshot(["today", "needs", "chat"]);
     await emit({
       ...state,
