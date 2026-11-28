@@ -1,12 +1,11 @@
-// Banneret Hub: the open tabs bar. Click activates, double-click keeps, middle-click closes, drag
-// reorders with pointer events (dnd-kit), since HTML5 drag events miss the desktop window's drag
+// Banneret Hub: the open tabs bar. Click activates, double-click keeps, middle-click closes,
+// right-click (or Shift+F10) opens the tab menu, drag reorders with pointer events (dnd-kit), since HTML5 drag events miss the desktop window's drag
 // region on Windows. A thread tab reads its live title from the quiet shell (one subscription per
 // tab, at most MAX_TABS, on data the client already holds).
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
-import { useRouter, type AnyRouter } from "@tanstack/react-router";
+import { EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
+import { useRouter } from "@tanstack/react-router";
 import { EllipsisIcon, PinIcon, XIcon } from "lucide-react";
 import {
   closestCenter,
@@ -24,59 +23,20 @@ import { useEffect, useRef, useState } from "react";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../../components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+import { openContextMenuFromKeyboard } from "../../contextMenuSource";
+import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
 import { useQuietThreadShell } from "../../state/entities";
 import { readEnvironment, useConnectedEnvironmentIds } from "../../state/environments";
 import { environmentShell } from "../../state/shell";
 import { useEnterpriseFeed } from "../useEnterpriseFeed";
-import { setActiveWorkspace, useWorkspaces } from "../workspacesStore";
+import { useWorkspaces } from "../workspacesStore";
+import { activateTab, closeTab, toScopedRef } from "./tabActions";
+import { TabMenu, type TabMenuState } from "./TabMenu";
 import type { Tab } from "./tabs.logic";
-import { syncTabsWithRoute } from "./tabsRoute";
-import {
-  beginActivation,
-  close,
-  endActivation,
-  keep,
-  move,
-  pin,
-  retitle,
-  setTabsHidden,
-  useTabsStore,
-} from "./tabsStore";
+import { close, keep, move, pin, retitle, setTabsHidden, useTabsStore } from "./tabsStore";
 
 const TAB_DRAG_MODIFIERS = [restrictToHorizontalAxis, restrictToFirstScrollableAncestor];
-
-/** Shows a tab: a page tab switches its workspace first; a thread tab's workspace follows itself. */
-async function activateTab(router: AnyRouter, tab: Tab) {
-  if (tab.kind === "thread") {
-    await router.navigate({ href: tab.href });
-    return;
-  }
-  beginActivation(tab);
-  try {
-    setActiveWorkspace(tab.workspaceId);
-    await router.navigate({ href: tab.href });
-  } finally {
-    endActivation();
-    syncTabsWithRoute(router);
-  }
-}
-
-async function closeTab(router: AnyRouter, id: string) {
-  const { closedActive, next } = close(new Set([id]));
-  if (!closedActive) return;
-  if (next === null) await router.navigate({ to: "/" });
-  else await activateTab(router, next);
-}
-
-function toScopedRef(tab: Tab): ScopedThreadRef | null {
-  return tab.threadRef === null
-    ? null
-    : scopeThreadRef(
-        EnvironmentId.make(tab.threadRef.environmentId),
-        ThreadId.make(tab.threadRef.threadId),
-      );
-}
 
 /**
  * Closes the tab once its thread is gone: the shell marks it deleted or archived, or it left the
@@ -130,6 +90,8 @@ function TabItem(props: {
   active: boolean;
   offline: boolean;
   workspaceName: string | undefined;
+  menuOpen: boolean;
+  onMenu: (element: HTMLElement, at: { x: number; y: number }) => void;
 }) {
   const { tab, active } = props;
   const router = useRouter();
@@ -153,15 +115,22 @@ function TabItem(props: {
   const offlineNote = `On ${machine ?? "a machine"}, not connected`;
   const itemRef = useRef<HTMLDivElement | null>(null);
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- brings the active tab into view in a bar that scrolls sideways
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the active tab, and so its close button, inside a bar that scrolls sideways
   useEffect(() => {
-    if (active) itemRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const item = itemRef.current;
+    const list = item?.closest('[role="tablist"]');
+    if (!active || !item || !list) return;
+    // Reports once on observe, then whenever the tab or the bar changes width.
+    return observeResize([item, list], () =>
+      item.scrollIntoView({ block: "nearest", inline: "nearest" }),
+    );
   }, [active]);
   const sentAt =
     shell === null ? undefined : (shell.latestUserAuthoredMessageAt ?? shell.latestUserMessageAt);
 
   return (
-    <Tooltip>
+    // The tooltip would sit on top of the tab menu.
+    <Tooltip disabled={props.menuOpen}>
       <TooltipTrigger
         render={
           <div
@@ -199,7 +168,24 @@ function TabItem(props: {
               event.preventDefault();
               void closeTab(router, tab.id);
             }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              props.onMenu(event.currentTarget, { x: event.clientX, y: event.clientY });
+            }}
             onKeyDown={(event) => {
+              // Keys on the tab's own buttons are theirs.
+              if (event.target !== event.currentTarget) return;
+              openContextMenuFromKeyboard(event);
+              if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                event.preventDefault();
+                const items = [
+                  ...event.currentTarget
+                    .closest('[role="tablist"]')!
+                    .querySelectorAll<HTMLElement>('[role="tab"]'),
+                ];
+                const step = event.key === "ArrowLeft" ? -1 : 1;
+                items[items.indexOf(event.currentTarget) + step]?.focus();
+              }
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 void activateTab(router, tab);
@@ -215,21 +201,21 @@ function TabItem(props: {
           <SendKeeper key={tab.id} tabId={tab.id} sentAt={sentAt} />
         ) : null}
         <span className="min-w-0 truncate">{title}</span>
-        <button
-          type="button"
-          aria-label={tab.pinned ? `Unpin ${title}` : `Pin ${title}`}
-          className={cn(
-            "flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted",
-            !tab.pinned && "hidden group-hover/tab:flex",
-          )}
-          onClick={(event) => {
-            event.stopPropagation();
-            pin(tab.id);
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          <PinIcon className={cn("size-3", tab.pinned && "fill-current")} />
-        </button>
+        {/* Nothing may appear on hover: a tab that grows pushes its close button out of reach. */}
+        {tab.pinned ? (
+          <button
+            type="button"
+            aria-label={`Unpin ${title}`}
+            className="flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted"
+            onClick={(event) => {
+              event.stopPropagation();
+              pin(tab.id);
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <PinIcon className="size-3 fill-current" />
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label={`Close ${title}`}
@@ -265,6 +251,7 @@ export function TabsBar() {
   const connected = useConnectedEnvironmentIds();
   const workspaces = useWorkspaces();
   const workspaceNames = new Map(workspaces.map((workspace) => [workspace.id, workspace.name]));
+  const [menu, setMenu] = useState<TabMenuState | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -305,11 +292,21 @@ export function TabsBar() {
                 workspaceName={
                   tab.workspaceId === null ? undefined : workspaceNames.get(tab.workspaceId)
                 }
+                menuOpen={menu?.open === true && menu.tabId === tab.id}
+                onMenu={(element, at) => setMenu({ open: true, tabId: tab.id, element, ...at })}
               />
             ))}
           </SortableContext>
         </DndContext>
       </div>
+      {/* Outside the tabs, so the menu's clicks never bubble into one. */}
+      {menu === null ? null : (
+        <TabMenu
+          menu={menu}
+          tabs={tabs}
+          onClose={() => setMenu((current) => current && { ...current, open: false })}
+        />
+      )}
       <Menu>
         <MenuTrigger
           render={

@@ -11,6 +11,7 @@ import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../s
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 import { useWorkspaceScopedProjects } from "../banneret/useWorkspaceScopedProjects";
+import { labelNoProjectTwins } from "../banneret/labelNoProjectTwins";
 
 export function useSidebarProjectGroups() {
   const projects = useWorkspaceScopedProjects(useProjects());
@@ -46,5 +47,7 @@ export function useSidebarProjectGroups() {
     },
     resolve,
   );
-  return sortSidebarV2ProjectGroups(unsortedGroups, threads, sortOrder, delegatedUnderParent);
+  return labelNoProjectTwins(
+    sortSidebarV2ProjectGroups(unsortedGroups, threads, sortOrder, delegatedUnderParent),
+  );
 }
