@@ -21,15 +21,19 @@ A browser test whose assertions depend on layout runs across the viewport matrix
 or an ultrawide one breaks layouts that look right at one desktop size.
 
 - Declare it with `forEachViewport` from `apps/web/src/banneret/test/viewports.ts`. That call is the
-  layout tag: it names each case `[layout] … at <size>`, so `-t "\[layout\]"` runs only those.
-  Every other browser test runs once, at its own size.
+  layout tag: it names each case `[layout] … at <size>`. Every other browser test runs once, at its
+  own size.
 - Mount at the size the matrix set. A shared harness must not resize the window for a layout test.
 - Use the helper's assertions for overlap, clipping, clickability, line length and centring.
-- Each size captures one screenshot to `.vitest-viewports/<test>/<size>.png` at the repository root.
-  CI uploads that folder as the `layout-screenshots` artifact. A PR that changes layout shows the
-  per-size screenshots. Look at them: the assertions do not catch everything.
-- Capture once or twice per case. A 4K capture at scale 2 takes seconds, and the case has the usual
-  test timeout.
+- Each case calls `at.screenshot()` while its UI is up. Capture once per case: a 4K capture at
+  scale 2 takes seconds, and the case has the usual test timeout.
+- Captures are off unless `VITE_LAYOUT_SHOTS` is set, and need `--no-file-parallelism`: a capture
+  takes focus from test files running beside it, which fails their keyboard tests. From `apps/web`:
+  `VITE_LAYOUT_SHOTS=1 vp test run --project browser --no-file-parallelism -t '\[layout\]' <files>`.
+- Screenshots land in `.vitest-viewports/<test>/<size>.png` at the repository root. CI runs the
+  matrix as its own step and uploads them as the `layout-screenshots` artifact.
+- A PR that changes layout shows the per-size screenshots. Look at them: the assertions do not catch
+  everything.
 
 ## Identity
 

@@ -155,20 +155,23 @@ async function folderNames(
 }
 
 // The two cases with the longest names: machine labels that are never cut, and a path that is.
-forEachViewport("No project folders stay inside the sidebar", async (at) => {
+forEachViewport("No project folders with machine names stay inside the sidebar", async (at) => {
   await folderNames(
     [
       noProject(PC, "pc-home", "C:\\Users\\a\\.banneret\\scratch", true),
       noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
     ],
-    () => at.screenshot("machines"),
+    () => at.screenshot(),
   );
+});
+
+forEachViewport("a No project folder named by its path stays inside the sidebar", async (at) => {
   await folderNames(
     [
       noProject(WSL, "wsl-home", "/home/a/.banneret/scratch", true),
       noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
     ],
-    () => at.screenshot("path"),
+    () => at.screenshot(),
   );
 });
 

@@ -45,6 +45,8 @@ import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { TeamPage } from "./TeamPage";
+// The page loads the office lazily; importing it here keeps its first transform out of a wait.
+import "./offices/office/TeamOffice";
 import { useWorkspacesStore } from "./workspacesStore";
 import { expectCentred, expectClickable, expectUnclipped, forEachViewport } from "./test/viewports";
 
@@ -387,8 +389,10 @@ forEachViewport("the Team office lays out its map", async (at) => {
   await using _screen = screen;
   await emit(state(ALL, teamRead(TEAM())));
   const map = page.getByRole("group", { name: /Office map/ });
-  await vi.waitFor(() =>
-    expect(map.element().querySelector('[data-office-target*="/desk/"]')).toBeTruthy(),
+  // Six sizes on a loaded runner: the first paint can take longer than the default second.
+  await vi.waitFor(
+    () => expect(map.element().querySelector('[data-office-target*="/desk/"]')).toBeTruthy(),
+    { timeout: 5000 },
   );
   const main = document.querySelector('[role="main"]')!;
   const content = main.querySelector('[data-layout="page"]')!;

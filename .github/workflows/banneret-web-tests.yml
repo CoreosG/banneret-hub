@@ -83,9 +83,21 @@ jobs:
         working-directory: apps/web
         run: |
           vp test run --project browser \
+            -t '^(?!.*\[layout\])' \
             src/banneret/ \
             src/components/ports/ \
             src/components/CommandPalette.browser.test.tsx
+
+      # The viewport matrix (forEachViewport), one file at a time: its screenshots take focus from
+      # files running beside them.
+      - name: Layout tests at every viewport
+        if: ${{ !cancelled() }}
+        working-directory: apps/web
+        env:
+          VITE_LAYOUT_SHOTS: "1"
+        run: |
+          mapfile -t files < <(grep -rlF 'forEachViewport(' src/banneret --include='*.browser.test.tsx')
+          vp test run --project browser --no-file-parallelism -t '\[layout\]' "${files[@]}"
 
       # One screenshot per layout test and viewport size (docs/banneret/maintaining.md, "Layout tests").
       - name: Upload layout screenshots

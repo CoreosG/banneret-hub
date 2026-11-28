@@ -1,6 +1,6 @@
 // Banneret Hub: the viewport matrix for layout browser tests (docs/banneret/maintaining.md, "Layout
-// tests"). A layout test runs once at every size below and captures one screenshot per size, saved to
-// <repo>/.vitest-viewports/<test>/<size>.png (gitignored, uploaded by CI).
+// tests"). A layout test runs once at every size below. With VITE_LAYOUT_SHOTS set it also saves one
+// screenshot per size to <repo>/.vitest-viewports/<test>/<size>.png (gitignored, uploaded by CI).
 import { expect, it, vi } from "vite-plus/test";
 import { cdp, commands, page } from "vite-plus/test/browser";
 
@@ -28,7 +28,10 @@ const LAYOUT_VIEWPORTS: readonly LayoutViewport[] = [
 ];
 
 export interface AtViewport extends LayoutViewport {
-  /** Saves what the window shows now. `part` tells a second capture of the same size apart. */
+  /**
+   * Marks the moment to capture and, with VITE_LAYOUT_SHOTS set, saves what the window shows.
+   * `part` tells a second capture of the same size apart.
+   */
   readonly screenshot: (part?: string) => Promise<void>;
 }
 
@@ -111,7 +114,9 @@ export function forEachViewport(name: string, body: (at: AtViewport) => Promise<
       ...viewport,
       screenshot: async (part) => {
         const path = `${slug(name)}/${viewport.id}${part ? `-${slug(part)}` : ""}.png`;
-        await capture(path);
+        // A DevTools capture takes focus from test files running in other pages, so captures
+        // happen only in a pass that runs one file at a time.
+        if (import.meta.env.VITE_LAYOUT_SHOTS) await capture(path);
         captured.push(path);
       },
     });
