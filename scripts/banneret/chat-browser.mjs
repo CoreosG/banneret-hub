@@ -83,7 +83,10 @@ export async function command(operation, arg) {
     }
   }
   if (op === "start") {
-    const relay = await startFakeRelay({ chat: true, autoApprove: false });
+    const relay = await startFakeRelay({
+      chat: key === "h1" ? { agentAsks: { enabled: true } } : true,
+      autoApprove: false,
+    });
     session = { relay };
     sessions.set(key, session);
     try {
@@ -148,6 +151,7 @@ export async function command(operation, arg) {
           { title: "Review results", state: "working" },
         ],
       });
+      session.root = root.id;
       const kim = await enrol(relay, "kim");
       await kim.call("PUT", "chat/me/settings", {
         ...(await kim.call("GET", "chat/me/settings")).body,
@@ -176,6 +180,35 @@ export async function command(operation, arg) {
     sessions.delete(key);
     return;
   }
+  if (op === "agentAsk") {
+    await session.ada.call("PUT", "chat/handles/h_builder", {
+      name: "builder",
+      threadRef: "builder1",
+      machineId: session.ada.me.machineId,
+      provider: "codex",
+    });
+    const result = await session.ada.call("POST", "chat/asks", {
+      asHandle: "h_builder",
+      to: { kind: "agent", handle: "h_review" },
+      question: "Which file defines retries?",
+      doneWhen: "Name the file.",
+      context: "Release upload retries.",
+      threadRootId: session.root,
+      key: arg,
+    });
+    return {
+      ask: result.body,
+      item: (await session.leo.call("GET", "needs")).body.items.find((i) => i.kind === "agent_ask"),
+    };
+  }
+  if (op === "agentAnswer")
+    return (
+      await session.leo.call("POST", "chat/asks/" + arg + "/answer", {
+        asHandle: "h_review",
+        text: "upload.ts",
+        receipt: { handle: "h_review", tokens: 180, seconds: 3, tools: ["read"] },
+      })
+    ).body;
   if (op === "ask") {
     await session.leo.call("POST", "chat/asks", {
       to: { kind: "person", person: session.ada.me.id },

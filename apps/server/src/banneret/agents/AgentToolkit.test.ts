@@ -1,3 +1,5 @@
+import { handleId } from "../chat/AgentChat.ts";
+import { makeAnswerRuns } from "../chat/AnswerRuns.ts";
 import { approvalMachine } from "../plugins/approvals.ts";
 import * as Activity from "../../preview/PreviewAgentActivity.ts";
 import { setLevel, toolkitSource } from "../plugins/levels.ts";
@@ -1138,6 +1140,63 @@ describe("agent lease tools against the fake relay", () => {
       { skills: [company] },
     );
   });
+
+  it.live("closes a consumed agent question after a restart loses its answering run", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            yield* joinWithBoard(fake, relay);
+            const device = (yield* (yield* Enrolment.BanneretEnrolment).relay(relay.origin))!;
+            const status = yield* device.status;
+            const post = yield* call("banneret_chat_post", {
+              conversation: "c_general",
+              key: "root",
+              text: "Release checks",
+            });
+            const target = handleId(COMPANY_THREAD);
+            const question = {
+              thread: post.messageId,
+              to: target,
+              question: "Which check?",
+              context: "Upload release",
+              doneWhen: "Name a check.",
+              key: "linux",
+            };
+            const ask = yield* call("banneret_agent_ask", question);
+            expect(ask.askId).toEqual(expect.any(String));
+            expect(yield* call("banneret_agent_ask", question)).toEqual(ask);
+            expect(status.machineId).toBeTruthy();
+            const deliveries = (yield* device.signedChat("GET", "deliveries")).body as {
+              items: { id: string; reason: string; expiresAt: string }[];
+            };
+            const delivery = deliveries.items.find((d) => d.reason === "ask")!;
+            const path = "deliveries/" + delivery.id;
+            const saved = yield* makeAnswerRuns;
+            yield* device.signedChat("POST", path + "/claim", { asHandle: target });
+            yield* saved.remember(
+              device,
+              String(ask.askId),
+              target,
+              delivery.expiresAt,
+              { id: RunId.make("lost-run"), threadId: COMPANY_THREAD },
+              ProjectId.make("project-company"),
+              { maxTokens: 200000, maxSeconds: 900 },
+            );
+            yield* device.signedChat("POST", path + "/consume", { asHandle: target });
+            yield* (yield* makeAnswerRuns).reconcile(device, true);
+            expect((yield* device.signedChat("GET", "asks?role=answerer")).body).toMatchObject({
+              items: [{ state: "unanswered", reason: "turn_ended" }],
+            });
+            expect((yield* device.signedChat("GET", "deliveries")).body).toMatchObject({
+              items: [{ reason: "ask_result" }],
+            });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
 
   it.live(
     "replays a claimed chat delivery on restart and stops progress after the session ends",

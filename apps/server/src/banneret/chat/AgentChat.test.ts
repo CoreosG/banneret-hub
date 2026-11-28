@@ -21,3 +21,27 @@ it.effect("consumes the invoking thread's inbox using a signed POST", () =>
     });
   }),
 );
+
+it("forces supervision only on the answering turn and stops at either cap", async () => {
+  const { answerPolicy } = await import("./turnPolicy.ts");
+  const { capReached, answerMessageId } = await import("./AnswerTurn.ts");
+  const policy = {
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    cwd: null,
+    approvalPolicy: "never",
+    sandboxPolicy: { type: "dangerFullAccess" },
+  } as const;
+  expect(answerPolicy(answerMessageId("a_one", "d_one"), policy)).toMatchObject({
+    runtimePolicy: {
+      runtimeMode: "approval-required",
+      sandboxPolicy: { type: "readOnly" },
+      approvalPolicy: "untrusted",
+    },
+  });
+  expect(answerPolicy("local-message", policy)).toEqual({});
+  const caps = { maxTokens: 20, maxSeconds: 5 };
+  expect(capReached({ tokens: 19, seconds: 4 }, caps)).toBeUndefined();
+  expect(capReached({ tokens: 20, seconds: 4 }, caps)).toBe("token_cap");
+  expect(capReached({ tokens: 19, seconds: 5 }, caps)).toBe("time_cap");
+});

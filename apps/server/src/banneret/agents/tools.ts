@@ -4,6 +4,7 @@
 // tracker login, exactly as the Board's Take and Release buttons do.
 import {
   ChatCard,
+  ChatNewAsk,
   ChatDeliveries,
   LEASE_RELEASE_REASONS,
   PoolResources,
@@ -546,6 +547,39 @@ export const AgentToolkit = Toolkit.make(
   ChatPostTool,
   ChatReplyTool,
   ChatProgressTool,
+  writes(
+    Tool.make("banneret_agent_ask", {
+      ...poolOptions,
+      description:
+        "Ask one agent a question in a shared chat thread. Include the facts it needs and what would answer it. Reuse the key on retry. Its owner controls whether it answers.",
+      parameters: Schema.Struct({
+        to: Schema.NonEmptyString,
+        thread: ChatId,
+        question: bounded(6144),
+        context: bounded(8192),
+        doneWhen: bounded(300),
+        pr: ChatNewAsk.fields.pr,
+        key: Schema.NonEmptyString,
+        taskRef: Schema.optional(ChatId),
+        choices: Schema.optional(
+          Schema.Array(Schema.String).check(Schema.isMinLength(2), Schema.isMaxLength(5)),
+        ),
+        timeoutSeconds: Schema.optional(
+          Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 604800 })),
+        ),
+      }),
+      success: Schema.Struct({ askId: ChatId }),
+    }),
+  ),
+  writes(
+    Tool.make("banneret_agent_answer", {
+      ...poolOptions,
+      description:
+        "Return the answer to the question that started this turn. Share only facts suitable for its home thread. The owner confirms a requested draft.",
+      parameters: Schema.Struct({ text: bounded(16384), choice: Schema.optional(Schema.String) }),
+      success: Schema.Struct({ askId: ChatId }),
+    }),
+  ),
   ChatAskTool,
   ChatInboxTool,
   reads(

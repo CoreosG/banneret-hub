@@ -1,3 +1,4 @@
+import { WaitingAsks } from "./chat/AgentAskCards";
 import { JoinRequests } from "./chat/JoinRequests";
 // Banneret Hub: Needs you for an Enterprise workspace, from the relay's GET /needs in the order the
 // relay returns it (most urgent first). Pages load on request.
@@ -18,7 +19,7 @@ import { Section, SectionEmpty } from "./ui/Section";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
 const groups = {
-  Questions: ["chat_ask", "thread_question", "founder_question", "persona_ask"],
+  Questions: ["agent_ask", "chat_ask", "thread_question", "founder_question", "persona_ask"],
   Mentions: ["mention", "agent_message"],
   Reviews: [
     "chat_join_requests",
@@ -116,9 +117,16 @@ export function NeedsPage() {
           ) : (
             <ul aria-label="Needs you items">
               {items.map((item) =>
-                item.kind === "chat_join_requests" &&
-                item.conversationId &&
-                feed.chatFlags?.includes("join_requests") ? (
+                item.kind === "agent_ask" && feed.chatFlags?.includes("agent_asks") ? (
+                  <WaitingAsks
+                    key={item.id}
+                    item={item}
+                    target={target}
+                    chatRevision={feed.chatRevision}
+                  />
+                ) : item.kind === "chat_join_requests" &&
+                  item.conversationId &&
+                  feed.chatFlags?.includes("join_requests") ? (
                   <JoinRequests
                     key={item.id}
                     item={item}

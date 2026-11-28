@@ -1,4 +1,5 @@
 import { memoryEnabled, isPluginMemoryTool } from "../memory/settings.ts";
+import { activeRun, answeringAsk } from "../chat/AnswerTurn.ts";
 import * as NodeSqlite from "node:sqlite";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
@@ -59,6 +60,7 @@ interface CallContext {
   transport?: StoredTransport;
 }
 interface Machine {
+  answering: (thread: ThreadId) => Effect.Effect<boolean, McpSchema.InvalidParams>;
   updates: Stream.Stream<number>;
   submit: (
     scope: McpInvocationScope,
@@ -85,12 +87,27 @@ export const approvalMachine = (id: EnvironmentId) =>
 type Registration = Parameters<McpServer.McpServer["Service"]["addTool"]>[0];
 export function holdWrite(options: Registration): Registration["handle"] {
   const tool = options.tool;
-  if (!tool.name.startsWith("banneret_") || classify(tool) === "read") return options.handle;
+  if (
+    tool.name === "banneret_agent_answer" ||
+    tool.name === "banneret_agent_ask" ||
+    (tool.annotations?.readOnlyHint === true && !tool.annotations.destructiveHint)
+  )
+    return options.handle;
+  const normallyHeld = tool.name.startsWith("banneret_") && classify(tool) !== "read";
   return (args) =>
     Effect.gen(function* () {
       if ((yield* replay) === tool.name)
         return yield* options.handle(args).pipe(Effect.provideService(replay, undefined));
       const scope = Option.getOrUndefined(yield* Effect.serviceOption(McpInvocationContext));
+      if (
+        !normallyHeld &&
+        (!scope?.thread ||
+          !(yield* (
+            machines.get(scope.environmentId)?.answering(scope.thread.threadId) ??
+            Effect.succeed(false)
+          )))
+      )
+        return yield* options.handle(args);
       if (!scope?.thread) return yield* error("A Hub thread is required.");
       return yield* (yield* approvalMachine(scope.environmentId)).submit(
         scope,
@@ -223,6 +240,11 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
         return actual;
       });
       const machine: Machine = {
+        answering: (thread) =>
+          activeRun(threads, thread).pipe(
+            Effect.map((run) => !!run && !!answeringAsk(run.userMessageId)),
+            Effect.mapError((e) => error(e.message)),
+          ),
         updates: SubscriptionRef.changes(revision),
         submit: Effect.fn(
           function* (scope, source, name, args, sensitive, transport) {
@@ -248,7 +270,10 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
               !shell.delegatedFrom;
             const row = store.hold({
               threadId: thread,
-              threadTitle: shell.title,
+              threadTitle:
+                messageId && answeringAsk(messageId)
+                  ? shell.title + " (answering an agent question)"
+                  : shell.title,
               sensitive,
               destination: yield* destination(thread, transport?.endpoint),
               turn: shell.activeRunId,

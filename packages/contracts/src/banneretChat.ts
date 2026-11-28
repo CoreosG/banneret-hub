@@ -736,6 +736,13 @@ export const ChatAction = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("applyWake"), wake: ChatWake }),
   Schema.Struct({ kind: Schema.Literal("settings"), id: Id, patch: ChatPatch }),
   Schema.Struct({ kind: Schema.Literal("handles"), ...Page }),
+  Schema.Struct({
+    kind: Schema.Literal("ownerAsks"),
+    state: Schema.Literals(["waiting_owner", "draft"]),
+    ...Page,
+  }),
+  Schema.Struct({ kind: Schema.Literal("askDecision"), id: Id, decision: ChatDecision }),
+  Schema.Struct({ kind: Schema.Literal("askConfirm"), id: Id, confirm: ChatConfirm }),
   Schema.Struct({ kind: Schema.Literal("dmSettings") }),
   Schema.Struct({ kind: Schema.Literal("setDmSettings"), settings: ChatSettings }),
   Schema.Struct({ kind: Schema.Literals(["join", "leave", "follow", "unfollow"]), id: Id }),
@@ -856,6 +863,12 @@ export function callChannel<A>(
       return call("PUT", "conversations/" + action.id + "/members/" + action.member);
     case "applyWake":
       return call("PUT", "me/agents/wake", { wake: action.wake });
+    case "ownerAsks":
+      return call("GET", "asks" + page + "&role=owner&state=" + action.state);
+    case "askDecision":
+      return call("POST", "asks/" + action.id + "/decision", action.decision);
+    case "askConfirm":
+      return call("POST", "asks/" + action.id + "/confirm", action.confirm);
     case "dmSettings":
       return call("GET", "me/settings");
     case "setDmSettings":

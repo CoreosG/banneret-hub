@@ -1,3 +1,4 @@
+import { activeRun, answeringAsk, runReceipt, capReached } from "../chat/AnswerTurn.ts";
 import { mayPause } from "./pause.ts";
 import { makePauseStore, admission } from "../PauseStore.ts";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -39,6 +40,12 @@ import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
 import { type AgentRelay, BanneretAgentRelays } from "./AgentRelays.ts";
 import { chatClient, invalid } from "../chat/AgentChat.ts";
 import { AgentToolkit } from "./tools.ts";
+
+const maskTokens = (value: string) =>
+  value.replace(
+    /\b(?:gh[pousr]_|github_pat_|sk-(?:ant-)?|xox[baprs]-|glpat-|AIza)[A-Za-z0-9_-]{16,}|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+    "[redacted]",
+  );
 
 const DEFAULT_BOARD_LIMIT = 50;
 /** The release reasons that leave a task free to continue unless the agent says otherwise, as in the dialog. */
@@ -427,6 +434,68 @@ const make = Effect.gen(function* () {
           progress,
         );
         return { messageId: result.id };
+      }),
+    ),
+    banneret_agent_ask: McpToolAccess.actsAsCaller(({ to, thread, ...ask }) =>
+      Effect.gen(function* () {
+        const client = yield* chat;
+        const threads = yield* ThreadManagementService;
+        const run = yield* activeRun(threads, (yield* requireRelay).thread.threadId).pipe(
+          Effect.mapError(() => invalid("Cannot identify the asking turn.")),
+        );
+        const parentAskId = run && answeringAsk(run.userMessageId);
+        if (run?.userMessageId.startsWith("chat-dm:")) {
+          const message = (yield* threads
+            .getMessagesById(run.threadId, [run.userMessageId])
+            .pipe(Effect.mapError(() => invalid("Cannot identify the original DM.")))).get(
+            run.userMessageId,
+          );
+          yield* client.checkDmHome(
+            thread,
+            message?.createdBy === "user"
+              ? message.text.split("\n---\n").slice(1).join("\n---\n")
+              : "",
+          );
+        }
+        const target = yield* client.resolveHandle(to);
+        const receipt =
+          run &&
+          (yield* runReceipt(threads, run, client.asHandle).pipe(
+            Effect.mapError(() => invalid("Cannot read this turn's usage.")),
+          ));
+        const result = yield* client.write("POST", "asks", {
+          ...ask,
+          to: { kind: "agent", handle: target },
+          threadRootId: thread,
+          parentAskId,
+          receipt,
+        });
+        return { askId: result.id };
+      }),
+    ),
+    banneret_agent_answer: McpToolAccess.actsAsCaller(({ text, choice }) =>
+      Effect.gen(function* () {
+        const client = yield* chat;
+        const threads = yield* ThreadManagementService;
+        const run = yield* activeRun(threads, (yield* requireRelay).thread.threadId).pipe(
+          Effect.mapError(() => invalid("Cannot identify the answering turn.")),
+        );
+        const askId = run && answeringAsk(run.userMessageId);
+        if (!run || !askId)
+          return yield* invalid("Only the turn answering this question can post an answer.");
+        const receipt = yield* runReceipt(threads, run, client.asHandle).pipe(
+          Effect.mapError(() => invalid("Cannot read this turn's usage.")),
+        );
+        const reason = capReached(receipt, yield* client.policy);
+        const result = yield* client.write(
+          "POST",
+          "asks/" + askId + "/answer",
+          reason
+            ? { none: true, reason, receipt }
+            : { text: maskTokens(text), choice: choice && maskTokens(choice), receipt },
+        );
+        if (reason) return yield* invalid("The answer reached its usage limit.");
+        return { askId: result.id };
       }),
     ),
     banneret_chat_ask: McpToolAccess.actsAsCaller(({ thread, task, ...ask }) =>

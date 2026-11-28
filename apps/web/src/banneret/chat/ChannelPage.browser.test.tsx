@@ -5,6 +5,7 @@ import {
   type BanneretFeedState,
   type BanneretFeedNeedsItem,
   type BanneretTeamPerson,
+  type ChatAsk,
   type ChannelAction,
   type ChannelResult,
 } from "@t3tools/contracts";
@@ -40,11 +41,16 @@ declare module "vite-plus/test/browser" {
     companyChat: {
       (op: "outsideStart"): Promise<typeof import("@t3tools/contracts").RelayMe.Type>;
       (
-        op: "start" | "roles:start" | "wake:start",
+        op: "start" | "roles:start" | "wake:start" | "h1:start",
       ): Promise<{ id: string; root: string; people: BanneretTeamPerson[] }>;
-      (op: "call" | "roles:call" | "leo" | "wake:leo", arg: ChannelAction): Promise<ChannelResult>;
+      (
+        op: "call" | "roles:call" | "leo" | "wake:leo" | "h1:leo",
+        arg: ChannelAction,
+      ): Promise<ChannelResult>;
+      (op: "h1:agentAsk", key: string): Promise<{ ask: ChatAsk; item: BanneretFeedNeedsItem }>;
+      (op: "h1:agentAnswer", id: string): Promise<ChatAsk>;
       (op: "ask"): Promise<BanneretFeedNeedsItem>;
-      (op: "stop" | "roles:stop" | "wake:stop"): Promise<void>;
+      (op: "stop" | "roles:stop" | "wake:stop" | "h1:stop"): Promise<void>;
     };
   }
 }

@@ -1,3 +1,4 @@
+import { answeringAsk } from "../chat/AnswerTurn.ts";
 // @effect-diagnostics globalFetch:off - Streamable HTTP responses pass through as Web streams with redirects disabled.
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
@@ -61,6 +62,13 @@ const proxy = Effect.gen(function* () {
     if (!rpc) return refuse("Expected one MCP request.");
     const thread = invocation.thread.threadId;
     const key = pluginSource(plugin.manifest.source);
+    const isAnswering = Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const active = (yield* store.getThreadShell(thread))?.activeRunId;
+      const run =
+        active && (yield* store.getThreadRecords(thread, ["runs"], { runIds: [active] })).runs[0];
+      return !!run && !!answeringAsk(run.userMessageId);
+    });
     const level = () => levelFor(thread, key);
     const listing = (id: string | number | undefined, params: object) =>
       Effect.tryPromise({
@@ -84,13 +92,16 @@ const proxy = Effect.gen(function* () {
       const current = yield* level();
       const showMemory =
         !page.tools.some((tool) => isMemoryTool(tool.name)) || (yield* memoryEnabled);
+      const answering = yield* isAnswering;
       return reply({
         result: {
           ...page.result,
           tools: page.tools.filter(
             (tool) =>
               (showMemory || !isMemoryTool(tool.name)) &&
-              allows(current, tool, plugin.manifest.toolPrefix),
+              allows(current, tool, plugin.manifest.toolPrefix) &&
+              (!answering ||
+                (tool.annotations?.readOnlyHint === true && !tool.annotations.destructiveHint)),
           ),
         },
       });
@@ -119,7 +130,7 @@ const proxy = Effect.gen(function* () {
       if (!listed || !allows(initial, listed, plugin.manifest.toolPrefix))
         return refuse(denied(name, plugin.manifest.source, initial));
       const kind = classify(listed, plugin.manifest.toolPrefix);
-      if (kind !== "read") {
+      if (kind !== "read" || (listed.annotations?.readOnlyHint !== true && (yield* isAnswering))) {
         const machine = yield* approvalMachine(invocation.environmentId);
         const result = yield* machine.submit(
           invocation,
