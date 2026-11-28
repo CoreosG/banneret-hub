@@ -368,6 +368,7 @@ function LeaseConfirmDialog() {
             <label>
               Where it continues{" "}
               <select
+                aria-label="Where it continues"
                 value={newThread ? "new" : "orchestrator"}
                 onChange={(e) => setNewThread(e.target.value === "new")}
               >
