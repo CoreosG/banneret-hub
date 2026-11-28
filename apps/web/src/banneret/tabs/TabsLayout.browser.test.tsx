@@ -1,5 +1,6 @@
-// Banneret Hub: a narrow window (900px) in the real app. A tab can always be closed, tabs have a
-// context menu, and the thread's Tool access panel closes like any popover.
+// Banneret Hub: the tabs bar in the real app. A tab can always be closed, tabs have a context menu,
+// and the thread's Tool access panel closes like any popover. Behaviour runs in the narrowest
+// window (900px); the layout checks at the end run at every size.
 import type { ThreadId } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { COMPOSER_CONTEXT_CLIPBOARD_MIME } from "@t3tools/shared/composerContextClipboard";
@@ -16,6 +17,15 @@ import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter, type AppRouter } from "~/router";
 import { answerRpc, ENVIRONMENT_ID, type FakeDriver } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
+import {
+  expectHit,
+  expectInside,
+  expectNoOverlap,
+  expectNoPageScroll,
+  showViewport,
+  VIEWPORTS,
+  windowRect,
+} from "../testViewports";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
 import { __reloadTabsForTests, keep, pin, useTabsStore } from "./tabsStore";
 
@@ -345,6 +355,187 @@ describe("tool access panel", () => {
   it("closes when its button is pressed again", async () => {
     await open();
     await trigger().click();
+    await expect.element(selector()).not.toBeInTheDocument();
+  });
+});
+
+// Twenty tabs with long names overflow the bar even at 3840px. The last, short one is active.
+async function fillBar() {
+  await openTabs();
+  const filler = Array.from({ length: 19 }, (_, index) => ({
+    id: `filler-${index}`,
+    kind: "thread" as const,
+    href: `/${ENVIRONMENT_ID}/filler-${index}`,
+    workspaceId: null,
+    threadRef: { environmentId: ENVIRONMENT_ID, threadId: `filler-${index}` },
+    title: `A thread with a long name that fills its tab ${index}`,
+    pinned: index === 18,
+    kept: true,
+    lastActiveAt: index,
+  }));
+  await act(() => useTabsStore.setState({ tabs: filler, activeId: null }));
+  await go("/map");
+  await vi.waitFor(() => expect(tabs()).toHaveLength(20));
+  await act(() => keep(activeTab().dataset.tabId!));
+}
+
+/** The sidebar, the tabs bar and the page share the window without covering or cutting each other. */
+function expectLayout() {
+  expectNoPageScroll();
+  const sidebar = document
+    .querySelector('[data-slot="sidebar-container"]')!
+    .getBoundingClientRect();
+  const bar = document.querySelector("[data-banneret-tabs-bar]")!.getBoundingClientRect();
+  expect(bar.top).toBe(0);
+  expect(bar.left).toBeCloseTo(sidebar.right, 0);
+  expect(bar.right).toBe(window.innerWidth);
+  for (const inset of document.querySelectorAll('[data-slot="sidebar-inset"]')) {
+    const box = inset.getBoundingClientRect();
+    expect(box.top).toBe(bar.bottom);
+    expect(box.bottom).toBe(window.innerHeight);
+    expect(box.left).toBeGreaterThanOrEqual(sidebar.right - 0.5);
+    expect(box.right).toBeLessThanOrEqual(window.innerWidth);
+  }
+  const list = document.querySelector('[role="tablist"]')!;
+  const options = page.getByRole("button", { name: "Tabs bar options" }).element();
+  expectNoOverlap([list, options], "x");
+  expectInside(options, bar);
+  expectHit(options);
+  expectNoOverlap(tabs(), "x");
+  for (const tab of tabs()) {
+    const box = tab.getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(bar.top);
+    expect(box.bottom).toBeLessThanOrEqual(bar.bottom);
+    const parts = [...tab.querySelectorAll(":scope > span, :scope > button")].filter((part) =>
+      part.checkVisibility(),
+    );
+    for (const part of parts) expectInside(part, box);
+    expectNoOverlap(parts, "x");
+  }
+}
+
+const ITEMS = ["Close", "Close others", "Close to the right", "Pin", "Keep", "Copy link"];
+
+/** The open menu is whole: inside the window, every item on its own line, uncut and uncovered. */
+async function expectMenuFits(items: ReadonlyArray<string> = ITEMS) {
+  await expect.element(page.getByRole("menu")).toBeVisible();
+  // The popup scales in, so its boxes settle a moment after it is visible.
+  await vi.waitFor(() => {
+    const popup = document.querySelector('[data-slot="menu-popup"]')!;
+    expectInside(popup, windowRect());
+    const rows = [...popup.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(rows.map((row) => row.textContent)).toEqual(items);
+    expectNoOverlap(rows, "y");
+    for (const row of rows) {
+      expectInside(row, popup.getBoundingClientRect());
+      expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+      if (row.getAttribute("aria-disabled") !== "true") expectHit(row);
+    }
+    const scroller = popup.firstElementChild!;
+    expect(scroller.scrollHeight).toBeLessThanOrEqual(scroller.clientHeight);
+  });
+}
+
+describe.each(VIEWPORTS)("layout at $name", (size) => {
+  it("keeps every tab's close button in reach, with a few tabs and with a full bar", async () => {
+    await showViewport(size);
+    await openTabs(threadPath(THREAD.id), "/today", "/map");
+    await vi.waitFor(expectLayout);
+    await userEvent.hover(activeTab());
+    expectClickable(closeButton(activeTab()));
+
+    await fillBar();
+    const list = document.querySelector('[role="tablist"]')!;
+    expect(list.scrollWidth).toBeGreaterThan(list.clientWidth);
+    // Measured before any hover: the bar itself keeps the active tab in view.
+    await vi.waitFor(() => expectClickable(closeButton(activeTab())));
+    for (const tab of tabs()) {
+      const width = tab.getBoundingClientRect().width;
+      await userEvent.hover(tab);
+      expect(tab.getBoundingClientRect().width).toBe(width);
+      expectClickable(closeButton(tab));
+    }
+    expectLayout();
+    const last = activeTab();
+    await userEvent.hover(last);
+    await userEvent.click(closeButton(last));
+    await vi.waitFor(() => expect(tabs()).toHaveLength(19));
+    expectLayout();
+  });
+
+  it("shows the whole tab menu and runs every action", async () => {
+    await showViewport(size);
+    // At the window's right edge, where the menu has the least room.
+    await fillBar();
+    await vi.waitFor(() => expectClickable(closeButton(activeTab())));
+    const box = activeTab().getBoundingClientRect();
+    await userEvent.click(activeTab(), {
+      button: "right",
+      position: { x: box.width - 2, y: box.height / 2 },
+    });
+    await expectMenuFits();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+
+    await openTabs("/today", "/board", "/feed");
+    await go("/map");
+    await vi.waitFor(() => expect(activeTab().dataset.preview).toBe(""));
+    activeTab().focus();
+    await userEvent.keyboard("{Shift>}{F10}{/Shift}");
+    await expectMenuFits();
+    await menuItem("Keep").click();
+    await vi.waitFor(() => expect(activeTab().dataset.preview).toBeUndefined());
+    const today = tabNamed("Today");
+    await choose(today, "Pin");
+    await vi.waitFor(() => expect(today.dataset.pinned).toBe(""));
+    await vi.waitFor(expectLayout);
+    await choose(today, "Unpin");
+    await vi.waitFor(() => expect(today.dataset.pinned).toBeUndefined());
+    const copied: string[] = [];
+    using _writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockImplementation(async (text) => {
+        copied.push(text);
+      });
+    await choose(today, "Copy link");
+    await vi.waitFor(() => expect(copied).toEqual([`${window.location.origin}/today`]));
+    await choose(tabNamed("Board"), "Close to the right");
+    await vi.waitFor(() => {
+      expect(tabs()).toHaveLength(2);
+      expect(router.state.location.pathname).toBe("/board");
+    });
+    await choose(tabNamed("Today"), "Close others");
+    await vi.waitFor(() => {
+      expect(tabs()).toHaveLength(1);
+      expect(router.state.location.pathname).toBe("/today");
+    });
+    // Closing the last tab goes home, where the app may open a draft with a tab of its own.
+    const only = activeTab();
+    await choose(only, "Close");
+    await vi.waitFor(() => {
+      expect(only.isConnected).toBe(false);
+      expect(router.state.location.pathname).not.toBe("/today");
+    });
+  });
+
+  it("keeps Tool access clear of the breadcrumb and its panel in the window", async () => {
+    await showViewport(size);
+    await openTabs(threadPath(THREAD.id));
+    await trigger().click();
+    await expect.element(selector()).toBeVisible();
+    await vi.waitFor(() => {
+      expectLayout();
+      const header = document.querySelector("[data-chat-header]")!.getBoundingClientRect();
+      const button = trigger().element();
+      expectInside(button, windowRect());
+      expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(header.bottom + 3);
+      const popup = document.querySelector('[data-slot="popover-popup"]')!;
+      expectInside(popup, windowRect());
+      expect(popup.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+        button.getBoundingClientRect().bottom,
+      );
+    });
+    await userEvent.keyboard("{Escape}");
     await expect.element(selector()).not.toBeInTheDocument();
   });
 });
