@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { SignInPrompts, SignInSettingsList } from "./SourceSignIns";
-import { expectHit, showViewport, VIEWPORTS, windowRect } from "./testViewports";
+import { expectClickable, forEachViewport, windowRect } from "./test/viewports";
 import "~/index.css";
 
 vi.mock(import("~/environments/primary/target"), async (original) => ({
@@ -144,44 +144,44 @@ describe("company sign-ins", () => {
     );
     expect(view.container.textContent).toBe("");
   });
+});
 
-  const sizes = [...VIEWPORTS, { width: 1920, height: 1080, scale: 2, name: "1920x1080 at 2x" }];
-  it.each(sizes)("keeps every control reachable at $name", async (size) => {
-    await showViewport(size);
-    const screenshots = import.meta.env.VITE_PL5_SCREENSHOTS;
-    const surfaces = {
-      settings: <SignInSettingsList label="this machine" rows={EVERY_STATE} act={vi.fn()} />,
-      thread: <SignInPrompts rows={[EVERY_STATE[2]!, EVERY_STATE[4]!]} act={vi.fn()} />,
-    };
-    for (const [surface, content] of Object.entries(surfaces)) {
-      await using view = await render(
-        // The app's panels scroll inside the window; the page itself never does.
-        <main
-          data-testid="panel"
-          className="scrollbar-gutter-both h-dvh overflow-y-auto overflow-x-hidden bg-background p-4 text-foreground"
-        >
-          <div className="mx-auto w-full max-w-3xl">{content}</div>
-        </main>,
-      );
-      const panel = page.getByTestId("panel").element();
-      await expect.element(page.getByRole("button", { name: "Save token" })).toBeVisible();
-      if (screenshots)
-        await page.screenshot({
-          path: `${screenshots}/${surface}-${size.width}x${size.height}-${size.scale}x.png`,
-        });
-      expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);
-      for (const element of view.container.querySelectorAll(
-        "button, input, a, [data-slot=sign-in-state], p, strong",
-      )) {
-        element.scrollIntoView({ block: "center" });
-        const box = element.getBoundingClientRect();
-        expect(box.width).toBeGreaterThan(0);
-        expect(box.left).toBeGreaterThanOrEqual(0);
-        expect(box.right).toBeLessThanOrEqual(windowRect().right);
-        // Text that is wider than its own box would be cut off.
-        expect(element.scrollWidth).toBeLessThanOrEqual(Math.ceil(box.width) + 1);
-        if (element.matches("button, a")) expectHit(element);
-      }
+for (const [surface, content] of [
+  [
+    "the sign-in settings",
+    <SignInSettingsList key="settings" label="this machine" rows={EVERY_STATE} act={vi.fn()} />,
+  ],
+  [
+    "the sign-in prompts",
+    <SignInPrompts key="thread" rows={[EVERY_STATE[2]!, EVERY_STATE[4]!]} act={vi.fn()} />,
+  ],
+] as const) {
+  forEachViewport(`${surface} keep every control reachable`, async (at) => {
+    await using view = await render(
+      // The app's panels scroll inside the window; the page itself never does.
+      <main
+        data-testid="panel"
+        className="scrollbar-gutter-both h-dvh overflow-y-auto overflow-x-hidden bg-background p-4 text-foreground"
+      >
+        <div className="mx-auto w-full max-w-3xl">{content}</div>
+      </main>,
+    );
+    const panel = page.getByTestId("panel").element();
+    await expect.element(page.getByRole("button", { name: "Save token" })).toBeVisible();
+    await at.screenshot();
+    expect(panel.scrollWidth).toBeLessThanOrEqual(panel.clientWidth);
+    for (const element of view.container.querySelectorAll(
+      "button, input, a, [data-slot=sign-in-state], p, strong",
+    )) {
+      element.scrollIntoView({ block: "center" });
+      const box = element.getBoundingClientRect();
+      expect(box.width).toBeGreaterThan(0);
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(windowRect().right);
+      // Text that is wider than its own box would be cut off.
+      expect(element.scrollWidth).toBeLessThanOrEqual(Math.ceil(box.width) + 1);
+      if (element.matches("button, a"))
+        expectClickable(element, element.textContent ?? "a control");
     }
   });
-});
+}
