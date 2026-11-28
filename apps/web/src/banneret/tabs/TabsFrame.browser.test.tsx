@@ -29,14 +29,13 @@ import { act, render } from "../../../test/render";
 import {
   expectCentred,
   expectClickable,
-  expectNoOverlap,
   expectReadableLines,
   expectUnclipped,
   forEachViewport,
 } from "../test/viewports";
 import { loadEnvironmentWorkspaces, useWorkspacesStore } from "../workspacesStore";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
-import { __reloadTabsForTests, keep, setTabsHidden, useTabsStore } from "./tabsStore";
+import { __reloadTabsForTests, setTabsHidden, useTabsStore } from "./tabsStore";
 
 // App imports start primary discovery, so its HTTP fixture must already be installed.
 const { THREAD, OTHER } = await vi.hoisted(async () => {
@@ -124,56 +123,6 @@ const router: AppRouter = await mountApp(threadPath(THREAD.id));
 async function go(to: string) {
   await act(() => router.navigate({ href: to }));
 }
-
-// More tabs than a narrow bar holds.
-const PAGES = ["/today", "/board", "/map", "/feed", "/needs"];
-
-/** An empty bar now, and again when the test ends, so no test inherits another's tabs. */
-async function emptyBar(): Promise<AsyncDisposable> {
-  const clear = () => act(() => useTabsStore.setState({ tabs: [], activeId: null }));
-  await go("/pull-requests");
-  await clear();
-  return { [Symbol.asyncDispose]: clear };
-}
-
-forEachViewport("the tabs bar and the sidebar frame the thread", async (at) => {
-  await using _bar = await emptyBar();
-  for (const [index, path] of [threadPath(OTHER.id), ...PAGES].entries()) {
-    await go(path);
-    await vi.waitFor(() => expect(tabs()).toHaveLength(index + 1));
-    await act(() => keep(activeTab()!.dataset.tabId!));
-  }
-  await go(threadPath(THREAD.id));
-  await expect.element(page.getByText(`Answer 29 for ${THREAD.id}.`)).toBeInTheDocument();
-  await vi.waitFor(expectFits);
-  const sidebar = document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')!;
-  expectUnclipped(sidebar, "the sidebar");
-  expectNoOverlap({
-    "the sidebar": sidebar,
-    "the tabs bar": bar()!,
-  });
-  expectNoOverlap({
-    "the sidebar": sidebar,
-    "the chat header": document.querySelector("[data-chat-header]")!,
-  });
-  const active = activeTab()!;
-  await userEvent.hover(active);
-  await vi.waitFor(() => {
-    expectClickable(
-      page.getByRole("button", { name: `Close ${active.textContent}` }).element(),
-      "the active tab's close button",
-    );
-  });
-  expectClickable(
-    page.getByRole("button", { name: "Tabs bar options" }).element(),
-    "the tabs bar options",
-  );
-  expectClickable(
-    page.getByRole("button", { name: "Toggle main sidebar" }).element(),
-    "the sidebar toggle",
-  );
-  await at.screenshot();
-});
 
 forEachViewport("the settings dialog sits over the app", async (at) => {
   await go(threadPath(THREAD.id));

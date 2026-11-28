@@ -131,6 +131,32 @@ function boxOf(element: Element, label: string) {
   return box;
 }
 
+/** The element is laid out within `frame`, whether or not anything would cut it off there. */
+export function expectInside(element: Element, frame: DOMRectReadOnly, label: string) {
+  const box = boxOf(element, label);
+  expect(
+    box.left >= frame.left - SLACK &&
+      box.top >= frame.top - SLACK &&
+      box.right <= frame.right + SLACK &&
+      box.bottom <= frame.bottom + SLACK,
+    `${label} ${describeBox(box)} is inside ${describeBox(frame as DOMRect)}`,
+  ).toBe(true);
+}
+
+export const windowRect = () => new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+
+export function expectNoPageScroll() {
+  const root = document.scrollingElement!;
+  expect(root.scrollWidth, "the page does not scroll sideways").toBeLessThanOrEqual(
+    window.innerWidth,
+  );
+  expect(root.scrollHeight, "the page does not scroll").toBeLessThanOrEqual(window.innerHeight);
+}
+
+/** `elements` keyed by `label` and position, for the overlap check. */
+export const numbered = (label: string, elements: Iterable<Element>) =>
+  Object.fromEntries([...elements].map((element, index) => [`${label} ${index}`, element]));
+
 /** No two of the named elements cover each other. */
 export function expectNoOverlap(parts: Readonly<Record<string, Element>>) {
   const boxes = Object.entries(parts).map(

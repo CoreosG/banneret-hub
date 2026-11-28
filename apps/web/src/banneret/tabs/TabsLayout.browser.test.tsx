@@ -18,14 +18,14 @@ import { getRouter, type AppRouter } from "~/router";
 import { answerRpc, ENVIRONMENT_ID, type FakeDriver } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
 import {
-  expectHit,
+  expectClickable,
   expectInside,
   expectNoOverlap,
   expectNoPageScroll,
-  showViewport,
-  VIEWPORTS,
+  forEachViewport,
+  numbered,
   windowRect,
-} from "../testViewports";
+} from "../test/viewports";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
 import { __reloadTabsForTests, keep, pin, useTabsStore } from "./tabsStore";
 
@@ -109,17 +109,6 @@ const CROWDED = [
   "/map",
 ];
 
-/** The button is inside the tab list's visible box and is what a click at its middle hits. */
-function expectClickable(button: HTMLElement) {
-  const list = document.querySelector('[role="tablist"]')!.getBoundingClientRect();
-  const box = button.getBoundingClientRect();
-  expect(box.width).toBeGreaterThan(0);
-  expect(box.left).toBeGreaterThanOrEqual(list.left - 0.5);
-  expect(box.right).toBeLessThanOrEqual(list.right + 0.5);
-  const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-  expect(button.contains(hit)).toBe(true);
-}
-
 describe("closing tabs in a narrow window", () => {
   it("keeps the active tab's close button in reach while it is hovered", async () => {
     await openTabs(...CROWDED);
@@ -130,7 +119,7 @@ describe("closing tabs in a narrow window", () => {
     const width = tab.getBoundingClientRect().width;
     await userEvent.hover(tab);
     expect(tab.getBoundingClientRect().width).toBe(width);
-    expectClickable(closeButton(tab));
+    expectClickable(closeButton(tab), "the close button");
     await userEvent.click(closeButton(tab));
     await vi.waitFor(() => expect(tab.isConnected).toBe(false));
   });
@@ -141,7 +130,7 @@ describe("closing tabs in a narrow window", () => {
     const width = tab.getBoundingClientRect().width;
     await userEvent.hover(tab);
     expect(tab.getBoundingClientRect().width).toBe(width);
-    expectClickable(closeButton(tab));
+    expectClickable(closeButton(tab), "the close button");
     await userEvent.click(closeButton(tab));
     await vi.waitFor(() => expect(tabs()).toHaveLength(2));
   });
@@ -150,7 +139,7 @@ describe("closing tabs in a narrow window", () => {
     await openTabs(...CROWDED);
     await act(() => pin(activeTab().dataset.tabId!));
     await userEvent.hover(activeTab());
-    expectClickable(closeButton(activeTab()));
+    expectClickable(closeButton(activeTab()), "the close button");
   });
 
   it("brings the active tab back into view when the window narrows", async () => {
@@ -160,7 +149,7 @@ describe("closing tabs in a narrow window", () => {
     } finally {
       await page.viewport(900, 700);
     }
-    await vi.waitFor(() => expectClickable(closeButton(activeTab())));
+    await vi.waitFor(() => expectClickable(closeButton(activeTab()), "the close button"));
   });
 
   it("closes from the keyboard when Enter is pressed on the close button", async () => {
@@ -398,10 +387,10 @@ function expectLayout() {
   }
   const list = document.querySelector('[role="tablist"]')!;
   const options = page.getByRole("button", { name: "Tabs bar options" }).element();
-  expectNoOverlap([list, options], "x");
-  expectInside(options, bar);
-  expectHit(options);
-  expectNoOverlap(tabs(), "x");
+  expectNoOverlap({ "the tab list": list, "the options button": options });
+  expectInside(options, bar, "the options button");
+  expectClickable(options, "the options button");
+  expectNoOverlap(numbered("tab", tabs()));
   for (const tab of tabs()) {
     const box = tab.getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(bar.top);
@@ -409,8 +398,8 @@ function expectLayout() {
     const parts = [...tab.querySelectorAll(":scope > span, :scope > button")].filter((part) =>
       part.checkVisibility(),
     );
-    for (const part of parts) expectInside(part, box);
-    expectNoOverlap(parts, "x");
+    for (const part of parts) expectInside(part, box, "a tab's part");
+    expectNoOverlap(numbered("tab part", parts));
   }
 }
 
@@ -422,61 +411,63 @@ async function expectMenuFits(items: ReadonlyArray<string> = ITEMS) {
   // The popup scales in, so its boxes settle a moment after it is visible.
   await vi.waitFor(() => {
     const popup = document.querySelector('[data-slot="menu-popup"]')!;
-    expectInside(popup, windowRect());
+    expectInside(popup, windowRect(), "the tab menu");
     const rows = [...popup.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     expect(rows.map((row) => row.textContent)).toEqual(items);
-    expectNoOverlap(rows, "y");
+    expectNoOverlap(numbered("menu item", rows));
     for (const row of rows) {
-      expectInside(row, popup.getBoundingClientRect());
+      expectInside(row, popup.getBoundingClientRect(), row.textContent);
       expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
-      if (row.getAttribute("aria-disabled") !== "true") expectHit(row);
+      if (row.getAttribute("aria-disabled") !== "true") expectClickable(row, row.textContent);
     }
     const scroller = popup.firstElementChild!;
     expect(scroller.scrollHeight).toBeLessThanOrEqual(scroller.clientHeight);
   });
 }
 
-describe.each(VIEWPORTS)("layout at $name", (size) => {
-  it("keeps every tab's close button in reach, with a few tabs and with a full bar", async () => {
-    await showViewport(size);
-    await openTabs(threadPath(THREAD.id), "/today", "/map");
-    await vi.waitFor(expectLayout);
-    await userEvent.hover(activeTab());
-    expectClickable(closeButton(activeTab()));
+forEachViewport("every tab's close button stays in reach", async (at) => {
+  await openTabs(threadPath(THREAD.id), "/today", "/map");
+  await vi.waitFor(expectLayout);
+  await userEvent.hover(activeTab());
+  expectClickable(closeButton(activeTab()), "the close button");
 
-    await fillBar();
-    const list = document.querySelector('[role="tablist"]')!;
-    expect(list.scrollWidth).toBeGreaterThan(list.clientWidth);
-    // Measured before any hover: the bar itself keeps the active tab in view.
-    await vi.waitFor(() => expectClickable(closeButton(activeTab())));
-    for (const tab of tabs()) {
-      const width = tab.getBoundingClientRect().width;
-      await userEvent.hover(tab);
-      expect(tab.getBoundingClientRect().width).toBe(width);
-      expectClickable(closeButton(tab));
-    }
-    expectLayout();
-    const last = activeTab();
-    await userEvent.hover(last);
-    await userEvent.click(closeButton(last));
-    await vi.waitFor(() => expect(tabs()).toHaveLength(19));
-    expectLayout();
+  await fillBar();
+  const list = document.querySelector('[role="tablist"]')!;
+  expect(list.scrollWidth).toBeGreaterThan(list.clientWidth);
+  // Measured before any hover: the bar itself keeps the active tab in view.
+  await vi.waitFor(() => expectClickable(closeButton(activeTab()), "the close button"));
+  await at.screenshot();
+  for (const tab of tabs()) {
+    const width = tab.getBoundingClientRect().width;
+    await userEvent.hover(tab);
+    expect(tab.getBoundingClientRect().width).toBe(width);
+    expectClickable(closeButton(tab), "the close button");
+  }
+  expectLayout();
+  const last = activeTab();
+  await userEvent.hover(last);
+  await userEvent.click(closeButton(last));
+  await vi.waitFor(() => expect(tabs()).toHaveLength(19));
+  expectLayout();
+});
+
+forEachViewport("the whole tab menu fits at the window's right edge", async (at) => {
+  // At the window's right edge, where the menu has the least room.
+  await fillBar();
+  await vi.waitFor(() => expectClickable(closeButton(activeTab()), "the close button"));
+  const box = activeTab().getBoundingClientRect();
+  await userEvent.click(activeTab(), {
+    button: "right",
+    position: { x: box.width - 2, y: box.height / 2 },
   });
+  await expectMenuFits();
+  await at.screenshot();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+});
 
-  it("shows the whole tab menu and runs every action", async () => {
-    await showViewport(size);
-    // At the window's right edge, where the menu has the least room.
-    await fillBar();
-    await vi.waitFor(() => expectClickable(closeButton(activeTab())));
-    const box = activeTab().getBoundingClientRect();
-    await userEvent.click(activeTab(), {
-      button: "right",
-      position: { x: box.width - 2, y: box.height / 2 },
-    });
-    await expectMenuFits();
-    await userEvent.keyboard("{Escape}");
-    await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
-
+describe("tab menu actions in a row", () => {
+  it("runs every action from the keyboard and the pointer, down to the last tab", async () => {
     await openTabs("/today", "/board", "/feed");
     await go("/map");
     await vi.waitFor(() => expect(activeTab().dataset.preview).toBe(""));
@@ -517,25 +508,25 @@ describe.each(VIEWPORTS)("layout at $name", (size) => {
       expect(router.state.location.pathname).not.toBe("/today");
     });
   });
+});
 
-  it("keeps Tool access clear of the breadcrumb and its panel in the window", async () => {
-    await showViewport(size);
-    await openTabs(threadPath(THREAD.id));
-    await trigger().click();
-    await expect.element(selector()).toBeVisible();
-    await vi.waitFor(() => {
-      expectLayout();
-      const header = document.querySelector("[data-chat-header]")!.getBoundingClientRect();
-      const button = trigger().element();
-      expectInside(button, windowRect());
-      expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(header.bottom + 3);
-      const popup = document.querySelector('[data-slot="popover-popup"]')!;
-      expectInside(popup, windowRect());
-      expect(popup.getBoundingClientRect().top).toBeGreaterThanOrEqual(
-        button.getBoundingClientRect().bottom,
-      );
-    });
-    await userEvent.keyboard("{Escape}");
-    await expect.element(selector()).not.toBeInTheDocument();
+forEachViewport("Tool access stays clear of the breadcrumb", async (at) => {
+  await openTabs(threadPath(THREAD.id));
+  await trigger().click();
+  await expect.element(selector()).toBeVisible();
+  await vi.waitFor(() => {
+    expectLayout();
+    const header = document.querySelector("[data-chat-header]")!.getBoundingClientRect();
+    const button = trigger().element();
+    expectInside(button, windowRect(), "Tool access");
+    expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(header.bottom + 3);
+    const popup = document.querySelector('[data-slot="popover-popup"]')!;
+    expectInside(popup, windowRect(), "the tool access panel");
+    expect(popup.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      button.getBoundingClientRect().bottom,
+    );
   });
+  await at.screenshot();
+  await userEvent.keyboard("{Escape}");
+  await expect.element(selector()).not.toBeInTheDocument();
 });
