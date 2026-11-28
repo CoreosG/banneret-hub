@@ -241,8 +241,8 @@ assignee or label, and its lease clocks do not apply.
   Take or Release and says why.
 - **For now,** Take and Release are on the Task tab only, not in a Board card's menu.
 
-Each write carries an `idempotencyKey`. A server that does not know it ignores it, and the contract already
-lets the holder claim again. The Hub keeps this state for each task, in memory only.
+Each write carries an `idempotencyKey`. The [task contract](plugins.md#repeated-claims-and-releases) makes a
+repeat with the same key the same call. The Hub keeps this state for each task, in memory only.
 
 | State   | Event                                                         | Next state                                               |
 | ------- | ------------------------------------------------------------- | -------------------------------------------------------- |

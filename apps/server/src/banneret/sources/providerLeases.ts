@@ -186,7 +186,7 @@ const write = Effect.fn("BanneretProviderLeases.write")(function* (
         ? earlier
         : { key: NodeCrypto.randomUUID(), change: fingerprint, at: now };
     pending.set(id, entry);
-    // Providers that do not know the key ignore it; a repeated claim by the holder succeeds anyway.
+    // The task contract makes a repeat with this key the same call (docs/banneret/plugins.md, Tasks).
     const args = { ...change.args, taskId: card.task.id, idempotencyKey: entry.key };
     let repeated = entry === earlier;
     const first = yield* Effect.result(session.call(change.tool, args));
