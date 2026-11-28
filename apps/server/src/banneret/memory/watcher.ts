@@ -12,9 +12,16 @@ import * as DateTime from "effect/DateTime";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import * as TextGenerators from "../../textGeneration/TextGenerators.ts";
+import { providerRules } from "./providerRules.ts";
 import { memoryAccess } from "./access.ts";
 import { personalMessage } from "./corrections.ts";
-import { candidates, reminderPrompt, selectedNotes, failOpen, quote } from "./reminders.ts";
+import {
+  candidates,
+  reminderPrompt,
+  selectedNotes,
+  failOpen,
+  selectedReminders,
+} from "./reminders.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { scanMemory } from "./files.ts";
 
@@ -24,9 +31,11 @@ function activityOf(event: OrchestrationV2DomainEvent) {
     const plan = event.payload;
     return plan.kind === "proposed_plan" ? plan.markdown : JSON.stringify(plan.steps);
   }
-  if (event.type !== "turn-item.updated" || event.payload.status !== "completed") return;
+  if (event.type !== "turn-item.updated") return;
   const item = event.payload;
   switch (item.type) {
+    case "assistant_message":
+      return item.text;
     case "command_execution":
       return item.input;
     case "dynamic_tool":
@@ -53,6 +62,7 @@ export const setupWatcher = Effect.gen(function* () {
       event: string,
       activity: Effect.Effect<string | undefined>,
       tool: boolean,
+      compareRules: boolean,
     ) {
       const designations = yield* readDesignations;
       if (
@@ -82,14 +92,21 @@ export const setupWatcher = Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make(setting.generator);
       const runner = yield* generators.runner(instanceId);
       if (!runner) return [];
-      const { keys } = yield* runner({
+      const providers =
+        compareRules && access.root
+          ? yield* Effect.promise(() => providerRules(access.root!, value))
+          : [];
+      const { keys, conflicts } = yield* runner({
         operation: "generateThreadTitle",
         cwd: ".",
         modelSelection: { instanceId, model: setting.model },
         outputSchema: Schema.Struct({
+          conflicts: Schema.Array(Schema.Struct({ a: Schema.String, b: Schema.String })).check(
+            Schema.isMaxLength(8),
+          ),
           keys: Schema.Array(Schema.String).check(Schema.isMaxLength(8)),
         }),
-        prompt: reminderPrompt(value, notes, recent),
+        prompt: reminderPrompt(value, notes, recent, providers),
       });
       const authorized = yield* memoryAccess(thread, environment);
       if (!authorized.orchestrator) return [];
@@ -97,8 +114,21 @@ export const setupWatcher = Effect.gen(function* () {
         const watcher = s.reminders(thread);
         const current = watcher.setting();
         if (current?.generator !== setting.generator || current.model !== setting.model) return [];
-        return selectedNotes(s.list(false), notes, keys).filter((n) =>
-          watcher.fire(run, event, n, recent.includes(n.key)),
+        const live = s.list(false);
+        const selected = selectedNotes(
+          live,
+          notes,
+          notes.map((n) => n.key),
+        );
+        return selectedReminders(
+          watcher,
+          run,
+          event,
+          selected,
+          providers,
+          keys,
+          compareRules ? conflicts : [],
+          recent,
         );
       }, "watcher");
     },
@@ -118,6 +148,7 @@ export const setupWatcher = Effect.gen(function* () {
         Effect.orElseSucceed(() => undefined),
       ),
       false,
+      false,
     ).pipe(
       Effect.provideContext(context),
       Effect.flatMap((notes) =>
@@ -125,7 +156,7 @@ export const setupWatcher = Effect.gen(function* () {
           Effect.map((now) =>
             notes.map((n) => ({
               key: "memory_" + n.key,
-              text: quote(n),
+              text: n.text,
               updatedAt: DateTime.formatIso(now),
             })),
           ),
@@ -140,8 +171,13 @@ export const setupWatcher = Effect.gen(function* () {
       if (
         !run ||
         (event.type === "turn-item.updated" &&
-          (event.payload.status !== "completed" ||
+          ((event.payload.status !== "completed" &&
+            !(
+              event.payload.status === "pending" &&
+              (event.payload.type === "command_execution" || event.payload.type === "dynamic_tool")
+            )) ||
             ![
+              "assistant_message",
               "dynamic_tool",
               "command_execution",
               "file_change",
@@ -156,6 +192,7 @@ export const setupWatcher = Effect.gen(function* () {
         event.payload.id,
         Effect.sync(() => activityOf(event)),
         event.type === "turn-item.updated",
+        true,
       );
       for (const note of notes) {
         const id = "memory:" + run + ":" + event.payload.id + ":" + note.key;
@@ -166,7 +203,7 @@ export const setupWatcher = Effect.gen(function* () {
             commandId: CommandId.make(id),
             messageId,
             threadId: event.threadId,
-            text: quote(note),
+            text: note.text,
             attachments: [],
             createdBy: "agent",
             creationSource: "server",
@@ -174,8 +211,8 @@ export const setupWatcher = Effect.gen(function* () {
             notification: {
               source: { kind: "system" },
               outcome: "updated",
-              summary: "Rule reminder: " + note.key,
-              detail: quote(note),
+              summary: note.summary,
+              detail: note.text,
             },
           })
           .pipe(Effect.provideService(reminderDelivery, messageId));

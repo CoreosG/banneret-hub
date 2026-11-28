@@ -12,6 +12,18 @@ import { TaskLeaseError } from "./taskLeases.ts";
 const error = Schema.Union([EnvironmentAuthorizationError, TaskLeaseError]);
 const bounded = (max: number) =>
   Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(max));
+const conflictSource = Schema.Struct({
+  key: Schema.optional(Schema.String),
+  version: Schema.optional(Schema.String),
+  text: Schema.String,
+  source: Schema.String,
+});
+const contradiction = Schema.Struct({
+  id: Schema.String,
+  a: Schema.Struct({ ...conflictSource.fields, key: Schema.String, version: Schema.String }),
+  b: conflictSource,
+});
+export type MemoryContradiction = typeof contradiction.Type;
 const reviewAction = Schema.Union([
   Schema.Struct({
     kind: Schema.Literals(["confirm", "keep", "pin", "unpin", "refresh", "remove", "dismiss"]),
@@ -20,6 +32,18 @@ const reviewAction = Schema.Union([
     kind: Schema.Literals(["edit", "editConfirm", "editKeep"]),
     text: bounded(4096),
   }),
+  Schema.Struct({
+    kind: Schema.Literal("resolveConflict"),
+    id: bounded(64),
+    choice: Schema.Literals(["keepA", "keepB"]),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("scopeConflict"),
+    id: bounded(64),
+    scopeA: bounded(128),
+    scopeB: bounded(128),
+  }),
+  Schema.Struct({ kind: Schema.Literal("editConflict"), id: bounded(64), text: bounded(4096) }),
   Schema.Struct({ kind: Schema.Literal("flag"), reason: bounded(512) }),
 ]);
 export type MemoryReviewAction = typeof reviewAction.Type;
@@ -128,6 +152,7 @@ export const MEMORY_RPCS = [
       Schema.Struct({
         reminders: Schema.optional(
           Schema.Struct({
+            contradictions: Schema.optional(Schema.Array(contradiction)),
             fired: Schema.Int,
             acknowledged: Schema.Int,
             contested: Schema.Int,

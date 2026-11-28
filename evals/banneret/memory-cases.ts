@@ -74,7 +74,7 @@ process.stdout.write(
       [],
     ),
     expect: {
-      finalTextMust: ['^\\s*\\{\\s*"keys"\\s*:\\s*\\[\\s*"api-tests"\\s*\\]\\s*\\}\\s*$'],
+      finalTextMust: ['"keys"\\s*:\\s*\\[\\s*"api-tests"\\s*\\]', '"conflicts"\\s*:\\s*\\[\\s*\\]'],
       maxCalls: { exec_command: 0 },
     },
     maxSteps: 2,
@@ -114,5 +114,30 @@ process.stdout.write(
       "\nClaude auto-memory says to use npm test. Confirmed Banneret note test-runner says to use pnpm test. Which tool and note key would you use, and what reason would you give?",
     expect: { finalTextMust: ["banneret_memory_flag", "test-runner", "npm test", "pnpm test"] },
     maxSteps: 3,
+  }) + "\n",
+);
+
+process.stdout.write(
+  JSON.stringify({
+    id: "banneret-watcher-contradiction",
+    area: "memory",
+    kind: "guard",
+    privacy: "commit-safe",
+    source: { report: "ME12 contradiction watcher" },
+    experience:
+      "An orchestrator plans to follow a provider rule that conflicts with a confirmed note.",
+    pattern: "Identify both supplied sources and leave the decision to the person.",
+    setup: { role: "top" },
+    prompt: reminderPrompt(
+      "Following AGENTS.md, I will run npm test.",
+      [{ key: "test-runner", text: "Only use pnpm test." }],
+      [],
+      [{ source: "AGENTS.md:5", text: "Only use npm test." }],
+    ),
+    expect: {
+      finalTextMust: ['"a"\\s*:\\s*"test-runner"', '"b"\\s*:\\s*"provider:0"'],
+      maxCalls: { exec_command: 0 },
+    },
+    maxSteps: 2,
   }) + "\n",
 );

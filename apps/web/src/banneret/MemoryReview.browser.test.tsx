@@ -1,3 +1,4 @@
+import { MemoryContradictionCard } from "./MemoryContradictionCard";
 import { expect, it, vi } from "vite-plus/test";
 import { render } from "../../test/render";
 import { MemoryNotes } from "./MemoryReview";
@@ -61,4 +62,31 @@ it("filters the expanded trust groups by kind and scope", async () => {
   await expect.element(screen.getByText("Reviews")).toBeVisible();
   await screen.getByLabelText("Kind").selectOptions("reference");
   expect(screen.getByText("Reviews").query()).toBeNull();
+});
+
+it("opens both citations and submits a scope decision only after Save", async () => {
+  const apply = vi.fn().mockResolvedValue(undefined);
+  await using screen = await render(
+    <MemoryContradictionCard
+      conflict={{ id: "123", a: note, b: { text: "Four spaces", source: "AGENTS.md:4" } }}
+      writable
+      apply={apply}
+    />,
+  );
+  await screen.getByText("Possible contradiction").click();
+  await expect
+    .element(screen.getByText("To change the provider rule, edit AGENTS.md:4 yourself."))
+    .toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "Keep A" })).toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "Keep B" })).toBeVisible();
+  await screen.getByRole("button", { name: "Both apply in different scopes" }).click();
+  await screen.getByLabelText("A applies when").fill("editing JSON");
+  expect(apply).not.toHaveBeenCalled();
+  await screen.getByRole("button", { name: "Save scopes" }).click();
+  expect(apply).toHaveBeenCalledWith({
+    kind: "scopeConflict",
+    id: "123",
+    scopeA: "editing JSON",
+    scopeB: "running in CI",
+  });
 });

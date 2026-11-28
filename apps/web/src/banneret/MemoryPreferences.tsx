@@ -78,7 +78,10 @@ export function MemoryPreferences({ environmentId, threadId }: ScopedThreadRef) 
             <input type="checkbox" name="watcher" defaultChecked={state.value.watcher?.enabled} />{" "}
             Rule reminders for this orchestrator
           </label>
-          <p>Matching activity and note excerpts go to the selected generator.</p>
+          <p>
+            The selected generator compares matching activity, Banneret notes and excerpts from
+            provider memory. You choose how to resolve possible contradictions.
+          </p>
           <label>
             Text generator{" "}
             <select name="generator" defaultValue={state.value.watcher?.generator}>

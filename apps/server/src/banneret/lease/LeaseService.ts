@@ -947,7 +947,13 @@ export const rpcHandlers = {
           return {
             ...store.counts(access.main),
             ...(watcher.setting()
-              ? { reminders: { ...watcher.status(), latest: watcher.latest() } }
+              ? {
+                  reminders: {
+                    ...watcher.status(),
+                    latest: watcher.latest(),
+                    contradictions: store.openConflicts(threadId),
+                  },
+                }
               : {}),
           };
         }

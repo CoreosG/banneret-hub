@@ -416,6 +416,7 @@ export type * from "./banneretPool.ts";
 export {
   memoryReviewInput,
   type MemoryReviewAction,
+  type MemoryContradiction,
   type MemoryReviewNote,
   type MemoryPreferencesInput,
 } from "./banneretMemory.ts";
