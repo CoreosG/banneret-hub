@@ -63,9 +63,7 @@ import { readProject } from "../state/entities";
 import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
 import { isChunkLoadError } from "../lib/chunkReloadGuard";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
-import { PinnedPortForwardsRestorer } from "../components/ports/PinnedPortForwardsRestorer";
-import { PortsDialogHost } from "../components/ports/PortsDialog";
-import { WorkspacesHost } from "../banneret/WorkspacesHost";
+import { BanneretDialogs } from "../banneret/BanneretDialogs";
 import { TabsFrame } from "../banneret/tabs/TabsFrame";
 
 export const Route = createRootRoute({
@@ -214,9 +212,7 @@ function RootRouteBranch() {
       <GuestShareDialogHost />
       <ProjectCloneToastCoordinator />
       <ConnectDeviceApprovalCoordinator />
-      <PinnedPortForwardsRestorer />
-      <PortsDialogHost />
-      <WorkspacesHost />
+      <BanneretDialogs />
       <AddProjectToMachineDialogHost />
       <UseInAnotherAppDialogHost />
       {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}

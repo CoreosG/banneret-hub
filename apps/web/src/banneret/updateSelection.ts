@@ -7,6 +7,11 @@ import type { UpdateEverythingRow } from "~/components/sidebar/updateEverything.
 
 export type SkippedMachines = ReadonlySet<EnvironmentId>;
 
+export interface ProviderUpdateOptions {
+  readonly quiet?: boolean;
+  readonly skipped?: SkippedMachines;
+}
+
 export const isSelectableRow = (row: UpdateEverythingRow) =>
   row.environmentId !== null && row.app !== "this-app" && row.app !== "desktop-app";
 

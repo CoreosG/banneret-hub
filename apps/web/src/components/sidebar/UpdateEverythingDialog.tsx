@@ -16,17 +16,10 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
-import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { ScrollArea } from "../ui/scroll-area";
-import {
-  countSelected,
-  isSelectableRow,
-  type SkippedMachines,
-  updateButtonLabel,
-  useUpdateSelection,
-} from "~/banneret/updateSelection";
+import * as MachineSelection from "~/banneret/MachineSelection";
 import { UpdateHubVersion } from "~/banneret/UpdateHubVersion";
 import type { RestartingMachine, UpdateEverythingRow } from "./updateEverything.logic";
 
@@ -49,16 +42,13 @@ const runningThreadCountAtom = Atom.family((environmentIds: string) =>
   ).pipe(Atom.withLabel(`update-everything-running-threads:${environmentIds}`)),
 );
 
-interface UpdateEverythingDialogProps {
+interface UpdateEverythingDialogProps extends MachineSelection.Props {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly version: string | null;
   readonly providerCount: number;
   readonly rows: ReadonlyArray<UpdateEverythingRow>;
   readonly restarts: ReadonlyArray<RestartingMachine>;
-  /** Banneret: adds a checkbox per machine; `onConfirm` receives the unticked ones. */
-  readonly selectable?: boolean;
-  readonly onConfirm: (skipped: SkippedMachines) => void;
   /** Overrides the "Update N machines?" title, for an update-track switch. */
   readonly title?: string;
   readonly confirmLabel?: string;
@@ -140,8 +130,7 @@ function UpdateEverythingDialogContent({
   const running = stopped + continuing;
   const restarting = new Set(restarts.map((machine) => machine.environmentId));
   const updating = rows.filter((row) => row.app !== null || row.providers.length > 0);
-  const { skipped: unticked, toggle } = useUpdateSelection();
-  const selectedCount = countSelected(updating, unticked);
+  const selection = MachineSelection.useSelection(updating, selectable, onConfirm);
   const skipped = rows.filter((row) => row.skipped !== null);
 
   return (
@@ -150,7 +139,7 @@ function UpdateEverythingDialogContent({
         <AlertDialogTitle>
           {title ??
             gt("{count, plural, one {Update {count} machine?} other {Update {count} machines?}}", {
-              count: selectable ? selectedCount : updating.length,
+              count: selection.count,
             })}
         </AlertDialogTitle>
         <AlertDialogDescription>
@@ -203,13 +192,7 @@ function UpdateEverythingDialogContent({
                 className="col-span-full grid grid-cols-subgrid border-b border-border/50 py-1.5 last:border-b-0"
               >
                 <span role="cell" className="flex min-w-0 items-center gap-2">
-                  {selectable && row.environmentId !== null && isSelectableRow(row) ? (
-                    <Checkbox
-                      checked={!unticked.has(row.environmentId)}
-                      onCheckedChange={() => toggle(row.environmentId!)}
-                      aria-label={row.label}
-                    />
-                  ) : null}
+                  <MachineSelection.Checkbox row={row} selection={selection} />
                   <span className="sr-only">{row.label}</span>
                   <MiddleTruncate value={row.label} aria-hidden />
                 </span>
@@ -297,13 +280,10 @@ function UpdateEverythingDialogContent({
         <AlertDialogClose ref={cancelRef} render={<Button variant="outline" disabled={busy} />}>
           <T>Cancel</T>
         </AlertDialogClose>
-        <Button
-          disabled={disabledReason !== null || busy || (selectable && selectedCount === 0)}
-          onClick={() => onConfirm(unticked)}
-        >
-          {selectable
-            ? updateButtonLabel(selectedCount)
-            : (confirmLabel ?? gt("Update", { $context: "verb, confirms the update" }))}
+        <Button {...selection.confirmButton(disabledReason !== null || busy)}>
+          {selection.label ??
+            confirmLabel ??
+            gt("Update", { $context: "verb, confirms the update" })}
         </Button>
       </AlertDialogFooter>
     </>

@@ -230,13 +230,7 @@ import * as LayoutCommandApprovalWrites from "./workspace/LayoutCommandApprovalW
 import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
-import * as WorkspaceFiles from "./workspace/WorkspaceFiles.ts";
-import * as ListeningPorts from "./preview/ListeningPorts.ts";
-import { pauseRpcHandlers } from "./banneret/Pause.ts";
-import * as BanneretWorkspaces from "./banneret/Workspaces.ts";
-import * as BanneretEnrolment from "./banneret/relay/Enrolment.ts";
-import * as BanneretRelayFeed from "./banneret/relay/RelayFeed.ts";
-import * as LeaseService from "./banneret/lease/LeaseService.ts";
+import * as BanneretRpc from "./banneret/rpc.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -2048,13 +2042,7 @@ export const layerWsRpc = (
       });
 
       const handlers = ServerWsRpcGroup.of({
-        ...WorkspaceFiles.rpcHandlers,
-        ...ListeningPorts.rpcHandlers,
-        ...(yield* pauseRpcHandlers),
-        ...BanneretWorkspaces.rpcHandlers,
-        ...BanneretEnrolment.rpcHandlers,
-        ...BanneretRelayFeed.rpcHandlers,
-        ...LeaseService.sessionHandlers(currentSessionId, serverAuth),
+        ...(yield* BanneretRpc.handlers(currentSessionId, serverAuth)),
         [WS_METHODS.issuesList]: (input) => issues.list(input),
         [WS_METHODS.issuesDetail]: (input) => issues.detail(input),
         [WS_METHODS.issuesComments]: (input) => issues.comments(input),
@@ -3830,9 +3818,7 @@ export const layer = Layer.unwrap(
     const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
     const npmRelease = yield* NpmRelease.NpmRelease;
     const pullRequests = yield* PullRequestService.PullRequestService;
-    const banneretEnrolment = yield* BanneretEnrolment.BanneretEnrolment;
-    const banneretRelayFeed = yield* BanneretRelayFeed.BanneretRelayFeed;
-    const leaseService = yield* LeaseService.LeaseService;
+    const banneretServices = yield* BanneretRpc.sessionServices;
     const issues = yield* IssueService.IssueService;
     const threadIssues = yield* ThreadIssueService.ThreadIssueService;
     const issueTrackers = yield* IssueTrackerConnections.IssueTrackerConnections;
@@ -3933,13 +3919,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
               // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
-              Layer.provide(Layer.succeed(BanneretEnrolment.BanneretEnrolment, banneretEnrolment)),
-              Layer.provide(
-                Layer.merge(
-                  Layer.succeed(BanneretRelayFeed.BanneretRelayFeed, banneretRelayFeed),
-                  Layer.succeed(LeaseService.LeaseService, leaseService),
-                ),
-              ),
+              Layer.provide(banneretServices),
               Layer.provide(Layer.succeed(IssueService.IssueService, issues)),
               Layer.provide(Layer.succeed(ThreadIssueService.ThreadIssueService, threadIssues)),
               Layer.provide(

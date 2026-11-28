@@ -210,11 +210,9 @@ export default function FileBrowserPanel({
   const fileOps = useWorkspaceFileOperations({
     environmentId,
     cwd,
-    enabled: !hostFolder,
-    knownPaths: entryKinds,
-    reload: async (directories) => {
-      await Promise.all([...new Set(directories)].map((directory) => load(directory, true)));
-    },
+    hostFolder,
+    entryKinds,
+    load,
     tree: () => model,
   });
   const { consumeTreeReset, flushPendingRename } = fileOps;

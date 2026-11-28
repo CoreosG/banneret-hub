@@ -31,8 +31,23 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as AssetSigner from "../assets/AssetSigner.ts";
 import { base64UrlDecodeUtf8, base64UrlEncode } from "../auth/utils.ts";
 import { requestUrl } from "../requestUrl.ts";
+import type { UnknownWorkspaceError } from "./KnownWorkspaces.ts";
+import type { WorkspacePathOutsideRootError } from "./WorkspacePaths.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./WorkspaceFileSystem.ts";
+
+export interface WorkspaceWriteGuard {
+  /** Banneret Hub: the write guard alone, for file-explorer operations. */
+  readonly resolveWritablePath: (input: {
+    readonly cwd: string;
+    readonly relativePath: string;
+  }) => Effect.Effect<
+    { readonly relativePath: string; readonly realTargetPath: string },
+    | WorkspaceFileSystem.WorkspaceFileSystemError
+    | WorkspacePathOutsideRootError
+    | UnknownWorkspaceError
+  >;
+}
 
 const filesError = (failure: WorkspaceFilesFailure, message: string) =>
   new WorkspaceFilesError({ failure, message });
