@@ -2,7 +2,10 @@
   "name": "@t3tools/banneret-plugin-kit",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./provider-profile": "./src/providerProfile/index.ts"
+  },
   "scripts": {
     "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run --config ../../vite.config.ts --dir .",

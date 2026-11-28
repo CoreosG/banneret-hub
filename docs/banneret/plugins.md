@@ -2,6 +2,8 @@
 
 Run your provider as its own MCP server and distribute a JSON manifest with it. You can use any language. The TypeScript workspace package `@t3tools/banneret-plugin-kit` exports Zod schemas for the manifest and all twelve tools, inferred input and output types, and an in-process test client.
 
+To describe a coding agent rather than add tools, see [provider profiles](provider-profiles.md) (experimental).
+
 Start with the [Banneret plugin template](https://github.com/CoreosG/banneret-plugin-template) for a runnable TypeScript server with task, skills and memory providers and a conformance check.
 
 ## Try a plugin in Solo

@@ -1,0 +1,552 @@
+{
+  "id": "codex",
+  "name": "Codex",
+  "sources": {
+    "agents-md-page": {
+      "url": "https://learn.chatgpt.com/docs/agent-configuration/agents-md",
+      "checked": "2026-11-28"
+    },
+    "config-reference": {
+      "url": "https://learn.chatgpt.com/docs/config-file/config-reference",
+      "checked": "2026-11-28"
+    },
+    "config-advanced": {
+      "url": "https://learn.chatgpt.com/docs/config-file/config-advanced",
+      "checked": "2026-11-28"
+    },
+    "env-page": {
+      "url": "https://learn.chatgpt.com/docs/config-file/environment-variables",
+      "checked": "2026-11-28"
+    },
+    "hooks-page": {
+      "url": "https://learn.chatgpt.com/docs/hooks",
+      "checked": "2026-11-28"
+    },
+    "memories-page": {
+      "url": "https://learn.chatgpt.com/docs/customization/memories",
+      "checked": "2026-11-28"
+    },
+    "skills-page": {
+      "url": "https://learn.chatgpt.com/docs/build-skills",
+      "checked": "2026-11-28"
+    },
+    "mcp-page": {
+      "url": "https://learn.chatgpt.com/docs/extend/mcp",
+      "checked": "2026-11-28"
+    },
+    "subagents-page": {
+      "url": "https://learn.chatgpt.com/docs/agent-configuration/subagents",
+      "checked": "2026-11-28"
+    },
+    "hub-notes": {
+      "code": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+      "symbol": "appContext, sent as untrusted additionalContext",
+      "commit": "c472ab9693",
+      "checked": "2026-11-28"
+    }
+  },
+  "instructions": {
+    "agentsMd": {
+      "value": "native",
+      "from": ["agents-md-page"]
+    },
+    "nameSetting": {
+      "value": {
+        "key": "project_doc_fallback_filenames",
+        "set": "a list of extra file names",
+        "honoredIn": ["~/.codex/config.toml"],
+        "since": null
+      },
+      "from": ["agents-md-page", "config-reference"],
+      "note": "The extra names are tried after AGENTS.md in each folder. The pages show the user config file and do not say whether a project config may set it."
+    },
+    "homeFolder": {
+      "value": {
+        "path": "~/.codex",
+        "env": "CODEX_HOME"
+      },
+      "from": ["agents-md-page", "env-page"]
+    },
+    "managed": {
+      "unknown": "The AGENTS.md page lists a global and a project scope only. It does not say that no organization-wide instruction file exists.",
+      "from": ["agents-md-page"]
+    },
+    "user": {
+      "value": {
+        "names": ["AGENTS.override.md", "AGENTS.md"],
+        "take": "firstNonEmpty"
+      },
+      "from": ["agents-md-page"]
+    },
+    "project": {
+      "walk": {
+        "value": {
+          "startsAt": "projectRoot",
+          "stopsAt": "startFolder"
+        },
+        "from": ["agents-md-page"]
+      },
+      "root": {
+        "value": {
+          "markers": [".git"],
+          "markerSetting": "project_root_markers",
+          "withoutRoot": "startFolderOnly"
+        },
+        "from": ["agents-md-page", "config-advanced"]
+      },
+      "names": {
+        "value": {
+          "names": ["AGENTS.override.md", "AGENTS.md"],
+          "take": "firstNonEmpty"
+        },
+        "from": ["agents-md-page"],
+        "note": "At most one file per folder."
+      },
+      "fallback": {
+        "value": {
+          "when": "afterPrimaryNamesInEachFolder",
+          "names": [],
+          "setting": "project_doc_fallback_filenames"
+        },
+        "from": ["agents-md-page"]
+      }
+    },
+    "subdirectory": {
+      "value": {
+        "load": "never"
+      },
+      "from": ["agents-md-page"],
+      "note": "The page says the search stops at the current directory, when the instruction chain is built."
+    },
+    "sizeCaps": {
+      "user": {
+        "limit": {
+          "unknown": "The pages do not say whether the size limit covers the personal file.",
+          "from": ["agents-md-page", "config-advanced"]
+        },
+        "counts": {
+          "unknown": "Not documented for the personal file."
+        },
+        "over": {
+          "unknown": "Not documented for the personal file."
+        }
+      },
+      "project": {
+        "limit": {
+          "value": {
+            "amounts": [
+              {
+                "amount": 32768,
+                "unit": "bytes"
+              }
+            ],
+            "setting": "project_doc_max_bytes"
+          },
+          "from": ["agents-md-page", "config-reference"]
+        },
+        "counts": {
+          "unknown": "The pages disagree. The AGENTS.md page says the limit is on the combined size. The advanced configuration page says it is how much to read from each file.",
+          "from": ["agents-md-page", "config-advanced"]
+        },
+        "over": {
+          "unknown": "The pages disagree. The AGENTS.md page says later files stop being added, and also speaks of truncated instructions.",
+          "from": ["agents-md-page", "config-advanced"]
+        }
+      },
+      "subdirectory": null
+    },
+    "precedence": {
+      "value": {
+        "order": ["user", "project"],
+        "folderOrder": "outermostFirst",
+        "onConflict": "laterIsCloser"
+      },
+      "from": ["agents-md-page"]
+    },
+    "rules": {
+      "unknown": "The instruction pages describe no folder of extra rule files.",
+      "from": ["agents-md-page"]
+    },
+    "imports": {
+      "unknown": "The instruction pages describe no way for one file to import another, and do not say that none exists.",
+      "from": ["agents-md-page"]
+    }
+  },
+  "memory": {
+    "learns": {
+      "value": true,
+      "from": ["memories-page"]
+    },
+    "onByDefault": {
+      "value": false,
+      "from": ["memories-page", "config-reference"]
+    },
+    "writesByItself": {
+      "value": true,
+      "from": ["memories-page"],
+      "note": "Once switched on, memories are written in the background from earlier chats."
+    },
+    "location": {
+      "value": ["$CODEX_HOME/memories_v2/", "$CODEX_HOME/memories/"],
+      "from": ["memories-page"],
+      "note": "Which folder is used depends on memories.version and on what already exists."
+    },
+    "offAtLaunch": {
+      "value": {
+        "possible": true,
+        "apply": [
+          {
+            "kind": "setting",
+            "key": "memories.use_memories",
+            "value": false
+          },
+          {
+            "kind": "setting",
+            "key": "memories.generate_memories",
+            "value": false
+          }
+        ]
+      },
+      "from": ["config-reference", "config-advanced"],
+      "note": "Config keys can be set for one run with -c key=value. Not checked: whether one app-server process can use different values per thread."
+    }
+  },
+  "hooks": {
+    "model": {
+      "value": "entries",
+      "from": ["hooks-page"]
+    },
+    "configFiles": {
+      "value": [
+        {
+          "level": "managed",
+          "path": "/etc/codex/hooks.json"
+        },
+        {
+          "level": "managed",
+          "path": "requirements.toml"
+        },
+        {
+          "level": "user",
+          "path": "$CODEX_HOME/hooks.json"
+        },
+        {
+          "level": "user",
+          "path": "$CODEX_HOME/config.toml"
+        },
+        {
+          "level": "project",
+          "path": ".codex/hooks.json"
+        },
+        {
+          "level": "project",
+          "path": ".codex/config.toml"
+        }
+      ],
+      "from": ["hooks-page", "config-advanced"],
+      "note": "Project folders are read from the project root to the start folder. Plugins can bundle hooks too. The managed hooks.json path is for macOS and Linux."
+    },
+    "handlers": {
+      "value": {
+        "runs": ["command", "mcp_tool"],
+        "skips": ["prompt", "agent"]
+      },
+      "from": ["hooks-page"]
+    },
+    "events": {
+      "value": [
+        {
+          "native": "SessionStart",
+          "common": "sessionStart"
+        },
+        {
+          "native": "SessionEnd",
+          "common": "sessionEnd"
+        },
+        {
+          "native": "UserPromptSubmit",
+          "common": "promptSubmit"
+        },
+        {
+          "native": "PreToolUse",
+          "common": "toolBefore"
+        },
+        {
+          "native": "PostToolUse",
+          "common": "toolAfter"
+        },
+        {
+          "native": "PermissionRequest",
+          "common": "permissionRequest"
+        },
+        {
+          "native": "Stop",
+          "common": "stop"
+        },
+        {
+          "native": "Interrupt",
+          "common": "interrupt"
+        },
+        {
+          "native": "SubagentStart",
+          "common": "subagentStart"
+        },
+        {
+          "native": "SubagentStop",
+          "common": "subagentStop"
+        },
+        {
+          "native": "PreCompact",
+          "common": "compactBefore"
+        },
+        {
+          "native": "PostCompact",
+          "common": "compactAfter"
+        },
+        {
+          "native": "PreModelRequest",
+          "common": "modelRequestBefore"
+        },
+        {
+          "native": "PostModelRequest",
+          "common": "modelRequestAfter"
+        }
+      ],
+      "from": ["hooks-page"]
+    },
+    "tools": {
+      "value": [
+        {
+          "kind": "shell",
+          "names": ["Bash"],
+          "aliases": [],
+          "paths": null
+        },
+        {
+          "kind": "patch",
+          "names": ["apply_patch"],
+          "aliases": ["Edit", "Write"],
+          "paths": {
+            "field": "tool_input.command",
+            "helper": "applyPatchPaths"
+          }
+        },
+        {
+          "kind": "subagent",
+          "names": ["spawn_agent"],
+          "aliases": ["Agent"],
+          "paths": null
+        }
+      ],
+      "from": ["hooks-page"],
+      "note": "Shell commands, unified exec included, arrive as Bash. Other local tools keep their own names."
+    },
+    "mcpToolName": {
+      "value": "mcp__{server}__{tool}",
+      "from": ["hooks-page"]
+    },
+    "inputFields": {
+      "value": {
+        "sessionId": "session_id",
+        "turnId": "turn_id",
+        "cwd": "cwd",
+        "eventName": "hook_event_name",
+        "permissionMode": "permission_mode",
+        "prompt": "prompt",
+        "toolName": "tool_name",
+        "toolInput": "tool_input",
+        "toolUseId": "tool_use_id",
+        "toolResult": "tool_response",
+        "shellCommand": "tool_input.command"
+      },
+      "from": ["hooks-page"],
+      "note": "turn_id and permission_mode are sent on some events only."
+    },
+    "blocks": {
+      "value": {
+        "exitCode": 2,
+        "decisions": [
+          "PreToolUse: hookSpecificOutput.permissionDecision deny, or decision block",
+          "PermissionRequest: hookSpecificOutput.decision.behavior deny",
+          "UserPromptSubmit and PostToolUse: decision block"
+        ]
+      },
+      "from": ["hooks-page"],
+      "note": "On Stop, a block makes the agent continue."
+    },
+    "ask": {
+      "value": "unsupportedToolRuns",
+      "from": ["hooks-page"],
+      "note": "The hook run is marked failed and the tool call continues."
+    },
+    "whenHookFails": {
+      "unknown": "The page says unsupported output and MCP tool hook errors let the call continue. It does not say what a local command hook that crashes or times out does.",
+      "from": ["hooks-page"]
+    },
+    "contextLimit": {
+      "value": {
+        "amount": 2500,
+        "unit": "tokens",
+        "setting": "additionalContextLimit"
+      },
+      "from": ["hooks-page"],
+      "note": "Approximate. Longer text is saved to a file and the model gets a preview with the path."
+    },
+    "trust": {
+      "value": {
+        "interactive": ["folderForProjectHooks", "eachHook"],
+        "nonInteractive": ["folderForProjectHooks", "eachHook"]
+      },
+      "from": ["hooks-page"],
+      "note": "Each new or changed hook definition needs review, recorded against its hash. A changed script in a plugin needs review again. --dangerously-bypass-hook-trust skips the review for one run."
+    },
+    "cannotCarry": {
+      "value": [
+        {
+          "kind": "event",
+          "name": "toolFailed",
+          "why": "There is no failure event. PostToolUse also runs after a shell command that exits non-zero."
+        },
+        {
+          "kind": "event",
+          "name": "notification",
+          "why": "The event list has no such event. The separate notify program is not a hook."
+        },
+        {
+          "kind": "decision",
+          "name": "ask",
+          "why": "permissionDecision ask is not supported. The hook run fails and the tool runs."
+        },
+        {
+          "kind": "handler",
+          "name": "http",
+          "why": "Only command and mcp_tool handlers are listed as supported."
+        },
+        {
+          "kind": "handler",
+          "name": "prompt",
+          "why": "Parsed but skipped."
+        },
+        {
+          "kind": "handler",
+          "name": "agent",
+          "why": "Parsed but skipped."
+        },
+        {
+          "kind": "tool",
+          "name": "webSearch",
+          "why": "Hosted tools do not run tool hooks."
+        },
+        {
+          "kind": "input",
+          "name": "filePath",
+          "why": "apply_patch sends the patch text in tool_input.command. No file path field is documented."
+        },
+        {
+          "kind": "output",
+          "name": "PermissionRequest updatedInput, updatedPermissions and interrupt",
+          "why": "Reserved. Returning them fails closed."
+        },
+        {
+          "kind": "output",
+          "name": "PostToolUse updatedMCPToolOutput",
+          "why": "Not supported yet. The hook run fails."
+        }
+      ],
+      "from": ["hooks-page", "config-advanced"]
+    },
+    "recordedInputs": {
+      "unknown": "No run has been recorded. Documentation examples do not count."
+    }
+  },
+  "skills": {
+    "locations": {
+      "value": [
+        {
+          "level": "managed",
+          "path": "/etc/codex/skills"
+        },
+        {
+          "level": "user",
+          "path": "~/.agents/skills"
+        },
+        {
+          "level": "project",
+          "path": ".agents/skills"
+        }
+      ],
+      "from": ["skills-page"],
+      "note": "Project folders are read from the start folder up to the repository root. Codex also bundles its own skills."
+    },
+    "entryFile": {
+      "value": "SKILL.md",
+      "from": ["skills-page"]
+    },
+    "sharedAgentsFolder": {
+      "value": true,
+      "from": ["skills-page"]
+    }
+  },
+  "agents": {
+    "locations": {
+      "value": [
+        {
+          "level": "user",
+          "path": "~/.codex/agents",
+          "format": "toml"
+        },
+        {
+          "level": "project",
+          "path": ".codex/agents",
+          "format": "toml"
+        }
+      ],
+      "from": ["subagents-page"]
+    }
+  },
+  "mcp": {
+    "configs": {
+      "value": [
+        {
+          "level": "user",
+          "path": "~/.codex/config.toml",
+          "key": "mcp_servers"
+        },
+        {
+          "level": "project",
+          "path": ".codex/config.toml",
+          "key": "mcp_servers"
+        }
+      ],
+      "from": ["mcp-page"],
+      "note": "Project config is read only in a trusted project."
+    }
+  },
+  "hubNotes": {
+    "value": {
+      "reachesTurn": true,
+      "deliveredAs": "untrustedContext"
+    },
+    "from": ["hub-notes"]
+  },
+  "conformance": {
+    "instructionLoads": {
+      "mixed": {
+        "atStart": [
+          "/home/ada/.codex/AGENTS.md",
+          "/home/ada/work/acme/AGENTS.md",
+          "/home/ada/work/acme/services/AGENTS.override.md"
+        ],
+        "onDemand": [],
+        "undetermined": [],
+        "unknownLevels": ["managed"]
+      },
+      "agentsOnly": {
+        "atStart": ["/home/ada/.codex/AGENTS.md", "/home/ada/work/acme/AGENTS.md"],
+        "onDemand": [],
+        "undetermined": [],
+        "unknownLevels": ["managed"]
+      }
+    }
+  }
+}

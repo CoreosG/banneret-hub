@@ -128,3 +128,30 @@ test.each([
   NodeAssert.equal(report.passed, !broken, JSON.stringify(report));
   if (broken) NodeAssert.ok(report.checks.at(-1).hint.includes(hint));
 });
+
+test("the bundled checker prints a profile and checks a draft", async (t) => {
+  const dir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "banneret-profile-"));
+  t.onTestFinished(() => NodeFSP.rm(dir, { recursive: true, force: true }));
+  const bundle = NodePath.join(dir, "checker.mjs");
+  const run = NodeUtil.promisify(NodeChildProcess.execFile);
+  await run(process.execPath, [NodePath.join(import.meta.dirname, "build.mjs"), bundle], {
+    cwd: NodePath.dirname(import.meta.dirname),
+  });
+  const cli = async (...args) => (await run(process.execPath, [bundle, ...args])).stdout;
+  const file = NodePath.join(dir, "profile.json");
+
+  NodeAssert.ok(JSON.parse(await cli("--print-profile", "schema")).properties.instructions);
+  for (const id of ["codex", "someAcpAgent"]) {
+    await NodeFSP.writeFile(file, await cli("--print-profile", id));
+    NodeAssert.equal(JSON.parse(await cli("--profile", file, "--json")).passed, true);
+  }
+
+  const broken = JSON.parse(await cli("--print-profile", "codex"));
+  delete broken.memory.learns.from;
+  await NodeFSP.writeFile(file, JSON.stringify(broken));
+  await NodeAssert.rejects(cli("--profile", file), (error) => {
+    NodeAssert.equal(error.code, 1);
+    NodeAssert.match(error.stdout, /FAIL shape .*memory\.learns\.from: /s);
+    return true;
+  });
+});

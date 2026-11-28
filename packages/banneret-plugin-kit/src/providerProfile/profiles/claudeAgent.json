@@ -1,0 +1,728 @@
+{
+  "id": "claudeAgent",
+  "name": "Claude Code",
+  "sources": {
+    "memory-page": {
+      "url": "https://code.claude.com/docs/en/memory",
+      "checked": "2026-11-28"
+    },
+    "hooks-page": {
+      "url": "https://code.claude.com/docs/en/hooks",
+      "checked": "2026-11-28"
+    },
+    "skills-page": {
+      "url": "https://code.claude.com/docs/en/skills",
+      "checked": "2026-11-28"
+    },
+    "subagents-page": {
+      "url": "https://code.claude.com/docs/en/sub-agents",
+      "checked": "2026-11-28"
+    },
+    "mcp-page": {
+      "url": "https://code.claude.com/docs/en/mcp",
+      "checked": "2026-11-28"
+    },
+    "managed-mcp-page": {
+      "url": "https://code.claude.com/docs/en/managed-mcp",
+      "checked": "2026-11-28"
+    },
+    "settings-page": {
+      "url": "https://code.claude.com/docs/en/settings-reference",
+      "checked": "2026-11-28"
+    },
+    "env-page": {
+      "url": "https://code.claude.com/docs/en/env-vars",
+      "checked": "2026-11-28"
+    },
+    "managed-settings-page": {
+      "url": "https://code.claude.com/docs/en/managed-settings",
+      "checked": "2026-11-28"
+    },
+    "hub-notes": {
+      "code": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+      "symbol": "withClaudeAppContext",
+      "commit": "c472ab9693",
+      "checked": "2026-11-28"
+    }
+  },
+  "instructions": {
+    "agentsMd": {
+      "value": "fallback",
+      "from": ["memory-page"],
+      "note": "By default only when no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md is in the start folder or above. Needs 2.1.277 or later. Not available when the built-in AGENTS.md plugin is disabled."
+    },
+    "nameSetting": {
+      "value": {
+        "key": "pluginConfigs[\"cc-plugin-agents-md@builtin\"].options.instructionFiles",
+        "set": "claude-md-and-agents-md, which reads both",
+        "honoredIn": ["~/.claude/settings.json", "a --settings file", "managed settings"],
+        "since": "2.1.277"
+      },
+      "from": ["memory-page"],
+      "note": "Ignored in project and local settings. Before 2.1.285 the plugin id was agents-md@builtin."
+    },
+    "homeFolder": {
+      "value": {
+        "path": "~/.claude",
+        "env": "CLAUDE_CONFIG_DIR"
+      },
+      "from": ["env-page"],
+      "note": "The page says the variable replaces the configuration directory. It does not name CLAUDE.md."
+    },
+    "managed": {
+      "value": {
+        "linux": "/etc/claude-code/CLAUDE.md",
+        "macos": "/Library/Application Support/ClaudeCode/CLAUDE.md",
+        "windows": "C:\\Program Files\\ClaudeCode\\CLAUDE.md"
+      },
+      "from": ["memory-page"]
+    },
+    "user": {
+      "value": {
+        "names": ["CLAUDE.md"],
+        "take": "all"
+      },
+      "from": ["memory-page"]
+    },
+    "project": {
+      "walk": {
+        "value": {
+          "startsAt": "startFolder",
+          "stopsAt": "filesystemRoot"
+        },
+        "from": ["memory-page"]
+      },
+      "root": {
+        "value": null,
+        "from": ["memory-page"],
+        "note": "Instruction files are read from every folder above, with no project root."
+      },
+      "names": {
+        "value": {
+          "names": ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"],
+          "take": "all"
+        },
+        "from": ["memory-page"],
+        "note": "CLAUDE.local.md comes after CLAUDE.md. The page does not order CLAUDE.md against .claude/CLAUDE.md."
+      },
+      "fallback": {
+        "value": {
+          "when": "noPrimaryFileOnTheWalk",
+          "names": ["AGENTS.md", ".claude/AGENTS.md"]
+        },
+        "from": ["memory-page"],
+        "note": "The personal and managed CLAUDE.md files do not count. AGENTS.override.md, AGENTS.local.md and files under .agents are never read."
+      }
+    },
+    "subdirectory": {
+      "value": {
+        "load": "onDemand",
+        "names": {
+          "names": ["CLAUDE.md", "CLAUDE.local.md"],
+          "take": "all"
+        },
+        "triggers": ["read", "write", "edit"],
+        "fallback": {
+          "names": ["AGENTS.md"],
+          "triggers": ["read"],
+          "blockedBy": ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]
+        },
+        "foldersBetween": "notDocumented"
+      },
+      "from": ["memory-page"]
+    },
+    "sizeCaps": {
+      "user": {
+        "limit": {
+          "value": {
+            "amounts": [
+              {
+                "amount": 4194304,
+                "unit": "bytes"
+              }
+            ],
+            "setting": null
+          },
+          "from": ["memory-page"],
+          "note": "For CLAUDE.md files read at launch. The page advises under 200 lines. It does not say whether an AGENTS.md read directly has the same limit."
+        },
+        "counts": {
+          "value": "eachFile",
+          "from": ["memory-page"]
+        },
+        "over": {
+          "value": "skipsFile",
+          "from": ["memory-page"]
+        }
+      },
+      "project": {
+        "limit": {
+          "value": {
+            "amounts": [
+              {
+                "amount": 4194304,
+                "unit": "bytes"
+              }
+            ],
+            "setting": null
+          },
+          "from": ["memory-page"],
+          "note": "For CLAUDE.md files read at launch. The page advises under 200 lines. It does not say whether an AGENTS.md read directly has the same limit."
+        },
+        "counts": {
+          "value": "eachFile",
+          "from": ["memory-page"]
+        },
+        "over": {
+          "value": "skipsFile",
+          "from": ["memory-page"]
+        }
+      },
+      "subdirectory": {
+        "limit": {
+          "value": {
+            "amounts": [
+              {
+                "amount": 40000,
+                "unit": "characters",
+                "when": "200K context window"
+              },
+              {
+                "amount": 200000,
+                "unit": "characters",
+                "when": "1M context window on Claude Opus 4.6 and Claude Sonnet 4.6"
+              },
+              {
+                "amount": 150000,
+                "unit": "characters",
+                "when": "1M context window on later models"
+              }
+            ],
+            "setting": null
+          },
+          "from": ["memory-page"],
+          "note": "For CLAUDE.md and CLAUDE.local.md in folders below, with their imports. Since 2.1.309."
+        },
+        "counts": {
+          "value": "eachFile",
+          "from": ["memory-page"]
+        },
+        "over": {
+          "value": "keepsStart",
+          "from": ["memory-page"],
+          "note": "A note tells the model to read the rest."
+        }
+      }
+    },
+    "precedence": {
+      "value": {
+        "order": ["managed", "user", "project"],
+        "folderOrder": "outermostFirst",
+        "onConflict": "notDefined"
+      },
+      "from": ["memory-page"],
+      "note": "All files are joined. The page says the model may pick either of two instructions that disagree."
+    },
+    "rules": {
+      "value": {
+        "folders": [
+          {
+            "level": "user",
+            "path": "~/.claude/rules"
+          },
+          {
+            "level": "project",
+            "path": ".claude/rules"
+          }
+        ],
+        "pathScopeField": "paths"
+      },
+      "from": ["memory-page"],
+      "note": "Rules without paths load at launch. Rules with paths load when a matching file is read, written or edited."
+    },
+    "imports": {
+      "value": {
+        "syntax": "@path",
+        "relativeTo": "importingFile",
+        "maxDepth": 4,
+        "outsideProject": "asksOnce"
+      },
+      "from": ["memory-page"],
+      "note": "Imports in code spans and code blocks are skipped. Imports in the person's own files load without asking, except in Cowork desktop sessions."
+    }
+  },
+  "memory": {
+    "learns": {
+      "value": true,
+      "from": ["memory-page"]
+    },
+    "onByDefault": {
+      "value": true,
+      "from": ["memory-page"],
+      "note": "In local sessions."
+    },
+    "writesByItself": {
+      "value": true,
+      "from": ["memory-page"]
+    },
+    "location": {
+      "value": ["~/.claude/projects/<project>/memory/"],
+      "from": ["memory-page"],
+      "note": "The autoMemoryDirectory setting moves it. MEMORY.md is read at start, up to 200 lines or 25KB."
+    },
+    "offAtLaunch": {
+      "value": {
+        "possible": true,
+        "apply": [
+          {
+            "kind": "env",
+            "name": "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+            "value": "1"
+          },
+          {
+            "kind": "setting",
+            "key": "autoMemoryEnabled",
+            "value": false
+          }
+        ]
+      },
+      "from": ["env-page", "settings-page"],
+      "note": "The variable beats the setting for one session, in either direction. A settings file's env block can also set the variable."
+    }
+  },
+  "hooks": {
+    "model": {
+      "value": "entries",
+      "from": ["hooks-page"]
+    },
+    "configFiles": {
+      "value": [
+        {
+          "level": "managed",
+          "path": "/etc/claude-code/managed-settings.json"
+        },
+        {
+          "level": "user",
+          "path": "~/.claude/settings.json"
+        },
+        {
+          "level": "project",
+          "path": ".claude/settings.json"
+        },
+        {
+          "level": "local",
+          "path": ".claude/settings.local.json"
+        }
+      ],
+      "from": ["hooks-page", "managed-settings-page"],
+      "note": "The managed path is the Linux one. Plugins, skills and subagents can declare hooks too."
+    },
+    "handlers": {
+      "value": {
+        "runs": ["command", "http", "mcp_tool", "prompt", "agent"],
+        "skips": []
+      },
+      "from": ["hooks-page"]
+    },
+    "events": {
+      "value": [
+        {
+          "native": "SessionStart",
+          "common": "sessionStart"
+        },
+        {
+          "native": "Setup",
+          "common": null
+        },
+        {
+          "native": "UserPromptSubmit",
+          "common": "promptSubmit"
+        },
+        {
+          "native": "UserPromptExpansion",
+          "common": null
+        },
+        {
+          "native": "PreSkillShellCommand",
+          "common": null
+        },
+        {
+          "native": "PreToolUse",
+          "common": "toolBefore"
+        },
+        {
+          "native": "PermissionRequest",
+          "common": "permissionRequest"
+        },
+        {
+          "native": "PermissionDenied",
+          "common": null
+        },
+        {
+          "native": "PostToolUse",
+          "common": "toolAfter"
+        },
+        {
+          "native": "PostToolUseFailure",
+          "common": "toolFailed"
+        },
+        {
+          "native": "PostToolBatch",
+          "common": null
+        },
+        {
+          "native": "Notification",
+          "common": "notification"
+        },
+        {
+          "native": "MessageDisplay",
+          "common": null
+        },
+        {
+          "native": "SubagentStart",
+          "common": "subagentStart"
+        },
+        {
+          "native": "SubagentStop",
+          "common": "subagentStop"
+        },
+        {
+          "native": "TaskCreated",
+          "common": null
+        },
+        {
+          "native": "TaskCompleted",
+          "common": null
+        },
+        {
+          "native": "Stop",
+          "common": "stop"
+        },
+        {
+          "native": "StopFailure",
+          "common": null
+        },
+        {
+          "native": "TeammateIdle",
+          "common": null
+        },
+        {
+          "native": "InstructionsLoaded",
+          "common": null
+        },
+        {
+          "native": "ConfigChange",
+          "common": null
+        },
+        {
+          "native": "CwdChanged",
+          "common": null
+        },
+        {
+          "native": "DirectoryAdded",
+          "common": null
+        },
+        {
+          "native": "FileChanged",
+          "common": null
+        },
+        {
+          "native": "WorktreeCreate",
+          "common": null
+        },
+        {
+          "native": "WorktreeRemove",
+          "common": null
+        },
+        {
+          "native": "PreCompact",
+          "common": "compactBefore"
+        },
+        {
+          "native": "PostCompact",
+          "common": "compactAfter"
+        },
+        {
+          "native": "PreModelSwitch",
+          "common": null
+        },
+        {
+          "native": "PostModelSwitch",
+          "common": null
+        },
+        {
+          "native": "Elicitation",
+          "common": null
+        },
+        {
+          "native": "ElicitationResult",
+          "common": null
+        },
+        {
+          "native": "SessionEnd",
+          "common": "sessionEnd"
+        }
+      ],
+      "from": ["hooks-page"]
+    },
+    "tools": {
+      "value": [
+        {
+          "kind": "shell",
+          "names": ["Bash", "PowerShell"],
+          "aliases": [],
+          "paths": null
+        },
+        {
+          "kind": "fileWrite",
+          "names": ["Write"],
+          "aliases": [],
+          "paths": {
+            "field": "tool_input.file_path",
+            "helper": null
+          }
+        },
+        {
+          "kind": "fileEdit",
+          "names": ["Edit"],
+          "aliases": [],
+          "paths": {
+            "field": "tool_input.file_path",
+            "helper": null
+          }
+        },
+        {
+          "kind": "fileRead",
+          "names": ["Read"],
+          "aliases": [],
+          "paths": {
+            "field": "tool_input.file_path",
+            "helper": null
+          }
+        },
+        {
+          "kind": "fileSearch",
+          "names": ["Glob", "Grep"],
+          "aliases": [],
+          "paths": null
+        },
+        {
+          "kind": "webFetch",
+          "names": ["WebFetch"],
+          "aliases": [],
+          "paths": null
+        },
+        {
+          "kind": "webSearch",
+          "names": ["WebSearch"],
+          "aliases": [],
+          "paths": null
+        },
+        {
+          "kind": "subagent",
+          "names": ["Agent"],
+          "aliases": [],
+          "paths": null
+        }
+      ],
+      "from": ["hooks-page"]
+    },
+    "mcpToolName": {
+      "value": "mcp__{server}__{tool}",
+      "from": ["hooks-page"],
+      "note": "A plugin's server is named plugin_<plugin>_<server>."
+    },
+    "inputFields": {
+      "value": {
+        "sessionId": "session_id",
+        "cwd": "cwd",
+        "eventName": "hook_event_name",
+        "permissionMode": "permission_mode",
+        "prompt": "prompt",
+        "toolName": "tool_name",
+        "toolInput": "tool_input",
+        "toolUseId": "tool_use_id",
+        "toolResult": "tool_response",
+        "shellCommand": "tool_input.command",
+        "filePath": "tool_input.file_path"
+      },
+      "from": ["hooks-page"]
+    },
+    "blocks": {
+      "value": {
+        "exitCode": 2,
+        "decisions": [
+          "PreToolUse: hookSpecificOutput.permissionDecision deny",
+          "PermissionRequest: hookSpecificOutput.decision.behavior deny",
+          "UserPromptSubmit, PostToolUse, Stop and others: top-level decision block"
+        ]
+      },
+      "from": ["hooks-page"],
+      "note": "What exit code 2 does differs by event. PermissionRequest does not read it."
+    },
+    "ask": {
+      "value": "supported",
+      "from": ["hooks-page"],
+      "note": "In a -p run where nobody can answer, the call is denied."
+    },
+    "whenHookFails": {
+      "value": "toolRuns",
+      "from": ["hooks-page"],
+      "note": "onFailure \"block\" (2.1.295 or later) changes this per hook. A timed-out Agent SDK callback hook blocks."
+    },
+    "contextLimit": {
+      "value": {
+        "amount": 10000,
+        "unit": "characters",
+        "setting": null
+      },
+      "from": ["hooks-page"],
+      "note": "Longer text is saved to a file and the model gets the path and a preview."
+    },
+    "trust": {
+      "value": {
+        "interactive": ["folderForAllHooks"],
+        "nonInteractive": []
+      },
+      "from": ["hooks-page"],
+      "note": "A -p or Agent SDK session treats the folder as trusted, so a repository's hooks run there."
+    },
+    "cannotCarry": {
+      "value": [
+        {
+          "kind": "event",
+          "name": "interrupt",
+          "why": "The event list has no such event."
+        },
+        {
+          "kind": "event",
+          "name": "modelRequestBefore",
+          "why": "The event list has no such event."
+        },
+        {
+          "kind": "event",
+          "name": "modelRequestAfter",
+          "why": "The event list has no such event."
+        }
+      ],
+      "from": ["hooks-page"]
+    },
+    "recordedInputs": {
+      "unknown": "No run has been recorded. Documentation examples do not count."
+    }
+  },
+  "skills": {
+    "locations": {
+      "value": [
+        {
+          "level": "managed",
+          "path": "/etc/claude-code/.claude/skills"
+        },
+        {
+          "level": "user",
+          "path": "~/.claude/skills"
+        },
+        {
+          "level": "project",
+          "path": ".claude/skills"
+        },
+        {
+          "level": "subdirectory",
+          "path": ".claude/skills"
+        }
+      ],
+      "from": ["skills-page"],
+      "note": "Project folders are read from the start folder up to the repository root. Folders below load when a file there is read or edited. The managed path is the Linux one."
+    },
+    "entryFile": {
+      "value": "SKILL.md",
+      "from": ["skills-page"]
+    },
+    "sharedAgentsFolder": {
+      "unknown": "The skills page does not mention .agents/skills.",
+      "from": ["skills-page"]
+    }
+  },
+  "agents": {
+    "locations": {
+      "value": [
+        {
+          "level": "user",
+          "path": "~/.claude/agents",
+          "format": "markdown"
+        },
+        {
+          "level": "project",
+          "path": ".claude/agents",
+          "format": "markdown"
+        }
+      ],
+      "from": ["subagents-page"],
+      "note": "Managed settings and plugins can add agents too."
+    }
+  },
+  "mcp": {
+    "configs": {
+      "value": [
+        {
+          "level": "managed",
+          "path": "/etc/claude-code/managed-mcp.json",
+          "key": "mcpServers"
+        },
+        {
+          "level": "user",
+          "path": "~/.claude.json"
+        },
+        {
+          "level": "local",
+          "path": "~/.claude.json",
+          "key": "projects.<path>.mcpServers"
+        },
+        {
+          "level": "project",
+          "path": ".mcp.json",
+          "key": "mcpServers"
+        }
+      ],
+      "from": ["mcp-page", "managed-mcp-page"],
+      "note": "The managed path is the Linux one. The pages do not name the key for user-scope servers."
+    }
+  },
+  "hubNotes": {
+    "value": {
+      "reachesTurn": true,
+      "deliveredAs": "quotedUserInput"
+    },
+    "from": ["hub-notes"]
+  },
+  "conformance": {
+    "instructionLoads": {
+      "mixed": {
+        "atStart": [
+          "/etc/claude-code/CLAUDE.md",
+          "/home/ada/.claude/CLAUDE.md",
+          "/home/ada/work/CLAUDE.md",
+          "/home/ada/work/acme/CLAUDE.md",
+          "/home/ada/work/acme/services/CLAUDE.local.md"
+        ],
+        "onDemand": ["/home/ada/work/acme/services/payments/CLAUDE.md"],
+        "undetermined": [],
+        "unknownLevels": []
+      },
+      "agentsOnly": {
+        "atStart": [
+          "/home/ada/.claude/CLAUDE.md",
+          "/home/ada/work/AGENTS.md",
+          "/home/ada/work/acme/AGENTS.md",
+          "/home/ada/work/acme/services/.claude/AGENTS.md"
+        ],
+        "onDemand": [
+          "/home/ada/work/acme/services/payments/AGENTS.md",
+          "/home/ada/work/acme/services/reports/CLAUDE.md"
+        ],
+        "undetermined": [],
+        "unknownLevels": []
+      }
+    }
+  }
+}
