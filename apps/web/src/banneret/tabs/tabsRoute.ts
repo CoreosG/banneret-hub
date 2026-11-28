@@ -8,8 +8,16 @@ import { readThreadShell } from "../../state/entities";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { resolveWorkspaces } from "../workspaces.logic";
 import { useWorkspacesStore } from "../workspacesStore";
-import { isPagePath, pageTitle, tabKey, type TabTarget, type TabThreadRef } from "./tabs.logic";
-import { closeInactive, observeRoute, useTabsStore } from "./tabsStore";
+import {
+  isPagePath,
+  pageTitle,
+  tabKey,
+  targetKey,
+  type TabTarget,
+  type TabThreadRef,
+} from "./tabs.logic";
+import { closeInactive, keep, observeRoute, useTabsStore } from "./tabsStore";
+import { useWorkspaceTabsStore } from "./workspaceTabsStore";
 
 /** "modal": Settings and Usage open over the last view, which keeps its tab. */
 function readRouteTarget(router: AnyRouter): TabTarget | null | "modal" {
@@ -88,9 +96,32 @@ function promotedFromActiveDraft(threadRef: TabThreadRef): string | undefined {
   return tabKey(active);
 }
 
+/** The last view under any modal; undefined until the router has shown one. */
+let shownTarget: TabTarget | null | undefined;
+
+export const shownRouteTarget = () => shownTarget;
+
 export function syncTabsWithRoute(router: AnyRouter) {
   const target = readRouteTarget(router);
-  if (target !== "modal") observeRoute(target);
+  if (target === "modal") return;
+  shownTarget = target;
+  // With Workspaces tabs the chats tabs stay exactly as they were left.
+  if (useWorkspaceTabsStore.getState().mode === "chats") observeRoute(target);
+}
+
+/**
+ * Back from Workspaces tabs: the view in front gets its chats tab. A preview that would make way for
+ * it is kept, so no tab is lost by switching.
+ */
+export function resumeChatTabs() {
+  if (shownTarget === undefined) return;
+  if (shownTarget !== null) {
+    const key = targetKey(shownTarget);
+    const { tabs } = useTabsStore.getState();
+    const preview = tabs.find((tab) => !tab.kept);
+    if (preview !== undefined && !tabs.some((tab) => tabKey(tab) === key)) keep(preview.id);
+  }
+  observeRoute(shownTarget);
 }
 
 /**

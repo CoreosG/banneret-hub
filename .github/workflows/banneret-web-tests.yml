@@ -90,14 +90,19 @@ jobs:
 
       # The viewport matrix (forEachViewport), one file at a time: its screenshots take focus from
       # files running beside them.
+      # The per-test timeout runs inside the page, so a frozen page never reaches it and Vitest waits
+      # forever. The step limit ends that, and still lets the screenshots upload. The verbose reporter
+      # prints each test as it finishes, so the log shows how far the run got.
       - name: Layout tests at every viewport
         if: ${{ !cancelled() }}
+        timeout-minutes: 8
         working-directory: apps/web
         env:
           VITE_LAYOUT_SHOTS: "1"
         run: |
           mapfile -t files < <(grep -rlF 'forEachViewport(' src/banneret --include='*.browser.test.tsx')
-          vp test run --project browser --no-file-parallelism -t '\[layout\]' "${files[@]}"
+          vp test run --project browser --no-file-parallelism -t '\[layout\]' \
+            --reporter=verbose --reporter=github-actions "${files[@]}"
 
       # One screenshot per layout test and viewport size (docs/banneret/maintaining.md, "Layout tests").
       - name: Upload layout screenshots

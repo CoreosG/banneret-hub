@@ -271,6 +271,21 @@ as tabs. A page tab keeps the page's board and filters.
 - A tab shown in italics is a preview. Opening something else replaces it. Sending a message keeps it.
 - Up to 20 tabs are kept. Pinned tabs are never dropped.
 
+**Tabs show.** Settings → Appearance → **Tabs show** picks what a tab is. **Chats** is the default and works as
+above. **Workspaces** is for people with many projects:
+
+- There is one tab per project. Here a workspace means a project, not a choice in the workspace switcher. The
+  No project folders of every machine are one tab.
+- The sidebar lists only the shown project's chats. Click a tab to go back to the chat you last had open in it,
+  like a separate browser window. A project with no chat starts a new one.
+- Pin, close, drag and the tab menu work as above. There are no preview tabs, no Keep and no 20-tab limit. Copy
+  link copies the tab's last chat.
+- Closing a tab only hides it. The workspace list at the top of the sidebar shows every project and brings the
+  tab back. After you close the last tab, the chat stays on screen and the sidebar lists every chat.
+- Pages such as Board get no tab of their own in this mode. The shown project stays selected.
+- With the tabs bar hidden, or in a window too narrow for it, the sidebar lists every chat again.
+- Switching between the two keeps your chat tabs and the chat in front. The choice is saved on this device.
+
 ## Ports, file transfer and Save As
 
 These work in every workspace, Solo included.

@@ -41,23 +41,51 @@ const devtools = () =>
     send(method: string, params?: Record<string, unknown>): Promise<{ readonly data: string }>;
   };
 
+/**
+ * `pending`, or after `ms` an error that names what never answered. Calls out to the browser have no
+ * limit of their own; this fails by name and lets `await using` clean up before the test times out.
+ * It cannot end a frozen page, where no timer runs.
+ */
+export async function within<T>(pending: PromiseLike<T>, what: string, ms = 8_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} did not finish within ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([pending, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const resize = (width: number, height: number) =>
+  within(page.viewport(width, height), `resizing the window to ${width}x${height}`);
+
 /** Resizes the test window, and restores the previous size and scale on dispose. */
 async function showViewport(viewport: LayoutViewport): Promise<AsyncDisposable> {
   const before = { width: window.innerWidth, height: window.innerHeight };
   const scaled = viewport.deviceScaleFactor !== 1;
   const restore = async () => {
-    if (scaled) await devtools().send("Emulation.clearDeviceMetricsOverride");
-    await page.viewport(before.width, before.height);
+    if (scaled) {
+      await within(
+        devtools().send("Emulation.clearDeviceMetricsOverride"),
+        "clearing the device scale",
+      );
+    }
+    await resize(before.width, before.height);
   };
   try {
-    await page.viewport(viewport.width, viewport.height);
+    await resize(viewport.width, viewport.height);
     if (scaled) {
-      await devtools().send("Emulation.setDeviceMetricsOverride", {
-        width: viewport.width,
-        height: viewport.height,
-        deviceScaleFactor: viewport.deviceScaleFactor,
-        mobile: false,
-      });
+      await within(
+        devtools().send("Emulation.setDeviceMetricsOverride", {
+          width: viewport.width,
+          height: viewport.height,
+          deviceScaleFactor: viewport.deviceScaleFactor,
+          mobile: false,
+        }),
+        "setting the device scale",
+      );
     }
     // A matrix that silently kept the old size would pass everything, so check what the page sees.
     await vi.waitFor(() =>
@@ -83,20 +111,23 @@ const slug = (text: string) =>
 // DevTools captures device pixels; Playwright's own screenshot ignores the scale set above.
 async function capture(path: string, viewport: LayoutViewport) {
   // An entrance caught half way through shows a faded page. Spinners never finish and are skipped.
-  await Promise.allSettled(
-    document
-      .getAnimations()
-      .filter(
-        (animation) =>
-          animation.playState === "running" &&
-          Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity),
-      )
-      .map((animation) => animation.finished),
+  await within(
+    Promise.allSettled(
+      document
+        .getAnimations()
+        .filter(
+          (animation) =>
+            animation.playState === "running" &&
+            Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity),
+        )
+        .map((animation) => animation.finished),
+    ),
+    `the animations before ${path}`,
   );
-  const { data } = await devtools().send("Page.captureScreenshot", {
-    format: "png",
-    optimizeForSpeed: true,
-  });
+  const { data } = await within(
+    devtools().send("Page.captureScreenshot", { format: "png", optimizeForSpeed: true }),
+    `capturing ${path}`,
+  );
   // A smaller image would make the 4K and 200% captures look like the 1080p one. A PNG's first 24
   // bytes (32 base64 characters) carry its pixel size.
   const header = new DataView(
@@ -107,7 +138,10 @@ async function capture(path: string, viewport: LayoutViewport) {
     viewport.height * viewport.deviceScaleFactor,
   ]);
   // Relative to apps/web. Vite refuses writes outside the repository.
-  await commands.writeFile(`../../.vitest-viewports/${path}`, data, "base64");
+  await within(
+    commands.writeFile(`../../.vitest-viewports/${path}`, data, "base64"),
+    `saving ${path}`,
+  );
 }
 
 /**

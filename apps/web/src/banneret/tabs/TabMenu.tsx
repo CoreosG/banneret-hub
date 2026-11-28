@@ -26,7 +26,9 @@ export interface TabMenuState {
  * Thread does. A page has only this app's own address, which is a link in a web client alone; an
  * unsent draft exists nowhere else.
  */
-function linkCopier(tab: Tab): (() => void) | null {
+export function linkCopier(
+  tab: Pick<Tab, "kind" | "href" | "threadRef" | "title">,
+): (() => void) | null {
   if (tab.kind === "thread") {
     const threadRef = toScopedRef(tab);
     if (threadRef === null || tab.href.startsWith("/draft/")) return null;

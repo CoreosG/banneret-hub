@@ -15,13 +15,17 @@ type Group = Pick<
   "displayName" | "isScratch" | "memberProjects" | "workspaceRoot"
 >;
 
+/** A machine's No project home, or another folder that reads like one. */
+export const isNoProjectGroup = (group: Pick<Group, "displayName" | "isScratch">) =>
+  group.isScratch || group.displayName === HOME_TITLE;
+
 const machinesOf = (group: Group) =>
   [...new Set(group.memberProjects.flatMap((member) => member.environmentLabel ?? []))]
     .toSorted()
     .join(", ");
 
 function labelNoProjectTwins<TGroup extends Group>(groups: ReadonlyArray<TGroup>): TGroup[] {
-  const twins = groups.filter((group) => group.isScratch || group.displayName === HOME_TITLE);
+  const twins = groups.filter(isNoProjectGroup);
   if (twins.length < 2) return [...groups];
   return groups.map((group) => {
     if (!twins.includes(group)) return group;

@@ -43,7 +43,7 @@ export async function closeAndShow(router: AnyRouter, ids: ReadonlySet<string>, 
 
 export const closeTab = (router: AnyRouter, id: string) => closeAndShow(router, new Set([id]));
 
-export function toScopedRef(tab: Tab): ScopedThreadRef | null {
+export function toScopedRef(tab: Pick<Tab, "threadRef">): ScopedThreadRef | null {
   return tab.threadRef === null
     ? null
     : scopeThreadRef(

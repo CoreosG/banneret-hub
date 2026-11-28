@@ -10,7 +10,7 @@ import {
   type CommandPaletteGroup,
 } from "../components/CommandPalette.logic";
 import { useVisibleThreadShells } from "../state/entities";
-import { useWorkspaceScopedThreads } from "./useWorkspaceScopedThreads";
+import { useWorkspaceThreads } from "./useWorkspaceScopedThreads";
 
 const OTHER_WORKSPACES_VALUE = "banneret:other-workspace-threads";
 
@@ -55,7 +55,7 @@ export function useWorkspacePaletteThreads<
   },
 >(threads: TThreads, query: string) {
   const shells = useVisibleThreadShells();
-  const scopedShells = useWorkspaceScopedThreads(shells);
+  const scopedShells = useWorkspaceThreads(shells);
   const [widened, setWidened] = useState(false);
   const unchanged = (groups: ReadonlyArray<CommandPaletteGroup>, _searching?: boolean) => groups;
   // The recent list (no query) stays scoped even after a search was widened.

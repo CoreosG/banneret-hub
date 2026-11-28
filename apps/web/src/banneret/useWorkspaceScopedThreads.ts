@@ -1,16 +1,29 @@
-// Banneret Hub: the threads the active workspace lists. The sidebar reads its threads through this,
-// so a workspace shows only its own projects' threads (and scratch threads, which every one shows).
+// Banneret Hub: the threads the sidebar lists. A workspace shows only its own projects' threads (and
+// scratch threads, which every one shows); with Workspaces tabs the shown tab narrows that again.
 import { useProjects } from "../state/entities";
+import { projectKeyOf, useProjectsOutsideShownWorkspace } from "./tabs/useProjectWorkspaces";
 import { filterThreadsForWorkspace, workspaceScopeProjectKeys } from "./workspaces.logic";
 import { useWorkspaces, useWorkspacesStore } from "./workspacesStore";
 
-export function useWorkspaceScopedThreads<
+/** The threads of the workspace switcher's choice. The command palette searches these. */
+export function useWorkspaceThreads<
   TThread extends Parameters<typeof filterThreadsForWorkspace>[0][number],
 >(threads: ReadonlyArray<TThread>): ReadonlyArray<TThread> {
   const projects = useProjects();
   const workspaces = useWorkspaces();
   const activeId = useWorkspacesStore((state) => state.activeId);
   return filterThreadsForWorkspace(threads, projects, workspaces, activeId);
+}
+
+export function useWorkspaceScopedThreads<
+  TThread extends Parameters<typeof filterThreadsForWorkspace>[0][number],
+>(threads: ReadonlyArray<TThread>): ReadonlyArray<TThread> {
+  const scoped = useWorkspaceThreads(threads);
+  const outside = useProjectsOutsideShownWorkspace();
+  if (outside === null) return scoped;
+  return scoped.filter(
+    (thread) => !outside.has(projectKeyOf(thread.environmentId, thread.projectId)),
+  );
 }
 
 /**
@@ -23,5 +36,9 @@ export function useWorkspaceScopeProjectKeys(
   const projects = useProjects();
   const workspaces = useWorkspaces();
   const activeId = useWorkspacesStore((state) => state.activeId);
-  return workspaceScopeProjectKeys(scopedProjectKeys, projects, workspaces, activeId);
+  const outside = useProjectsOutsideShownWorkspace();
+  const keys = workspaceScopeProjectKeys(scopedProjectKeys, projects, workspaces, activeId);
+  if (outside === null || scopedProjectKeys !== null) return keys;
+  const all = keys ?? new Set(projects.map((p) => projectKeyOf(p.environmentId, p.id)));
+  return new Set([...all].filter((key) => !outside.has(key)));
 }
