@@ -98,6 +98,8 @@ Hub never asks for the `memory.person` scope for a thread's calls.
 
 Keep task IDs stable across boards. Map tracker records to the relay's board card fields and return the card directly on read, with optional preview and sign-off. The kit validates both shapes. See the [annotated schemas](relay-v1/openapi.yaml) and [worked task read](relay-v1/examples/task.json).
 
+The Hub also calls `tasks_claim` and `tasks_release` when a person presses Take or Release. Those calls carry an extra `idempotencyKey`. If you support it, answer a repeated key with the first outcome, so a retry after a lost answer changes nothing. An `other` release also carries `reasonText`, and the same words start the `note`. To match a task to the relay's board, `tasks_read` and `tasks_list_tasks` must return the same `ref` the board shows.
+
 Claim for the authenticated actor. A repeated claim by the current holder succeeds. A competing holder gets a conflict. Release only the caller's own claim. Use one of `done`, `blocked`, `handing_over`, `out_of_usage`, `wrong_approach`, `duplicate`, `deprioritised` or `other` for the reason. For example, release with `{"taskId":"T42","reason":"handing_over","freeToContinue":true,"note":"Tests pass. Next: review the diff."}`.
 
 Every task provider must set `atomicClaim`. Set it to true only when the backing store can guarantee one winner across simultaneous competing claims. If your tracker uses a read followed by a separate write, declare false so clients can account for that race.

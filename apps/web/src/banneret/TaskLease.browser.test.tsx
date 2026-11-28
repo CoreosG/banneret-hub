@@ -980,11 +980,18 @@ describe("A company's own tracker", () => {
       closedAt: null,
     },
   });
+  /** For the layout: a card whose words agree with a held task. */
+  const heldCard: BanneretBoardCard = {
+    ...external,
+    status: "built",
+    statusWhy: "Someone holds it at the company's tracker.",
+  };
   /** The relay's board for external tasks: no Banneret leases, and a source that owns the claims. */
   const companyFeed = (
     owner: { title?: string; leases?: "unsupported" } = {},
+    shown = external,
   ): BanneretFeedState => ({
-    ...feed([external], false),
+    ...feed([shown], false),
     elsewhere: {
       tasks: { owner: "external", source: "acme-jira", title: TITLE, prefix: "", ...owner },
     },
@@ -1090,7 +1097,7 @@ describe("A company's own tracker", () => {
           <ReleaseDialogHost />
         </div>,
       );
-      await emit(companyFeed({ title }));
+      await emit(companyFeed({ title }, heldCard));
       await expect.element(screen.getByTestId("lease-source")).toBeVisible();
       await userEvent.click(button("Release…"));
       await userEvent.click(page.getByRole("radio", { name: "Done" }));
