@@ -6,6 +6,7 @@ import {
   ChatThreadLocation,
   allBoardCards,
   EnvironmentId,
+  ThreadId,
   type BanneretBoardCard,
   type BanneretBoardPr,
   type BanneretMap,
@@ -17,6 +18,10 @@ import {
 import { ExternalLinkIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
+import { randomUUID } from "../lib/utils";
+import { buildThreadRouteParams } from "../threadRoutes";
+import { reviewRepository } from "./chat/reviewPr";
+import { TaskReviews } from "./chat/AgentAskCards";
 import { chatRpc } from "./chat/client";
 import { chatHref } from "./chat/ChannelRows";
 import { type ReactNode, useEffect, useState } from "react";
@@ -665,14 +670,65 @@ function TaskPanelBody(props: {
         lease={lease}
         note={note}
       />
+      {feed.chatFlags?.includes("reviews") && shown && shown.prs.length > 0 && (
+        <TaskReviews
+          target={target}
+          card={shown}
+          revision={feed.chatRevision ?? 0}
+          owner={feed.chatFlags.includes("promote") ? enrolment?.me?.login : undefined}
+        />
+      )}
+      {feed.chatFlags?.includes("reviews") &&
+        feed.team?.value?.people.length === 1 &&
+        shown?.prs
+          .filter((pr) => pr.state === "open" && pr.headSha && reviewRepository(pr))
+          .map((pr) => (
+            <div key={pr.number} className="px-4 pb-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={opening}
+                onClick={async () => {
+                  setOpening(true);
+                  try {
+                    const threadId = await chatRpc.run(target, {
+                      kind: "selfCheck",
+                      pr: { repo: reviewRepository(pr)!, number: pr.number, headSha: pr.headSha! },
+                      key: randomUUID(),
+                      ...(props.threadRef && { thread: props.threadRef.threadId }),
+                    });
+                    if (typeof threadId === "string") {
+                      await navigate({
+                        to: "/$environmentId/$threadId",
+                        params: buildThreadRouteParams({
+                          environmentId,
+                          threadId: ThreadId.make(threadId),
+                        }),
+                      });
+                      openTaskDialog(null);
+                    }
+                  } catch (e) {
+                    setDiscussionError(String(e));
+                  }
+                  setOpening(false);
+                }}
+              >
+                Self-check #{pr.number}
+              </Button>
+              <small>
+                {" "}
+                Runs in a fresh thread. A self-check never counts as a second approval.
+              </small>
+            </div>
+          ))}
       {feed.chatFlags?.includes("task_links") && !notFound && (
         <div className="flex items-center gap-2 px-4 pb-2">
           <Button variant="outline" size="sm" disabled={opening} onClick={() => void discuss()}>
             Discuss this task
           </Button>
-          {discussionError && <span role="alert">{discussionError}</span>}
         </div>
       )}
+      {discussionError && <span role="alert">{discussionError}</span>}
       <FactsGrid
         facts={facts}
         className={notFound ? "shrink-0 px-4 pb-3 sm:grid-cols-1" : "shrink-0 px-4 pb-3"}

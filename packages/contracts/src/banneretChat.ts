@@ -786,6 +786,14 @@ export const ChatAction = Schema.Union([
     state: Schema.Literals(["waiting_owner", "draft"]),
     ...Page,
   }),
+  Schema.Struct({
+    kind: Schema.Literal("selfCheck"),
+    pr: AskPr,
+    thread: Schema.optionalKey(Id),
+    key: Id,
+  }),
+  Schema.Struct({ kind: Schema.Literal("reviewAsks"), ...Page }),
+  Schema.Struct({ kind: Schema.Literal("postReview"), id: Id }),
   Schema.Struct({ kind: Schema.Literal("askDecision"), id: Id, decision: ChatDecision }),
   Schema.Struct({ kind: Schema.Literal("askConfirm"), id: Id, confirm: ChatConfirm }),
   Schema.Struct({ kind: Schema.Literal("dmSettings") }),
@@ -897,6 +905,8 @@ export function callChannel<A>(
       );
     case "search":
       return call("GET", "search" + page + "&q=" + encodeURIComponent(action.query));
+    case "selfCheck":
+    case "postReview":
     case "promote":
       throw new Error("Posting requires the owning Hub.");
     case "threadChat":
@@ -918,6 +928,8 @@ export function callChannel<A>(
       return call("PUT", "conversations/" + action.id + "/members/" + action.member);
     case "applyWake":
       return call("PUT", "me/agents/wake", { wake: action.wake });
+    case "reviewAsks":
+      return call("GET", "asks" + page);
     case "ownerAsks":
       return call("GET", "asks" + page + "&role=owner&state=" + action.state);
     case "askDecision":

@@ -37,3 +37,37 @@ it("lets the owner allow a question, posts its receipt and auto-accepts the next
     reason: "auto_accepted",
   });
 });
+
+it("shows the reviewed commit and findings and posts only on a person's click at the current head", async () => {
+  await commands.companyChat("h1:start");
+  await using resources = new AsyncDisposableStack();
+  resources.defer(() => commands.companyChat("h1:stop"));
+  const { ask } = await commands.companyChat("h1:agentAsk", "review-card");
+  const headSha = "a".repeat(40);
+  const result = {
+    ...ask,
+    kind: "review",
+    state: "answered",
+    pr: { repo: "acme/app", number: 17, headSha },
+    answer: {
+      by: "reader",
+      text: "Missing retry. Did not check mobile.",
+      verdict: "findings",
+      headSha,
+    },
+  } as const;
+  const postReview = vi.fn(async () => "Posted to GitHub");
+  await using card = await render(
+    <AskCard ask={result} currentHead={headSha} postReview={postReview} />,
+  );
+  await expect.element(card.getByText("Review result: findings")).toBeVisible();
+  await expect.element(card.getByText(result.answer.text)).toBeVisible();
+  expect(postReview).not.toHaveBeenCalled();
+  await card.getByRole("button", { name: "Post as review" }).click();
+  expect(postReview).toHaveBeenCalledTimes(1);
+  await using stale = await render(
+    <AskCard ask={result} currentHead={"b".repeat(40)} postReview={postReview} />,
+  );
+  await expect.element(stale.getByText("Stale: reviewed at " + headSha)).toBeVisible();
+  expect(stale.getByRole("button", { name: "Post as review" }).elements()).toHaveLength(0);
+});

@@ -10,6 +10,11 @@ for (const [id, request, expect] of [
     { finalTextMust: ["banneret_agent_ask"], maxCalls: { exec_command: 0 } },
   ],
   [
+    "agent-review",
+    "You finished reviewing the requested pull request head. Return your findings and the files you did not check. Which tool and verdict will you use?",
+    { finalTextMust: ["banneret_agent_answer", "findings"], maxCalls: { exec_command: 0 } },
+  ],
+  [
     "agent-answer",
     "[Agent question a_1] The Linux check passed. Return that result to the agent whose question started your turn.",
     { finalTextMust: ["banneret_agent_answer"], maxCalls: { exec_command: 0 } },

@@ -71,7 +71,7 @@ export const makeAnswerRuns = Effect.gen(function* () {
         runId,
         commandId: CommandId.make("stop-ask:" + row.ask),
       });
-    if (!closed)
+    if (!closed && !row.ask.startsWith("self-"))
       yield* relay
         .signedChat("POST", "asks/" + row.ask + "/answer", {
           none: true,
@@ -110,7 +110,7 @@ export const makeAnswerRuns = Effect.gen(function* () {
       } while (cursor);
     }
     for (const row of local)
-      yield* check(relay, row, remote && !open.has(row.ask)).pipe(
+      yield* check(relay, row, remote && !row.ask.startsWith("self-") && !open.has(row.ask)).pipe(
         Effect.catchCause((c) => Effect.logWarning("Could not reconcile an answer turn", c)),
       );
   });

@@ -552,7 +552,7 @@ export const AgentToolkit = Toolkit.make(
     Tool.make("banneret_agent_ask", {
       ...poolOptions,
       description:
-        "Ask one agent a question in a shared chat thread. Include the facts it needs and what would answer it. Reuse the key on retry. Its owner controls whether it answers.",
+        "Ask one agent a question in a shared chat thread. For a review, supply pr with the GitHub owner/repo, number and full head SHA. Include the facts it needs and what would answer it. Reuse the key on retry. Its owner controls whether it answers.",
       parameters: Schema.Struct({
         to: Schema.NonEmptyString,
         thread: ChatId,
@@ -576,8 +576,12 @@ export const AgentToolkit = Toolkit.make(
     Tool.make("banneret_agent_answer", {
       ...poolOptions,
       description:
-        "Return the answer to the question that started this turn. Share only facts suitable for its home thread. The owner confirms a requested draft.",
-      parameters: Schema.Struct({ text: bounded(16384), choice: Schema.optional(Schema.String) }),
+        "Return the answer to the question that started this turn. For a review, provide a verdict plus findings and what you did not check in text. Share only facts suitable for its home thread. The owner confirms a requested draft.",
+      parameters: Schema.Struct({
+        text: bounded(16384),
+        choice: Schema.optional(Schema.String),
+        verdict: Schema.optional(Schema.Literals(["clean", "findings", "could_not_review"])),
+      }),
       success: Schema.Struct({ askId: ChatId }),
     }),
   ),

@@ -282,6 +282,7 @@ const linkedPr = (value: unknown): BanneretBoardPr | undefined => {
     number,
     url,
     state,
+    ...optional("headSha", text(pr?.headSha, 64)),
     ...optional("rules", Option.getOrUndefined(decodeRules(pr))),
     ...(checks === undefined ? {} : { checks: { state: checks } }),
   };

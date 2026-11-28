@@ -1,4 +1,5 @@
 import { countLabel } from "../countLabel";
+import { matchesReview } from "./reviewPr";
 import { AskCard } from "./AgentAskCards";
 import { HandoffCards } from "./HandoffCards";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
@@ -614,9 +615,26 @@ function Timeline({
                       )}
                       {m.deleted ? (
                         <i>Message deleted</i>
-                      ) : m.ask?.to.kind === "agent" && m.ask.kind === "question" ? (
+                      ) : m.ask?.to.kind === "agent" ? (
                         <AskCard
                           ask={m.ask}
+                          currentHead={
+                            m.ask.pr &&
+                            [...tasks.values()]
+                              .flatMap((c) => c.prs)
+                              .find((p) => matchesReview(p, m.ask?.pr))?.headSha
+                          }
+                          postReview={
+                            m.ask.kind === "review" &&
+                            flags.includes("promote") &&
+                            m.ask.to.owner.login === enterprise.enrolment.me?.login
+                              ? () =>
+                                  chatRpc.run(enterprise.target, {
+                                    kind: "postReview",
+                                    id: m.ask!.id,
+                                  })
+                              : undefined
+                          }
                           names={new Map(people.map((person) => [person.id, person.login]))}
                         />
                       ) : (

@@ -1842,6 +1842,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           number: pr.number,
           url: prUrl(pr.number),
           state: pr.state,
+          ...(pr.headSha && { headSha: pr.headSha }),
           baseBranch: pr.baseBranch,
           approvals: pr.approvals,
           canApprove: canApprove.map((p) =>
@@ -2966,6 +2967,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   }
   function changeAsk(message: ChatMessage, patch: Partial<ChatAsk>) {
     const ask = { ...message.ask!, ...patch };
+    if (ask.kind === "review" && ask.state === "answered") ask.answerMessageId = message.id;
     const channel = channels.get(message.conversationId)!;
     if (!activeAsk(ask)) {
       ask.closedAt = iso(Date.now());
@@ -3114,6 +3116,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         )
       )
         changeAsk(m, { state: "orphaned" });
+      else if (
+        a.kind === "review" &&
+        a.state === "open" &&
+        reviewTask(a.pr)?.prs.some(
+          (pr) => pr.number === a.pr?.number && pr.headSha && pr.headSha !== a.pr.headSha,
+        )
+      )
+        changeAsk(m, { state: "unanswered", reason: "head_moved" });
       else if (Date.parse(a.expiresAt) <= Date.now()) changeAsk(m, { state: "expired" });
     }
     settleHandoffs();

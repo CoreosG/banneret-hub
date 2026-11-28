@@ -3557,6 +3557,68 @@ describe("chat contract", () => {
     });
   });
 
+  it("binds reviews to the PR head through acceptance, answer, head move and closure", async () => {
+    const { asker, answerer, chat, to, newAsk } = await sharedAskThread();
+    const repo = "example-org/example-app",
+      headSha = "a".repeat(40),
+      id = "task_" + randomText(5);
+    const seed = (head: string, state = "open") =>
+      client.control("/board/seed", {
+        tasks: [
+          {
+            id,
+            title: "Review",
+            projectKey: repo,
+            holder: asker.login,
+            prs: [{ number: 17, author: asker.login, state, headSha: head }],
+          },
+        ],
+      });
+    const request = async (key: string, head: string) => {
+      const r = await call(asker, "POST", chat + "asks", {
+        ...newAsk,
+        question: key,
+        key,
+        kind: "review",
+        pr: { repo, number: 17, headSha: head },
+      });
+      return r.body as { id: string; state: string };
+    };
+    await seed(headSha);
+    const first = await request("first_review", headSha);
+    expect(first.state).toBe("waiting_owner");
+    const path = chat + "asks/" + first.id;
+    expect(
+      (await call(answerer, "POST", path + "/decision", { allow: "always", kinds: ["review"] }))
+        .body,
+    ).toMatchObject({ state: "open" });
+    expect(
+      (
+        await call(answerer, "POST", path + "/answer", {
+          asHandle: to.id,
+          text: "Checked retry. UI unchecked.",
+          verdict: "clean",
+          headSha,
+        })
+      ).body,
+    ).toMatchObject({ state: "answered", answer: { verdict: "clean", headSha } });
+    const second = await request("second_review", headSha);
+    expect(second.state).toBe("open");
+    const nextHead = "b".repeat(40);
+    await seed(nextHead);
+    const rows = () => call(answerer, "GET", chat + "asks?role=answerer");
+    expect((await rows()).body).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: second.id, state: "unanswered", reason: "head_moved" }),
+        expect.objectContaining({ id: first.id, state: "answered" }),
+      ]),
+    });
+    const last = await request("last_review", nextHead);
+    await seed(nextHead, "closed");
+    expect((await rows()).body).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: last.id, state: "orphaned" })]),
+    });
+  });
   it("keeps the reviewer independent and derives hand-off progress from the task holder", async () => {
     const { asker, answerer, chat, to, newAsk } = await sharedAskThread();
     const taskId = "task_" + randomText(5),

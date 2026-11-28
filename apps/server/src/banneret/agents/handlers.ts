@@ -1,4 +1,11 @@
-import { activeRun, answeringAsk, runReceipt, capReached } from "../chat/AnswerTurn.ts";
+import { currentReviewHead } from "../chat/ReviewCheckout.ts";
+import {
+  reviewThreadId,
+  activeRun,
+  answeringAsk,
+  runReceipt,
+  capReached,
+} from "../chat/AnswerTurn.ts";
 import { mayPause } from "./pause.ts";
 import { makePauseStore, admission } from "../PauseStore.ts";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -219,7 +226,7 @@ const make = Effect.gen(function* () {
     (effect) => Effect.ignoreCause(effect),
   );
 
-  const chat = Effect.gen(function* () {
+  const getChat = Effect.fn(function* (register: boolean) {
     const { thread, relay } = yield* requireRelay;
     const device = yield* enrolment.relay(relay.relayOrigin);
     if (!device) return yield* invalid("Join the company to use chat.");
@@ -236,9 +243,10 @@ const make = Effect.gen(function* () {
       providerName(known?.driver ?? "agent"),
       status.machineId,
     );
-    yield* client.ensure;
+    if (register) yield* client.ensure;
     return client;
   });
+  const chat = getChat(true);
   const watchContext = yield* Effect.context<Effect.Services<ReturnType<typeof follow>>>();
   const poolFailure = (error: { message: string }) =>
     new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message });
@@ -469,6 +477,7 @@ const make = Effect.gen(function* () {
           ));
         const result = yield* client.write("POST", "asks", {
           ...ask,
+          kind: ask.pr ? "review" : "question",
           to: { kind: "agent", handle: target },
           threadRootId: thread,
           parentAskId,
@@ -477,9 +486,8 @@ const make = Effect.gen(function* () {
         return { askId: result.id };
       }),
     ),
-    banneret_agent_answer: McpToolAccess.actsAsCaller(({ text, choice }) =>
+    banneret_agent_answer: McpToolAccess.actsAsCaller(({ text, choice, verdict }) =>
       Effect.gen(function* () {
-        const client = yield* chat;
         const threads = yield* ThreadManagementService;
         const run = yield* activeRun(threads, (yield* requireRelay).thread.threadId).pipe(
           Effect.mapError(() => invalid("Cannot identify the answering turn.")),
@@ -487,18 +495,57 @@ const make = Effect.gen(function* () {
         const askId = run && answeringAsk(run.userMessageId);
         if (!run || !askId)
           return yield* invalid("Only the turn answering this question can post an answer.");
-        const receipt = yield* runReceipt(threads, run, client.asHandle).pipe(
+        const { relay } = yield* requireRelay;
+        const reviewing = run.threadId === reviewThreadId(relay.relayOrigin, askId);
+        let reviewCaps: { maxTokens: number; maxSeconds: number } | undefined;
+        if (reviewing) {
+          if (Option.isNone(pauseDatabase)) return yield* invalid("Cannot verify the review run.");
+          const bound = yield* pauseDatabase.value<{
+            maxTokens: number;
+            maxSeconds: number;
+          }>`SELECT maxTokens,maxSeconds FROM banneret_answer_runs WHERE origin=${relay.relayOrigin} AND ask=${askId} AND thread=${run.threadId} AND run=${run.id}`.pipe(
+            Effect.mapError(() => invalid("Cannot verify the review run.")),
+          );
+          reviewCaps = bound[0];
+          if (!reviewCaps) return yield* invalid("This run is not assigned to that review.");
+        }
+        const client = yield* getChat(!reviewing);
+        const review = reviewing ? yield* client.review(askId) : undefined;
+        if (review && (!review.pr || review.to.kind !== "agent" || !verdict))
+          return yield* invalid("Return findings, unchecked work and a review verdict.");
+        const handle = review?.to.kind === "agent" ? review.to.handle : client.asHandle;
+        const receipt = yield* runReceipt(threads, run, handle).pipe(
           Effect.mapError(() => invalid("Cannot read this turn's usage.")),
         );
-        const reason = capReached(receipt, yield* client.policy);
+        const headMoved =
+          review?.pr &&
+          review.pr.headSha !==
+            (yield* Effect.tryPromise({
+              try: () => currentReviewHead(review.pr!),
+              catch: () => invalid("Cannot verify the pull request head."),
+            }));
+        const reason = headMoved
+          ? "head_moved"
+          : capReached(receipt, reviewCaps ?? (yield* client.policy));
         const result = yield* client.write(
           "POST",
           "asks/" + askId + "/answer",
           reason
             ? { none: true, reason, receipt }
-            : { text: maskTokens(text), choice: choice && maskTokens(choice), receipt },
+            : {
+                text: maskTokens(text),
+                choice: choice && maskTokens(choice),
+                ...(review && { verdict, headSha: review.pr?.headSha }),
+                receipt,
+              },
+          handle,
         );
-        if (reason) return yield* invalid("The answer reached its usage limit.");
+        if (reason)
+          return yield* invalid(
+            headMoved
+              ? "The head moved. Request another review."
+              : "The answer reached its usage limit.",
+          );
         return { askId: result.id };
       }),
     ),

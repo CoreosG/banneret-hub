@@ -6697,6 +6697,7 @@ components:
         number: { type: integer, minimum: 1 }
         url: { type: string, format: uri }
         state: { description: "Open string; known: `open`, `merged`, `closed`.", allOf: [{ $ref: "#/components/schemas/OpenToken" }] }
+        headSha: {type: string, description: Current head commit when known.}
         baseBranch: { type: string, minLength: 1, maxLength: 255 }
         approvals:
           oneOf: [{ $ref: "#/components/schemas/PrApprovals" }, { type: "null" }]

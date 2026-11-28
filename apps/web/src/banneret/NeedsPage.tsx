@@ -23,6 +23,7 @@ const groups = {
   Questions: ["agent_ask", "chat_ask", "thread_question", "founder_question", "persona_ask"],
   Mentions: ["mention", "agent_message"],
   Reviews: [
+    "review_request",
     "chat_join_requests",
     "thread_approval",
     "pr_approval",
@@ -118,7 +119,8 @@ export function NeedsPage() {
           ) : (
             <ul aria-label="Needs you items">
               {items.map((item) =>
-                item.kind === "agent_ask" && feed.chatFlags?.includes("agent_asks") ? (
+                (item.kind === "review_request" || item.kind === "agent_ask") &&
+                feed.chatFlags?.includes("agent_asks") ? (
                   <WaitingAsks
                     key={item.id}
                     item={item}

@@ -55,6 +55,7 @@ import * as Stream from "effect/Stream";
 
 import { makeHandoffs } from "../chat/Handoffs.ts";
 import { makeDeliveries } from "../chat/Deliveries.ts";
+import { postReview } from "../chat/PostReview.ts";
 import { promote } from "../chat/Promote.ts";
 import { SourceControlDrivers } from "../../sourceControl/builtInDrivers.ts";
 import type { SourceControlDriverInstance } from "@t3tools/source-control-core/server/driver";
@@ -1562,13 +1563,21 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
             ? agents && chatFlags.includes("agents")
               ? agents.settings(enrolment, action)
               : Effect.succeed(chatUnavailable)
-            : action.kind === "promote"
-              ? chatFlags.includes("promote")
-                ? promote(enrolment, github, action)
+            : action.kind === "selfCheck"
+              ? agents && chatFlags.includes("reviews")
+                ? agents.selfCheck(enrolment, action)
                 : Effect.succeed(chatUnavailable)
-              : action.kind === "search" && !chatFlags.includes("search")
-                ? Effect.succeed(chatUnavailable)
-                : channelAction(enrolment.signedChat, action)
+              : action.kind === "postReview"
+                ? chatFlags.includes("promote")
+                  ? postReview(enrolment, github?.pullRequests, action.id)
+                  : Effect.succeed(chatUnavailable)
+                : action.kind === "promote"
+                  ? chatFlags.includes("promote")
+                    ? promote(enrolment, github, action)
+                    : Effect.succeed(chatUnavailable)
+                  : action.kind === "search" && !chatFlags.includes("search")
+                    ? Effect.succeed(chatUnavailable)
+                    : channelAction(enrolment.signedChat, action)
         : Effect.succeed(chatUnavailable),
     today: readToday,
     needs: readNeeds,

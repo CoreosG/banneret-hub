@@ -28,6 +28,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
 import { feedRpc, useRelayFeedStore } from "./relayFeedStore";
 import { TaskDialogHost } from "./TaskDialog";
+import { chatRpc } from "./chat/client";
 import { TaskPanel } from "./TaskPanel";
 import { openTaskDialog, taskRpc } from "./taskStore";
 import { taskSurface } from "./taskSurface";
@@ -233,6 +234,34 @@ const headerLinkOut = () =>
   document.querySelector<HTMLAnchorElement>('[data-testid="task-link-out-icon"]');
 
 describe("Task tab", () => {
+  it("labels the solo review as a self-check and keeps it separate from merge approvals", async () => {
+    const { emit } = setup();
+    const shown = card("2", "Review", {
+      prs: [
+        {
+          number: 17,
+          url: "https://github.com/acme/app/pull/17",
+          state: "open",
+          headSha: "a".repeat(40),
+        },
+      ],
+    });
+    using _rpc = vi.spyOn(chatRpc, "run").mockResolvedValue({ items: [], nextCursor: null });
+    await using _panel = await openPanel(taskSurface(RELAY, shown.task));
+    await emit({
+      ...state(["board"], [shown]),
+      chatFlags: ["reviews"],
+      team: {
+        fetchedAt: null,
+        value: { people: [{ ...founder.me!, machines: [], sessions: [] }] },
+      },
+    });
+    await expect.element(page.getByRole("button", { name: "Self-check #17" })).toBeVisible();
+    await expect
+      .element(page.getByText(/A self-check never counts as a second approval/))
+      .toBeVisible();
+  });
+
   it("draws the header from the board card, with the preview and sign-off from the task read", async () => {
     using _clock = pinClock();
     const { emit, read } = setup();
