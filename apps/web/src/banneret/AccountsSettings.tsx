@@ -1,7 +1,8 @@
 import { WorkspaceRoles } from "./chat/Roles";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
-import { SettingsSection } from "../components/settings/settingsLayout";
+import { useSearchableSetting } from "../components/settings/settingsSearch";
+import { SettingsSection, SettingsSearchTarget } from "../components/settings/settingsLayout";
 import { Button } from "../components/ui/button";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { accountMatch, useGitHubLogin } from "./accountIdentity";
@@ -9,6 +10,7 @@ import { enrolmentRpc, useEnrolmentViews } from "./enrolmentStore";
 import { openWorkspaceDialog } from "./workspacesStore";
 
 function TailscaleLogin({ environmentId }: { environmentId: EnvironmentId }) {
+  const setting = useSearchableSetting();
   const [login, setLogin] = useState<string | null>(null);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- read this machine only while Accounts is open
   useEffect(() => {
@@ -20,18 +22,25 @@ function TailscaleLogin({ environmentId }: { environmentId: EnvironmentId }) {
       current = false;
     };
   }, [environmentId]);
-  return <p>Tailscale: {login ?? "Not available"}</p>;
+  return (
+    <SettingsSearchTarget {...setting("account-tailscale")}>
+      Tailscale: {login ?? "Not available"}
+    </SettingsSearchTarget>
+  );
 }
 
 function MachineAccounts({
   environmentId,
   label,
   local,
+  first,
 }: {
   environmentId: EnvironmentId;
   label: string;
   local: boolean;
+  first: boolean;
 }) {
+  const setting = useSearchableSetting();
   const login = useGitHubLogin(environmentId);
   const views = useEnrolmentViews(environmentId);
   return (
@@ -40,43 +49,52 @@ function MachineAccounts({
         {label}
         {local && " (this machine)"}
       </h3>
-      <p>GitHub: {login ?? "Not available"}</p>
+      <SettingsSearchTarget {...(first && setting("account-github"))}>
+        GitHub: {login ?? "Not available"}
+      </SettingsSearchTarget>
       {local && <TailscaleLogin environmentId={environmentId} />}
-      {views.map((view) => {
-        const match = accountMatch(login, view.me?.login);
-        return (
-          <div key={view.relayOrigin} className="mt-2">
-            <p>
-              {view.displayName ?? view.relayOrigin} · Relay:{" "}
-              {view.me ? `${view.me.login} · ${view.me.role.name}` : "Not available"} · Machine:{" "}
-              {view.label ?? "Not available"}
-            </p>
-            <p className={match === false ? "text-warning" : "text-muted-foreground"}>
-              {match === null
-                ? "Account match unavailable"
-                : match
-                  ? "GitHub account matches"
-                  : "GitHub account differs from relay"}
-            </p>
-            <Button
-              variant="link"
-              size="sm"
-              onClick={() => openWorkspaceDialog({ kind: "machines", origin: view.relayOrigin })}
-            >
-              Machines
-            </Button>
-            <Button
-              variant="link"
-              size="sm"
-              onClick={() =>
-                openWorkspaceDialog({ kind: "enterprise", origin: view.relayOrigin, environmentId })
-              }
-            >
-              Relay sign-in
-            </Button>
-          </div>
-        );
-      })}
+      <SettingsSearchTarget {...(first && setting("account-relay"))}>
+        {!views.length && <p>Relay: Not available</p>}
+        {views.map((view) => {
+          const match = accountMatch(login, view.me?.login);
+          return (
+            <div key={view.relayOrigin} className="mt-2">
+              <p>
+                {view.displayName ?? view.relayOrigin} · Relay:{" "}
+                {view.me ? `${view.me.login} · ${view.me.role.name}` : "Not available"} · Machine:{" "}
+                {view.label ?? "Not available"}
+              </p>
+              <p className={match === false ? "text-warning" : "text-muted-foreground"}>
+                {match === null
+                  ? "Account match unavailable"
+                  : match
+                    ? "GitHub account matches"
+                    : "GitHub account differs from relay"}
+              </p>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => openWorkspaceDialog({ kind: "machines", origin: view.relayOrigin })}
+              >
+                Machines
+              </Button>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() =>
+                  openWorkspaceDialog({
+                    kind: "enterprise",
+                    origin: view.relayOrigin,
+                    environmentId,
+                  })
+                }
+              >
+                Relay sign-in
+              </Button>
+            </div>
+          );
+        })}
+      </SettingsSearchTarget>
     </div>
   );
 }
@@ -86,14 +104,18 @@ export function AccountsSettings({
 }: {
   machines: ReadonlyArray<{ environmentId: EnvironmentId; label: string }>;
 }) {
+  const setting = useSearchableSetting();
   const primary = usePrimaryEnvironmentId();
   return (
-    <SettingsSection id="accounts" title="Accounts">
-      <WorkspaceRoles />
-      {machines.map((machine) => (
+    <SettingsSection {...setting("accounts")}>
+      <SettingsSearchTarget {...setting("account-roles")}>
+        <WorkspaceRoles />
+      </SettingsSearchTarget>
+      {machines.map((machine, index) => (
         <MachineAccounts
           key={machine.environmentId}
           {...machine}
+          first={index === 0}
           local={machine.environmentId === primary}
         />
       ))}

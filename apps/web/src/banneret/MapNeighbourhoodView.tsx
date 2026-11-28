@@ -1,3 +1,4 @@
+import { countLabel } from "./countLabel";
 // Banneret Hub: the Map's Neighbourhood view. One item in the middle, what it rests on to the left and
 // what rests on it to the right. An arrow is amber when the relay lists its blocker in `blockedBy`,
 // dashed when that blocker is itself blocked. Nodes are buttons over an SVG of the arrows.
@@ -70,7 +71,7 @@ function ItemPicker(props: {
       <ComboboxPopup align="start" className="w-96">
         <ComboboxSearchInput
           aria-label="Search items"
-          placeholder={`Search ${items.length} items`}
+          placeholder={`Search ${countLabel(items.length, "item")}`}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />

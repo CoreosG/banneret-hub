@@ -120,7 +120,11 @@ export function SharingForm({ enterprise }: { enterprise: EnterpriseFeed }) {
   const label = enterprise.enrolment.label ?? "This machine";
   const named = choice.share === "agents_and_name";
   return (
-    <section className="grid gap-3 rounded-lg border bg-card p-4 text-sm">
+    <section
+      id="office-sharing"
+      tabIndex={-1}
+      className="grid gap-3 rounded-lg border bg-card p-4 text-sm"
+    >
       <h3 className="font-medium">Sharing settings</h3>
       <label>
         {enterprise.enrolment.me?.login} on {label}{" "}

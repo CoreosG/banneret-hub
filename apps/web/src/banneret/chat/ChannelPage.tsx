@@ -1,3 +1,4 @@
+import { countLabel } from "../countLabel";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { ChannelMembers } from "./ChannelMembers";
 import { RequestControl } from "./JoinRequests";
@@ -187,8 +188,9 @@ function ChannelView({ enterprise, id, root, focus }: View) {
               )}
               <button onClick={() => setMembers(!showMembers)}>
                 <UsersIcon size={15} />
-                {channel.memberCount.people} people
-                {flags.includes("agents") && ` · ${channel.memberCount.agents} agents`}
+                {countLabel(channel.memberCount.people, "person", "people")}
+                {flags.includes("agents") &&
+                  ` · ${countLabel(channel.memberCount.agents, "agent")}`}
               </button>
               {channel.kind === "channel" && channel.me.member && (
                 <label data-chat-notifications>
@@ -239,7 +241,8 @@ function ChannelView({ enterprise, id, root, focus }: View) {
                       {channel.kind === "channel" ? "Members of #" + channel.name : "Members"}
                     </SheetTitle>
                     <p className="text-xs text-muted-foreground">
-                      {channel.memberCount.people} people · {channel.memberCount.agents} agents
+                      {countLabel(channel.memberCount.people, "person", "people")} ·{" "}
+                      {countLabel(channel.memberCount.agents, "agent")}
                     </p>
                   </SheetHeader>
                   <section data-chat-members className="overflow-auto">

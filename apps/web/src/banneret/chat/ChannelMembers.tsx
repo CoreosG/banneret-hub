@@ -1,3 +1,4 @@
+import { countLabel } from "../countLabel";
 import { useState } from "react";
 import { ChatMessages, type ChatConversation, type ChatMember } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -120,8 +121,8 @@ export function ChannelMembers({
               </strong>
               {typeof count.value === "number" && !count.error && (
                 <p>
-                  They will see {count.value} earlier messages and {channel.memberCount.people}{" "}
-                  people.
+                  They will see {countLabel(count.value, "earlier message")} and{" "}
+                  {countLabel(channel.memberCount.people, "person", "people")}.
                 </p>
               )}
               <button disabled={pending} onClick={() => select(null)}>

@@ -6,6 +6,7 @@ import { mayPause } from "./pause.ts";
 import { defaults, skillCatalog } from "../skills/catalog.ts";
 import * as Schema from "effect/Schema";
 import { knowledgeRevision } from "../memory/KbIndex.ts";
+import { memoryEnabled } from "../memory/settings.ts";
 import { memoryAccess, offersHubMemory } from "../memory/access.ts";
 import * as SandboxHandoff from "./SandboxHandoff.ts";
 import * as Context from "effect/Context";
@@ -99,10 +100,12 @@ const offeredOnly = McpServer.visibility(
             Effect.flatMap((a) => a.open((s) => s.folders().length > 0)),
             Effect.provideContext(memoryContext),
           );
-        if (memoryNames.includes(target))
+        if (memoryNames.includes(target)) {
+          if (!(yield* memoryEnabled.pipe(Effect.provideContext(memoryContext)))) return false;
           return yield* offersHubMemory(thread.threadId, caller.environmentId).pipe(
             Effect.provideContext(memoryContext),
           );
+        }
         const offered = yield* relays.offered(thread.threadId);
         if (target === JOIN_URI && offered.size === 0)
           return yield* memoryAccess(thread.threadId, caller.environmentId, "skills").pipe(
@@ -228,12 +231,18 @@ const relistOnOfferChange = (every: Duration.Input) =>
       const relays = yield* AgentRelays.BanneretAgentRelays;
       const server = yield* McpServer.McpServer;
       let last = yield* relays.offerInputs;
+      let lastMemory = yield* memoryEnabled;
       let lastKnowledge = knowledgeRevision;
       yield* Effect.sleep(every).pipe(
-        Effect.andThen(relays.offerInputs),
-        Effect.flatMap((next) => {
-          if ((next === undefined || next === last) && lastKnowledge === knowledgeRevision)
+        Effect.andThen(Effect.all([relays.offerInputs, memoryEnabled])),
+        Effect.flatMap(([next, enabled]) => {
+          if (
+            (next === undefined || next === last) &&
+            lastKnowledge === knowledgeRevision &&
+            enabled === lastMemory
+          )
             return Effect.void;
+          lastMemory = enabled;
           lastKnowledge = knowledgeRevision;
           last = next;
           // Forget kept offers first, so the list this notice prompts reads the new offer.

@@ -1,3 +1,4 @@
+import { countLabel } from "../../countLabel";
 import { RoomChannel } from "../OfficeChat";
 import { Link } from "@tanstack/react-router";
 import { PersonRoomAgents } from "../AgentDetails";
@@ -151,7 +152,7 @@ function OfficeRoom({
           office.flags.includes("status") && p.status?.text,
           ...(office.flags.includes("sharing") ? p.machines.map((machine) => machine.label) : []),
           ...claims.map((c) => c.task.title),
-          agents.length + " agents",
+          countLabel(agents.length, "agent"),
         ]
           .filter(Boolean)
           .join(" · "),
@@ -591,7 +592,7 @@ export default function TeamOffice(props: Props) {
           +
         </button>
         <span>
-          Showing {rooms.length} of {slots.length} rooms. Use Floor for everyone.
+          Showing {rooms.length} of {countLabel(slots.length, "room")}. Use Floor for everyone.
         </span>
       </div>
       <div

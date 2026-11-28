@@ -1,3 +1,4 @@
+import { countLabel } from "../countLabel";
 import * as Schema from "effect/Schema";
 import { useState } from "react";
 import { AuthEnvironmentMaintainScope, RoleDetail, type ChannelAction } from "@t3tools/contracts";
@@ -296,7 +297,10 @@ function RoleEditor({
           </fieldset>
         </div>
         {role.memberCount > 0 && (
-          <p>Changes affect {role.memberCount} people. They keep their channel memberships.</p>
+          <p>
+            Changes affect {countLabel(role.memberCount, "person", "people")}. They keep their
+            channel memberships.
+          </p>
         )}
         <div className="flex flex-wrap gap-2">
           <Button

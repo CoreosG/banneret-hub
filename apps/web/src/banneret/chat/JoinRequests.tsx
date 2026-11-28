@@ -1,3 +1,4 @@
+import { countLabel } from "../countLabel";
 import { useState } from "react";
 import * as Schema from "effect/Schema";
 import {
@@ -108,7 +109,7 @@ export function Directory({
               )}
               <span>{c.purpose}</span>
               <small>
-                {c.memberCount.people} people · {c.access.join}
+                {countLabel(c.memberCount.people, "person", "people")} · {c.access.join}
               </small>
               {c.me.can.join && (
                 <button disabled={busy} onClick={() => void change({ kind: "join", id: c.id })}>

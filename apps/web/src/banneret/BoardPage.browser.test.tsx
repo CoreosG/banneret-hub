@@ -28,6 +28,7 @@ import { act, render } from "../../test/render";
 import { SidebarProvider } from "../components/ui/sidebar";
 import { useProjects, useServerConfigs } from "../state/entities";
 import { useConnectedEnvironmentIds, usePrimaryEnvironmentId } from "../state/environments";
+import { chatRpc } from "./chat/client";
 import { BoardPage } from "./BoardPage";
 import { CompanySearchHost } from "./CompanySearch";
 import { storeEnrolmentView, useEnrolmentStore } from "./enrolmentStore";
@@ -235,6 +236,11 @@ function createBoardRouter(path = "/board") {
     routeTree: root.addChildren([
       createRoute({ getParentRoute: () => root, path: "/", component: () => <p>Home</p> }),
       createRoute({ getParentRoute: () => root, path: "/today", component: () => <p>Today</p> }),
+      createRoute({
+        getParentRoute: () => root,
+        path: "/channels/$channelId",
+        component: () => <p>Channel</p>,
+      }),
       createRoute({ getParentRoute: () => root, path: "/board", component: BoardPage }),
     ]),
     history: createMemoryHistory({ initialEntries: [path] }),
@@ -266,6 +272,62 @@ const summaryText = () =>
 const legend = () => document.querySelector('[aria-label="Status legend"]')!;
 
 describe("Enterprise board", () => {
+  it("opens the mapped channel from a card without leases", async () => {
+    using stack = new DisposableStack();
+    const { emit, router, screen } = await openBoard(stack);
+    await using _screen = screen;
+    const items = ["platform", "releases"].map((name) => ({
+      kind: "channel",
+      name,
+      id: "c_" + name,
+      purpose: "",
+      agents: "off",
+      memberCount: { people: 1, agents: 0 },
+      archived: false,
+      access: {
+        visibility: "public",
+        join: "open",
+        outsiders: "none",
+        post: "everyone",
+        invite: "members",
+        replies: "everyone",
+      },
+      managers: [],
+      lastSeq: 0,
+      me: {
+        can: {
+          read: true,
+          post: true,
+          reply: true,
+          join: false,
+          request: false,
+          manage: false,
+          invite: true,
+          openToOutside: false,
+        },
+        member: true,
+        notify: "all",
+        muted: false,
+        readSeq: 0,
+        unread: 0,
+        mentions: 0,
+      },
+    }));
+    vi.spyOn(chatRpc, "run").mockResolvedValue({ items, nextCursor: null });
+    const base = {
+      ...state(["board", "chat"], boardRead(boardOf(CARDS()), { leases: false })),
+      chatFlags: ["channels"],
+    };
+    await emit(base);
+    await expect.element(page.getByText("Guild invites")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Actions for Guild invites" }))
+      .not.toBeInTheDocument();
+    await emit({ ...base, boardChannels: { platform: "releases" } });
+    await page.getByRole("button", { name: "Actions for Guild invites" }).click();
+    await page.getByRole("menuitem", { name: "Open chat" }).click();
+    expect(router.state.location.pathname).toBe("/channels/c_releases");
+  });
   it("draws the relay's five columns in order, each card opening its Task tab", async () => {
     using stack = new DisposableStack();
     const { emit, router, screen } = await openBoard(stack, "/");

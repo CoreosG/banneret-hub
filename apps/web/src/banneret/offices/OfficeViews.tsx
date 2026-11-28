@@ -1,3 +1,4 @@
+import { countLabel } from "../countLabel";
 import { MeetingEditor, PresenceForm, SharingForm } from "./OfficeSettings";
 import { OfficeChat, RoomChannel, Message } from "./OfficeChat";
 import { Meeting } from "./Meeting";
@@ -249,7 +250,7 @@ function Room({
           />
           <strong>{board?.title ?? room.board}</strong>
           <span className="text-xs text-muted-foreground">
-            {room.desks} desks · {room.active} active
+            {countLabel(room.desks, "desk")} · {room.active} active
             {countText(room.counts) && " · " + countText(room.counts)}
           </span>
         </button>
@@ -421,11 +422,11 @@ export function OfficeViews({ enterprise, office, people }: Props) {
           </>
         )}
       </div>
-      {showOffice && me && (
+      {(showOffice || office.flags.includes("sharing")) && me && (
         <details className="max-h-64 overflow-auto">
           <summary className="cursor-pointer text-sm">My office</summary>
           <div className="grid max-w-xl gap-4 py-2">
-            {flags.some((f) => f === "presence" || f === "status") && (
+            {showOffice && flags.some((f) => f === "presence" || f === "status") && (
               <PresenceForm enterprise={enterprise} person={me} />
             )}
             {office.flags.includes("sharing") && <SharingForm enterprise={enterprise} />}

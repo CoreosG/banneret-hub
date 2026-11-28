@@ -658,7 +658,7 @@ describe("Team page", () => {
       },
     };
     await emit(state(ALL, teamRead(team)));
-    const button = page.getByRole("button", { name: /board-49.*desks/ });
+    const button = page.getByRole("button", { name: /board-49.*desk/ });
     await expect.element(button).toHaveAttribute("aria-expanded", "true");
     expect(feedRpc.room).not.toHaveBeenCalled();
     button.element().scrollIntoView();
@@ -778,6 +778,29 @@ describe("Team page", () => {
     await expect.element(page.getByRole("button", { name: /Platform.*desks/ })).toBeVisible();
   });
 
+  it("explains empty desks and opens the owner's sharing setting", async () => {
+    using stack = new DisposableStack();
+    const { emit, screen } = await openTeam(stack);
+    await using _screen = screen;
+    const people = TEAM().people.map((p) => ({ ...p, machines: [], sessions: [] }));
+    await emit(
+      state(
+        ["team"],
+        teamRead({
+          people,
+          office: { ...office, preset: "community", summary: { ...office.summary, rooms: [] } },
+        }),
+      ),
+    );
+    await page.getByText("Hallway", { exact: true }).first().click();
+    const link = page.getByRole("link", { name: "Set what colleagues see." }).first();
+    await expect.element(link).toBeVisible();
+    await expect.element(page.getByText("Nothing shared", { exact: true }).first()).toBeVisible();
+    await expect.element(page.getByText("No claimed tasks.").first()).toBeVisible();
+    await expect.element(page.getByText("No agents at this desk.").first()).toBeVisible();
+    await link.click();
+    await expect.element(page.getByLabelText("Machine sharing")).toBeVisible();
+  });
   it("starts a community on Floor with machines hidden and no automatic reminder", async () => {
     using stack = new DisposableStack();
     const { emit, screen } = await openTeam(stack);
@@ -1096,6 +1119,7 @@ it("explores desks with the keyboard and restores focus after closing the card",
   await expect
     .element(card.getByRole("button", { name: /Direct message/ }))
     .not.toBeInTheDocument();
+  await expect.element(card.getByText("Nothing shared")).toBeVisible();
   await card.getByRole("button", { name: /Profile blocks/ }).click();
   await expect.element(page.getByRole("dialog", { name: "Task" })).toBeVisible();
   await userEvent.keyboard("{Escape}");
