@@ -1,6 +1,6 @@
 // Banneret Hub: "No project" in the sidebar with two machines. Their No project homes are one
-// folder; another project with the same title says where it is. Runs at every window size, with the
-// sidebar in the frame and at the default width the app gives it.
+// folder; another project with the same title says where it is. The sidebar sits in its frame, at
+// the default width the app gives it.
 import "../index.css";
 
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -21,14 +21,14 @@ import {
 import { makeThreadFixture } from "../test-fixtures";
 import type { Project } from "../types";
 import {
-  expectHit,
+  expectClickable,
   expectInside,
   expectNoOverlap,
   expectNoPageScroll,
-  showViewport,
-  VIEWPORTS,
+  forEachViewport,
+  numbered,
   windowRect,
-} from "./testViewports";
+} from "./test/viewports";
 
 vi.mock("../state/entities", { spy: true });
 vi.mock("../state/environments", { spy: true });
@@ -36,6 +36,9 @@ vi.mock("../components/sidebar/SidebarChrome", () => ({
   SidebarChromeHeader: () => null,
   SidebarChromeFooter: () => null,
 }));
+
+// The desktop sidebar: below 768px it is a sheet that starts closed.
+await page.viewport(900, 700);
 
 const PC = EnvironmentId.make("pc");
 const WSL = EnvironmentId.make("wsl");
@@ -72,15 +75,15 @@ function expectSidebarLayout() {
   ]);
   const rows = [...document.querySelectorAll("[data-sidebar-row]")];
   expect(rows.length).toBeGreaterThan(0);
-  for (const row of rows) expectInside(row, frame);
-  expectNoOverlap(rows, "y");
+  for (const row of rows) expectInside(row, frame, "a sidebar row");
+  expectNoOverlap(numbered("sidebar row", rows));
   for (const folder of document.querySelectorAll('[data-testid="sidebar-project-folder"]')) {
     const button = folder.querySelector("button")!;
     const name = button.querySelector<HTMLElement>(".truncate")!;
     const chevron = button.querySelector(":scope > svg:last-child")!;
-    expectInside(name, button.getBoundingClientRect());
-    expectNoOverlap([name, chevron], "x");
-    expectHit(button);
+    expectInside(name, button.getBoundingClientRect(), "the folder name");
+    expectNoOverlap({ "the folder name": name, "the chevron": chevron });
+    expectClickable(button, "the folder");
     if (name.scrollWidth > name.clientWidth) {
       expect(getComputedStyle(name).textOverflow).toBe("ellipsis");
       // Machine names this short are never cut.
@@ -96,19 +99,25 @@ async function expectFolderMenu() {
   await userEvent.click(button, { button: "right" });
   await expect.element(page.getByRole("menu")).toBeVisible();
   await vi.waitFor(() => {
-    expectInside(page.getByRole("menu").element(), windowRect());
-    expectHit(page.getByRole("menuitem", { name: "Project settings" }).element());
+    expectInside(page.getByRole("menu").element(), windowRect(), "the folder menu");
+    expectClickable(
+      page.getByRole("menuitem", { name: "Project settings" }).element(),
+      "Project settings",
+    );
   });
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 }
 
-async function folderNames(size: (typeof VIEWPORTS)[number], projects: ReadonlyArray<Project>) {
+async function folderNames(
+  projects: ReadonlyArray<Project>,
+  /** Runs while the sidebar is up. */
+  whileShown?: () => Promise<void>,
+) {
   const stack = new DisposableStack();
   const previous = getClientSettings();
   stack.defer(() => __setClientSettingsForTests(previous));
   __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, boringSidebarEnabled: true });
-  await showViewport(size);
   vi.mocked(usePrimaryEnvironmentId).mockReturnValue(PC);
   vi.mocked(useConnectedEnvironmentIds).mockReturnValue([PC, WSL]);
   vi.mocked(useEnvironmentIdentities).mockReturnValue([
@@ -139,15 +148,37 @@ async function folderNames(size: (typeof VIEWPORTS)[number], projects: ReadonlyA
   );
   await vi.waitFor(expectSidebarLayout);
   await expectFolderMenu();
+  await whileShown?.();
   await screen.unmount();
   stack.dispose();
   return names.toSorted();
 }
 
-describe.each(VIEWPORTS)("No project folders across two machines at $name", (size) => {
+// The two cases with the longest names: machine labels that are never cut, and a path that is.
+forEachViewport("No project folders with machine names stay inside the sidebar", async (at) => {
+  await folderNames(
+    [
+      noProject(PC, "pc-home", "C:\\Users\\a\\.banneret\\scratch", true),
+      noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
+    ],
+    () => at.screenshot(),
+  );
+});
+
+forEachViewport("a No project folder named by its path stays inside the sidebar", async (at) => {
+  await folderNames(
+    [
+      noProject(WSL, "wsl-home", "/home/a/.banneret/scratch", true),
+      noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
+    ],
+    () => at.screenshot(),
+  );
+});
+
+describe("No project folders across two machines", () => {
   it("are one folder, with no machine label, when both are No project homes", async () => {
     expect(
-      await folderNames(size, [
+      await folderNames([
         noProject(PC, "pc-home", "C:\\Users\\a\\.banneret\\scratch", true),
         noProject(WSL, "wsl-home", "/home/a/.banneret/scratch", true),
       ]),
@@ -156,7 +187,7 @@ describe.each(VIEWPORTS)("No project folders across two machines at $name", (siz
 
   it("name their machines when one of them is not its machine's home", async () => {
     expect(
-      await folderNames(size, [
+      await folderNames([
         noProject(PC, "pc-home", "C:\\Users\\a\\.banneret\\scratch", true),
         noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
       ]),
@@ -165,7 +196,7 @@ describe.each(VIEWPORTS)("No project folders across two machines at $name", (siz
 
   it("name their machines when neither is known to be a home", async () => {
     expect(
-      await folderNames(size, [
+      await folderNames([
         noProject(PC, "pc-stray", "C:\\Users\\a\\.t3\\scratch", false),
         noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
       ]),
@@ -174,7 +205,7 @@ describe.each(VIEWPORTS)("No project folders across two machines at $name", (siz
 
   it("show the folder of a second one on the same machine", async () => {
     expect(
-      await folderNames(size, [
+      await folderNames([
         noProject(WSL, "wsl-home", "/home/a/.banneret/scratch", true),
         noProject(WSL, "wsl-stray", "/home/a/.t3/scratch", false),
       ]),

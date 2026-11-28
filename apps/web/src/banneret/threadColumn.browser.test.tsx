@@ -5,7 +5,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
-import { expect, it, vi } from "vite-plus/test";
+import { expect, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 
 import { AppRoot } from "~/AppRoot";
@@ -17,12 +17,19 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { getRouter } from "~/router";
 import { ENVIRONMENT_ID, type FakeDriver } from "../../test/fakeEnvironment";
 import { act, render } from "../../test/render";
+import {
+  expectCentred,
+  expectClickable,
+  expectReadableLines,
+  forEachViewport,
+} from "./test/viewports";
 
 // App imports start primary discovery, so its HTTP fixture must already be installed.
-const { thread, environment } = await vi.hoisted(async () => {
+const { thread } = await vi.hoisted(async () => {
   const { installFakeEnvironment, threadWithHistory } = await import("../../test/fakeEnvironment");
   const thread = threadWithHistory("thread-column", 6);
-  return { thread, environment: installFakeEnvironment([thread]) };
+  installFakeEnvironment([thread]);
+  return { thread };
 });
 
 vi.mock("../../../../packages/client-runtime/src/connection/driver.ts", async (importOriginal) => {
@@ -71,44 +78,70 @@ async function expectSharedLane(label: string) {
   );
 }
 
-it("keeps the chat column and the composer in one centred lane", async () => {
+forEachViewport("keeps the chat column and the composer in one centred lane", async (at) => {
   const style = document.createElement("style");
   style.textContent = stylesheet;
   document.head.append(style);
   using _style = { [Symbol.dispose]: () => style.remove() };
   const ref = scopeThreadRef(ENVIRONMENT_ID, thread.id);
-  using _environment = environment;
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
     onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
   });
-  await page.viewport(1920, 1080);
   const router = getRouter(
     createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
   );
   await router.load();
-  await using _app = await render(<AppRoot router={router} />, { router: false });
+  const container = document.createElement("div");
+  container.style.cssText = "width: 100vw; height: 100vh;";
+  await using _app = await render(<AppRoot router={router} />, { container, router: false });
 
-  // The founder's window: maximised at 1920, details card shown, right panel closed.
+  // The founder's window: maximised, details card asked for, right panel closed. A narrow window
+  // shows the card as a sheet or not at all, and the lane checks skip a card that is not there.
   await act(() => useRightPanelStore.getState().close(ref));
   await act(() => useRightPanelStore.getState().setThreadPanelOpen(ref, "inline", true));
-  await expect.element(page.getByRole("region", { name: "Thread details" })).toBeVisible();
-  await expectSharedLane("1920, card shown");
-  const { composer } = lanes();
-  // Centred in the canvas right of the sidebar, not pinned to its left edge.
-  const canvas = document.querySelector("[data-chat-canvas]")!.getBoundingClientRect();
-  expect(composer.left - canvas.left).toBeGreaterThan(48);
-
-  for (const width of [1280, 1920]) {
-    await page.viewport(width, 1080);
-    await expectSharedLane(`${width} after a resize, card shown`);
+  const wide = at.width >= 1280;
+  if (wide) {
+    await expect.element(page.getByRole("region", { name: "Thread details" })).toBeVisible();
   }
+  await expectSharedLane(`${at.id}, card asked for`);
 
   await act(() => useRightPanelStore.getState().setThreadPanelOpen(ref, "inline", false));
-  await expectSharedLane("1920, card hidden");
+  await expectSharedLane(`${at.id}, card hidden`);
+  const { composer, last } = lanes();
+  const canvas = document.querySelector("[data-chat-canvas]")!;
+  // Centred in the canvas right of the sidebar, not pinned to its left edge.
+  await vi.waitFor(() => {
+    expectCentred(document.querySelector('[data-chat-composer-stack="true"]')!, canvas, at.id);
+  });
+  if (canvas.getBoundingClientRect().width > composer.width + 96) {
+    expect(composer.left - canvas.getBoundingClientRect().left).toBeGreaterThan(48);
+  }
+  expect(last.width, "the chat column stays a reading column").toBeLessThanOrEqual(800);
+  expectReadableLines(
+    document.querySelector("[data-chat-canvas] .messages-timeline-scroll")!,
+    "chat messages",
+  );
+  const toolAccess = page.getByRole("button", { name: "Tool access" }).element();
+  expectClickable(toolAccess, "tool access");
+  // The fork's row above the timeline starts with the chat column, not at the canvas edge. A narrow
+  // window insets the column a little further for the timeline minimap.
+  expect(Math.abs(toolAccess.getBoundingClientRect().left - composer.left)).toBeLessThanOrEqual(32);
+  expectClickable(
+    document.querySelector('[data-chat-composer-stack="true"] [contenteditable="true"]')!,
+    "the composer input",
+  );
+  await at.screenshot();
 
+  if (!wide) return;
+  if (at.id === "1920x1080") {
+    for (const width of [1280, 1920]) {
+      await page.viewport(width, 1080);
+      await expectSharedLane(`${width} after a resize, card hidden`);
+    }
+  }
   await act(() => useRightPanelStore.getState().open(ref, "files"));
-  await expectSharedLane("1920, right panel open");
+  await expectSharedLane(`${at.id}, right panel open`);
   await act(() => useRightPanelStore.getState().setThreadPanelOpen(ref, "inline", true));
-  await expectSharedLane("1920, right panel open, card shown");
+  await expectSharedLane(`${at.id}, right panel open, card shown`);
 });

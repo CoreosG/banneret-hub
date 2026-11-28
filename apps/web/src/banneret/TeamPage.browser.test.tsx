@@ -45,7 +45,10 @@ import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { TeamPage } from "./TeamPage";
+// The page loads the office lazily; importing it here keeps its first transform out of a wait.
+import "./offices/office/TeamOffice";
 import { useWorkspacesStore } from "./workspacesStore";
+import { expectCentred, expectClickable, expectUnclipped, forEachViewport } from "./test/viewports";
 
 vi.mock(import("~/environments/primary/target"), async (original) => ({
   ...(await original()),
@@ -337,8 +340,13 @@ function Shell() {
   );
 }
 
-async function openTeam(stack: DisposableStack, path = "/team") {
-  await page.viewport(1280, 800);
+/** `size: null` keeps the window as it is, for a layout test at its matrix size. */
+async function openTeam(
+  stack: DisposableStack,
+  path = "/team",
+  size: { readonly width: number; readonly height: number } | null = { width: 1280, height: 800 },
+) {
+  if (size) await page.viewport(size.width, size.height);
   const style = document.createElement("style");
   style.textContent = appCss;
   document.head.append(style);
@@ -375,6 +383,63 @@ const ALL = ["today", "board", "team"];
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
 const personRow = (login: string) =>
   document.querySelector<HTMLElement>(`[data-person="${login}"]`);
+forEachViewport("the Team office lays out its map", async (at) => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openTeam(stack, "/team?view=office", null);
+  await using _screen = screen;
+  await emit(state(ALL, teamRead(TEAM())));
+  const map = page.getByRole("group", { name: /Office map/ });
+  // Six sizes on a loaded runner: the first paint can take longer than the default second.
+  await vi.waitFor(
+    () => expect(map.element().querySelector('[data-office-target*="/desk/"]')).toBeTruthy(),
+    { timeout: 5000 },
+  );
+  const main = document.querySelector('[role="main"]')!;
+  const content = main.querySelector('[data-layout="page"]')!;
+  expectCentred(content, main, "the Team page");
+  expectUnclipped(map.element(), "the office map");
+  const canvas = map.element().querySelector("canvas")!;
+  // The canvas fills the map, and draws at the window's pixel density up to the 4096px cap.
+  await vi.waitFor(() => {
+    const frame = map.element();
+    expect(canvas.getBoundingClientRect().width).toBeCloseTo(frame.clientWidth, 0);
+    expect(canvas.getBoundingClientRect().height).toBeCloseTo(frame.clientHeight, 0);
+    const ratio = Math.min(
+      at.deviceScaleFactor,
+      4096 / Math.max(frame.clientWidth, frame.clientHeight),
+    );
+    expect(canvas.width).toBe(Math.floor(frame.clientWidth * ratio));
+    expect(canvas.height).toBe(Math.floor(frame.clientHeight * ratio));
+  });
+  const context = canvas.getContext("2d")!;
+  await vi.waitFor(() =>
+    expect(context.getImageData(0, 0, canvas.width, canvas.height).data.some((v) => v > 0)).toBe(
+      true,
+    ),
+  );
+  // These rooms are narrower than any matrix size's map, so what is painted sits in its middle.
+  await vi.waitFor(() => {
+    const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+    let left = width;
+    let right = 0;
+    for (let y = 0; y < height; y += 4) {
+      for (let x = 0; x < width; x += 1) {
+        if (data[(y * width + x) * 4 + 3] === 0) continue;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+      }
+    }
+    const scale = width / canvas.clientWidth;
+    expect(Math.abs(left - (width - right)) / scale, "rooms are centred").toBeLessThanOrEqual(48);
+  });
+  expectClickable(page.getByRole("button", { name: "Zoom out" }).element(), "Zoom out");
+  expectClickable(
+    page.getByRole("button", { name: "List", exact: true }).element(),
+    "the List switch",
+  );
+  await at.screenshot();
+});
+
 describe("Team page", () => {
   it("opens founder approvals and prepares the manual seat command", async () => {
     using stack = new DisposableStack();

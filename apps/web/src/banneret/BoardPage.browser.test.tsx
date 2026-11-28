@@ -42,6 +42,14 @@ import { useWorkspacesStore } from "./workspacesStore";
 import { rememberedBoard } from "./boardChoice";
 import { boardEntry, singleBoard } from "./boards.testkit";
 import { FILTER_MEMORY_KEY, rememberedFilters } from "./filterMemory";
+import {
+  expectCentred,
+  expectClickable,
+  expectNoOverlap,
+  expectReadableLines,
+  expectUnclipped,
+  forEachViewport,
+} from "./test/viewports";
 
 vi.mock(import("~/environments/primary/target"), async (original) => ({
   ...(await original()),
@@ -261,8 +269,13 @@ function createBoardRouter(path = "/board") {
   });
 }
 
-async function openBoard(stack: DisposableStack, path = "/board") {
-  await page.viewport(1600, 900);
+/** `size: null` keeps the window as it is, for a layout test at its matrix size. */
+async function openBoard(
+  stack: DisposableStack,
+  path = "/board",
+  size: { readonly width: number; readonly height: number } | null = { width: 1600, height: 900 },
+) {
+  if (size) await page.viewport(size.width, size.height);
   const style = document.createElement("style");
   style.textContent = appCss;
   document.head.append(style);
@@ -1039,6 +1052,52 @@ describe("Enterprise board", () => {
       expect(document.querySelector('[data-testid="lease-buttons"]')).toBeNull();
     });
   });
+});
+
+forEachViewport("the Board lays out its columns", async (at) => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openBoard(stack, "/board", null);
+  await using _screen = screen;
+  const long =
+    "Delivery: v1 Stage 3 Guild, Trust, Works and Games, then the follow-ups from review";
+  await emit(
+    state(
+      ["board"],
+      boardRead(
+        boardOf([
+          ...CARDS(),
+          card("8", long, "free"),
+          card("9", "Relay: stuck rule for quiet claims", "validating"),
+        ]),
+      ),
+    ),
+  );
+  await expect.element(page.getByText(long)).toBeVisible();
+  const grid = document.querySelector<HTMLElement>('[data-layout="board-columns"]')!;
+  const columns = [...grid.children];
+  expect(columns).toHaveLength(5);
+  for (const element of columns) {
+    expect(element.getBoundingClientRect().width).toBeGreaterThanOrEqual(180);
+  }
+  expectNoOverlap(
+    Object.fromEntries(columns.map((element, index) => [`column ${index}`, element])),
+  );
+  // Five columns fit from the first desktop size up; below it the row scrolls, never the page.
+  if (at.width >= 1920) {
+    expect(grid.scrollWidth).toBeLessThanOrEqual(grid.clientWidth);
+    for (const [index, element] of columns.entries()) {
+      expectUnclipped(element, `column ${index}`, "x");
+    }
+  }
+  expect(document.scrollingElement!.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  // The grid takes the page's width, with the same gutter on both sides.
+  expectCentred(grid, document.querySelector('[role="main"]')!, "board columns");
+  expectClickable(
+    cardOf("1").querySelector<HTMLElement>("[data-slot=task-ref]")!,
+    "the first card",
+  );
+  expectReadableLines(grid, "board cards");
+  await at.screenshot();
 });
 
 describe("Several boards, filters and search", () => {

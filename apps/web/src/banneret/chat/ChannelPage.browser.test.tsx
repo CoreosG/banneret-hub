@@ -35,6 +35,14 @@ import { ChatConversations, ChatConversation, ChatMessages } from "@t3tools/cont
 import { DmPrivacy, ChannelPage } from "./ChannelPage";
 import { NeedsRow } from "../TodayRows";
 import { chatRpc } from "./client";
+import {
+  expectCentred,
+  expectClickable,
+  expectNoOverlap,
+  expectReadableLines,
+  expectUnclipped,
+  forEachViewport,
+} from "../test/viewports";
 const decodeConversation = Schema.decodeUnknownSync(ChatConversation);
 const decodeMessages = Schema.decodeUnknownSync(ChatMessages);
 const decodeConversations = Schema.decodeUnknownSync(ChatConversations);
@@ -92,7 +100,12 @@ it("answers a named agent question from its Needs you row", async () => {
     answer: { choice: "Linux" },
   });
 });
-async function setupChannel(resources: AsyncDisposableStack, scenario: ChatScenario) {
+/** `size: null` keeps the window as it is, for a layout test at its matrix size. */
+async function setupChannel(
+  resources: AsyncDisposableStack,
+  scenario: ChatScenario,
+  size: { readonly width: number; readonly height: number } | null = { width: 1440, height: 900 },
+) {
   const { root: message, people } = await commands.companyChat(`${scenario}:start`);
   resources.defer(() => commands.companyChat(`${scenario}:stop`));
   useRelayFeedStore.setState({ feeds: {} });
@@ -243,7 +256,7 @@ async function setupChannel(resources: AsyncDisposableStack, scenario: ChatScena
   style.textContent = appCss;
   document.head.append(style);
   resources.defer(() => style.remove());
-  await page.viewport(1440, 900);
+  if (size) await page.viewport(size.width, size.height);
   const shell = createRootRoute({
     component: () => (
       <SidebarProvider>
@@ -298,6 +311,52 @@ async function proof(view: string) {
   }
   document.documentElement.classList.remove("dark");
 }
+
+forEachViewport("the channel keeps a centred reading column", async (at) => {
+  await using resources = new AsyncDisposableStack();
+  const { router, show, asLeo } = await setupChannel(resources, "messages", null);
+  await using screen = await render(<RouterProvider router={router} />, { router: false });
+  await show(["chat"]);
+  const channels = await asLeo({ kind: "list" });
+  if (!channels.ok) throw new Error(channels.message);
+  const platform = decodeConversations(channels.value).items.find(
+    (c) => c.kind === "channel" && c.name === "platform",
+  )!;
+  const long =
+    "A long release note that has to wrap: " + "the upload resumes after reconnecting. ".repeat(12);
+  const posted = await asLeo({ kind: "post", id: platform.id, key: "long", text: long });
+  if (!posted.ok) throw new Error(posted.message);
+  await screen.getByRole("button", { name: /^platform\b/ }).click();
+  const input = screen.getByRole("textbox", { name: "Channel message" });
+  await expect.element(input).toBeVisible();
+  await expect.element(screen.getByText(/A long release note/)).toBeVisible();
+
+  const find = (selector: string) => screen.container.querySelector(selector)!;
+  const column = find("[data-chat-column]");
+  const scroll = find("[data-chat-column] > [data-chat-scroll]");
+  const composer = find("[data-chat-column] > [data-chat-composer]");
+  await vi.waitFor(() => {
+    expectCentred(scroll, column, "channel messages");
+    expectCentred(composer, column, "the composer");
+    expectReadableLines(scroll, "channel messages");
+    expectNoOverlap({ "the messages": scroll, "the composer": composer });
+  });
+  expectUnclipped(composer, "the composer");
+  expectClickable(input.element(), "the message input");
+  await at.screenshot();
+
+  await screen.getByRole("button", { name: /2 replies/ }).click();
+  await expect.element(screen.getByRole("textbox", { name: "Thread reply" })).toBeVisible();
+  const thread = find("[data-chat-thread]");
+  await vi.waitFor(() => {
+    expectReadableLines(thread, "the thread pane");
+    expectNoOverlap({ "the channel": column, "the thread pane": thread });
+  });
+  expectClickable(
+    screen.getByRole("textbox", { name: "Thread reply" }).element(),
+    "the reply input",
+  );
+});
 
 it("opens only when offered, reads the channel, posts, replies, edits and deletes through the fake relay", async () => {
   await using resources = new AsyncDisposableStack();

@@ -26,6 +26,13 @@ import {
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
+import {
+  expectCentred,
+  expectClickable,
+  expectReadableLines,
+  expectUnclipped,
+  forEachViewport,
+} from "../test/viewports";
 import { loadEnvironmentWorkspaces, useWorkspacesStore } from "../workspacesStore";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
 import { __reloadTabsForTests, setTabsHidden, useTabsStore } from "./tabsStore";
@@ -80,7 +87,7 @@ async function mountApp(path: string) {
   const router = getRouter(createMemoryHistory({ initialEntries: [path] }));
   await router.load();
   const container = document.createElement("div");
-  container.style.cssText = "height: 900px; width: 1400px;";
+  container.style.cssText = "height: 100vh; width: 100vw;";
   await render(<AppRoot router={router} />, { container, router: false });
   return router;
 }
@@ -116,6 +123,24 @@ const router: AppRouter = await mountApp(threadPath(THREAD.id));
 async function go(to: string) {
   await act(() => router.navigate({ href: to }));
 }
+
+forEachViewport("the settings dialog sits over the app", async (at) => {
+  await go(threadPath(THREAD.id));
+  await go("/settings/general");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect.element(dialog).toBeVisible();
+  const popup = dialog.element();
+  await vi.waitFor(() => {
+    expectCentred(popup, document.documentElement, "the settings dialog", 2);
+    expectUnclipped(popup, "the settings dialog");
+  });
+  expectClickable(dialog.getByRole("button", { name: /close/i }).element(), "the close button");
+  // Upstream's settings rows reach 98ch at this dialog width.
+  expectReadableLines(popup, "the settings dialog", 100);
+  await at.screenshot();
+  await go(threadPath(THREAD.id));
+  await expect.element(dialog).not.toBeInTheDocument();
+});
 
 describe("open tabs frame layout", () => {
   it("fits a chat thread; the timeline scrolls inside and header controls stay in the header", async () => {

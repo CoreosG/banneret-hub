@@ -1,10 +1,9 @@
 // Layout at every supported window size for the click-test surfaces: channel settings, Browse
-// channels, Roles and the thread header entry points. `VITE_LAYOUT_SHOTS=<folder in the repository>`
-// also saves a capture of each surface.
+// channels, Roles and the thread header entry points.
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { ComponentProps } from "react";
-import { expect, it, vi } from "vite-plus/test";
-import { cdp, commands, page, userEvent } from "vite-plus/test/browser";
+import { expect, vi } from "vite-plus/test";
+import { page, userEvent } from "vite-plus/test/browser";
 import { render } from "../../test/render";
 import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
 import appCss from "../index.css?inline";
@@ -15,7 +14,7 @@ import { Directory } from "./chat/JoinRequests";
 import { WorkspaceRoles } from "./chat/Roles";
 import "./nativeSelect.css";
 import { usePause } from "./Pause";
-import { showViewport, VIEWPORTS } from "./testViewports";
+import { expectReadableLines, expectUnclipped, forEachViewport } from "./test/viewports";
 
 const { useEnterpriseFeed } = vi.hoisted(() => ({ useEnterpriseFeed: vi.fn() }));
 vi.mock(import("~/environments/primary/target"), async (original) => ({
@@ -123,13 +122,6 @@ const channel = (name: string, extra: { read?: boolean; join?: boolean } = {}) =
   },
 });
 
-/** Shows one size, and gives the window back as it was when the test ends. */
-async function atViewport(size: (typeof VIEWPORTS)[number]) {
-  const before = { width: window.innerWidth, height: window.innerHeight, scale: 1 };
-  await showViewport(size);
-  return { [Symbol.asyncDispose]: () => showViewport(before) };
-}
-
 const box = (element: Element) => element.getBoundingClientRect();
 const where = (element: Element) => {
   const r = box(element);
@@ -163,19 +155,6 @@ const visiblePart = (element: Element) =>
       Math.max(0, Math.min(part.bottom, frame.bottom) - top),
     );
   }, box(element));
-
-function expectUnclipped(element: Element, label: string) {
-  const r = box(element);
-  expect(r.width > 0 && r.height > 0, `${label} is laid out`).toBe(true);
-  for (const frame of framesOf(element))
-    expect(
-      r.left >= frame.left - 0.5 &&
-        r.right <= frame.right + 0.5 &&
-        r.top >= frame.top - 0.5 &&
-        r.bottom <= frame.bottom + 0.5,
-      `${label} ${where(element)} is clipped by [${frame.left},${frame.top} ${frame.width}x${frame.height}]`,
-    ).toBe(true);
-}
 
 function scrollerOf(element: Element) {
   let node = element.parentElement;
@@ -253,39 +232,12 @@ function expectContained(root: Element, label: string) {
   }
 }
 
-/** No sideways scroll, and no sentence wider than 90 characters of its own font. */
+/** No sideways scroll, nothing spilling out of its box, and lines a person can read. */
 function expectReadable(root: Element, label: string, maxWidth: number) {
   expectContained(root, label);
   expect(box(root).width, `${label} width`).toBeLessThanOrEqual(maxWidth + 0.5);
   expect(root.scrollWidth, `${label} scrolls sideways`).toBeLessThanOrEqual(root.clientWidth + 1);
-  const context = document.createElement("canvas").getContext("2d")!;
-  for (const text of root.querySelectorAll("p, small")) {
-    if (!text.checkVisibility()) continue;
-    const style = getComputedStyle(text);
-    context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    const range = document.createRange();
-    range.selectNodeContents(text);
-    for (const line of range.getClientRects())
-      expect(
-        line.width / context.measureText("0").width,
-        `${label}: "${text.textContent?.slice(0, 50)}" line length in ch`,
-      ).toBeLessThanOrEqual(90);
-  }
-}
-
-async function capture(surface: string, size: (typeof VIEWPORTS)[number]) {
-  const folder = import.meta.env.VITE_LAYOUT_SHOTS as string | undefined;
-  if (!folder) return;
-  // DevTools captures device pixels, so the 2x window is saved at its real resolution.
-  const devtools = cdp() as unknown as {
-    send(method: string, params: object): Promise<{ data: string }>;
-  };
-  const { data } = await devtools.send("Page.captureScreenshot", { format: "png" });
-  await commands.writeFile(
-    `../../${folder}/${surface}-${size.width}x${size.height}@${size.scale}x.png`,
-    data,
-    "base64",
-  );
+  expectReadableLines(root, label);
 }
 
 function styles() {
@@ -339,8 +291,7 @@ function relay() {
   });
 }
 
-it.each(VIEWPORTS)("channel settings sheet fits $name", async (size) => {
-  await using _viewport = await atViewport(size);
+forEachViewport("the channel settings sheet fits", async (at) => {
   using _styles = styles();
   using _relay = relay();
   await using _screen = await render(
@@ -368,11 +319,10 @@ it.each(VIEWPORTS)("channel settings sheet fits $name", async (size) => {
     sheet.getByRole("button", { name: "Confirm archive" }).element(),
     "Confirm archive",
   );
-  await capture("channel-settings", size);
+  await at.screenshot();
 });
 
-it.each(VIEWPORTS)("Browse channels fits the sidebar at $name", async (size) => {
-  await using _viewport = await atViewport(size);
+forEachViewport("Browse channels fits the sidebar", async (at) => {
   using _styles = styles();
   using _relay = relay();
   await using screen = await render(
@@ -387,11 +337,10 @@ it.each(VIEWPORTS)("Browse channels fits the sidebar at $name", async (size) => 
   await screen.getByRole("button", { name: "Archive channel" }).click();
   expectReadable(column, "directory confirming", SIDEBAR);
   expectControls(column, "directory confirming");
-  await capture("browse-channels", size);
+  await at.screenshot();
 });
 
-it.each(VIEWPORTS)("Roles fits the settings page at $name", async (size) => {
-  await using _viewport = await atViewport(size);
+forEachViewport("Roles fits the settings page", async (at) => {
   using _styles = styles();
   using _relay = relay();
   useEnterpriseFeed.mockReturnValue(enterprise([]));
@@ -414,7 +363,7 @@ it.each(VIEWPORTS)("Roles fits the settings page at $name", async (size) => {
   expectReadable(content, "roles", 896);
   expectControls(scroller, "roles");
   scroller.scrollTop = 0;
-  await capture("roles", size);
+  await at.screenshot();
   await screen.getByRole("button", { name: "New role" }).click();
   await expect.element(screen.getByText(/lowercase letters/)).toBeVisible();
   expectReadable(content, "new role", 896);
@@ -442,8 +391,7 @@ function unnamedThread() {
   return { [Symbol.dispose]: () => void vi.mocked(chatRpc.run).mockImplementation(answer) };
 }
 
-it.each(VIEWPORTS)("thread header entry points fit $name", async (size) => {
-  await using _viewport = await atViewport(size);
+forEachViewport("the thread header entry points fit", async (at) => {
   using _styles = styles();
   using _relay = relay();
   usePause.setState({ [env]: { status: { paused: false, held: 0, running: [] } } });
@@ -499,7 +447,7 @@ it.each(VIEWPORTS)("thread header entry points fit $name", async (size) => {
     await screen.getByRole("button", { name: "Stop all" }).click();
     expectControls(main, "stop all confirm");
     expectReadable(bar, "header", box(main).width);
-    if (header === "named") await capture("thread-header", size);
+    if (header === "named") await at.screenshot();
     await screen.getByRole("button", { name: "Cancel" }).click();
     // Each popover opens inside the window.
     await screen.getByRole("button", { name: "Tool access" }).click();

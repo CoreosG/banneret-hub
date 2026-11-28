@@ -34,6 +34,13 @@ import { feedRpc, refreshToday, useRelayFeedStore } from "./relayFeedStore";
 import { FILTER_MEMORY_KEY } from "./filterMemory";
 import { TodayPage } from "./TodayPage";
 import { useWorkspacesStore } from "./workspacesStore";
+import {
+  expectCentred,
+  expectNoOverlap,
+  expectReadableLines,
+  expectUnclipped,
+  forEachViewport,
+} from "./test/viewports";
 
 vi.mock(import("~/environments/primary/target"), async (original) => ({
   ...(await original()),
@@ -253,8 +260,12 @@ function createFeedRouter(path = "/") {
   });
 }
 
-async function prepareScreen(stack: DisposableStack) {
-  await page.viewport(1280, 800);
+/** `size: null` keeps the window as it is, for a layout test at its matrix size. */
+async function prepareScreen(
+  stack: DisposableStack,
+  size: { readonly width: number; readonly height: number } | null = { width: 1280, height: 800 },
+) {
+  if (size) await page.viewport(size.width, size.height);
   const style = document.createElement("style");
   style.textContent = appCss;
   document.head.append(style);
@@ -262,6 +273,32 @@ async function prepareScreen(stack: DisposableStack) {
 }
 
 const sidebar = () => page.getByRole("navigation", { name: "Sidebar" });
+
+forEachViewport("Today lays out its two columns", async (at) => {
+  using stack = new DisposableStack();
+  await prepareScreen(stack, null);
+  const { emit } = setup();
+  const router = createFeedRouter("/today");
+  await using screen = await render(<RouterProvider router={router} />, { router: false });
+  await emit(snapshot(["today", "needs", "health"], 4));
+  await expect.element(screen.getByText("Queue over capacity")).toBeVisible();
+  const main = document.querySelector('[role="main"]')!;
+  const content = main.querySelector('[data-layout="page"]')!;
+  expectCentred(content, main, "Today");
+  expect(content.getBoundingClientRect().width).toBeLessThanOrEqual(1200);
+  const grid = content.querySelector('[data-layout="today-columns"]')!;
+  const [first, second] = [...grid.children];
+  expectNoOverlap({ "the first column": first!, "the second column": second! });
+  const [left, right] = [first!.getBoundingClientRect(), second!.getBoundingClientRect()];
+  // Two columns side by side on a desktop; stacked, never squeezed, in a narrow window.
+  if (at.width >= 1920) expect(right.top).toBe(left.top);
+  else expect(right.top).toBeGreaterThanOrEqual(left.bottom);
+  for (const section of [...first!.children, ...second!.children]) {
+    expectUnclipped(section, `section ${section.textContent?.slice(0, 30)}`, "x");
+  }
+  expectReadableLines(content, "Today");
+  await at.screenshot();
+});
 
 describe("Enterprise Today and Needs you", () => {
   it("presents live chat notices through the desktop renderer", async () => {
