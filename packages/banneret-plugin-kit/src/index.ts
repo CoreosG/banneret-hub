@@ -23,6 +23,8 @@ export const manifestSchema = z
 const name = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const skill = z.object({ name, description: text });
 const byTask = z.object({ taskId: Id });
+// A repeat with the same key is the same call: same result, no new effect. docs/banneret/plugins.md, Tasks.
+const taskWrite = byTask.extend({ idempotencyKey: text.max(128).optional() });
 
 export const tools = {
   tasks_list_boards: {
@@ -35,11 +37,11 @@ export const tools = {
   },
   tasks_read: { input: byTask, output: TaskRead },
   tasks_claim: {
-    input: byTask,
+    input: taskWrite,
     output: z.object({ status: z.enum(["claimed", "conflict"]) }),
   },
   tasks_release: {
-    input: byTask.extend({
+    input: taskWrite.extend({
       reason: z.enum([
         "done",
         "blocked",

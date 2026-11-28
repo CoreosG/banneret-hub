@@ -161,6 +161,55 @@ export async function check(manifest, client, { peer, taskId } = {}) {
           (await call("tasks_release", release, actors[winner])).status === "not_holder",
           "Clear the claim on release.",
         );
+        // A repeated claim by the holder succeeds without a key, so these look at what only a key explains.
+        const claimKey = { ...args, idempotencyKey: NodeCrypto.randomUUID() };
+        const releaseKey = { ...release, idempotencyKey: NodeCrypto.randomUUID() };
+        const keyed = async (tool, input, actor = winner) =>
+          (await call(tool, input, actors[actor])).status;
+        requireResult(
+          (await keyed("tasks_claim", claimKey)) === "claimed",
+          "Accept a claim that carries an idempotencyKey.",
+        );
+        requireResult(
+          (await keyed("tasks_claim", claimKey, 1 - winner)) === "conflict",
+          "Keep each idempotencyKey to its caller. Another actor's same key is a different call.",
+        );
+        for (const time of ["first", "repeated"]) {
+          requireResult(
+            (await keyed("tasks_release", releaseKey)) === "released",
+            "Answer the " + time + " tasks_release with one idempotencyKey with released.",
+          );
+        }
+        requireResult(
+          (await keyed("tasks_claim", claimKey)) === "claimed",
+          "Answer a repeated claim idempotencyKey with its first result, even after a release.",
+        );
+        // Not every provider reports leases, so the other actor's claim shows who holds the task.
+        const other = 1 - winner;
+        requireResult(
+          (await keyed("tasks_claim", args, other)) === "claimed",
+          "Make no second claim for a repeated claim idempotencyKey.",
+        );
+        requireResult(
+          (await keyed("tasks_release", release, other)) === "released",
+          "Allow the holder to release.",
+        );
+        requireResult(
+          (await keyed("tasks_claim", args)) === "claimed",
+          "Treat a claim without an idempotencyKey as a new call.",
+        );
+        requireResult(
+          (await keyed("tasks_release", releaseKey)) === "released",
+          "Answer a repeated release idempotencyKey with its first result.",
+        );
+        requireResult(
+          (await keyed("tasks_claim", args, other)) === "conflict",
+          "Release nothing for a repeated release idempotencyKey.",
+        );
+        requireResult(
+          (await keyed("tasks_release", release)) === "released",
+          "Allow the holder to release the new claim.",
+        );
       } catch (error) {
         await Promise.allSettled(actors.map((actor) => call("tasks_release", release, actor)));
         throw error;

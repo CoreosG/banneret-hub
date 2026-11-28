@@ -86,15 +86,30 @@ function fake(actor, state, broken) {
       if (name === "tasks_list_tasks") return ok({ tasks: [card] });
       if (name.startsWith("tasks_") && args.taskId !== card.task.id) return failed;
       if (name === "tasks_read") return ok(card);
+      // One result for each caller, tool and key. Without a key, every call is a new one.
+      const once = (run) => {
+        const id =
+          args.idempotencyKey &&
+          [broken === "shared-key" ? "" : actor, name, args.idempotencyKey].join(" ");
+        if (id && broken !== "ignores-key" && state.results?.has(id))
+          return ok(state.results.get(id));
+        const result = { status: run() };
+        if (id) (state.results ??= new Map()).set(id, result);
+        return ok(result);
+      };
       if (name === "tasks_claim") {
-        if (!state.holder || broken === "race") state.holder = actor;
-        return ok({ status: state.holder === actor ? "claimed" : "conflict" });
+        return once(() => {
+          if (!state.holder || broken === "race") state.holder = actor;
+          return state.holder === actor ? "claimed" : "conflict";
+        });
       }
       if (name === "tasks_release") {
         if (args.reason !== "handing_over") return failed;
-        if (state.holder !== actor) return ok({ status: "not_holder" });
-        delete state.holder;
-        return ok({ status: "released" });
+        return once(() => {
+          if (state.holder !== actor) return "not_holder";
+          delete state.holder;
+          return "released";
+        });
       }
       if (name.endsWith("_propose")) {
         state.note = {
@@ -115,6 +130,8 @@ function fake(actor, state, broken) {
 test.each([
   ["tasks", undefined],
   ["tasks", "race", "Exactly one claim"],
+  ["tasks", "ignores-key", "repeated tasks_release"],
+  ["tasks", "shared-key", "to its caller"],
   ["memory", undefined],
   ["memory", "confirm", "banneret_memory_propose"],
   ["memory", "resolve", "banneret_memory_flag"],
