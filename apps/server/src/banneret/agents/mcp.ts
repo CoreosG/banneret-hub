@@ -1,7 +1,6 @@
 import { activeRun, answeringAsk } from "../chat/AnswerTurn.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { approvalLifecycle } from "../plugins/approvals.ts";
-import { pluginRoute } from "../plugins/proxy.ts";
 export { holdWrite } from "../plugins/approvals.ts";
 import { PreviewAgentActivity } from "../../preview/PreviewAgentActivity.ts";
 import { levelFor, toolkitSource, parkedMessage, allows, denied } from "../plugins/levels.ts";
@@ -314,14 +313,5 @@ export const layer = (
     SandboxHandoff.lifecycle,
     relistOnOfferChange(options.relistEvery ?? "5 seconds"),
   ).pipe(Layer.provide(offeredOnly.combine(toolkitLevels).layer), Layer.provide(AgentRelays.layer));
-
-/** Upstream's transport with the fork's tools registered beside its own, plus the plugin routes. */
-export const transport =
-  (
-    serve: typeof McpHttpServer.layerMcpTransport,
-    register: typeof McpHttpServer.toolkitRegistration,
-  ) =>
-  <RA, RE, RR>(registrations: Layer.Layer<RA, RE, RR>) =>
-    serve(Layer.mergeAll(registrations, layer(register))).pipe(Layer.merge(pluginRoute));
-
+export { pluginRoute } from "../plugins/proxy.ts";
 export { withSkillResources } from "../skills/resources.ts";
