@@ -1,3 +1,4 @@
+import { ThreadToolLevels } from "../ThreadToolLevels";
 import { MemoryStrip } from "../MemoryStrip";
 import { ChatHandle, ChatSettings, type EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -143,7 +144,10 @@ export function ThreadTimeline(props: ComponentProps<typeof Timeline>) {
       working={props.isWorking}
       renderTimeline={(cards) => (
         <>
-          <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
+          <header className="flex items-center gap-3">
+            <ThreadToolLevels {...thread} />
+            <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
+          </header>
           <Timeline
             {...props}
             footer={

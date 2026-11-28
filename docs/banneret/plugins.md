@@ -12,6 +12,16 @@ Start a Claude or Codex chat in a project assigned to the workspace. Use task to
 
 The Solo machine keeps credentials in its user's Hub secret store. The manifest request is anonymous. The Hub attaches the credential when contacting the configured MCP endpoint. Use HTTPS for network servers or HTTP on loopback for local development.
 
+## Thread tool access
+
+Open **Tool access** in a thread to set the Banneret toolkit and each available plugin to None, Read, or Read + write. A source starts at Read + write. Changes stay on this machine and apply on the next call, including during a turn. Existing workspace and relay permissions still apply. Shell and file tools follow the CLI permission mode.
+
+| Session state | Event                                                 | What the agent can do                                                                                          |
+| ------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Parked        | The Hub issues a session or the last active turn ends | List the tools allowed by the saved levels. Calls receive a parked message.                                    |
+| Active        | A turn starts                                         | List and call tools within the saved levels. Overlapping turns keep the thread active until the last one ends. |
+| Revoked       | The provider session ends or the Hub restarts         | The credential expires. The next session uses the levels already saved for the thread.                         |
+
 ## Declare what you provide
 
 For example, a tracker behind a gateway could ship this manifest:

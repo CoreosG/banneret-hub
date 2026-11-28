@@ -1,3 +1,5 @@
+import * as Activity from "../../preview/PreviewAgentActivity.ts";
+import { setLevel, toolkitSource } from "../plugins/levels.ts";
 import { memoryAccess } from "../memory/access.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalDateInEffect:off globalJsonInEffect:off globalTimersInEffect:off globalFetch:off globalFetchInEffect:off - a real HTTP relay (the fake) behind a recording forwarder.
 import { NodeHttpServer } from "@effect/platform-node";
@@ -397,11 +399,22 @@ describe("agent toolkit listing", () => {
         Layer.provide(Layer.succeed(IssueService.IssueService, issueService(newTracker()))),
         Layer.provide(local),
       );
-      yield* HttpRouter.serve(serverLayer, {
-        disableListenLog: true,
-        disableLogger: true,
-      }).pipe(Layer.build);
+      const activity = yield* Activity.PreviewAgentActivity.pipe(Effect.provide(Activity.layer));
+      const turns = new Map<ThreadId, Effect.Effect<void>>();
+      for (const scope of scopes.values())
+        turns.set(scope.thread.threadId, yield* activity.begin(scope.thread.threadId));
+      yield* HttpRouter.serve(
+        serverLayer.pipe(Layer.provide(Layer.succeed(Activity.PreviewAgentActivity, activity))),
+        {
+          disableListenLog: true,
+          disableLogger: true,
+        },
+      ).pipe(Layer.build);
       return {
+        companyLevel: (level: "read" | "read_write") =>
+          setLevel(COMPANY_THREAD, toolkitSource, level).pipe(Effect.provide(local)),
+        parkCompany: turns.get(COMPANY_THREAD)!,
+        startCompany: activity.begin(COMPANY_THREAD),
         confirmSoloSkill: Effect.fn("Test.confirmSoloSkill")(
           function* (key: string) {
             const access = yield* memoryAccess(
@@ -442,7 +455,8 @@ describe("agent toolkit listing", () => {
       Effect.scoped(
         Effect.gen(function* () {
           relayTools = ALL_TOOLS;
-          const { configureKnowledge, confirmSoloSkill } = yield* serveAgents({});
+          const { configureKnowledge, confirmSoloSkill, companyLevel, parkCompany, startCompany } =
+            yield* serveAgents({});
           const httpClient = yield* HttpClient.HttpClient;
           const session = (token: string) =>
             Effect.gen(function* () {
@@ -523,6 +537,20 @@ describe("agent toolkit listing", () => {
               "upstream_tool",
             ].sort(),
           );
+          yield* companyLevel("read");
+          expect(yield* company.tools).not.toContain("banneret_lease_take");
+          expect(yield* company.tools).toContain("banneret_board");
+          expect(
+            (yield* company.call("banneret_lease_take", { taskId: "safe" })).error?.message,
+          ).toContain("set to read");
+          yield* parkCompany;
+          expect(yield* company.tools).toContain("banneret_board");
+          expect((yield* company.call("banneret_board", {})).error?.message).toContain(
+            "parked between turns",
+          );
+          const endTurn = yield* startCompany;
+          yield* Effect.addFinalizer(() => endTurn);
+          yield* companyLevel("read_write");
           expect((yield* company.prompts).map((prompt) => prompt.name)).toEqual(
             expect.arrayContaining([
               "banneret_start_task",

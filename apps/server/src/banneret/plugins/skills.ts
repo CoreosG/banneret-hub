@@ -1,3 +1,4 @@
+import type { ListedTool, levelFor } from "./levels.ts";
 import type { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
@@ -36,6 +37,13 @@ export const skillReply = Effect.fn("SoloPlugins.skills")(function* (
   request: Request,
   plugin: { endpoint: string; token: string; manifest: { toolPrefix?: string | undefined } },
   thread: { threadId: ThreadId; providerInstanceId: ProviderInstanceId },
+  permission: (
+    tool: ListedTool,
+  ) => Effect.Effect<
+    string | undefined,
+    Effect.Error<ReturnType<typeof levelFor>>,
+    Effect.Services<ReturnType<typeof levelFor>>
+  >,
 ) {
   const envelope = decodeCall(
     yield* Effect.promise(() =>
@@ -70,7 +78,7 @@ export const skillReply = Effect.fn("SoloPlugins.skills")(function* (
   const catalog = yield* Effect.gen(function* () {
     const client = yield* McpClient.McpClient;
     const list = (yield* client.listTools()).find((t) => t.name === prefix + "skills_list");
-    if (!list) return;
+    if (!list || (yield* permission(list))) return;
     const result = yield* client.callTool({ tool: list, arguments: {} }, { timeout: "8 seconds" });
     const parsed = decodeCatalog(result.structuredContent);
     if (!result.isError && Option.isSome(parsed)) return parsed.value.skills;

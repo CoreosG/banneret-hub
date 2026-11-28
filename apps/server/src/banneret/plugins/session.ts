@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { OrchestrationV2AppThread, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -15,9 +15,15 @@ export const threadPlugins = Effect.fn("SoloPlugins.thread")(function* (
   environmentId: EnvironmentId,
 ) {
   const thread = yield* (yield* ProjectionStoreV2).getThread(threadId);
+  return yield* pluginsForThread(thread, environmentId);
+});
+export const pluginsForThread = Effect.fn(function* (
+  thread: OrchestrationV2AppThread,
+  environmentId: EnvironmentId,
+) {
   if (!thread || thread.guestShare || thread.linkOrigin || thread.deletedAt || thread.archivedAt)
     return [];
-  const owner = (yield* threadWorkspace(threadId, thread.projectId, environmentId))?.owner;
+  const owner = (yield* threadWorkspace(thread.id, thread.projectId, environmentId))?.owner;
   return owner?.kind === "solo" ? yield* readPlugins(owner.id) : [];
 });
 

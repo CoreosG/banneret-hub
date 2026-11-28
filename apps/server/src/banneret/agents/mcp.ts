@@ -1,3 +1,5 @@
+import { PreviewAgentActivity } from "../../preview/PreviewAgentActivity.ts";
+import { levelFor, toolkitSource, parkedMessage, allows, denied } from "../plugins/levels.ts";
 import { defaults, skillCatalog } from "../skills/catalog.ts";
 import * as Schema from "effect/Schema";
 import { knowledgeRevision } from "../memory/KbIndex.ts";
@@ -8,7 +10,7 @@ import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { McpSchema, McpServer } from "effect/ai";
+import { McpSchema, McpServer, Tool } from "effect/ai";
 
 import type * as McpHttpServer from "../../mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../../mcp/McpInvocationContext.ts";
@@ -18,6 +20,47 @@ import { JOIN_URI, joinText, skillRules } from "./join.ts";
 import { taskPrompts } from "./startTask.ts";
 import { AgentToolkit, memoryNames, skillNames } from "./tools.ts";
 
+const invalidParams = Schema.is(McpSchema.InvalidParams);
+const toolkitLevels = McpServer.visibility(
+  Effect.gen(function* () {
+    const activity = yield* PreviewAgentActivity;
+    const services = yield* Effect.context<Effect.Services<ReturnType<typeof levelFor>>>();
+    const tools = new Map(Object.entries(AgentToolkit.tools));
+    return ({ method, target }: McpServer.MiddlewareOptions) =>
+      Effect.gen(function* () {
+        const tool = tools.get(target);
+        if (!tool) return true;
+        const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
+        const thread = Option.getOrUndefined(scope)?.thread;
+        if (!thread) return false;
+        const level = yield* levelFor(thread.threadId, toolkitSource).pipe(
+          Effect.provideContext(services),
+        );
+        const allowed = allows(level, {
+          name: target,
+          annotations: {
+            readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
+            destructiveHint: Context.get(tool.annotations, Tool.Destructive),
+          },
+        });
+        if (method !== "tools/call") return allowed;
+        if (!allowed)
+          return yield* new McpSchema.InvalidParams({
+            message: denied(target, toolkitSource, level),
+          });
+        if (!(yield* activity.active(thread.threadId)))
+          return yield* new McpSchema.InvalidParams({ message: parkedMessage });
+        return true;
+      }).pipe(
+        Effect.mapError(
+          (e) =>
+            new McpSchema.InvalidParams({
+              message: invalidParams(e) ? e.message : "Cannot check thread tool access.",
+            }),
+        ),
+      );
+  }),
+);
 /**
  * Visible when the calling thread is offered the tool, or, for the join resource, any tool. A check that
  * failed would fail the whole list request, so every failure reads as hidden.
@@ -214,6 +257,6 @@ export const layer = (
     joinResource,
     SandboxHandoff.lifecycle,
     relistOnOfferChange(options.relistEvery ?? "5 seconds"),
-  ).pipe(Layer.provide(offeredOnly.layer), Layer.provide(AgentRelays.layer));
+  ).pipe(Layer.provide(offeredOnly.combine(toolkitLevels).layer), Layer.provide(AgentRelays.layer));
 export { pluginRoute } from "../plugins/proxy.ts";
 export { withSkillResources } from "../skills/resources.ts";

@@ -2,6 +2,8 @@
 import { NodeHttpServer } from "@effect/platform-node";
 import { HttpRouter, HttpClient, HttpBody } from "effect/http";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
+import * as Activity from "../../preview/PreviewAgentActivity.ts";
+import { setLevel, pluginSource } from "./levels.ts";
 import { pluginRoute } from "./proxy.ts";
 import * as NodeHttp from "node:http";
 
@@ -45,6 +47,7 @@ const threadId = ThreadId.make("test-chat");
 const providerInstanceId = ProviderInstanceId.make("codex");
 const thread = liveThreadShell(threadId);
 const layers = Layer.mergeAll(
+  Activity.layer,
   Layer.mock(ProjectionStoreV2)({
     getThreadShell: () => Effect.succeed(thread),
     getThread: () => Effect.succeed(idleThreadProjection(thread).thread),
@@ -106,22 +109,31 @@ it.live(
   () =>
     Effect.gen(function* () {
       const headers: string[] = [];
+      const activity = yield* Activity.PreviewAgentActivity;
+      const park = yield* activity.begin(threadId);
       const fixture = yield* Effect.acquireDisposable(
         Effect.promise(async () => {
-          const server = NodeHttp.createServer((request, response) => {
+          const server = NodeHttp.createServer(async (request, response) => {
             headers.push(request.headers.authorization ?? "");
             response.setHeader("content-type", "application/json");
             if (request.url === "/mcp") {
               if (request.headers.authorization !== "Bearer demo-alice")
                 response.writeHead(401).end();
-              else
+              else {
+                const chunks = [];
+                for await (const chunk of request) chunks.push(chunk);
+                const rpc = JSON.parse(Buffer.concat(chunks).toString("utf8"));
                 response.end(
                   JSON.stringify({
                     jsonrpc: "2.0",
-                    id: 2,
-                    result: { tools: [{ name: "skills_get" }] },
+                    id: rpc.id,
+                    result:
+                      rpc.method === "tools/call"
+                        ? { content: [] }
+                        : { tools: [{ name: "skills_get" }, { name: "delete_issue" }] },
                   }),
                 );
+              }
             } else response.end(JSON.stringify(manifest));
           });
           await new Promise<void>((resolve, reject) =>
@@ -183,6 +195,31 @@ it.live(
       const listing = yield* send(server.headers.Authorization!);
       expect(listing.status).toBe(200);
       expect(yield* listing.text).toContain("skills_get");
+      yield* setLevel(threadId, pluginSource("starter"), "read");
+      const call = (name: string) =>
+        send(
+          server.headers.Authorization!,
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 2,
+            method: "tools/call",
+            params: { name, arguments: {} },
+          }),
+        );
+      const readList = yield* (yield* send(server.headers.Authorization!)).text;
+      expect(readList).toContain("skills_get");
+      expect(readList).not.toContain("delete_issue");
+      if (!templateEndpoint)
+        expect(yield* (yield* call("skills_get")).json).toMatchObject({ result: { content: [] } });
+      expect(yield* (yield* call("delete_issue")).text).toContain("is set to read");
+      yield* park;
+      expect(yield* (yield* send(server.headers.Authorization!)).text).toContain("skills_get");
+      expect(yield* (yield* call("skills_get")).text).toContain("parked between turns");
+      const endTurn = yield* activity.begin(threadId);
+      yield* Effect.addFinalizer(() => endTurn);
+      yield* setLevel(threadId, pluginSource("starter"), "none");
+      expect(yield* (yield* call("skills_get")).text).toContain("is set to none");
+      yield* setLevel(threadId, pluginSource("starter"), "read_write");
       if (templateEndpoint) {
         const skills = yield* send(
           server.headers.Authorization!,
