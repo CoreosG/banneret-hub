@@ -121,6 +121,11 @@ export const TaskLeaseRef = Schema.Struct({
   scope: IssueRef.fields.scope,
   key: IssueRef.fields.key,
   relayOrigin: Schema.NonEmptyString,
+  /**
+   * The relay's board id for the task. When a company source owns tasks, the server finds the task by
+   * this alone, on its own copy of the board.
+   */
+  taskId: Schema.optional(Schema.NonEmptyString),
 });
 export type TaskLeaseRef = typeof TaskLeaseRef.Type;
 

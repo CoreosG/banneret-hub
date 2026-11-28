@@ -5,10 +5,12 @@ import { create } from "zustand";
 import { useServerConfigs } from "../state/entities";
 import { useConnectedEnvironmentIds } from "../state/environments";
 import { type RelayTarget, useEnrolmentStore } from "./enrolmentStore";
+import { useEnvironmentFeed } from "./relayFeedStore";
 import { useLeaseEntry } from "./leaseStore";
 import {
   leaseRoute,
   repoChoiceKey,
+  sourceRoute,
   type LeaseEnvironment,
   type LeaseMachine,
   type LeaseRoute,
@@ -55,6 +57,15 @@ export function useLeaseRoute(target: RelayTarget, task: TaskIdentity): LeaseRou
   const environments = useLeaseEnvironments();
   const heldOn = useLeaseEntry(target, task.id)?.heldOn ?? null;
   const choice = useLeaseMachineStore((state) => state.choices[taskKey(task.ref)]);
+  const owner = useEnvironmentFeed(target).elsewhere?.tasks;
+  if (owner?.owner === "external")
+    return sourceRoute({
+      page: target,
+      taskId: task.id,
+      taskRef: task.ref,
+      environments,
+      source: owner.title,
+    });
   return leaseRoute({
     page: target,
     taskRef: task.ref,

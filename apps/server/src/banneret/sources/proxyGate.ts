@@ -13,6 +13,7 @@ import type { ListedTool } from "../plugins/levels.ts";
 import { forward } from "../plugins/transport.ts";
 import { readCapped } from "../relay/RelayClient.ts";
 import { missingTools } from "./filters.ts";
+import { claimVerb } from "./taskLink.ts";
 import { makeSourceStates, sourceNotice, type ThreadSource } from "./ThreadSources.ts";
 import { applyCredential, sourceAccess } from "./tokens.ts";
 
@@ -139,7 +140,17 @@ export const sourceGate = Effect.fn("BanneretSources.gate")(function* (
         const read = yield* Effect.tryPromise({ try: () => catalog(response, id), catch: broke });
         if (!read.tools) return unlisted();
         const { nextCursor: _next, ...rest } = read.result;
-        tools.push(...read.tools);
+        // A claim or release is a write whatever the source says: it needs write access and approval.
+        tools.push(
+          ...read.tools.map((tool) =>
+            claimVerb(tool.name, plugin.company)
+              ? {
+                  ...tool,
+                  annotations: { ...tool.annotations, readOnlyHint: false },
+                }
+              : tool,
+          ),
+        );
         result = rest;
         cursor = read.cursor;
         if (!cursor) break;

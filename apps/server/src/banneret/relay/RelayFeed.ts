@@ -867,7 +867,10 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
             ),
           };
           sections = sectionKinds(advertised);
-          chatFlags = sectionFlags(advertised, "chat") ?? [];
+          // A hand-off moves a Banneret lease, so there is none when Banneret does not own tasks.
+          chatFlags = (sectionFlags(advertised, "chat") ?? []).filter(
+            (flag) => !(flag === "handoffs" && elsewhere?.tasks),
+          );
           boardChannels = Object.fromEntries(
             list(hidden.has("chat") ? [] : fields(fields(reply.body)?.chat)?.boards, 50).flatMap(
               (entry) => {
@@ -908,7 +911,8 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           dashboardSettings = { dashboards, ...optional("leaseClocks", clocks) };
           sectionsVersion = reply.etag;
           mcpTools = mcpToolsOf(reply.body);
-          // A tracker Banneret does not own keeps its own claims: no Take or Release here.
+          // A tracker Banneret does not own keeps its own claims, so Banneret's leases are off. With a
+          // company source, Take and Release call its claim tools (sources/providerLeases.ts).
           boardFlags =
             sectionFlags(advertised, "board")?.filter(
               (flag) => !(flag === "leases" && elsewhere?.tasks),

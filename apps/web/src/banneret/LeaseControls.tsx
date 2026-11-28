@@ -88,15 +88,34 @@ export function useLeaseCheck(
   const host = machine?.ref.host;
   const scope = machine?.ref.scope ?? "";
   const key = machine?.ref.key ?? "";
+  const boardTaskId = machine?.ref.taskId;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the tracker's lease when the task is shown
   useEffect(() => {
     if (!enabled || on === null || tracker === null) return;
     void checkLease({ environmentId, relayOrigin }, taskId, {
       environmentId: on,
       label,
-      ref: { tracker, ...(host === undefined ? {} : { host }), scope, key },
+      ref: {
+        tracker,
+        ...(host === undefined ? {} : { host }),
+        scope,
+        key,
+        ...(boardTaskId === undefined ? {} : { taskId: boardTaskId }),
+      },
     });
-  }, [environmentId, relayOrigin, taskId, enabled, on, label, tracker, host, scope, key]);
+  }, [
+    environmentId,
+    relayOrigin,
+    taskId,
+    enabled,
+    on,
+    label,
+    tracker,
+    host,
+    scope,
+    key,
+    boardTaskId,
+  ]);
   return entry;
 }
 
@@ -125,7 +144,10 @@ export function startLease(
     });
     return;
   }
-  const ask = operation === "take" || (route.machines.length > 1 && !route.held);
+  // A company's claim has nothing to ask: one machine, and no hand-off follows it.
+  const ask =
+    route.source === undefined &&
+    (operation === "take" || (route.machines.length > 1 && !route.held));
   if (ask) {
     openLeaseConfirm({
       relay: target,
@@ -495,7 +517,7 @@ export function LeaseButtons(props: {
           {running === "take" ? "Taking…" : takeLabel(props.route, props.continues)}
         </Button>
       ) : null}
-      {status.actions.release && (
+      {status.actions.release && props.route.source === undefined && (
         <OfferButton
           target={{ ...props.target, environmentId: props.route.chosen.environmentId }}
           taskId={props.taskId}
@@ -540,6 +562,8 @@ function ReadBackBar() {
 export function LeaseNoticeLine(props: {
   readonly entry: LeaseEntry | undefined;
   readonly className?: string;
+  /** The company source that owns tasks, by title; it needs no read-back wait. */
+  readonly source?: string | undefined;
 }) {
   const entry = props.entry;
   if (entry === undefined) return null;
@@ -551,8 +575,12 @@ export function LeaseNoticeLine(props: {
         data-operation={entry.phase.operation}
         className={cn("flex flex-col gap-1 text-muted-foreground text-xs", props.className)}
       >
-        <span>{RUNNING_WORDS[entry.phase.operation]}</span>
-        {entry.phase.operation === "take" ? <ReadBackBar /> : null}
+        <span>
+          {props.source === undefined
+            ? RUNNING_WORDS[entry.phase.operation]
+            : `Waiting for ${props.source}…`}
+        </span>
+        {entry.phase.operation === "take" && props.source === undefined ? <ReadBackBar /> : null}
       </div>
     );
   }

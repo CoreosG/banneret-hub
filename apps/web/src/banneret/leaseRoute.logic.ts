@@ -36,6 +36,8 @@ export type LeaseRoute =
       readonly chosen: LeaseMachine;
       /** The chosen machine is the one this window took the task on. */
       readonly held: boolean;
+      /** The company source that owns tasks, by title. Unset: Banneret's own take and release. */
+      readonly source?: string;
     };
 
 export interface LeaseEnvironment {
@@ -136,6 +138,42 @@ export function leaseRoute(input: LeaseRouteInput): LeaseRoute {
     byId(page.environmentId) ??
     first[0]!;
   return { kind: "ready", machines: first, chosen, held: held !== undefined };
+}
+
+/**
+ * When a company source owns tasks, take and release run on the page's own machine, with its sign-in to
+ * that source. The server finds the task by the relay's id alone, so the rest of the reference only has
+ * to be well formed.
+ */
+export function sourceRoute(input: {
+  readonly page: LeaseRouteInput["page"];
+  readonly taskId: string;
+  readonly taskRef: BanneretBoardTask["ref"];
+  readonly environments: ReadonlyArray<LeaseEnvironment>;
+  readonly source: string;
+}): LeaseRoute {
+  const environment = input.environments.find(
+    (one) => one.environmentId === input.page.environmentId,
+  );
+  if (environment === undefined) return { kind: "loading" };
+  const view = environment.enrolments.find((one) => one.relayOrigin === input.page.relayOrigin);
+  const machine: LeaseMachine = {
+    environmentId: environment.environmentId,
+    label: view?.label ?? environment.label ?? environment.environmentId,
+    ref: {
+      tracker: IssueTrackerKind.make("external"),
+      scope: input.taskRef.scope.trim() || "-",
+      key: input.taskRef.key.trim() || "-",
+      taskId: input.taskId,
+    },
+  };
+  return {
+    kind: "ready",
+    machines: [machine],
+    chosen: machine,
+    held: false,
+    source: input.source,
+  };
 }
 
 function hostOf(origin: string): string {

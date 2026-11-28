@@ -224,6 +224,8 @@ function taskFacts(
   view: TaskView,
   options: {
     readonly leases: boolean;
+    /** The company source that owns claims, by title; its answer alone says who holds the task. */
+    readonly source: string | undefined;
     readonly signOff: boolean;
     readonly lease: LeaseEntry | undefined;
     /** Opens a map item's neighbourhood; null when the relay offers none. */
@@ -243,6 +245,28 @@ function taskFacts(
   const release = options.leases
     ? lastReleaseView(options.lease?.status ?? null, card?.lastRelease)
     : null;
+  const claimed = options.lease?.status?.availability === "available" ? options.lease.status : null;
+  const sourceFacts =
+    options.source === undefined
+      ? null
+      : {
+          owner:
+            claimed === null ? undefined : (
+              <span className="flex flex-wrap items-center gap-2" data-testid="owner-from-source">
+                {claimed.lease === null ? (
+                  <span className={TYPE.meta}>Nobody holds it, says {options.source}</span>
+                ) : (
+                  <span className="min-w-0 break-words">
+                    <span className="font-medium">{claimed.lease.holder}</span>, says{" "}
+                    {options.source}
+                  </span>
+                )}
+              </span>
+            ),
+          lastRelease: claimed?.lastRelease ? (
+            <LastReleaseValue release={claimed.lastRelease} />
+          ) : undefined,
+        };
   const dates: ReadonlyArray<Fact> = [
     {
       label: "Opened",
@@ -266,7 +290,7 @@ function taskFacts(
   ];
   if (view.notFound) {
     return [
-      { label: "Owner", value: options.leases ? undefined : null },
+      { label: "Owner", value: options.leases || sourceFacts ? sourceFacts?.owner : null },
       ...dates,
       { label: "Pull request", value: undefined },
       { label: "Stage", value: stage?.title, empty: "Not on the map" },
@@ -284,7 +308,9 @@ function taskFacts(
   return [
     {
       label: "Owner",
-      value: !options.leases ? null : card === null ? undefined : held === undefined ? (
+      value: sourceFacts ? (
+        sourceFacts.owner
+      ) : !options.leases ? null : card === null ? undefined : held === undefined ? (
         checked === null ? (
           <span className={TYPE.meta}>Nobody holds it</span>
         ) : (
@@ -372,9 +398,12 @@ function taskFacts(
     },
     {
       label: "Last release",
-      empty: EMPTY_NONE,
-      wide: release?.note !== undefined,
-      value: !options.leases ? null : release === null ? undefined : (
+      // A source that could not be asked is not one with no release.
+      empty: sourceFacts && claimed === null ? EMPTY_NOT_KNOWN : EMPTY_NONE,
+      wide: (sourceFacts ? claimed?.lastRelease?.note : release?.note) !== undefined,
+      value: sourceFacts ? (
+        sourceFacts.lastRelease
+      ) : !options.leases ? null : release === null ? undefined : (
         <LastReleaseValue release={release} />
       ),
     },
@@ -389,7 +418,12 @@ function TaskHeader(props: {
   readonly atWork: boolean;
   readonly route: LeaseRoute;
   readonly hasIssueRef: boolean;
+  /** The company source that owns tasks, by title: the link out names it. */
+  readonly trackerTitle: string | undefined;
+  /** Take and release run here: Banneret's leases, or a company source's own claims. */
   readonly leases: boolean;
+  /** A company source owns tasks but the relay does not leave claims to it, by title. */
+  readonly claimsOff: string | undefined;
   readonly lease: LeaseEntry | undefined;
   readonly note: string | null;
 }) {
@@ -403,8 +437,9 @@ function TaskHeader(props: {
       : blockedByName(view.map, mapItem);
   const ref = taskRef({ ...view.task, openedAt: "", closedAt: null });
   const href = safeLinkOut(view.task.ref.url);
-  const tracker = trackerName(view.task.ref.tracker);
+  const tracker = props.trackerTitle ?? trackerName(view.task.ref.tracker);
   const release = lastReleaseView(props.lease?.status ?? null, card?.lastRelease);
+  const source = props.route.kind === "ready" ? props.route.source : undefined;
   return (
     <header className="flex shrink-0 flex-col gap-2 px-4 pt-4 pb-3" data-testid="task-header">
       <div className="flex min-w-0 items-start gap-2">
@@ -454,8 +489,19 @@ function TaskHeader(props: {
           {why}
         </p>
       )}
-      {props.leases ? <LeaseNoticeLine entry={props.lease} /> : null}
+      {props.leases ? <LeaseNoticeLine entry={props.lease} source={source} /> : null}
       <OwnedElsewhere capabilities={["tasks"]} />
+      {source !== undefined && props.route.kind === "ready" ? (
+        <p className={TYPE.meta} data-testid="lease-source">
+          Take and release use your sign-in to {source} on {props.route.chosen.label}.
+        </p>
+      ) : null}
+      {props.claimsOff === undefined ? null : (
+        <p className={TYPE.meta} role="status" data-testid="lease-source-off">
+          {props.claimsOff} owns tasks, but the relay does not leave claims to it, so take and
+          release are off.
+        </p>
+      )}
       {/* Without any project here the link row below already says so. */}
       {props.leases &&
       routeProblem(props.route) !== null &&
@@ -474,7 +520,11 @@ function TaskHeader(props: {
 }
 
 /** The row in place of the thread: no project here is on the tracker, or the relay has no details. */
-function LinkRow(props: { readonly task: TaskIdentity; readonly notFound: boolean }) {
+function LinkRow(props: {
+  readonly task: TaskIdentity;
+  readonly notFound: boolean;
+  readonly trackerTitle: string | undefined;
+}) {
   const href = safeLinkOut(props.task.ref.url);
   const repo = taskRef({ ...props.task, openedAt: "", closedAt: null }).repo;
   return (
@@ -497,7 +547,7 @@ function LinkRow(props: { readonly task: TaskIdentity; readonly notFound: boolea
           variant="outline"
           render={<a href={href} target="_blank" rel="noopener noreferrer" />}
         >
-          Open on {trackerName(props.task.ref.tracker)}
+          Open on {props.trackerTitle ?? trackerName(props.task.ref.tracker)}
         </Button>
       )}
     </div>
@@ -586,8 +636,12 @@ function TaskPanelBody(props: {
   const enrolment = useEnrolmentView(environmentId, relayOrigin);
   const issueRef = useTaskIssueRef(environmentId, surface.task);
   const leases = feed.board?.leases === true;
+  // With tasks owned by a company source, its claims decide, whatever the board's `leases` flag says.
+  const tasksOwner = feed.elsewhere?.tasks?.owner === "external" ? feed.elsewhere.tasks : undefined;
+  const source = tasksOwner && !tasksOwner.leases ? tasksOwner.title : undefined;
+  const claims = tasksOwner ? source !== undefined : leases;
   const route = useLeaseRoute(target, surface.task);
-  const lease = useLeaseCheck(target, taskId, routeMachine(route), leases);
+  const lease = useLeaseCheck(target, taskId, routeMachine(route), claims);
 
   // A thread's panel has no page following the feed, so the tab follows it while shown.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the server's relay feed while the Task tab is shown
@@ -656,7 +710,8 @@ function TaskPanelBody(props: {
         }
       : null;
   const facts = taskFacts(view, {
-    leases,
+    leases: claims && source === undefined,
+    source,
     signOff: enrolment?.me?.permissions.includes("relay.admin") ?? false,
     lease,
     showOnMap,
@@ -673,7 +728,9 @@ function TaskPanelBody(props: {
         atWork={feed.board?.atWork.includes(taskId) === true}
         route={route}
         hasIssueRef={issueRef !== null}
-        leases={leases}
+        leases={claims}
+        claimsOff={tasksOwner?.leases ? tasksOwner.title : undefined}
+        trackerTitle={tasksOwner?.title}
         lease={lease}
         note={note}
       />
@@ -747,7 +804,7 @@ function TaskPanelBody(props: {
         className={notFound ? "shrink-0 px-4 pb-3 sm:grid-cols-1" : "shrink-0 px-4 pb-3"}
       />
       {issueRef === null ? (
-        <LinkRow task={surface.task} notFound={notFound} />
+        <LinkRow task={surface.task} notFound={notFound} trackerTitle={tasksOwner?.title} />
       ) : (
         <TaskThread
           environmentId={environmentId}
