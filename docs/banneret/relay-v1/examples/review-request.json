@@ -10,7 +10,7 @@
   "context": "Review the updated parser.",
   "doneWhen": "Return findings for this head.",
   "pr": {
-    "repo": "core",
+    "repo": "example-org/example-app",
     "number": 42,
     "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   },

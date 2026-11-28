@@ -24,6 +24,7 @@ const settings: {
     enabled?: boolean;
     defaultChannels?: readonly string[];
     boards?: readonly { board: string; channel: string }[];
+    taskLinks?: { enabled?: boolean };
   };
 } & Pick<
   FakeRelayOptions,

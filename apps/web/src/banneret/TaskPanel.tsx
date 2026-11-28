@@ -630,16 +630,21 @@ function TaskPanelBody(props: {
   const navigate = useNavigate();
   const [opening, setOpening] = useState(false);
   const [discussionError, setDiscussionError] = useState("");
+  const [noThread, setNoThread] = useState(false);
   async function discuss() {
     setOpening(true);
     setDiscussionError("");
+    setNoThread(false);
     try {
       const result = await chatRpc.run(target, { kind: "discuss", id: taskId });
       const location = decodeThreadLocation(result);
       await navigate({ href: chatHref(location.conversationId, location.threadRootId) });
       openTaskDialog(null);
     } catch (e) {
-      setDiscussionError(String(e));
+      // The relay refuses a task a thread with either code.
+      const { code } = e as { code?: string };
+      if (code === "not_found" || code === "forbidden") setNoThread(true);
+      else setDiscussionError(String(e));
     }
     setOpening(false);
   }
@@ -729,6 +734,12 @@ function TaskPanelBody(props: {
             Discuss this task
           </Button>
         </div>
+      )}
+      {noThread && (
+        <p role="status" className="px-4 pb-2 text-muted-foreground text-sm">
+          This task has no chat thread you can open. A thread needs a channel for its board where
+          everyone can see the task. Follow the task here instead.
+        </p>
       )}
       {discussionError && <span role="alert">{discussionError}</span>}
       <FactsGrid

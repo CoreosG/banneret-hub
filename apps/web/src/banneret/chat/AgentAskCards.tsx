@@ -17,6 +17,10 @@ import type { RelayTarget } from "../enrolmentStore";
 import { chatRpc, conversations, handles, members, pageItems, useChatRead } from "./client";
 
 const decode = Schema.decodeUnknownSync(ChatAsks);
+const plainReasons: Readonly<Record<string, string>> = {
+  pr_gone:
+    "The pull request is no longer on the board, so this review has ended. It may have been merged or closed.",
+};
 const settings = Schema.decodeUnknownSync(ChatSettings);
 function CommitSha({ sha }: { sha: string }) {
   return (
@@ -94,7 +98,9 @@ export function AskCard({
         Expires <time dateTime={ask.expiresAt}>{new Date(ask.expiresAt).toLocaleString()}</time>
       </small>
       {ask.byRule && <small>Auto-accepted by {ask.to.owner.login}’s rule</small>}
-      {ask.reason && ask.reason !== "auto_accepted" && <p>{ask.reason}</p>}
+      {ask.reason && ask.reason !== "auto_accepted" && (
+        <p>{plainReasons[ask.reason] ?? ask.reason}</p>
+      )}
       {ask.state === "answered" && answer && (
         <section className="grid justify-items-start gap-1.5 border-t pt-2 text-sm">
           <strong>

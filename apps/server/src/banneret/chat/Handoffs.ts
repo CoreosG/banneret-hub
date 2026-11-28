@@ -186,9 +186,10 @@ export function handoffsForMachine(
               return yield* invalid("You must hold this task to offer it.");
             yield* handoffNote(o.note);
             yield* verifyPushedWork(yield* projects.listShells(), ref, o.branch, o.headSha);
-            // The relay finds the task's thread itself. A relay without task threads has no such call.
+            // The relay finds the task's thread itself. A relay without task threads has no such call. A task
+            // can also have none, when no channel may show its title, and the offer goes without it.
             if (taskLinks && !o.threadRootId)
-              yield* relay.signedChat("PUT", "tasks/" + o.taskId + "/thread");
+              yield* relay.signedChat("PUT", "tasks/" + o.taskId + "/thread").pipe(Effect.ignore);
             return (yield* relay.signedChat("POST", "handoffs", o)).body;
           }
           const h = (yield* list(relay)).find((row) => row.id === action.id);

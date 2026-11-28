@@ -126,3 +126,35 @@ it("shows the reviewed commit and findings and posts only on a person's click at
   await expect.element(stale.getByText(/Stale: reviewed at/)).toBeVisible();
   expect(stale.getByRole("button", { name: "Post as review" }).elements()).toHaveLength(0);
 });
+
+it("says in plain words that a review ended because its pull request left the board", async () => {
+  const person = { id: "leo", login: "leo" };
+  await using card = await render(
+    <AskCard
+      ask={{
+        id: "gone",
+        kind: "review",
+        from: { owner: person, handle: "ana/builder" },
+        to: { kind: "agent", owner: person, handle: "leo/reviewer" },
+        onBehalfOf: person,
+        question: "Check the retry.",
+        pr: { repo: "acme/platform", number: 17, headSha: "a".repeat(40) },
+        choices: [],
+        depth: 1,
+        receipts: [],
+        createdAt: "2026-11-28T00:00:00Z",
+        expiresAt: "2026-11-28T04:00:00Z",
+        state: "orphaned",
+        reason: "pr_gone",
+      }}
+    />,
+  );
+  await expect
+    .element(
+      card.getByText(
+        "The pull request is no longer on the board, so this review has ended. It may have been merged or closed.",
+      ),
+    )
+    .toBeVisible();
+  expect(card.getByText("pr_gone").elements()).toHaveLength(0);
+});

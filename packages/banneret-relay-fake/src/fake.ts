@@ -208,7 +208,9 @@ export interface FakeRelayOptions extends RelayOwnershipFields {
         };
         readonly deliveries?: { expireAfter?: string; inboxExpireAfter?: string };
         readonly channels?: { maxMembers?: number };
+        /** The channel, by name, where each board's task threads live. */
         readonly boards?: readonly { board: string; channel: string }[];
+        readonly taskLinks?: { readonly enabled?: boolean };
       };
   readonly officeFixture?: "company" | "community";
   readonly teamPreset?: "company" | "community";
@@ -867,6 +869,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   if (invalid) throw new Error(invalid);
   const chatEnabled = owners.chat.owner === "banneret";
   const chatConfig = chatEnabled && typeof options.chat === "object" ? options.chat : undefined;
+  // Task threads are on only where a board names its channel.
+  const taskLinksEnabled = !!chatConfig?.boards?.length && chatConfig.taskLinks?.enabled !== false;
   const defaultNames = chatConfig?.defaultChannels ?? (chatEnabled ? ["general"] : []);
   const duration = (value: string) => {
     const match = /^(\d+)(s|m|h|d)$/.exec(value);
@@ -991,6 +995,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   let boards: ReadonlyArray<BoardConfig> = DEFAULT_BOARDS;
   // The fake has a work tracker once a board is seeded; until then Today's Shipped block is not configured.
   let boardSeeded = false;
+  // A seeded board counts as read whole unless the seed says it is partial.
+  let boardPartial = false;
   /** Derived entries, newest first. Relay-wide. */
   let feedRecords: FeedRecord[] = [];
   let graveyardRecords: GraveyardRecord[] = [];
@@ -2661,6 +2667,50 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       .map(([emoji, ids]) => ({ emoji, count: ids.size, mine: ids.has(person) })),
   });
   const taskThreads = new Map<string, string>();
+  // Hand-offs whose thread was taken from the task's link, not named by the offer.
+  const takenThreads = new Set<string>();
+  /**
+   * The only channel a task's thread may live in: the board's, while all its readers can see the task. The rule is
+   * asked again before each call and each line, since readers and roles change. A refusal is an error code.
+   */
+  const taskChannel = (task: BoardTask): Channel | TaskRefusal => {
+    const name = chatConfig?.boards?.find((b) => b.board === task.board)?.channel;
+    if (!taskLinksEnabled || !name) return "not_found";
+    const channel = [...channels.values()].find((c) => !c.dmKey && c.name === name);
+    if (!channel || channel.archived) return "forbidden";
+    const readers = [...people.values()].filter((p) => !p.removed && visible(channel, p.id));
+    // An outsider whose access check is pending reads again once it passes, so nothing can be said yet.
+    const pending = (p: Person) =>
+      p.admission === "outside" && p.outsideReason === "outside_check_pending";
+    if (readers.some((p) => !pending(p) && !taskAllowed(p, task))) return "not_found";
+    return readers.some(pending) ? "unavailable" : channel;
+  };
+  type TaskRefusal = "not_found" | "forbidden" | "unavailable";
+  /** A caller learns only the channels of boards their role lets them see. */
+  const boardChannels = (p: Person) => {
+    const boards = chatConfig!.boards!.filter((b) => boardAllowed(p, b.board));
+    return boards.length ? { boards } : {};
+  };
+  const noTaskThread = (code: TaskRefusal) =>
+    new RelayError(
+      code,
+      {
+        not_found: "This task has no chat thread.",
+        forbidden: "The board's discussion channel is not available.",
+        unavailable: "The relay cannot tell yet who may see this task. Try again later.",
+      }[code],
+    );
+  /** Lease lines, by task, that wait while the relay cannot tell whether the thread is safe. */
+  const waitingLines = new Map<string, { event: string; text: string }[]>();
+  /** The task's linked root, while the relay may write there. */
+  const safeThread = (taskId: string) => {
+    const root = messages.get(taskThreads.get(taskId) ?? "");
+    const task = boardTasks.find((t) => t.id === taskId);
+    const channel = task && taskChannel(task);
+    return root && typeof channel === "object" && channel.id === root.conversationId
+      ? root
+      : undefined;
+  };
   let chatSeq = 0;
   const defaultChannels = defaultNames.map((name) => {
     const channel: Channel = {
@@ -2955,8 +3005,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     return m;
   }
   function echoLease(task: BoardTask, event: string, text: string) {
-    const root = messages.get(taskThreads.get(task.id) ?? "");
-    if (root) systemMessage(channels.get(root.conversationId)!, task.id, event, text, root);
+    if (!taskThreads.has(task.id)) return;
+    waitingLines.set(task.id, [...(waitingLines.get(task.id) ?? []), { event, text }]);
+    writeLeaseLines();
+  }
+  function writeLeaseLines() {
+    for (const [taskId, lines] of waitingLines) {
+      const task = boardTasks.find((t) => t.id === taskId);
+      if (task && taskChannel(task) === "unavailable") continue;
+      waitingLines.delete(taskId);
+      // A line left out is not made up later.
+      const root = safeThread(taskId);
+      if (root)
+        for (const { event, text } of lines)
+          systemMessage(channels.get(root.conversationId)!, taskId, event, text, root);
+    }
   }
 
   function handleReadsHome(c: Channel, handleId: string, rootId: string) {
@@ -3106,7 +3169,19 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   }
   function handoffEvent(h: Handoff, event: string, text: string) {
     const root = messages.get(h.threadRootId ?? taskThreads.get(h.taskId) ?? "");
-    if (root) systemMessage(channels.get(root.conversationId)!, h.taskId, event, text, root);
+    if (!root) return;
+    // A line goes into a task's thread only for that task, with its chip, and only while the thread is safe.
+    // A thread the offer named itself gets a line with no chip.
+    const taskThread =
+      !h.threadRootId || takenThreads.has(h.id) || [...taskThreads.values()].includes(root.id);
+    if (taskThread && safeThread(h.taskId)?.id !== root.id) return;
+    systemMessage(
+      channels.get(root.conversationId)!,
+      taskThread ? h.taskId : undefined,
+      event,
+      text,
+      root,
+    );
   }
   function settleHandoffs() {
     for (const h of handoffs.values()) {
@@ -3170,6 +3245,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
     const links = tasks.flatMap((t) => t.prs.filter((p) => p.number === pr.number));
     return {
       tasks,
+      // A whole board that does not show it says it is gone. A partial one says nothing.
+      gone: !tasks.length && !boardPartial,
       closed: links.some((p) => p.state !== "open"),
       head: links.findLast((p) => p.headSha)?.headSha,
       author: links.findLast((p) => p.author)?.author,
@@ -3215,6 +3292,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             c.agents === "off"))
       )
         changeAsk(m, { state: "orphaned" });
+      else if (a.kind === "review" && reviewFacts(a.pr!).gone)
+        changeAsk(m, { state: "orphaned", reason: "pr_gone" });
       else if (a.kind === "review" && reviewFacts(a.pr!).closed)
         changeAsk(m, { state: "orphaned" });
       else if (a.kind === "review" && a.state === "open" && headMoved(a, reviewFacts(a.pr!)))
@@ -3222,6 +3301,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       else if (Date.parse(a.expiresAt) <= Date.now()) changeAsk(m, { state: "expired" });
       else if (a.kind === "review") sawHead(a, reviewFacts(a.pr!));
     }
+    writeLeaseLines();
     settleHandoffs();
   }
   const deliveryReadable = (d: ChatDelivery, person: Person) => {
@@ -3591,8 +3671,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           ...(chatEnabled
             ? {
                 chat: {
-                  ...(typeof options.chat === "object" &&
-                    options.chat.boards && { boards: options.chat.boards }),
+                  ...(taskLinksEnabled && boardChannels(caller.person)),
                   maxTextBytes: 16384,
                   editWindowSeconds: 0,
                   rate: {
@@ -3622,7 +3701,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     flags: [
                       ...(options.search === false ? [] : ["search"]),
                       ...(options.promote === false ? [] : ["promote"]),
-                      "task_links",
+                      ...(taskLinksEnabled ? ["task_links"] : []),
                       "channel_access",
                       "join_requests",
                       ...(agentAsksEnabled ? ["agent_asks"] : []),
@@ -4188,8 +4267,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               if (!input.verdict || !input.headSha)
                 throw new RelayError("malformed", "Provide the review verdict and head.");
               const facts = reviewFacts(a.pr!);
+              // The sweep has ended a review whose pull request left a whole board, so this board is partial.
               if (!facts.tasks.length)
-                throw new RelayError("unavailable", "The board does not show this pull request.");
+                throw new RelayError(
+                  "unavailable",
+                  "The board was not read whole. Try again later.",
+                );
               const reviewer = people.get(target.owner.id)!;
               if (isMaker(facts, reviewer)) {
                 // The refusal keeps this change. The relay ends the review, so nobody decided it.
@@ -4208,7 +4291,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               if (!sameText(input.headSha, a.pr!.headSha) || headMoved(a, facts))
                 return send("ChatAsk", move({ state: "unanswered", reason: "head_moved" }));
             }
-            const { text, choice, verdict, headSha } = input;
+            const { text, choice, verdict } = input;
+            const headSha = input.headSha?.toLowerCase();
             if (!(text ?? choice)?.trim()) throw new RelayError("malformed", "Provide an answer.");
             const answer = {
               text: text ?? choice!,
@@ -4286,7 +4370,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             )
           )
             fail("handoff_open");
-          const rootId = input.threadRootId ?? taskThreads.get(task.id);
+          let rootId = input.threadRootId;
+          let taken = false;
           if (rootId) {
             const root = messageFor(rootId),
               channel = channels.get(root.conversationId)!;
@@ -4297,6 +4382,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               !visible(channel, to.id)
             )
               throw new RelayError("forbidden", "Choose a shared hand-off thread.");
+          } else {
+            // The task's own thread, when it is safe and both people can use it. Otherwise none.
+            const own = safeThread(task.id),
+              channel = own && channels.get(own.conversationId)!;
+            if (own && rights(channel!, person).reply && visible(channel!, to.id)) {
+              rootId = own.id;
+              taken = true;
+            }
           }
           const now = Date.now();
           const h: Handoff = {
@@ -4319,6 +4412,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           };
           handoffs.set(h.id, h);
           offerKeys.set(key, h.id);
+          if (taken) takenThreads.add(h.id);
           handoffEvent(
             h,
             "handoff_offered",
@@ -4810,6 +4904,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (kind === "review") {
               const facts = reviewFacts(ask.pr!);
               const parties = [person, to, people.get(origin.id)!];
+              if (!facts.tasks.length && boardPartial)
+                throw new RelayError(
+                  "unavailable",
+                  "The board was not read whole. Try again later.",
+                );
               if (
                 !facts.tasks.length ||
                 !parties.every((p) => facts.tasks.some((t) => taskAllowed(p, t)))
@@ -4902,7 +5001,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               : {}),
             ...(ask.context !== undefined && { context: ask.context }),
             ...(ask.doneWhen && { doneWhen: ask.doneWhen }),
-            ...(ask.pr && { pr: ask.pr }),
+            ...(ask.pr && { pr: { ...ask.pr, headSha: ask.pr.headSha.toLowerCase() } }),
             ...(ask.taskRef && { taskRef: ask.taskRef }),
             ...(ask.parentAskId && { parentAskId: ask.parentAskId }),
           };
@@ -5543,11 +5642,14 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           (method === "PUT" || method === "DELETE")) ||
         (resource === "tasks" && action === "thread" && method === "PUT")
       ) {
+        if (!taskLinksEnabled) throw new RelayError("not_found", "Task threads are off.");
         const root = resource === "threads" ? messageFor(id) : undefined;
         if (root) {
           const channel = channelFor(root.conversationId);
           if (root.threadRootId || root.deleted)
             throw new RelayError("malformed", "Choose a current thread root.");
+          // A DM as the task's one discussion would hide it from everyone else.
+          if (channel.dmKey) throw new RelayError("malformed", "A DM cannot hold a task thread.");
           if (!channel.members.has(person.id) || channel.archived)
             throw new RelayError("forbidden", "Join an open channel to link a task.");
         }
@@ -5555,6 +5657,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         if (method === "DELETE") {
           if (linked && root) {
             taskThreads.delete(linked);
+            waitingLines.delete(linked);
             const { taskRef: _task, ...updated } = root;
             messages.set(id, updated);
             chatChange(channelFor(root.conversationId), {
@@ -5568,23 +5671,30 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         }
         const taskId = root ? (parseJson(body, "ChatTask") as ChatTask).taskRef : id;
         const task = boardTasks.find((t) => t.id === taskId);
-        if (!task) throw new RelayError("not_found", "Unknown board task.");
+        if (!task && boardPartial)
+          throw new RelayError("unavailable", "The board was not read whole. Try again later.");
+        if (!task || !taskAllowed(person, task))
+          throw new RelayError("not_found", "Unknown board task.");
         const existing = taskThreads.get(taskId);
         let destination = existing ? messageFor(existing) : root;
-        if (!existing) {
-          if (linked) throw new RelayError("malformed", "Unlink this thread first.");
+        const channel = taskChannel(task);
+        if (typeof channel === "string") throw noTaskThread(channel);
+        if (existing) {
+          if (destination!.conversationId !== channel.id) throw noTaskThread("not_found");
+        } else {
           if (root) {
+            if (root.conversationId !== channel.id)
+              throw new RelayError("forbidden", "A task's thread lives in its board's channel.");
+            if (linked) throw new RelayError("malformed", "Unlink this thread first.");
             const updated = { ...root, taskRef: taskId };
             messages.set(id, updated);
-            chatChange(channelFor(root.conversationId), {
+            chatChange(channel, {
               kind: "message.edited",
               seq: ++chatSeq,
               message: updated,
             });
           } else {
-            const channel = defaultChannels[0];
-            if (!channel || channel.archived || channel.access.visibility === "private")
-              throw new RelayError("forbidden", "No public discussion channel is available.");
+            if (!visible(channel, person.id)) throw new RelayError("not_found", "Unknown channel.");
             destination = systemMessage(channel, taskId, "task_linked", task.title);
           }
           taskThreads.set(taskId, destination!.id);
@@ -6527,6 +6637,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         };
       });
       boards = seededBoards;
+      boardPartial = input.partial === true;
       for (const task of boardTasks) feedReleases(task);
       boardSeeded = true;
       refreshAllHeads();

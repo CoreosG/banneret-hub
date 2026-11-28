@@ -11,7 +11,7 @@ import type {
   PoolNextResponse,
   PoolView,
 } from "@t3tools/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it, type TestContext } from "vite-plus/test";
 
 import { RelayClient, rfc3339, SseReader, type Reply } from "./client.ts";
 import { type FakeRelay, startFakeRelay } from "./fake.ts";
@@ -48,6 +48,7 @@ beforeAll(async () => {
       agentAsks: { enabled: true },
       handoffs: { enabled: true, stallAfter: "1s" },
       reviews: { enabled: true },
+      boards: [{ board: "platform", channel: "task-talk" }],
     },
     skills: [
       {
@@ -196,6 +197,25 @@ const call = (machine: Enrolled, method: string, target: string, body?: unknown)
     device: machine.machineId,
     ...(body === undefined ? {} : { body }),
   });
+
+/** Every conversation the caller can list. A shared relay soon has more than one page of channels. */
+const allConversations = async (machine: Enrolled) => {
+  const rows: { id: string; kind: string; name?: string }[] = [];
+  let cursor: string | null = null;
+  do {
+    const reply = await call(
+      machine,
+      "GET",
+      "/relay/v1/chat/conversations?limit=100" +
+        (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""),
+    );
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    const page = reply.body as { items: typeof rows; nextCursor: string | null };
+    rows.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return rows;
+};
 
 /** The head's `boards` index, read and validated; undefined when the head names none. */
 const readBoardsIndex = async (machine: Enrolled, files: Readonly<Record<string, string>>) => {
@@ -2627,12 +2647,32 @@ describe("team", () => {
     expectSchema(schema, file.body);
     return file.body;
   };
+  interface DirectoryPage {
+    people: { id: string; login: string; role: string; presence: string }[];
+    nextCursor: string | null;
+  }
+  const peoplePage = async (machine: Enrolled, query: string) => {
+    const reply = await call(machine, "GET", "/relay/v1/team/people?" + query);
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    expectSchema("SnapshotTeamPeople", reply.body);
+    return reply.body as DirectoryPage;
+  };
+  // The whole directory. The snapshot file holds the first page and `/team/people` continues it. A shared
+  // relay soon has more people than one page holds.
   const readTeam = async (machine: Enrolled) => {
     const files = await filesFor(machine);
     await readFile(machine, files.team!, "SnapshotTeam");
-    return (await readFile(machine, files["team.people"]!, "SnapshotTeamPeople")) as {
-      people: { id: string; login: string; role: string; presence: string }[];
-    };
+    let page = (await readFile(
+      machine,
+      files["team.people"]!,
+      "SnapshotTeamPeople",
+    )) as DirectoryPage;
+    const people = [...page.people];
+    while (page.nextCursor !== null) {
+      page = await peoplePage(machine, "cursor=" + encodeURIComponent(page.nextCursor));
+      people.push(...page.people);
+    }
+    return { people };
   };
   const sessionsOf = async (machine: Enrolled, reader = machine) => {
     const person = (await readTeam(reader)).people.find((p) => p.login === machine.login)!;
@@ -2769,6 +2809,7 @@ describe("team", () => {
         expect(Buffer.byteLength(JSON.stringify(summary))).toBeLessThanOrEqual(65536);
         expect(summary.rooms).toHaveLength(50);
         expect(summary.people.total).toBe(preset === "company" ? 500 : 2000);
+        expect((await readTeam(reader)).people).toHaveLength(summary.people.total);
         if (preset === "company") {
           expect(
             summary.rooms.every((room) => room.desks === 10 && room.counts.working === 30),
@@ -2883,6 +2924,25 @@ describe("team", () => {
       ).status,
     ).toBe(400);
   });
+  it("continues the directory page by page until nextCursor is null", async () => {
+    const prefix = "pg-" + randomText(5);
+    const logins = ["a", "b", "c"].map((end) => prefix + "-" + end);
+    let reader: Enrolled | undefined;
+    for (const login of logins) reader = await enrol({ login });
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: DirectoryPage = await peoplePage(
+        reader!,
+        "q=" + prefix + "&limit=1" + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""),
+      );
+      expect(page.people).toHaveLength(1);
+      seen.push(page.people[0]!.login);
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    expect(seen).toEqual(logins);
+  });
+
   it("includes a directory member before their first sign-in", async () => {
     const reader = await enrol();
     const person = (await readTeam(reader)).people.find((entry) => entry.login === "cy-example");
@@ -4769,13 +4829,13 @@ describe("chat contract", () => {
         ],
       });
     };
-    const send = (key: string, head: string) =>
+    const send = (key: string, head: string, pr: { repo?: string } = {}) =>
       call(t.asker, "POST", t.chat + "asks", {
         ...t.newAsk,
         question: key,
         key,
         kind: "review",
-        pr: { repo, number: 17, headSha: head },
+        pr: { repo, number: 17, headSha: head, ...pr },
       });
     // The loop limits count agent asks in a thread since a person last wrote there.
     const speak = () =>
@@ -4862,6 +4922,60 @@ describe("chat contract", () => {
     expect(await t.read(lagging.id)).toMatchObject({ state: "open" });
     await t.seed(laterHead);
     expect(await t.read(lagging.id)).toMatchObject({ state: "unanswered", reason: "head_moved" });
+  });
+
+  it("ends a review as pr_gone when the whole board no longer shows its pull request", async () => {
+    const t = await reviewWorld();
+    await t.seed(oldHead);
+    const open = await t.request("gone_open", oldHead);
+    await t.allow(open.id);
+    const waiting = await t.request("gone_waiting", newHead);
+    expect(waiting.state).toBe("waiting_owner");
+    // A merge that closes its task takes the card off the board before any read shows "merged".
+    await client.control("/board/seed", { tasks: [] });
+    for (const ask of [open, waiting])
+      expect(await t.read(ask.id)).toMatchObject({ state: "orphaned", reason: "pr_gone" });
+    expectError(await t.verdict(open.id, oldHead), 409, "ask_closed");
+    expectError(await t.send("gone_again", laterHead), 404, "not_found");
+    const results = (await call(t.asker, "GET", t.chat + "deliveries")).body as {
+      items: { reason: string; message: { ask?: { id: string; reason?: string } } }[];
+    };
+    expect(
+      results.items.filter((d) => d.reason === "ask_result" && d.message.ask?.id === open.id),
+    ).toMatchObject([{ message: { ask: { reason: "pr_gone" } } }]);
+  });
+
+  // The control surface of another relay cannot seed a board that was not read whole.
+  it.skipIf(external)(
+    "keeps a review waiting while the board was not read whole, and answers 503",
+    async () => {
+      const t = await reviewWorld();
+      await t.seed(oldHead);
+      const open = await t.request("partial_open", oldHead);
+      await t.allow(open.id);
+      await client.control("/board/seed", { tasks: [], partial: true });
+      expect(await t.read(open.id)).toMatchObject({ state: "open" });
+      expectError(await t.verdict(open.id, oldHead), 503, "unavailable");
+      expectError(await t.send("partial_new", newHead), 503, "unavailable");
+      expectError(await call(t.asker, "PUT", t.chat + "tasks/unseen/thread"), 503, "unavailable");
+      await client.control("/board/seed", { tasks: [] });
+      expect(await t.read(open.id)).toMatchObject({ state: "orphaned", reason: "pr_gone" });
+    },
+  );
+
+  it("takes a review only for an owner/name repository and a full commit SHA, kept in lower case", async () => {
+    const t = await reviewWorld();
+    await t.seed(oldHead);
+    expectError(await t.send("short_sha", oldHead.slice(0, 7)), 400, "malformed");
+    expectError(await t.send("bare_repo", oldHead, { repo: "example-app" }), 400, "malformed");
+    const ask = await t.request("upper_sha", oldHead.toUpperCase());
+    expect(ask).toMatchObject({ pr: { headSha: oldHead } });
+    await t.allow(ask.id);
+    expectError(await t.verdict(ask.id, oldHead.slice(0, 7)), 400, "malformed");
+    expect((await t.verdict(ask.id, oldHead.toUpperCase())).body).toMatchObject({
+      state: "answered",
+      answer: { headSha: oldHead },
+    });
   });
 
   it("refuses a review with 503 when it cannot tell who opened the pull request", async () => {
@@ -4964,7 +5078,7 @@ describe("chat contract", () => {
         ...newAsk,
         key: "review",
         kind: "review",
-        pr: { repo, number: 17, headSha: "abc1234" },
+        pr: { repo, number: 17, headSha: "d".repeat(40) },
       }),
       403,
       "review_same_owner",
@@ -5253,101 +5367,458 @@ describe("chat contract", () => {
       ).toBe(403);
     },
   );
-  /** A task with its discussion opened, and a member who joined that channel. */
-  async function taskDiscussion() {
-    const member = await enrol();
-    const taskId = "t_" + randomText(6);
-    const path = "/relay/v1/chat/";
+  type BoardChannel = { board: string; channel: string };
+  const meOf = async (machine: Enrolled) =>
+    (await call(machine, "GET", "/relay/v1/capabilities")).body as {
+      me: { id: string };
+      chat?: { boards?: BoardChannel[] };
+      sections: { kind: string; flags: string[] }[];
+    };
+  /** The relay's first board channel. A relay that maps none has task threads off, so the case skips. */
+  async function boardChannel(context: TestContext) {
+    const mapping = (await meOf(await enrol())).chat?.boards?.[0];
+    context.skip(!mapping, "this relay maps no board to a channel");
+    return mapping!;
+  }
+  // The mapped channel, made private and once per relay, so its readers are only the people a case adds.
+  const taskRooms = new Map<RelayClient, { owner: Enrolled; id: string; name: string }>();
+  async function taskRoom(name: string) {
+    let room = taskRooms.get(client);
+    if (!room) {
+      const owner = await enrol();
+      let id = (await allConversations(owner)).find((c) => c.name === name)?.id;
+      if (!id) {
+        const created = await call(owner, "POST", "/relay/v1/chat/conversations", {
+          kind: "channel",
+          name,
+          purpose: "Task threads",
+          template: "private",
+        });
+        expectSchema("ChatConversation", created.body);
+        id = (created.body as { id: string }).id;
+      }
+      room = { owner, id, name };
+      taskRooms.set(client, room);
+    }
+    return room;
+  }
+  const seat = async (
+    room: { owner: Enrolled; id: string },
+    machine: Enrolled,
+    method: "PUT" | "DELETE" = "PUT",
+  ) => {
+    const reply = await call(
+      room.owner,
+      method,
+      "/relay/v1/chat/conversations/" + room.id + "/members/" + (await meOf(machine)).me.id,
+    );
+    expect(reply.status, JSON.stringify(reply.body)).toBe(method === "PUT" ? 200 : 204);
+  };
+  const taskRepo = "example-org/example-app";
+  /** A member whose role hides the tasks these cases seed: they may see another repository only. */
+  const restricted = () => enrol({ role: "staff", repoKeys: ["example-org/other"] });
+  async function seedTask(board: string) {
+    const taskId = "t_" + randomText(6),
+      title = "Secret upload " + randomText(4);
     await client.control("/board/seed", {
-      tasks: [{ id: taskId, title: "Build upload", comments: [], assignees: [], labels: [] }],
+      tasks: [
+        {
+          id: taskId,
+          title,
+          board,
+          projectKey: taskRepo,
+          comments: [],
+          assignees: [],
+          labels: [],
+        },
+      ],
     });
-    const open = () => call(member, "PUT", path + "tasks/" + taskId + "/thread");
-    const location = await open();
+    return { taskId, title };
+  }
+  /** Whether any message the caller can list in the conversation belongs to the task. */
+  const mentionsTask = async (machine: Enrolled, conversationId: string, taskId: string) => {
+    const reply = await call(
+      machine,
+      "GET",
+      "/relay/v1/chat/conversations/" + conversationId + "/messages?limit=100",
+    );
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    return (reply.body as { items: { taskRef?: string }[] }).items.some(
+      (m) => m.taskRef === taskId,
+    );
+  };
+  /** A task on the mapped board, and a member of its channel who has not opened its thread yet. */
+  async function taskWorld(mapping: BoardChannel) {
+    const room = await taskRoom(mapping.channel),
+      member = await enrol();
+    await seat(room, member);
+    const { taskId, title } = await seedTask(mapping.board);
+    const path = "/relay/v1/chat/";
+    const open = (caller: Enrolled = member) =>
+      call(caller, "PUT", path + "tasks/" + taskId + "/thread");
+    const say = async (conversationId: string, from: Enrolled = member) => {
+      const reply = await call(from, "POST", path + "messages", {
+        conversationId,
+        text: "Another root",
+        key: randomText(6),
+      });
+      expectSchema("ChatMessage", reply.body);
+      return (reply.body as { id: string }).id;
+    };
+    return { room, member, taskId, title, path, open, say };
+  }
+  /** A task with its discussion opened. */
+  async function taskDiscussion(mapping: BoardChannel) {
+    const world = await taskWorld(mapping);
+    const location = await world.open();
     expectSchema("ChatThreadLocation", location.body);
     const { conversationId, threadRootId } = location.body as {
       conversationId: string;
       threadRootId: string;
     };
-    const caps = await call(member, "GET", "/relay/v1/capabilities");
-    const personId = (caps.body as { me: { id: string } }).me.id;
-    expect(
-      (await call(member, "PUT", path + "conversations/" + conversationId + "/members/" + personId))
-        .status,
-    ).toBe(200);
+    expect(conversationId).toBe(world.room.id);
     const tracker = (body: string, held: boolean) =>
       client.control("/board/tracker", {
-        taskId,
-        comments: [{ author: member.login, body }],
-        assignees: held ? [member.login] : [],
+        taskId: world.taskId,
+        comments: [{ author: world.member.login, body }],
+        assignees: held ? [world.member.login] : [],
         labels: held ? ["claimed"] : [],
       });
-    return { member, taskId, path, open, location, conversationId, threadRootId, tracker };
+    return { ...world, location, conversationId, threadRootId, tracker };
   }
 
-  // Task threads are relay slice CR5. Until a relay serves them, these two run against the fake.
-  it.skipIf(external)(
-    "opens one discussion per task and echoes lease transitions only while linked (pending relay slice CR5)",
-    async () => {
-      const { member, taskId, path, open, location, conversationId, threadRootId, tracker } =
-        await taskDiscussion();
-      expect((await open()).body).toEqual(location.body);
-      const other = await call(member, "POST", path + "messages", {
-        conversationId,
-        text: "Another root",
-        key: randomText(6),
-      });
-      const otherLink = path + "threads/" + (other.body as { id: string }).id + "/task";
-      expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual(
-        location.body,
-      );
-      for (const reason of ["done", "handing_over"]) {
-        await tracker("claim: " + member.login + "/hub", true);
-        await tracker("release: " + reason, false);
-      }
-      const thread = path + "threads/" + threadRootId;
-      expect((await call(member, "GET", thread)).body).toMatchObject({
-        items: [
-          { kind: "system", systemEvent: "lease_taken" },
-          { systemEvent: "lease_released", text: expect.stringContaining("done") },
-          { systemEvent: "lease_taken" },
-          { systemEvent: "lease_handed_over" },
-        ],
-      });
-      expect((await call(member, "DELETE", thread + "/task")).status).toBe(204);
-      expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual({
-        conversationId,
-        threadRootId: (other.body as { id: string }).id,
-      });
-    },
-  );
-  it.skipIf(external)(
-    "records the task's thread on a hand-off offered without one (pending relay slice CR5)",
-    async () => {
-      const { member, taskId, path, threadRootId, tracker } = await taskDiscussion();
-      const receiver = await enrol();
-      const { me } = (await call(receiver, "GET", "/relay/v1/capabilities")).body as {
-        me: { id: string };
-      };
+  it("advertises task threads only with a board channel mapping", async () => {
+    const caps = await meOf(await enrol());
+    const flags = caps.sections.find((section) => section.kind === "chat")!.flags;
+    expect(flags.includes("task_links")).toBe(!!caps.chat?.boards?.length);
+  });
+
+  it("tells a caller only the channels of boards their role lets them see", async (context) => {
+    const mapping = await boardChannel(context);
+    await seedTask(mapping.board);
+    const caps = await meOf(await restricted());
+    expect(caps.chat?.boards?.map((b) => b.board) ?? []).not.toContain(mapping.board);
+  });
+
+  it("opens one discussion per task and echoes lease transitions only while linked", async (context) => {
+    const mapping = await boardChannel(context);
+    const { member, taskId, path, open, say, location, conversationId, threadRootId, tracker } =
+      await taskDiscussion(mapping);
+    expect((await open()).body).toEqual(location.body);
+    const other = await say(conversationId);
+    const otherLink = path + "threads/" + other + "/task";
+    expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual(location.body);
+    for (const reason of ["done", "handing_over"]) {
       await tracker("claim: " + member.login + "/hub", true);
-      const offer = await call(member, "POST", path + "handoffs", {
-        taskId,
-        to: { id: me.id, login: receiver.login },
-        note: { goal: "Upload", done: "Built", next: "Review" },
-        key: "offer",
+      await tracker("release: " + reason, false);
+    }
+    const thread = path + "threads/" + threadRootId;
+    expect((await call(member, "GET", thread)).body).toMatchObject({
+      items: [
+        { kind: "system", systemEvent: "lease_taken" },
+        { systemEvent: "lease_released", text: expect.stringContaining("done") },
+        { systemEvent: "lease_taken" },
+        { systemEvent: "lease_handed_over" },
+      ],
+    });
+    expect((await call(member, "DELETE", thread + "/task")).status).toBe(204);
+    expect((await call(member, "PUT", otherLink, { taskRef: taskId })).body).toEqual({
+      conversationId,
+      threadRootId: other,
+    });
+  });
+
+  it("records the task's thread on a hand-off offered without one", async (context) => {
+    const mapping = await boardChannel(context);
+    const { room, member, taskId, path, threadRootId, tracker } = await taskDiscussion(mapping);
+    const receiver = await enrol();
+    await seat(room, receiver);
+    await tracker("claim: " + member.login + "/hub", true);
+    const offer = await call(member, "POST", path + "handoffs", {
+      taskId,
+      to: { id: (await meOf(receiver)).me.id, login: receiver.login },
+      note: { goal: "Upload", done: "Built", next: "Review" },
+      key: "offer",
+    });
+    expectSchema("Handoff", offer.body);
+    expect(offer.body).toMatchObject({ state: "offered", threadRootId });
+    expect((await call(member, "GET", path + "threads/" + threadRootId)).body).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ systemEvent: "handoff_offered" })]),
+    });
+  });
+
+  it("gives a task on an unmapped board no thread, and still takes its hand-off and review", async (context) => {
+    await boardChannel(context);
+    const caps = await meOf(await enrol());
+    const unmapped = ["platform", "ops"].find(
+      (board) => !caps.chat?.boards?.some((mapping) => mapping.board === board),
+    );
+    context.skip(!unmapped, "this relay maps every board these cases seed");
+    const { asker, answerer, chat, to, conversationId, newAsk } = await sharedAskThread();
+    const taskId = "task_" + randomText(5);
+    await client.control("/board/seed", {
+      tasks: [
+        {
+          id: taskId,
+          title: "Unmapped upload",
+          board: unmapped!,
+          projectKey: taskRepo,
+          holder: asker.login,
+          prs: [{ number: 17, author: asker.login, headSha: "a".repeat(40) }],
+        },
+      ],
+    });
+    expectError(await call(asker, "PUT", chat + "tasks/" + taskId + "/thread"), 404, "not_found");
+    const general = (await allConversations(asker)).find((c) => c.name === "general");
+    if (general) expect(await mentionsTask(asker, general.id, taskId)).toBe(false);
+    expect(await mentionsTask(asker, conversationId, taskId)).toBe(false);
+    const offer = await call(asker, "POST", chat + "handoffs", {
+      taskId,
+      to: to.owner,
+      note: { goal: "Upload", done: "Built", next: "Review" },
+      key: "offer",
+    });
+    expectSchema("Handoff", offer.body);
+    expect(offer.body).toMatchObject({ state: "offered" });
+    expect(offer.body).not.toHaveProperty("threadRootId");
+    // The review's home is an ordinary shared thread; it needs no task thread.
+    const review = await call(asker, "POST", chat + "asks", {
+      ...newAsk,
+      kind: "review",
+      pr: { repo: taskRepo, number: 17, headSha: "a".repeat(40) },
+    });
+    expectSchema("ChatAsk", review.body);
+    expect(review.body).toMatchObject({ state: "waiting_owner" });
+    expect((await call(answerer, "GET", chat + "handoffs?role=receiver")).body).toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ taskId, state: "offered" })]),
+    });
+  });
+
+  const lines = async (machine: Enrolled, rootId: string) => {
+    const reply = await call(machine, "GET", "/relay/v1/chat/threads/" + rootId);
+    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    return (reply.body as { items: { systemEvent: string }[] }).items.map((m) => m.systemEvent);
+  };
+  const offerTo = async (giver: Enrolled, receiver: Enrolled, taskId: string) => {
+    const reply = await call(giver, "POST", "/relay/v1/chat/handoffs", {
+      taskId,
+      to: { id: (await meOf(receiver)).me.id, login: receiver.login },
+      note: { goal: "Upload", done: "Built", next: "Review" },
+      key: randomText(6),
+    });
+    expectSchema("Handoff", reply.body);
+    expect(reply.body).toMatchObject({ state: "offered" });
+    return reply.body as { id: string; threadRootId?: string };
+  };
+
+  it("opens and links no thread while any reader of the channel cannot see the task", async (context) => {
+    const mapping = await boardChannel(context);
+    const { room, member, taskId, path, open, say } = await taskWorld(mapping);
+    const outsideTheTask = await restricted();
+    await seat(room, outsideTheTask);
+    try {
+      const root = await say(room.id);
+      expectError(await open(), 404, "not_found");
+      expectError(
+        await call(member, "PUT", path + "threads/" + root + "/task", { taskRef: taskId }),
+        404,
+        "not_found",
+      );
+      expect(await mentionsTask(member, room.id, taskId)).toBe(false);
+    } finally {
+      await seat(room, outsideTheTask, "DELETE");
+    }
+    expectSchema("ChatThreadLocation", (await open()).body);
+  });
+
+  it("stops using a task's thread, and writes no line there, while a reader cannot see the task", async (context) => {
+    const mapping = await boardChannel(context);
+    const { room, member, taskId, open, location, threadRootId, tracker } =
+      await taskDiscussion(mapping);
+    const receiver = await enrol();
+    await seat(room, receiver);
+    const later = await restricted();
+    await seat(room, later);
+    try {
+      expectError(await open(), 404, "not_found");
+      await tracker("claim: " + member.login + "/hub", true);
+      expect((await offerTo(member, receiver, taskId)).threadRootId).toBeUndefined();
+      expect(await lines(member, threadRootId)).toEqual([]);
+    } finally {
+      await seat(room, later, "DELETE");
+    }
+    // The same thread goes on, and the lines left out are not made up.
+    expect((await open()).body).toEqual(location.body);
+    await tracker("release: done", false);
+    const written = await lines(member, threadRootId);
+    expect(written).toContain("lease_released");
+    expect(written).not.toContain("lease_taken");
+    expect(written).not.toContain("handoff_offered");
+  });
+
+  it("sends a hand-off without a thread when the receiver cannot read the task's thread", async (context) => {
+    const mapping = await boardChannel(context);
+    const { member, taskId, threadRootId, tracker } = await taskDiscussion(mapping);
+    const receiver = await enrol();
+    context.skip(
+      (await call(receiver, "GET", "/relay/v1/chat/threads/" + threadRootId)).status === 200,
+      "every member reads this relay's board channel",
+    );
+    await tracker("claim: " + member.login + "/hub", true);
+    expect((await offerTo(member, receiver, taskId)).threadRootId).toBeUndefined();
+    // The thread is still safe, so the task's line goes there.
+    expect(await lines(member, threadRootId)).toEqual(["lease_taken", "handoff_offered"]);
+  });
+
+  it("tells a caller whose role hides a task nothing about its thread", async (context) => {
+    const mapping = await boardChannel(context);
+    const { open } = await taskDiscussion(mapping);
+    expectError(await open(await restricted()), 404, "not_found");
+  });
+
+  it("links a thread only in the board's channel, and never a DM", async (context) => {
+    const mapping = await boardChannel(context);
+    const { member, taskId, path, say } = await taskWorld(mapping);
+    const link = (root: string) =>
+      call(member, "PUT", path + "threads/" + root + "/task", { taskRef: taskId });
+    const dm = await call(member, "POST", path + "conversations", {
+      kind: "dm",
+      members: [(await meOf(await enrol())).me.id],
+    });
+    expectError(await link(await say((dm.body as { id: string }).id)), 400, "malformed");
+    const elsewhere = await call(member, "POST", path + "conversations", {
+      kind: "channel",
+      name: "elsewhere-" + randomText(5),
+      template: "private",
+    });
+    expectError(await link(await say((elsewhere.body as { id: string }).id)), 403, "forbidden");
+  });
+
+  it("writes no lease line into an archived channel, and makes none up when it returns", async (context) => {
+    const mapping = await boardChannel(context);
+    const { room, member, path, open, location, threadRootId, tracker } =
+      await taskDiscussion(mapping);
+    const thread = path + "threads/" + threadRootId;
+    const archive = async (archived: boolean) => {
+      const reply = await call(room.owner, "PATCH", path + "conversations/" + room.id, {
+        archived,
       });
-      expectSchema("Handoff", offer.body);
-      expect(offer.body).toMatchObject({ state: "offered", threadRootId });
-      expect((await call(member, "GET", path + "threads/" + threadRootId)).body).toMatchObject({
-        items: expect.arrayContaining([
-          expect.objectContaining({ systemEvent: "handoff_offered" }),
-        ]),
+      expect(reply.status, JSON.stringify(reply.body)).toBe(200);
+    };
+    await archive(true);
+    try {
+      await tracker("claim: " + member.login + "/hub", true);
+      // The link stays, but an archived thread is neither returned nor unlinked.
+      expectError(await open(), 403, "forbidden");
+      expectError(await call(member, "DELETE", thread + "/task"), 403, "forbidden");
+    } finally {
+      await archive(false);
+    }
+    expect((await open()).body).toEqual(location.body);
+    await tracker("release: done", false);
+    expect(await lines(member, threadRootId)).toEqual(["lease_released"]);
+  });
+
+  // The switches and the board's channel are relay config, so these two need their own fake.
+  it.skipIf(external)("keeps task threads off without a board channel mapping", async () => {
+    const boards = [{ board: "platform", channel: "general" }];
+    for (const chat of [true, { boards, taskLinks: { enabled: false } }])
+      await onOwnFake({ chat }, async () => {
+        const member = await enrol();
+        const caps = await meOf(member);
+        expect(caps.sections.find((s) => s.kind === "chat")!.flags).not.toContain("task_links");
+        expect(caps.chat).not.toHaveProperty("boards");
+        const { taskId } = await seedTask("platform");
+        expectError(
+          await call(member, "PUT", "/relay/v1/chat/tasks/" + taskId + "/thread"),
+          404,
+          "not_found",
+        );
       });
+  });
+
+  it.skipIf(external)(
+    "opens no thread when the board's channel is missing, archived or open to someone the task is hidden from",
+    async () => {
+      await onOwnFake(
+        { chat: { boards: [{ board: "platform", channel: "launch" }] } },
+        async () => {
+          const member = await enrol(),
+            path = "/relay/v1/chat/";
+          const { taskId } = await seedTask("platform");
+          const refused = async (status: number, code: string) => {
+            expectError(
+              await call(member, "PUT", path + "tasks/" + taskId + "/thread"),
+              status,
+              code,
+            );
+            const general = (await allConversations(member)).find((c) => c.name === "general")!;
+            expect(await mentionsTask(member, general.id, taskId)).toBe(false);
+          };
+          await refused(403, "forbidden");
+          const created = await call(member, "POST", path + "conversations", {
+            kind: "channel",
+            name: "launch",
+            template: "team",
+          });
+          const channel = path + "conversations/" + (created.body as { id: string }).id;
+          await call(member, "PATCH", channel, { archived: true });
+          await refused(403, "forbidden");
+          await call(member, "PATCH", channel, { archived: false });
+          // Not a member, but the channel is public, so they could read it.
+          await restricted();
+          await refused(404, "not_found");
+        },
+      );
     },
   );
+  // Only relay config can map a board to a channel that is open to outsiders.
+  it.skipIf(external)(
+    "answers 503 and holds lease lines while an outside reader's access check is pending",
+    async () => {
+      await onOwnFake(
+        { chat: { boards: [{ board: "platform", channel: "launch" }] } },
+        async () => {
+          const member = await enrol(),
+            path = "/relay/v1/chat/";
+          const created = await call(member, "POST", path + "conversations", {
+            kind: "channel",
+            name: "launch",
+            template: "shared",
+          });
+          const room = { owner: member, id: (created.body as { id: string }).id };
+          // The outside reader may see the task, so the channel is safe while their access is proven.
+          const outsider = await enrol({ admission: "outside", repoKeys: [taskRepo] });
+          await seat(room, outsider);
+          const { taskId } = await seedTask("platform");
+          const open = () => call(member, "PUT", path + "tasks/" + taskId + "/thread");
+          const location = await open();
+          expectSchema("ChatThreadLocation", location.body);
+          const { threadRootId } = location.body as { threadRootId: string };
+          const check = (reason: string | null) =>
+            client.control("/outside/check", { login: outsider.login, reason });
+          await check("outside_check_pending");
+          expectError(await open(), 503, "unavailable");
+          await client.control("/board/tracker", {
+            taskId,
+            comments: [{ author: member.login, body: "claim: " + member.login + "/hub" }],
+            assignees: [member.login],
+            labels: ["claimed"],
+          });
+          expect(await lines(member, threadRootId)).toEqual([]);
+          await check(null);
+          expect(await lines(member, threadRootId)).toEqual(["lease_taken"]);
+          expect((await open()).body).toEqual(location.body);
+        },
+      );
+    },
+  );
+
   it.skipIf(external)(
     "searches messages by filter and returns a promotable text and link (pending relay slice CR6, agent reads + progress; its task filters need CR5)",
-    async () => {
-      const { member, path, conversationId, threadRootId } = await taskDiscussion();
+    async (context) => {
+      const mapping = await boardChannel(context);
+      const { member, path, conversationId, threadRootId } = await taskDiscussion(mapping);
       const text = "needle" + randomText(6);
       const reply = await call(member, "POST", path + "messages", {
         conversationId,
@@ -5366,7 +5837,7 @@ describe("chat contract", () => {
         return (page.body as { items: unknown[] }).items;
       };
       for (const filter of [
-        "in:#general",
+        "in:#" + mapping.channel,
         "from:@" + member.login,
         "is:human",
         "has:task",
@@ -5378,7 +5849,7 @@ describe("chat contract", () => {
           {
             messageId: msg,
             conversationId,
-            conversationName: "#general",
+            conversationName: "#" + mapping.channel,
             threadRootId,
             author: { login: member.login },
             createdAt: expect.any(String),
@@ -5559,11 +6030,11 @@ describe("chat contract", () => {
     expect(
       (await call(owner, "POST", path + "/read", { conversationId: id, seq: message.seq })).body,
     ).toEqual({ conversationId: id, seq: message.seq });
-    expect((await call(otherMachine, "GET", path + "/conversations")).body).toMatchObject({
-      items: expect.arrayContaining([
+    expect(await allConversations(otherMachine)).toEqual(
+      expect.arrayContaining([
         expect.objectContaining({ id, me: expect.objectContaining({ readSeq: message.seq }) }),
       ]),
-    });
+    );
     expect((await call(owner, "DELETE", path + "/messages/" + message.id)).body).toMatchObject({
       deleted: true,
       text: "",

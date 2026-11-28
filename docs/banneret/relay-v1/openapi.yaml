@@ -1201,8 +1201,11 @@ paths:
       - chat
       operationId: discussTask
       description: >-
-        Relay slice CR5, with the task thread's root and lease system replies. A relay without it does not
-        advertise task_links.
+        Relay slice CR5. Returns the task's thread, or opens one in the channel mapped to the task's board, only
+        while every reader of that channel can see the task. There is no fallback channel. 404 not_found when no
+        channel is mapped, a reader may not see the task, the caller's role hides it, or task threads are off
+        (the relay then does not advertise task_links). 403 forbidden when the mapped channel is missing or
+        archived. See README, Task threads.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -1227,7 +1230,10 @@ paths:
       tags:
       - chat
       operationId: linkTask
-      description: Relay slice CR5, with task threads.
+      description: >-
+        Relay slice CR5. Links a root of the board's mapped channel, only while every reader there can see the
+        task. 400 malformed for a DM root, 403 forbidden for a root in any other channel. Otherwise the refusals
+        of the task PUT. See README, Task threads.
       parameters:
       - $ref: '#/components/parameters/Device'
       - $ref: '#/components/parameters/Counter'
@@ -4100,12 +4106,16 @@ components:
       - headSha
       properties:
         repo:
+          description: GitHub owner/name.
           type: string
+          pattern: ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$
         number:
           type: integer
           minimum: 1
         headSha:
+          description: The full commit SHA, 40 or 64 hex characters. The relay keeps it in lower case.
           type: string
+          pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
     AskReceipt:
       type: object
       additionalProperties: false
@@ -5412,7 +5422,9 @@ components:
             - findings
             - could_not_review
           headSha:
+            description: The full commit SHA that was reviewed. The relay keeps it in lower case.
             type: string
+            pattern: ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$
           asHandle:
             $ref: '#/components/schemas/Id'
           receipt:
@@ -5485,6 +5497,9 @@ components:
       - retentionDays
       properties:
         boards:
+          description: >-
+            The channel, by name, for each board's task threads. Lists only boards the caller's role lets them see.
+            Present only while task threads are on and there is at least one.
           type: array
           maxItems: 50
           items:

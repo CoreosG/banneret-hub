@@ -742,6 +742,8 @@ use the lead's room. Each person's room entry includes the number of waiting lea
 `GET /team/people`, `GET /team/rooms/{board}/sessions` and `GET /team/hallway/sessions` take an opaque
 `cursor` and a `limit` from 1 to 100 (default 100). Continue with the returned `nextCursor` until null.
 For people, `q` matches the beginning of the login or display name, case-insensitively.
+The `team.people` file is only the first page. When its `nextCursor` is not null, `GET /team/people` with
+that cursor continues the same list. A reader that needs the whole directory reads every page.
 
 | Presence event | Stored values and live result |
 |---|---|
@@ -971,7 +973,7 @@ Paths below are relative to `/relay/v1`. Every call is signed. A read on behalf 
 | `DELETE /chat/messages/{id}` | Delete (author; founders) |
 | `PUT /chat/messages/{id}/progress` | Create or edit the caller agent's progress message in a thread (relay slice CR6) |
 | `PUT /chat/messages/{id}/reactions/{emoji}` / `DELETE` | React |
-| `PUT /chat/tasks/{taskId}/thread` | Open or create the board task's canonical discussion; no request body (relay slice CR5) |
+| `PUT /chat/tasks/{taskId}/thread` | Open or create the board task's canonical discussion, in its board's channel only (see Task threads); no request body (relay slice CR5) |
 | `PUT /chat/threads/{rootId}/task` / `DELETE` | Associate a current root with a board task, or remove its association (204) (relay slice CR5) |
 | `PUT /chat/threads/{rootId}/follow` / `DELETE` | Follow or unfollow |
 | `POST /chat/read` | Move read cursors `{conversationId, threadRootId?, seq}` |
@@ -1109,7 +1111,7 @@ Handle       { id, owner {id, login}, claimName, shortName?, provider, machine {
 | `agent_owner_dm_read` | People may turn on "My agents can read my DMs" |
 | `others_agents` | People can mention and DM other people's agents |
 | `asks` | Agent questions and answers |
-| `task_links` | Task threads, task chips and lease echoes (relay slice CR5) |
+| `task_links` | Task threads, task chips and lease echoes (relay slice CR5). Only while task threads are on |
 | `reactions` | Reactions |
 | `search` | Message search |
 | `promote` | "Post to GitHub" on messages |
@@ -1137,8 +1139,8 @@ An edit window of zero permits the author to edit at any age. Text and card limi
 | `chat.deliveries.expireAfter` / `inboxExpireAfter` | `24h` / `7d` |
 | `chat.requests.expireAfter` / `retryAfterDecline` / `maxPendingPerPerson` | `14d` / `7d` / `5` |
 | `chat.channels.maxMembers` | `200` |
-| `chat.taskLinks.enabled` / `chat.taskLinks.leaseEvents` | `true` / `true` |
-| `chat.boards[].channel` | none |
+| `chat.taskLinks.enabled` / `chat.taskLinks.leaseEvents` | `true` / `true`. Task threads are on only while `chat.boards` also maps at least one board |
+| `chat.boards[].channel` | none. A board without a channel has no task threads |
 | `chat.retention.channels` / `chat.retention.dms` | `0` (keep) / `0` (keep) |
 | `chat.promote.enabled` | `false` (Banneret's preset: `true`) |
 | `chat.search.enabled` | `true` |
@@ -1151,15 +1153,70 @@ An edit window of zero permits the author to edit at any age. Text and card limi
 | Any | Reload or reconnect | Read membership from the relay. Pending UI and open message actions reset on reload. |
 
 Banneret's preset sets `chat.enabled: true`, `chat.promote.enabled: true`, channels `general`, `platform`, `hub`,
-`ops`, and maps each board to its channel. Authenticated chat capabilities can publish those mappings as `chat.boards[]` entries with `board` and `channel`. The Hub resolves them against the channels visible to the caller. Nothing Banneret-specific is in code.
+`ops`, and maps each board to its channel. While task threads are on, authenticated chat capabilities publish those mappings as `chat.boards[]` entries with `board` and `channel`. The Hub resolves them against the channels visible to the caller. Nothing Banneret-specific is in code.
 
+
+### Task threads
 
 **Task threads are relay slice CR5.** The slice covers both task PUTs, the task's root and the lease system
 replies below. A relay without it does not advertise `task_links`, and a Hub then calls neither task PUT.
 
-Both task PUTs return 200 `ChatThreadLocation {conversationId, threadRootId}`. A task has one linked root and a root has one linked task. Concurrent links return the existing location, including when the proposed root differs. An inaccessible destination returns 404 without its location. Explicit link and unlink require membership in the writable conversation. Unlink a root before assigning it to another task. Deleting the root frees its association.
+Task threads are on while `chat.taskLinks.enabled` is not `false` and `chat.boards` maps at least one board.
+So they are on by default only where a channel is mapped. While they are off, the relay does not advertise
+`task_links` or publish `chat.boards`, and both PUTs and the DELETE return 404 `not_found`. `chat.boards`
+lists for each caller only the boards their role lets them see, and is absent when there are none.
 
-Opening an unlinked task creates a system root (`task_linked`, task title, `taskRef`) in its configured board channel, or the default public channel when unmapped. The fake uses its default general channel. Future counted takes, releases and handovers append system replies with `taskRef`, one line of text and `systemEvent` respectively `lease_taken`, `lease_released`, or `lease_handed_over`. The release line includes the release reason. No lease ages or human activity signals are sent. The Hub resolves chip state from its board snapshot.
+**A task's thread must never show its title to someone whose role hides that task.** The reason is the role
+scope of DEC-HUB-031: a role limits which boards and repositories a person sees, and a hidden item leaves no
+title. A channel has its own readers, so a title posted there reaches all of them. Therefore:
+
+- A task's thread lives only in the channel that `chat.boards` maps to a board showing the task. There is no
+  fallback channel.
+- The relay opens, links, returns or writes it only while every reader of that channel can see the task.
+  Readers follow the channel's access rules: its members, and for a public channel everyone who can read it
+  without joining. An agent reads only what its owner can.
+- Readers and roles change, so the relay asks again before each call and each line.
+- An outside collaborator whose access check is pending, as after a restart, reads again once it passes. While
+  such a person would read the channel, the relay cannot say whether it is safe.
+- Without such a channel the task has no chat thread. It stays in the Task panel. Hand-off offers and review
+  asks work without one.
+- **Limit:** the rule stops new posts. It does not remove what was already written when someone who may not
+  see the task joins the channel later, or when a role changes. A user's own posts in a task thread, and the
+  relay's lines about asks there, are not the task's data.
+
+| The task's mapped channel | A task call | A relay line in its thread |
+|---|---|---|
+| None mapped | 404 `not_found` | Not written |
+| Missing or archived | 403 `forbidden` | Not written |
+| A reader may not see the task | 404 `not_found` | Not written |
+| The board cannot say whether a reader may see it | 503 `unavailable` | A lease line waits. A hand-off line is left out |
+| Safe, but the linked thread is somewhere else | 404 `not_found` | Not written |
+| Safe | The thread, to a caller who can read it | Written |
+
+Both task PUTs return 200 `ChatThreadLocation {conversationId, threadRootId}`. A task has one linked root and
+a root has one linked task. Linking and unlinking need a member who may reply in the open channel. Opening an
+unlinked task creates a system root (`task_linked`, with the task title and `taskRef`) in the board's channel.
+A caller whose role hides the task gets 404 `not_found`. A task that a board not read whole does not show gets
+503 `unavailable`.
+
+| Link state | Event | Next state |
+|---|---|---|
+| Unlinked | A caller who can read the board's safe channel opens it | Linked to a new `task_linked` root there |
+| Unlinked | A member links a root of that channel while it is safe | Linked to that thread |
+| Unlinked | Open or link while the channel is not safe (table above) | Unchanged. Refused |
+| Unlinked | Link of a root in any other channel | Unchanged. 403 `forbidden` |
+| Unlinked | The caller cannot read the board's channel | Unchanged. 404 `not_found` |
+| Any | Link of a DM root. A DM would hide the task's one discussion from everyone else | Unchanged. 400 `malformed` |
+| Linked | Someone opens or links the task again, from any root | Unchanged: the same location, or refused without it |
+| Linked | Its thread is linked to another task | Unchanged. 400 `malformed` |
+| Linked | A member unlinks the thread while its channel is open | Unlinked |
+| Linked | The root is deleted | Unlinked |
+| Linked | The channel stops being safe | Linked. Calls are refused and lines left out until it is safe again |
+
+Later counted takes, releases and handovers append system replies with `taskRef`, one line of text and
+`systemEvent` `lease_taken`, `lease_released` or `lease_handed_over`. The release line includes the release
+reason. A line left out because the thread was not safe, an archived channel included, is not made up later.
+No lease ages or human activity signals are sent. The Hub resolves chip state from its board snapshot.
 
 ### Chat state transitions
 
@@ -1338,26 +1395,36 @@ The Office shows agent activity that your account can read. Floor and List show 
 
 The Office rebuilds these indicators from current relay data and the machine's saved Pause setting when you reopen it. They add no activity history.
 
-Each offer records the signed giver device as `fromMachineId` and its resolved discussion as `threadRootId` when present. When an offer names no thread, the relay looks up the task's linked thread itself (relay slice CR5). So a Hub opens the task thread first on a relay that advertises `task_links`, and need not add it to the offer. Only that giver device runs the release. Creation always leaves the offer pending. For automatic acceptance the receiver checks the tracker first, then sends `byRule: true` and its own `machineId` to `/accept`. The relay rechecks the named-person rule, usage and pause settings at that write. If the rule or its limits no longer allow the hand-off, return 403 `auto_accept_scope` and leave the offer open for a click. The signed receiver device must supply its own machine ID on rule acceptance. Persist `byRule: true` on the hand-off through all later transitions. Manual acceptances omit this audit field. A successful rule acceptance records “Auto-accepted by <login>'s rule.” in the thread.
+Each offer records the signed giver device as `fromMachineId` and its discussion as `threadRootId` when it has one. An offer that names a thread needs one the giver may reply in and the receiver can read, or the relay returns 403 `forbidden`. When an offer names none, the relay takes the task's own thread only while it is safe (see Task threads), the giver may reply in it and the receiver can read it (relay slice CR5). Otherwise the offer has no `threadRootId` and goes ahead without a thread. So a Hub first tries to open the task thread on a relay that advertises `task_links`, need not add it to the offer, and sends the offer even when that call is refused.
+
+Hand-off lines go into the offer's thread. An offer with none writes to its task's thread once there is one. A line goes into a task's thread, with its `taskRef`, only for that task and only while the thread is safe. Otherwise it is left out. A line in any other thread carries no `taskRef`. Only that giver device runs the release. Creation always leaves the offer pending. For automatic acceptance the receiver checks the tracker first, then sends `byRule: true` and its own `machineId` to `/accept`. The relay rechecks the named-person rule, usage and pause settings at that write. If the rule or its limits no longer allow the hand-off, return 403 `auto_accept_scope` and leave the offer open for a click. The signed receiver device must supply its own machine ID on rule acceptance. Persist `byRule: true` on the hand-off through all later transitions. Manual acceptances omit this audit field. A successful rule acceptance records “Auto-accepted by <login>'s rule.” in the thread, under the same rule.
 
 The receiver calls `/accept` with its selected machine (and `newThread: true` to start a new task thread there after take) or `/decline` with a reason. The giver calls `/withdraw`. Emit `handoff_declined` for decline and `handoff_closed` for other final outcomes. Keep the existing lease release event. Derive `waiting_release` while the giver holds the lease and `waiting_take` while the task is free. After 30 minutes in a step, derive class 2 `handoff_stalled` for the party that can advance it. Each Hub re-reads the fold before writing its release or claim. On restart, read accepted offers and recompute the step from the tracker.
 
 ### Review asks
 
-A review is an ask of kind `review`, sent to an agent. It names the repository, the PR number and the requested head SHA. The rules for requests between agents above apply too: consent, rules by a named person and the loop limits. A review has no draft mode, so `allow: "draft"` returns 400. A result carries the reviewed head and a verdict of `clean`, `findings` or `could_not_review`. Only a person posts a review or approval to GitHub.
+A review is an ask of kind `review`, sent to an agent. It names the repository, the PR number and the requested head SHA. The rules for requests between agents above apply too: consent, rules by a named person and the loop limits. `pr.repo` is a GitHub `owner/name`. `pr.headSha`, and the `headSha` of a verdict, are full commit SHAs of 40 or 64 hex characters, which the relay keeps in lower case. Anything else is 400 `malformed`. A review has no draft mode, so `allow: "draft"` returns 400. A result carries the reviewed head and a verdict of `clean`, `findings` or `could_not_review`. Only a person posts a review or approval to GitHub.
 
 **`chat.reviews` stays off until relay slice CR6, "agent reads + progress".** The Hub's "Post as review" first calls `POST /chat/messages/{id}/promote`, which that slice serves.
 
 The relay finds the pull request on the asker's board by its GitHub link. The asker, the reviewer's owner and the person the chain started from must all see it, or the relay returns 404 `not_found`. When the relay cannot read enough of a board to decide this, it returns 503 `unavailable`. A merged or closed pull request returns 400 `malformed`. Each head has at most one active review for each reviewer owner.
 
-**Maker and checker.** The reviewer's owner must not have opened the pull request or hold any task that links it. Logins are compared without case. An `incomplete` lease counts for the holder it names. This applies between one owner's agents too. If the board shows neither, but the relay cannot tell who opened the pull request or who holds a linked task, a review request returns 503 `unavailable`.
+**Maker and checker.** The reviewer's owner must not have opened the pull request or hold any task that links it. The relay matches the author by their GitHub account, so a bot account or a changed login still counts. An `incomplete` lease counts for the holder it names. This applies between one owner's agents too. If the board shows neither, but the relay cannot tell who opened the pull request or who holds a linked task, a review request returns 503 `unavailable`.
 
 **The relay checks again when the verdict arrives,** because the owner may have taken the task since. This covers the reviewing agent's answer and the owner's own answer by hand:
 
 - If the reviewer's owner now holds a linked task or opened the pull request, the review ends as `orphaned` with reason `review_same_owner`. It writes its one `ask_result`. The answer gets 403 `review_same_owner`, and the change is still saved.
-- If the board cannot rule that out, also when no task on it links the pull request any more, the answer gets 503 and the review stays active.
+- If the board cannot rule that out, the answer gets 503 and the review stays active.
 - An answer with `none: true` posts no verdict, so it is not checked.
-- No background check ends a review for this.
+- No background check ends a review for maker and checker.
+
+**When the pull request leaves the board.** A merge that closes its task, such as one with "Closes #N", takes
+the card off the board. No read may ever show the pull request as merged. So when a read of the whole board
+that began after the review no longer shows the pull request, the review ends as `orphaned` with reason
+`pr_gone`, and writes its one `ask_result`. A later answer gets 409 `ask_closed`, and a new request for that
+pull request gets 404 `not_found`. A board that was not read whole says nothing. The review stays active, an
+answer with a verdict gets 503 `unavailable`, and so does a new request. The Hub's review card says in plain
+words that the pull request is no longer on the board.
 
 **When the head moves.** The board comes from GitHub data, which can lag. It may still show the old head when an agent asks about a commit it has just pushed. So the relay ends a review as `head_moved` for a different board head only after its board has shown the requested commit. A board read that began before the review was written does not count. Until then, only the reviewer's Hub can report a move. It reads the head itself when it checks out the pull request and before it answers. It then sends `none: true` with reason `head_moved`. An answer that names another head ends the review the same way.
 
@@ -1373,8 +1440,10 @@ The relay finds the pull request on the asker's board by its GitHub link. The as
 | Open | The board has shown the requested head and now shows another | Unanswered, `head_moved` |
 | Waiting_owner | The owner answers after the board showed the requested head and then another | Unanswered, `head_moved` |
 | Waiting_owner, open | The pull request is merged or closed | Orphaned |
+| Waiting_owner, open | A whole board, read after the review began, no longer shows the pull request | Orphaned, `pr_gone` |
+| Waiting_owner, open | A verdict arrives while a board not read whole does not show the pull request | Unchanged. The answer gets 503 |
 
-Every other change follows the ask table, so an answer to a review that has already ended gets 409 `ask_closed`. The relay sees a merge or close only while the pull request is still on the board. Otherwise the review ends at its deadline. A head change after a review has finished does not change it, and the client marks it stale. The board shows the current commit in the linked pull request's optional `headSha`. An answered review's `answerMessageId` names the ask's own message, the result card that the human-only promotion check uses.
+Every other change follows the ask table, so an answer to a review that has already ended gets 409 `ask_closed`. While the board is not read whole, a review whose pull request it does not show waits, at the latest until its deadline. A head change after a review has finished does not change it, and the client marks it stale. The board shows the current commit in the linked pull request's optional `headSha`. An answered review's `answerMessageId` names the ask's own message, the result card that the human-only promotion check uses.
 
 ### Progress message (`messages.progress_state`)
 

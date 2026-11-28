@@ -67,8 +67,15 @@ Host pairings always wait for founder confirmation, including on an auto-approvi
 That relay must run with the network identity check off, and it must expose the control surface below.
 Some tests run only against the fake. These need their own store, clock or switches: the empty-store start,
 the network identity check, the 24-hour event retention bound, the Team scale fixtures, the 30-day hand-off
-removal, an unread task holder and the asks and hand-off switches. The tests named "pending relay slice" wait for CR5 (task
-threads) or CR6, "agent reads + progress" (owner-DM reads, progress, search, promotion).
+removal, an unread task holder, a board that was not read whole, the asks and hand-off switches, and the task thread
+config. The tests named "pending relay slice" wait for CR6, "agent reads + progress" (owner-DM reads, progress, search,
+promotion).
+
+For the task thread cases, the relay under test maps one board to a channel in `chat.boards` and leaves another board
+unmapped. The fake maps `platform` to `task-talk`. The suite creates that channel as a private one, so each case controls
+who reads it. Do not map the board to a channel that every member reads, such as `general`. The suite enrols people who
+may not see a task, so the relay rightly refuses the thread there and these cases fail. A relay that maps no board has
+task threads off: it must not advertise `task_links`, and the cases that need a thread skip.
 
 ## Control surface (tests only)
 
@@ -184,10 +191,14 @@ eligible logins against active company people. Reseeding replaces the prior revi
 They also accept `headSha`, the current head commit. A PR seeded without `author` has an unknown opener. The fake
 alone accepts `leaseUnknown: true` on a task, for a holder that could not be read. The one case that seeds it
 skips other relays. Review asks follow the board as it was last read through a chat or Needs call, so read after
-each seed.
+each seed. A seeded board counts as read whole. The fake alone accepts `partial: true` beside `tasks`, for a board
+that was not read whole. The one case that seeds it skips other relays.
 
 Select `"officeFixture": "company"` in the JSON config for 500 people, 50 boards and 1,500 working agents. Select `"officeFixture": "community"` for a directory of 2,000 people. Sign in as the default founder to keep the directory count exact.
 
 Pass `--chat` to enable the channel and thread calls. The fake keeps chat in memory. Its JSON config accepts `{"chat":{"enabled":true,"defaultChannels":["general"]}}`. Only org members with channels.seePublic automatically join them. Configure the real conformance target with `chat.enabled: true`.
+
+Task threads are off until `chat.boards`, a list of `{board, channel}`, maps a board to a channel name.
+`chat.taskLinks.enabled: false` turns them off again.
 
 In a pairing control request, person.admission may be member or outside. Set role to a template or custom role id and repoKeys to the granted project keys. POST /conformance/v1/outside/check takes {login, reason}. A null reason resumes a paused check. A confirmed revocation requires a new enrolment. Role, chat and request fixtures live in memory for the lifetime of the fake.
