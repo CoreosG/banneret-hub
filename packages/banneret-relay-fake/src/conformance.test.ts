@@ -3676,9 +3676,9 @@ describe("chat contract", () => {
       t.chat + "deliveries/" + delivery.id + "/refuse",
       { asHandle: t.to.id, reason: "thread_gone" },
     );
-    expect(refused.body).toMatchObject({
-      state: "refused",
-      message: { ask: { state: "unanswered", reason: "not_delivered" } },
+    expect(refused.body).toMatchObject({ state: "refused" });
+    expect((await call(t.asker, "GET", t.chat + "asks?role=asker")).body).toMatchObject({
+      items: [{ id: ask.id, state: "unanswered", reason: "not_delivered" }],
     });
     expect(await waking(t, t.asker)).toEqual([
       expect.objectContaining({
