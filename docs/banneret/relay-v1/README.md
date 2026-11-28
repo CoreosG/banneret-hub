@@ -1315,8 +1315,7 @@ A repeated offer from the same giver and handle with the same key, task and rece
 | New | Offer accepted for storage | Offered. Emit handoff_offered and derive handoff_offer for the receiver. |
 | Offered | Receiver accepts, or a matching personal auto rule passes the Take checks | Accepted. Emit handoff_accepted. |
 | Offered | Receiver declines, giver withdraws, 24-hour deadline passes | Declined, withdrawn or expired |
-| Offered | Giver loses the lease | Void |
-| Offered or accepted | Task closes or a party loses access | Void |
+| Offered | Giver loses the lease, task closes or a party loses access | Void |
 | Accepted | Giver withdraws before release | Withdrawn |
 | Accepted | Receiver holds the lease | Closed with outcome done |
 | Accepted | A third party takes the released task | Closed with outcome lost |
