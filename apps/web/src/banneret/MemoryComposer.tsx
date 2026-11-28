@@ -3,6 +3,7 @@ import type { ServerProvider } from "@t3tools/contracts";
 import { ChatComposer as Composer, type ChatComposerProps } from "../components/chat/ChatComposer";
 import { memoryThreadKey, useMemoryAvailability, openMemoryCommand } from "./memoryCommand";
 import { isWorkflowPhrase } from "./WorkflowReview";
+import { useSwitchBanner } from "./ProviderSwitchNotice";
 export type { ChatComposerHandle } from "../components/chat/ChatComposer";
 
 const memory = { name: "memory", description: "Search and review private Banneret notes" };
@@ -10,7 +11,9 @@ const commands = (list: ServerProvider["slashCommands"]) => [
   ...list.filter((c) => c.name !== "memory"),
   memory,
 ];
-export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
+export const ChatComposer = memo(function ChatComposer(given: ChatComposerProps) {
+  const switching = useSwitchBanner(given);
+  const props = switching ? { ...given, bannerItems: [...given.bannerItems, switching] } : given;
   const ref = props.routeThreadRef;
   const enabled = useMemoryAvailability((s) => s.threads[memoryThreadKey(ref)]);
   const providers = enabled

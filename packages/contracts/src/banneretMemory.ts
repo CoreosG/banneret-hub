@@ -6,7 +6,9 @@ import {
   AuthSettingsWriteScope,
   EnvironmentAuthorizationError,
 } from "./auth.ts";
-import { ThreadId } from "./baseSchemas.ts";
+import { ContextHandoffId, NonNegativeInt, ThreadId } from "./baseSchemas.ts";
+import type { OrchestrationV2Run, OrchestrationV2TurnItem } from "./orchestrationV2.ts";
+import { ProviderDriverKind, type ProviderInstanceId } from "./providerInstance.ts";
 import { TaskLeaseError } from "./taskLeases.ts";
 
 const error = Schema.Union([EnvironmentAuthorizationError, TaskLeaseError]);
@@ -112,6 +114,58 @@ const workflowState = Schema.Struct({
   weekly: Schema.Boolean,
   report: Schema.NullOr(workflowReport),
 });
+const providerSwitchSide = Schema.Struct({
+  name: Schema.String,
+  /** False when the Hub cannot say which instruction files this provider reads. */
+  integrated: Schema.Boolean,
+  project: Schema.NullOr(Schema.String),
+  personal: Schema.NullOr(Schema.String),
+});
+const switchNotice = Schema.Struct({
+  from: providerSwitchSide,
+  to: providerSwitchSide,
+  /** Null when this chat's agent is not given the note index. */
+  notes: Schema.NullOr(NonNegativeInt),
+  /** How much of the earlier conversation the handoff took along, when it is recorded. */
+  carried: Schema.NullOr(Schema.Struct({ items: NonNegativeInt, of: NonNegativeInt })),
+});
+export type SwitchNotice = typeof switchNotice.Type;
+export type ProviderSwitchSide = typeof providerSwitchSide.Type;
+
+/** The title the server gives a handoff made because the thread changed provider instance. */
+const PROVIDER_HANDOFF_TITLE = "Provider handoff";
+export const isProviderHandoff = (item: { readonly title?: string | null }) =>
+  item.title === PROVIDER_HANDOFF_TITLE;
+
+/**
+ * The instances a provider handoff went between, or null for a fork, merge-back or recovery row.
+ * Two instances can run the same provider, so the caller compares their drivers.
+ */
+export function providerHandoffEnds(
+  item: Pick<
+    Extract<OrchestrationV2TurnItem, { type: "handoff" }>,
+    "title" | "status" | "runId" | "strategy" | "fromProviderInstanceIds" | "toProviderInstanceId"
+  >,
+  runs: ReadonlyArray<Pick<OrchestrationV2Run, "id" | "ordinal" | "providerInstanceId">>,
+): { from: ProviderInstanceId; to: ProviderInstanceId; resumed: boolean } | null {
+  if (!isProviderHandoff(item) || item.status === "failed") return null;
+  const to = item.toProviderInstanceId;
+  // A retry also covers the target's own failed run, which is not where the thread came from.
+  const sources = item.fromProviderInstanceIds.filter((id) => id !== to);
+  const ordinal = runs.find((run) => run.id === item.runId)?.ordinal ?? Infinity;
+  // The handoff lists its sources in first-use order. The latest run says which one was last.
+  const last = runs
+    .filter((run) => run.ordinal <= ordinal && sources.includes(run.providerInstanceId))
+    .reduce<(typeof runs)[number] | undefined>(
+      (best, run) => (best === undefined || run.ordinal > best.ordinal ? run : best),
+      undefined,
+    );
+  const from = last?.providerInstanceId ?? sources.at(-1);
+  return from === undefined
+    ? null
+    : { from, to, resumed: item.strategy === "delta_since_target_last_seen" };
+}
+
 export const MEMORY_RPCS = [
   Rpc.make("memory.workflow", {
     payload: Schema.Struct({
@@ -199,6 +253,17 @@ export const MEMORY_RPCS = [
     success: Schema.Array(ThreadId),
     error,
   }),
+  Rpc.make("memory.switchNotice", {
+    payload: Schema.Struct({
+      threadId: ThreadId,
+      from: ProviderDriverKind,
+      to: ProviderDriverKind,
+      /** The handoff a switch recorded. Left out while the switch is only picked. */
+      handoffId: Schema.optional(ContextHandoffId),
+    }),
+    success: switchNotice,
+    error,
+  }),
   Rpc.make("memory.summary", {
     payload: Schema.Struct({ threadId: ThreadId }),
     success: Schema.NullOr(
@@ -276,6 +341,7 @@ export const MEMORY_RPC_SCOPES = {
   "memory.review": AuthSettingsWriteScope,
   "memory.skills": AuthOrchestrationOperateScope,
   "memory.list": AuthOrchestrationOperateScope,
+  "memory.switchNotice": AuthOrchestrationOperateScope,
   "memory.summary": AuthOrchestrationOperateScope,
   "memory.getSetting": AuthOrchestrationReadScope,
   "memory.setSetting": AuthSettingsWriteScope,
@@ -298,6 +364,7 @@ export const MEMORY_RPC_AGGREGATES = {
   "memory.review": "leases",
   "memory.skills": "leases",
   "memory.list": "leases",
+  "memory.switchNotice": "leases",
   "memory.summary": "leases",
   "memory.getSetting": "leases",
   "memory.setSetting": "leases",

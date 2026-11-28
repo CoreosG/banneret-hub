@@ -11,6 +11,15 @@ let promptHook: PromptHook | undefined;
 export const promptReminders: PromptHook = (thread, run, message) =>
   promptHook?.(thread, run, message) ?? Effect.succeed([]);
 
+/** There is one hook slot, so a second source of notes joins the first through this. */
+export const bothHooks =
+  (first: PromptHook, second: PromptHook): PromptHook =>
+  (thread, run, message) =>
+    Effect.zipWith(first(thread, run, message), second(thread, run, message), (a, b) => [
+      ...a,
+      ...b,
+    ]);
+
 export const installHook = (hook: PromptHook) =>
   Effect.acquireRelease(
     Effect.sync(() => {

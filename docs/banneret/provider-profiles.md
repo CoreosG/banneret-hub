@@ -4,7 +4,19 @@ A provider profile describes one coding agent: which instruction files it reads,
 
 Profiles are experimental. The shape may change in any release. They are not part of the plugin manifest contract in [Write a Banneret plugin](plugins.md).
 
-The Hub does not act on profiles yet. This page describes the data and the checks it must pass.
+The Hub uses profiles for one thing so far, the provider switch notice below. It writes no files from them. This page describes the data and the checks it must pass.
+
+## The switch notice
+
+When a chat moves to another provider, the web app shows what changes. Before you send, a line on the composer says whether the next message starts a new session or resumes an earlier one. After the switch, a card under the "Context handoff" divider shows:
+
+- how much of the earlier conversation was carried
+- the number of Banneret notes, in orchestrator chats
+- the instruction file names each provider's profile says it looks for
+
+The Hub does not read those files or check which exist. A provider without a built-in profile is shown as not fully integrated, and no file names are guessed for it. Moving between two accounts of one provider shows nothing.
+
+The new agent gets a short note with the first message after the switch. It names the earlier provider. In orchestrator chats it also asks the agent to read `banneret://join`. The mobile app shows neither the card nor the composer line, but the agent still gets the note.
 
 ## What ships
 
