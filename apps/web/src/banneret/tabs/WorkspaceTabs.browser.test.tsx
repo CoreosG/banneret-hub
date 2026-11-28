@@ -659,8 +659,14 @@ forEachViewport("workspace tabs with a shared start show the part that differs",
   await vi.waitFor(() => expect(alike()).toHaveLength(LONG_NAMES.length));
   await vi.waitFor(expectBarLayout);
   await at.screenshot();
-  // Last: hovering the first tab scrolls the bar away from the selected one.
+  // Last: hovering a tab scrolls the bar away from the selected one.
   await expectTabsToldApart(alike());
+  for (const tab of alike()) {
+    const width = tab.getBoundingClientRect().width;
+    await userEvent.hover(tab);
+    expect(tab.getBoundingClientRect().width).toBe(width);
+    expectClickable(tab.querySelector('button[aria-label^="Close "]')!, "the close button");
+  }
 });
 
 /** Appearance settings for one test. Leaving closes them, pass or fail, before the next size. */
