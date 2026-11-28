@@ -18,6 +18,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../../components/ui/menu
 import { observeResize } from "../../lib/observeResize";
 import { cn } from "../../lib/utils";
 import { setTabsHidden } from "./tabsStore";
+import { splitTabTitle } from "./tabTitle.logic";
 
 const TAB_DRAG_MODIFIERS = [restrictToHorizontalAxis, restrictToFirstScrollableAncestor];
 
@@ -39,6 +40,29 @@ export const tabClassName = (tab: {
 
 export const TAB_BUTTON_CLASS_NAME =
   "flex size-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted";
+
+/**
+ * A tab's name. It is cut at the end, or in the middle when another tab of the bar starts the same
+ * way. The text stays whole either way; give the tab itself the name for assistive technology.
+ */
+export function TabTitle({ title, titles }: { title: string; titles: ReadonlyArray<string> }) {
+  const split = splitTabTitle(title, titles);
+  if (split === null) return <span className="min-w-0 truncate">{title}</span>;
+  return (
+    <span className="flex min-w-0">
+      <span data-tab-head="" className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">
+        {split.head}
+      </span>
+      {/* The head gives way first. A tail too long for the tab still leaves it a few characters. */}
+      <span
+        data-tab-tail=""
+        className="max-w-[calc(100%-4ch)] shrink-0 overflow-hidden text-ellipsis whitespace-pre"
+      >
+        {split.tail}
+      </span>
+    </span>
+  );
+}
 
 /** Left and right arrows move focus along the strip. */
 export function moveTabFocus(event: KeyboardEvent<HTMLElement>) {

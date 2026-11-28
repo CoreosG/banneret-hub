@@ -28,6 +28,11 @@ size.
 - Use the helper's assertions for overlap, clipping, clickability, line length and centring.
 - Each case calls `at.screenshot()` while its UI is up. Capture once per case: a large capture
   takes seconds on a loaded runner, and the case has the usual test timeout.
+- Each case builds its own state: CI runs the layout cases alone, so setup in any other test never
+  happens there. All browser test files share one storage, so a test that saves anything (tabs,
+  drafts, panels, filters) takes `keepBrowserStorage()` from `test/browserStorage.ts` with `using`.
+  A file that mounts one app for all its tests takes the storage before mounting. Its layout cases
+  give that back and stay last in the file. Lifecycle hooks are not allowed.
 - Captures are off unless `VITE_LAYOUT_SHOTS` is set, and need `--no-file-parallelism`: a capture
   takes focus from test files running beside it, which fails their keyboard tests. From `apps/web`:
   `VITE_LAYOUT_SHOTS=1 vp test run --project browser --no-file-parallelism -t '\[layout\]' <files>`.

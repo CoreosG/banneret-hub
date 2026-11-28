@@ -17,6 +17,8 @@ import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter, type AppRouter } from "~/router";
 import { answerRpc, ENVIRONMENT_ID, type FakeDriver } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
+import { keepBrowserStorage } from "../test/browserStorage";
+import { expectTabsToldApart } from "../test/tabNames";
 import {
   expectClickable,
   expectInside,
@@ -57,6 +59,9 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
 }));
 
 answerRpc("plugins.levels", () => Effect.succeed([{ source: "banneret", level: "read_write" }]));
+// Each layout test gives browser storage back as this file found it. They come last in the file, so
+// the next file's stores load none of what the app here saved.
+const asFound = keepBrowserStorage();
 localStorage.removeItem(TABS_STORAGE_KEY);
 __reloadTabsForTests();
 await page.viewport(900, 700);
@@ -348,6 +353,20 @@ describe("tool access panel", () => {
   });
 });
 
+/** One layout test's bar: it starts the test's own tabs and leaves none, in memory or saved. */
+function ownTabs(): AsyncDisposable {
+  return {
+    async [Symbol.asyncDispose]() {
+      try {
+        await go("/pull-requests");
+        await act(() => useTabsStore.setState({ tabs: [], activeId: null }));
+      } finally {
+        asFound[Symbol.dispose]();
+      }
+    },
+  };
+}
+
 // Twenty tabs with long names overflow the bar even at 3840px. The last, short one is active.
 async function fillBar() {
   await openTabs();
@@ -426,6 +445,7 @@ async function expectMenuFits(items: ReadonlyArray<string> = ITEMS) {
 }
 
 forEachViewport("every tab's close button stays in reach", async (at) => {
+  await using _tabs = ownTabs();
   await openTabs(threadPath(THREAD.id), "/today", "/map");
   await vi.waitFor(expectLayout);
   await userEvent.hover(activeTab());
@@ -451,7 +471,19 @@ forEachViewport("every tab's close button stays in reach", async (at) => {
   expectLayout();
 });
 
+forEachViewport("chat tabs with a shared start show the part that differs", async (at) => {
+  await using _tabs = ownTabs();
+  await fillBar();
+  const alike = tabs().filter((tab) => tab.textContent.startsWith("A thread with a long name"));
+  expect(alike).toHaveLength(19);
+  await vi.waitFor(expectLayout);
+  await at.screenshot();
+  // The last one is pinned, which leaves its name the least room.
+  await expectTabsToldApart(alike);
+});
+
 forEachViewport("the whole tab menu fits at the window's right edge", async (at) => {
+  await using _tabs = ownTabs();
   // At the window's right edge, where the menu has the least room.
   await fillBar();
   await vi.waitFor(() => expectClickable(closeButton(activeTab()), "the close button"));
@@ -511,6 +543,7 @@ describe("tab menu actions in a row", () => {
 });
 
 forEachViewport("Tool access stays clear of the breadcrumb", async (at) => {
+  await using _tabs = ownTabs();
   await openTabs(threadPath(THREAD.id));
   await trigger().click();
   await expect.element(selector()).toBeVisible();

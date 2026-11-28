@@ -38,6 +38,7 @@ import {
   expectUnclipped,
   forEachViewport,
 } from "./test/viewports";
+import { keepBrowserStorage } from "./test/browserStorage";
 import { taskSurface } from "./taskSurface";
 import { useOpenTask } from "./useOpenTask";
 import { singleBoard } from "./boards.testkit";
@@ -679,26 +680,25 @@ describe("Task tab in a thread's right panel", () => {
     const key = scopedThreadKey(scopeThreadRef(LOCAL, ThreadId.make("thread-1")));
     const saved = { isOpen: true, activeSurfaceId: surface.id, surfaces: [surface] };
     const storageKey = "t3code:right-panel-state:v2";
-    const before = localStorage.getItem(storageKey);
-    try {
-      useRightPanelStore.setState({ byThreadKey: {} });
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          state: { byThreadKey: { [key]: saved }, threadPanelVisibilityByThreadKey: {} },
-          version: useRightPanelStore.persist.getOptions().version,
-        }),
-      );
-      await useRightPanelStore.persist.rehydrate();
-      expect(useRightPanelStore.getState().byThreadKey[key]?.surfaces).toEqual([surface]);
-    } finally {
-      if (before === null) localStorage.removeItem(storageKey);
-      else localStorage.setItem(storageKey, before);
-      useRightPanelStore.setState({ byThreadKey: {} });
-    }
+    using own = new DisposableStack();
+    own.use(keepBrowserStorage());
+    own.defer(() => useRightPanelStore.setState({ byThreadKey: {} }));
+    useRightPanelStore.setState({ byThreadKey: {} });
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        state: { byThreadKey: { [key]: saved }, threadPanelVisibilityByThreadKey: {} },
+        version: useRightPanelStore.persist.getOptions().version,
+      }),
+    );
+    await useRightPanelStore.persist.rehydrate();
+    expect(useRightPanelStore.getState().byThreadKey[key]?.surfaces).toEqual([surface]);
   });
 
   it("opens as a tab beside a routed thread", async () => {
+    using own = new DisposableStack();
+    own.use(keepBrowserStorage());
+    own.defer(() => useRightPanelStore.setState({ byThreadKey: {} }));
     setup();
     useRightPanelStore.setState({ byThreadKey: {} });
     const task = card("2", "Guild invites").task;

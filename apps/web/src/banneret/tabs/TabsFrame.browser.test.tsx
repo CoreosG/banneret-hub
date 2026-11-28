@@ -26,6 +26,7 @@ import {
   type FakeDriver,
 } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
+import { keepBrowserStorage } from "../test/browserStorage";
 import {
   expectCentred,
   expectClickable,
@@ -75,6 +76,9 @@ const ALPHA = workspace("ws-alpha", "Alpha");
 const BETA = workspace("ws-beta", "Beta");
 
 answerRpc(BANNERET_WORKSPACES_WS_METHODS.list, () => Effect.succeed({ workspaces: [ALPHA, BETA] }));
+// Each layout test gives browser storage back as this file found it. They come last in the file, so
+// the next file's stores load none of what the app here saved.
+const asFound = keepBrowserStorage();
 localStorage.removeItem(TABS_STORAGE_KEY);
 __reloadTabsForTests();
 await page.viewport(1400, 900);
@@ -123,24 +127,6 @@ const router: AppRouter = await mountApp(threadPath(THREAD.id));
 async function go(to: string) {
   await act(() => router.navigate({ href: to }));
 }
-
-forEachViewport("the settings dialog sits over the app", async (at) => {
-  await go(threadPath(THREAD.id));
-  await go("/settings/general");
-  const dialog = page.getByRole("dialog", { name: "Settings" });
-  await expect.element(dialog).toBeVisible();
-  const popup = dialog.element();
-  await vi.waitFor(() => {
-    expectCentred(popup, document.documentElement, "the settings dialog", 2);
-    expectUnclipped(popup, "the settings dialog");
-  });
-  expectClickable(dialog.getByRole("button", { name: /close/i }).element(), "the close button");
-  // Upstream's settings rows reach 98ch at this dialog width.
-  expectReadableLines(popup, "the settings dialog", 100);
-  await at.screenshot();
-  await go(threadPath(THREAD.id));
-  await expect.element(dialog).not.toBeInTheDocument();
-});
 
 describe("open tabs frame layout", () => {
   it("fits a chat thread; the timeline scrolls inside and header controls stay in the header", async () => {
@@ -423,4 +409,38 @@ describe("open tabs", () => {
     await act(() => setTabsHidden(false));
     await vi.waitFor(expectFits);
   });
+});
+
+/** Settings over a thread, for one layout test. Leaving closes them and saves nothing, pass or fail. */
+async function settingsOverThread(): Promise<AsyncDisposable> {
+  await go(threadPath(THREAD.id));
+  await go("/settings/general");
+  return {
+    async [Symbol.asyncDispose]() {
+      try {
+        await go(threadPath(THREAD.id));
+        await expect
+          .element(page.getByRole("dialog", { name: "Settings" }))
+          .not.toBeInTheDocument();
+        await act(() => useTabsStore.setState({ tabs: [], activeId: null }));
+      } finally {
+        asFound[Symbol.dispose]();
+      }
+    },
+  };
+}
+
+forEachViewport("the settings dialog sits over the app", async (at) => {
+  await using _settings = await settingsOverThread();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect.element(dialog).toBeVisible();
+  const popup = dialog.element();
+  await vi.waitFor(() => {
+    expectCentred(popup, document.documentElement, "the settings dialog", 2);
+    expectUnclipped(popup, "the settings dialog");
+  });
+  expectClickable(dialog.getByRole("button", { name: /close/i }).element(), "the close button");
+  // Upstream's settings rows reach 98ch at this dialog width.
+  expectReadableLines(popup, "the settings dialog", 100);
+  await at.screenshot();
 });

@@ -19,6 +19,7 @@ import { ComposerBannerStack } from "../components/chat/ComposerBannerStack";
 import { V2LifecycleRow } from "../components/chat/V2LifecycleRow";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useSwitchBanner } from "./ProviderSwitchNotice";
+import { keepBrowserStorage } from "./test/browserStorage";
 import { expectInside, expectNoPageScroll, forEachViewport, windowRect } from "./test/viewports";
 
 const ask = vi.hoisted(() => vi.fn());
@@ -182,6 +183,15 @@ function pick(thread: string, instanceId: string) {
     });
 }
 
+/** A pick is saved with the thread's draft: one test's picks are gone after it. */
+function ownDrafts(): Disposable {
+  const stack = new DisposableStack();
+  stack.use(keepBrowserStorage());
+  const drafts = useComposerDraftStore.getState();
+  stack.defer(() => useComposerDraftStore.setState(drafts, true));
+  return stack;
+}
+
 const card = () => page.getByRole("region", { name: "Provider switch" });
 const expectCard = (text: string) =>
   expect.poll(() => card().query()?.textContent ?? "").toContain(text);
@@ -230,6 +240,7 @@ describe("composer line", () => {
     ["codex", "claudeAgent", "Switching to Claude Code starts a new session."],
   ])("announces a pick from %s to %s", async (from, to, title) => {
     const thread = `compose-${from}-${to}`;
+    using _drafts = ownDrafts();
     using _answers = answering();
     await using _screen = await render(<ComposerLine thread={thread} from={from} />);
     expect(page.getByText(/Switching to/).query()).toBeNull();
@@ -243,6 +254,7 @@ describe("composer line", () => {
   });
 
   it("says so when the picked provider has no profile", async () => {
+    using _drafts = ownDrafts();
     using _answers = answering();
     await using _screen = await render(<ComposerLine thread="compose-kiro" from="codex" />);
     pick("compose-kiro", "kiro");
@@ -251,6 +263,7 @@ describe("composer line", () => {
   });
 
   it("stays away for another account of the same provider", async () => {
+    using _drafts = ownDrafts();
     using _answers = answering();
     await using _screen = await render(
       <ComposerLine thread="compose-account" from="claudeAgent" />,
@@ -263,6 +276,7 @@ describe("composer line", () => {
 });
 
 forEachViewport("the provider switch notice stays inside the chat column", async (at) => {
+  using _drafts = ownDrafts();
   using _answers = answering();
   const thread = `layout-${at.id}`;
   await using _screen = await render(

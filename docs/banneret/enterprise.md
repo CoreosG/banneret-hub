@@ -268,6 +268,8 @@ as tabs. A page tab keeps the page's board and filters.
   Closing several at once leaves pinned tabs open. Pin keeps a tab for good.
 - A thread tab copies a link to the thread. A page tab copies this web app's address for the page, so it has
   no link in the desktop app.
+- When tabs start the same way, their names are cut in the middle, so the end that differs stays in sight.
+  Hover a tab to read its full name.
 - A tab shown in italics is a preview. Opening something else replaces it. Sending a message keeps it.
 - Up to 20 tabs are kept. Pinned tabs are never dropped.
 

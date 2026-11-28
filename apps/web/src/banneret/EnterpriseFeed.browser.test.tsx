@@ -34,6 +34,7 @@ import { feedRpc, refreshToday, useRelayFeedStore } from "./relayFeedStore";
 import { FILTER_MEMORY_KEY } from "./filterMemory";
 import { TodayPage } from "./TodayPage";
 import { useWorkspacesStore } from "./workspacesStore";
+import { keepBrowserStorage } from "./test/browserStorage";
 import {
   expectCentred,
   expectNoOverlap,
@@ -266,6 +267,8 @@ async function prepareScreen(
   size: { readonly width: number; readonly height: number } | null = { width: 1280, height: 800 },
 ) {
   if (size) await page.viewport(size.width, size.height);
+  // Opening Today saves when it was last opened.
+  stack.use(keepBrowserStorage());
   const style = document.createElement("style");
   style.textContent = appCss;
   document.head.append(style);

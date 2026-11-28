@@ -19,6 +19,7 @@ import {
   TAB_BUTTON_CLASS_NAME,
   tabClassName,
   TabStrip,
+  TabTitle,
   useKeepTabInView,
 } from "./tabStrip";
 import { environmentNames, useWorkspaceTabsView } from "./useProjectWorkspaces";
@@ -47,6 +48,8 @@ function WorkspaceTabItem(props: {
   drawn: DrawnWorkspaceTabs;
   offline: boolean;
   menuOpen: boolean;
+  /** Every name in the bar. */
+  titles: ReadonlyArray<string>;
   onMenu: (element: HTMLElement, at: { x: number; y: number }) => void;
 }) {
   const { entry, workspace } = props.tab;
@@ -75,6 +78,7 @@ function WorkspaceTabItem(props: {
             role="tab"
             tabIndex={active ? 0 : -1}
             aria-selected={active}
+            aria-label={title}
             data-tab-id={entry.key}
             data-pinned={entry.pinned ? "" : undefined}
             data-offline={props.offline ? "" : undefined}
@@ -112,7 +116,7 @@ function WorkspaceTabItem(props: {
         {entry.lastChat === null ? null : (
           <LastChatGoneWatcher key={entry.lastChat.href} entry={entry} active={active} />
         )}
-        <span className="min-w-0 truncate">{title}</span>
+        <TabTitle title={title} titles={props.titles} />
         {/* Nothing may appear on hover: a tab that grows pushes its close button out of reach. */}
         {entry.pinned ? (
           <button
@@ -162,6 +166,7 @@ export function WorkspaceTabsBar() {
     tabs,
     shownKey: tabs.find((tab) => tab.workspace.key === shown?.key)?.entry.key ?? null,
   };
+  const titles = tabs.map((tab) => tab.workspace.name);
 
   return (
     <TabStrip
@@ -189,6 +194,7 @@ export function WorkspaceTabsBar() {
           key={tab.entry.key}
           tab={tab}
           drawn={drawn}
+          titles={titles}
           offline={tab.workspace.projects.every(
             (project) => !connected.includes(EnvironmentId.make(project.environmentId)),
           )}

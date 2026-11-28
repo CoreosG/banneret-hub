@@ -35,6 +35,7 @@ import { ChatConversations, ChatConversation, ChatMessages } from "@t3tools/cont
 import { DmPrivacy, ChannelPage } from "./ChannelPage";
 import { NeedsRow } from "../TodayRows";
 import { chatRpc } from "./client";
+import { keepBrowserStorage } from "../test/browserStorage";
 import {
   expectCentred,
   expectClickable,
@@ -108,6 +109,8 @@ async function setupChannel(
 ) {
   const { root: message, people } = await commands.companyChat(`${scenario}:start`);
   resources.defer(() => commands.companyChat(`${scenario}:stop`));
+  // The tabs bar saves a tab for each channel shown.
+  resources.use(keepBrowserStorage());
   useRelayFeedStore.setState({ feeds: {} });
   useTabsStore.setState(useTabsStore.getInitialState());
   const env = EnvironmentId.make("local"),

@@ -18,6 +18,8 @@ import { getRouter, type AppRouter } from "~/router";
 import { useUiStateStore } from "~/uiStateStore";
 import { ENVIRONMENT_ID, type FakeDriver } from "../../../test/fakeEnvironment";
 import { act, render } from "../../../test/render";
+import { keepBrowserStorage } from "../test/browserStorage";
+import { expectTabsToldApart } from "../test/tabNames";
 import {
   expectClickable,
   expectInside,
@@ -32,7 +34,11 @@ import {
 import { setActiveWorkspace, useWorkspacesStore } from "../workspacesStore";
 import { TABS_STORAGE_KEY } from "./tabs.logic";
 import { __reloadTabsForTests, setTabsHidden, useTabsStore } from "./tabsStore";
-import { NO_PROJECT_KEY, WORKSPACE_TABS_STORAGE_KEY } from "./workspaceTabs.logic";
+import {
+  EMPTY_WORKSPACE_TABS,
+  NO_PROJECT_KEY,
+  WORKSPACE_TABS_STORAGE_KEY,
+} from "./workspaceTabs.logic";
 import { showChatTabs } from "./workspaceTabsActions";
 import { __reloadWorkspaceTabsForTests, useWorkspaceTabsStore } from "./workspaceTabsStore";
 
@@ -78,6 +84,9 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
+// Each layout test gives browser storage back as this file found it. They come last in the file, so
+// the next file's stores load none of what the app here saved.
+const asFound = keepBrowserStorage();
 localStorage.removeItem(TABS_STORAGE_KEY);
 localStorage.removeItem(WORKSPACE_TABS_STORAGE_KEY);
 __reloadTabsForTests();
@@ -158,7 +167,7 @@ async function chooseTabsShow(label: "Chats" | "Workspaces") {
   await expect.element(page.getByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
 }
 
-/** Drops every unsent chat: the next test file shares this browser storage and would list them. */
+/** Drops every unsent chat. */
 async function discardDrafts() {
   await go(threadPath(THREAD.id));
   await act(() => {
@@ -169,20 +178,45 @@ async function discardDrafts() {
   });
 }
 
-/**
- * The web and api chats under Workspaces tabs, for one layout test: CI runs those without the tests
- * above them. The next test file gets Chats tabs and no drafts back.
- */
-async function workspacesFixture(): Promise<AsyncDisposable> {
-  draftIn("web");
-  draftIn("api");
-  await chooseTabsShow("Workspaces");
+/** No tab of either kind, as on a first start. The setting is Chats again. */
+const forgetTabs = () =>
+  act(() => {
+    useWorkspaceTabsStore.setState(EMPTY_WORKSPACE_TABS, true);
+    useTabsStore.setState({ tabs: [], activeId: null });
+  });
+
+/** One layout test's own tabs and chats: it leaves none behind, in memory or saved. */
+function ownTabs(): AsyncDisposable {
   return {
     async [Symbol.asyncDispose]() {
-      await act(() => showChatTabs());
-      await discardDrafts();
+      try {
+        await act(() => showChatTabs());
+        await discardDrafts();
+        await forgetTabs();
+      } finally {
+        asFound[Symbol.dispose]();
+      }
     },
   };
+}
+
+/**
+ * The web and api chats under Workspaces tabs, starting from no tabs, for one layout test: CI runs
+ * those without the tests above them.
+ */
+async function workspacesFixture(): Promise<AsyncDisposable> {
+  const own = ownTabs();
+  try {
+    await go(threadPath(THREAD.id));
+    await forgetTabs();
+    draftIn("web");
+    draftIn("api");
+    await chooseTabsShow("Workspaces");
+  } catch (error) {
+    await own[Symbol.asyncDispose]();
+    throw error;
+  }
+  return own;
 }
 
 async function menuOn(title: string, item: string) {
@@ -618,6 +652,23 @@ forEachViewport("workspace tabs, their menu and the workspace list fit", async (
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 });
 
+forEachViewport("workspace tabs with a shared start show the part that differs", async (at) => {
+  await using _fixture = await workspacesFixture();
+  for (const name of LONG_NAMES) await pickWorkspace(name);
+  const alike = () => tabs().filter((tab) => LONG_NAMES.includes(tab.textContent));
+  await vi.waitFor(() => expect(alike()).toHaveLength(LONG_NAMES.length));
+  await vi.waitFor(expectBarLayout);
+  await at.screenshot();
+  // Last: hovering a tab scrolls the bar away from the selected one.
+  await expectTabsToldApart(alike());
+  for (const tab of alike()) {
+    const width = tab.getBoundingClientRect().width;
+    await userEvent.hover(tab);
+    expect(tab.getBoundingClientRect().width).toBe(width);
+    expectClickable(tab.querySelector('button[aria-label^="Close "]')!, "the close button");
+  }
+});
+
 /** Appearance settings for one test. Leaving closes them, pass or fail, before the next size. */
 async function appearanceSettings(): Promise<AsyncDisposable> {
   await go("/settings/appearance");
@@ -630,6 +681,7 @@ async function appearanceSettings(): Promise<AsyncDisposable> {
 }
 
 forEachViewport("the Tabs show setting fits Appearance settings", async (at) => {
+  await using _tabs = ownTabs();
   await using _settings = await appearanceSettings();
   const select = page.getByRole("combobox", { name: "Tabs show" });
   await expect.element(select).toBeVisible();
