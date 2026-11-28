@@ -33,6 +33,7 @@ import { needsCountLabel, offersSection } from "./relayFeed.logic";
 import { useEnterpriseFeed } from "./useEnterpriseFeed";
 
 import { OutsideWorkspace } from "./OutsideWorkspace";
+import { OwnedElsewhere } from "./OwnedElsewhere";
 
 export function EnterpriseSidebarRows() {
   return (
@@ -203,6 +204,7 @@ function CompanyRows() {
           </SidebarMenuItem>
         ) : null}
       </SidebarMenu>
+      <OwnedElsewhere capabilities={["tasks", "chat"]} className="mx-2 mt-1" />
       {feed.sectionsKnown && feed.sections.includes("chat") && (
         <ChannelRows
           key={relayKey(enterprise.target)}

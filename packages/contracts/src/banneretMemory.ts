@@ -253,6 +253,12 @@ export const MEMORY_RPCS = [
     success: Schema.Boolean,
     error,
   }),
+  Rpc.make("skills.getSetting", { payload: Schema.Struct({}), success: Schema.Boolean, error }),
+  Rpc.make("skills.setSetting", {
+    payload: Schema.Struct({ enabled: Schema.Boolean }),
+    success: Schema.Boolean,
+    error,
+  }),
 ] as const;
 
 export const MEMORY_RPC_SCOPES = {
@@ -273,6 +279,8 @@ export const MEMORY_RPC_SCOPES = {
   "memory.summary": AuthOrchestrationOperateScope,
   "memory.getSetting": AuthOrchestrationReadScope,
   "memory.setSetting": AuthSettingsWriteScope,
+  "skills.getSetting": AuthOrchestrationReadScope,
+  "skills.setSetting": AuthSettingsWriteScope,
 } as const;
 
 export const MEMORY_RPC_AGGREGATES = {
@@ -293,4 +301,6 @@ export const MEMORY_RPC_AGGREGATES = {
   "memory.summary": "leases",
   "memory.getSetting": "leases",
   "memory.setSetting": "leases",
+  "skills.getSetting": "leases",
+  "skills.setSetting": "leases",
 } as const;

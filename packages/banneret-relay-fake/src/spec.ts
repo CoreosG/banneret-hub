@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeURL from "node:url";
 
+import { toolCapability } from "@t3tools/contracts";
 import type { RelayOwners, RelayOwnershipFields, RelayCapability } from "@t3tools/contracts";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -197,13 +198,8 @@ function sourceUrlAllowed(value: string): boolean {
 }
 
 export function offersOwnedTool(owners: RelayOwners, name: string): boolean {
-  if (/^banneret_(board$|task$|lease_)/.test(name)) return owners.tasks.owner === "banneret";
-  if (/^banneret_(chat_|agent_(ask|answer)$|handoff_offer$)/.test(name))
-    return owners.chat.owner === "banneret";
-  if (name.startsWith("banneret_memory_")) return owners.memory.owner === "banneret";
-  if (name.startsWith("banneret_skills_")) return owners.skills.owner === "banneret";
-  if (name === "banneret_kb_search") return owners.search.owner === "banneret";
-  return true;
+  const capability = toolCapability(name);
+  return capability === null || owners[capability].owner === "banneret";
 }
 
 export function ownershipError({

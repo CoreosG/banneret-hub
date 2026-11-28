@@ -4,7 +4,9 @@
 // Solo thread, or a machine that never joined, makes no relay call.
 import {
   BANNERET_AGENT_TOOLS,
+  type ElsewhereOwners,
   OrchestratorMcpFailure,
+  toolCapability,
   type ProjectId,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -38,18 +40,27 @@ const OFFER_TTL = Duration.seconds(15);
 
 const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(BANNERET_AGENT_TOOLS);
 
-/** The agent tools the relay enables for this person: named in `mcpTools`, with the required permission. */
+/**
+ * The agent tools the relay enables for this person: named in `mcpTools`, with the required permission.
+ * A tool of a capability Banneret does not own is never offered, even if a relay names it.
+ */
 export const offeredTools = (
   mcpTools: ReadonlyArray<RelayMcpTool>,
   permissions: readonly string[],
+  elsewhere: ElsewhereOwners | null = null,
 ): ReadonlySet<string> =>
   new Set(
     mcpTools
-      .filter(
-        (tool) =>
+      .filter((tool) => {
+        const capability = toolCapability(tool.name);
+        return (
           AGENT_TOOL_NAMES.has(tool.name) &&
-          (!tool.requires || permissions.includes(tool.requires)),
-      )
+          !(capability && elsewhere?.[capability]) &&
+          // A hand-off passes on a Banneret lease, so it needs tasks as well as chat.
+          !(tool.name === "banneret_handoff_offer" && elsewhere?.tasks) &&
+          (!tool.requires || permissions.includes(tool.requires))
+        );
+      })
       .map((tool) => tool.name),
   );
 
@@ -69,6 +80,8 @@ export class BanneretAgentRelays extends Context.Service<
     readonly forThread: (
       threadId: ThreadId,
     ) => Effect.Effect<AgentRelay | null, OrchestratorMcpFailure>;
+    /** What Banneret does not own at the thread's company, read now. Null also on any error. */
+    readonly elsewhere: (threadId: ThreadId) => Effect.Effect<ElsewhereOwners | null>;
     /** The agent tools offered to the thread, kept briefly. Never fails: on any error nothing is offered. */
     readonly offered: (threadId: ThreadId) => Effect.Effect<ReadonlySet<string>>;
     /**
@@ -132,7 +145,9 @@ export const layer = Layer.effect(
         const relay = yield* forThread(threadId);
         if (relay === null) return new Set<string>();
         const tools = yield* feed.mcpTools(relay.relayOrigin);
-        return tools === null ? new Set<string>() : offeredTools(tools, relay.me.permissions);
+        return tools === null
+          ? new Set<string>()
+          : offeredTools(tools, relay.me.permissions, yield* feed.elsewhere(relay.relayOrigin));
       },
       // A failed offer must hide the tools, never fail the list request that asked.
       Effect.catchCause((cause) =>
@@ -164,6 +179,8 @@ export const layer = Layer.effect(
           view.me?.login ?? null,
           view.me?.permissions ?? null,
           joined ? yield* feed.mcpTools(view.relayOrigin) : null,
+          // An owner change can leave `mcpTools` alone and still change the Hub's own tools.
+          joined ? yield* feed.elsewhere(view.relayOrigin) : null,
         ]);
       }
       return inputsKey(inputs);
@@ -173,8 +190,17 @@ export const layer = Layer.effect(
       ),
     );
 
+    const elsewhere = Effect.fn("BanneretAgentRelays.elsewhere")(
+      function* (threadId: ThreadId) {
+        const relay = yield* forThread(threadId);
+        return relay === null ? null : yield* feed.elsewhere(relay.relayOrigin);
+      },
+      Effect.catchCause(() => Effect.succeed(null)),
+    );
+
     return BanneretAgentRelays.of({
       forThread,
+      elsewhere,
       offered,
       offerInputs,
       forgetOffers: Cache.invalidateAll(offers),

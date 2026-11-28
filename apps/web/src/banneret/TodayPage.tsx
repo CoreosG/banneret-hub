@@ -23,6 +23,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { FeedStatus } from "./FeedParts";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
 import { refreshToday } from "./relayFeedStore";
+import { OwnedElsewhere } from "./OwnedElsewhere";
 import { blockView, healthSummary, todayCounts, type TodayCounts } from "./today.logic";
 import {
   AlarmRow,
@@ -308,7 +309,9 @@ export function TodayPage() {
             </Block>
           </div>
         </div>
-        {!health ? null : healthTiles.length === 0 ? (
+        {!health ? (
+          <OwnedElsewhere capabilities={["health"]} />
+        ) : healthTiles.length === 0 ? (
           <QuietLine
             icon={HeartPulseIcon}
             fact="Health has nothing to show yet."

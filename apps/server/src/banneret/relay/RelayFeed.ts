@@ -37,6 +37,8 @@ import {
   OfficeSummary,
   OfficeDirectory,
   type BanneretTeamRead,
+  type ElsewhereOwners,
+  elsewhereOwners,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -123,6 +125,8 @@ interface RelayFeedInstance {
   readonly events: Stream.Stream<BanneretFeedState>;
   /** The capabilities `mcpTools`, as last read; null until capabilities have been read. */
   readonly mcpTools: Effect.Effect<ReadonlyArray<RelayMcpTool> | null>;
+  /** What Banneret does not own here; null without `owners`, or before capabilities are read. */
+  readonly elsewhere: Effect.Effect<ElsewhereOwners | null>;
 }
 
 /** One capabilities `mcpTools` entry as the Hub keeps it: the name and optional permission for the caller. */
@@ -157,6 +161,7 @@ interface FeedService {
   readonly events: (relayOrigin: string) => Stream.Stream<BanneretFeedState>;
   /** Server only, for the agent toolkit; null for a relay not joined or whose capabilities are unread. */
   readonly mcpTools: (relayOrigin: string) => Effect.Effect<ReadonlyArray<RelayMcpTool> | null>;
+  readonly elsewhere: (relayOrigin: string) => Effect.Effect<ElsewhereOwners | null>;
 }
 
 const NOT_JOINED = { joined: false, value: null, fetchedAt: null } as const;
@@ -190,6 +195,7 @@ export class BanneretRelayFeed extends Context.Reference<FeedService>(
       task: () => Effect.succeed(NOT_JOINED),
       events: () => Stream.concat(Stream.make(NOT_JOINED_SNAPSHOT), Stream.never),
       mcpTools: () => Effect.succeed(null),
+      elsewhere: () => Effect.succeed(null),
     }),
   },
 ) {}
@@ -510,6 +516,15 @@ const mcpToolsOf = (body: unknown): ReadonlyArray<RelayMcpTool> =>
     }),
   );
 
+/** The sections that go when Banneret does not own what they show. */
+const hiddenSections = (elsewhere: ElsewhereOwners | null): ReadonlySet<string> =>
+  new Set([
+    ...(elsewhere?.chat ? ["chat"] : []),
+    // An external tracker's board is still the relay's view of it. Off means no board at all.
+    ...(elsewhere?.tasks?.owner === "off" ? ["board", "task"] : []),
+    ...(elsewhere?.health?.owner === "off" ? ["health"] : []),
+  ]);
+
 /** The flags of the first section of `kind`, or null when the relay does not advertise one. */
 const sectionFlags = (body: unknown, kind: string): ReadonlyArray<string> | null => {
   const section = list(fields(body)?.sections, 64)
@@ -610,6 +625,8 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
   let sectionsKnown = false;
   let dashboardSettings: Pick<BanneretFeedState, "dashboards" | "leaseClocks"> = {};
   let mcpTools: ReadonlyArray<RelayMcpTool> = [];
+  // Capability owners: null until read, and for a relay without `owners`. A failed reread keeps the last.
+  let elsewhere: ElsewhereOwners | null = null;
   // The `ETag` of the capabilities last read: a heartbeat whose `capabilitiesVersion` differs means
   // the document changed, even when the stream missed `capabilities.changed` or the read failed.
   let sectionsVersion: string | undefined;
@@ -673,6 +690,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     ...dashboardSettings,
     sectionsKnown,
     sections,
+    ...(elsewhere && { elsewhere }),
     needsCount,
     ...(sections.includes("chat") ? { chatRevision, chatFlags, boardChannels } : {}),
     revision,
@@ -816,15 +834,26 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
       Effect.flatMap((reply) =>
         Effect.suspend(() => {
           if (!stillJoined(key)) return Effect.void;
-          sections = sectionKinds(reply.body);
-          chatFlags = sectionFlags(reply.body, "chat") ?? [];
+          elsewhere = elsewhereOwners(reply.body);
+          const hidden = hiddenSections(elsewhere);
+          const body = fields(reply.body);
+          const advertised = {
+            ...body,
+            sections: list(body?.sections, 64).filter(
+              (section) => !hidden.has(String(fields(section)?.kind)),
+            ),
+          };
+          sections = sectionKinds(advertised);
+          chatFlags = sectionFlags(advertised, "chat") ?? [];
           boardChannels = Object.fromEntries(
-            list(fields(fields(reply.body)?.chat)?.boards, 50).flatMap((entry) => {
-              const row = fields(entry);
-              const board = text(row?.board, 128);
-              const channel = text(row?.channel, 128);
-              return board && channel ? [[board, channel]] : [];
-            }),
+            list(hidden.has("chat") ? [] : fields(fields(reply.body)?.chat)?.boards, 50).flatMap(
+              (entry) => {
+                const row = fields(entry);
+                const board = text(row?.board, 128);
+                const channel = text(row?.channel, 128);
+                return board && channel ? [[board, channel]] : [];
+              },
+            ),
           );
           sectionsKnown = true;
           const dashboards = defined(
@@ -856,10 +885,14 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
           dashboardSettings = { dashboards, ...optional("leaseClocks", clocks) };
           sectionsVersion = reply.etag;
           mcpTools = mcpToolsOf(reply.body);
-          boardFlags = sectionFlags(reply.body, "board");
-          mapFlags = sectionFlags(reply.body, "map");
-          feedFlags = sectionFlags(reply.body, "feed");
-          teamFlags = sectionFlags(reply.body, "team");
+          // A tracker Banneret does not own keeps its own claims: no Take or Release here.
+          boardFlags =
+            sectionFlags(advertised, "board")?.filter(
+              (flag) => !(flag === "leases" && elsewhere?.tasks),
+            ) ?? null;
+          mapFlags = sectionFlags(advertised, "map");
+          feedFlags = sectionFlags(advertised, "feed");
+          teamFlags = sectionFlags(advertised, "team");
           teamPreset =
             fields(fields(reply.body)?.team)?.preset === "company" ? "company" : "community";
           snapshotOffered = fields(reply.body)?.snapshot !== undefined;
@@ -1478,6 +1511,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
         dashboardSettings = {};
         sectionsVersion = undefined;
         mcpTools = [];
+        elsewhere = null;
         needsCount = null;
         today = null;
         needsFirst = null;
@@ -1608,6 +1642,7 @@ const makeRelayFeed = Effect.fn("BanneretRelayFeed.makeRelayFeed")(function* (
     task: readTask,
     events,
     mcpTools: Effect.sync(() => (sectionsKnown ? mcpTools : null)),
+    elsewhere: Effect.sync(() => elsewhere),
   };
   return service;
 });
@@ -1700,6 +1735,10 @@ const make = Effect.fn("BanneretRelayFeed.make")(function* (
     mcpTools: (relayOrigin) =>
       Effect.flatMap(feedFor(relayOrigin), (feed) =>
         feed === undefined ? Effect.succeed(null) : feed.mcpTools,
+      ),
+    elsewhere: (relayOrigin) =>
+      Effect.flatMap(feedFor(relayOrigin), (feed) =>
+        feed === undefined ? Effect.succeed(null) : feed.elsewhere,
       ),
     events: (relayOrigin) =>
       Stream.unwrap(

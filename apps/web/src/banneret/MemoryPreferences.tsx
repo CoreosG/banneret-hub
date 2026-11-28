@@ -5,6 +5,7 @@ import { useState } from "react";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useChatRead } from "./chat/client";
+import { OwnedElsewhere } from "./OwnedElsewhere";
 
 const read = createEnvironmentRpcCommand(connectionAtomRuntime, {
   tag: "memory.preferences",
@@ -70,6 +71,7 @@ export function MemoryPreferences({ environmentId, threadId }: ScopedThreadRef) 
               defaultValue={state.value.folders.join("\n")}
             />
           </label>
+          <OwnedElsewhere capabilities={["search"]} />
           <label>
             <input type="checkbox" name="nudges" defaultChecked={state.value.nudges} /> Find
             repeated corrections in this orchestrator

@@ -60,6 +60,7 @@ import { useLeaseRoute } from "./leaseMachineStore";
 import { routeProblem } from "./leaseRoute.logic";
 import { useLeaseEntry } from "./leaseStore";
 import { notMeasuredReason, offersSection } from "./relayFeed.logic";
+import { OwnedElsewhere } from "./OwnedElsewhere";
 import { LeaseChip } from "./ui/Chips";
 import { PageHeader, SummaryFigure } from "./ui/PageHeader";
 import { QuietLine } from "./ui/QuietLine";
@@ -545,7 +546,11 @@ export function BoardPage() {
     return (
       <BoardFrame company={workspace.name}>
         <PageHeader title="Board" />
-        <QuietLine fact={`${workspace.name} does not offer a board.`} />
+        {feed.elsewhere?.tasks ? (
+          <OwnedElsewhere capabilities={["tasks"]} />
+        ) : (
+          <QuietLine fact={`${workspace.name} does not offer a board.`} />
+        )}
       </BoardFrame>
     );
   }
@@ -622,6 +627,7 @@ export function BoardPage() {
           </ToggleGroup>
         ) : null}
       </PageHeader>
+      <OwnedElsewhere capabilities={["tasks"]} />
       <FeedStatus
         feed={feed}
         company={workspace.name}

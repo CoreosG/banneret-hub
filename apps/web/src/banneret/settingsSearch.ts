@@ -24,7 +24,12 @@ export const banneretSettings = [
     to: "/settings/accounts",
     scope: "environment-defaults",
   },
-  { id: "memory", title: "Memory", to: "/settings/chat", scope: "environment-defaults" },
+  {
+    id: "memory",
+    title: "Memory and skills from Banneret Hub",
+    to: "/settings/chat",
+    scope: "environment-defaults",
+  },
   {
     id: "banneret-memory",
     title: "Use Banneret memory",

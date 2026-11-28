@@ -13,6 +13,8 @@ import { workspacesFilePath } from "../Workspaces.ts";
 import { threadWorkspace } from "../plugins/workspace.ts";
 
 import { BanneretEnrolment } from "../relay/Enrolment.ts";
+import { BanneretRelayFeed } from "../relay/RelayFeed.ts";
+import { soloSkillsEnabled } from "./settings.ts";
 import { repoCommands } from "./repoSync.ts";
 import { allowsPersonalRepo } from "./gitCopy.ts";
 import { isMemoryFileError } from "./files.ts";
@@ -38,17 +40,49 @@ const hasPluginCapability = (
       )
     : Effect.succeed(false);
 
-export const offersHubMemory = Effect.fn("BanneretMemory.offered")(function* (
+/** What a thread's relay says Banneret does not own; null for a Solo thread or a relay without owners. */
+const relayElsewhere = Effect.fn("Banneret.relayElsewhere")(function* (
+  owner: { relay?: { origin: string } | undefined } | undefined,
+) {
+  return owner?.relay ? yield* (yield* BanneretRelayFeed).elsewhere(owner.relay.origin) : null;
+});
+
+const ownerOfThread = Effect.fn("Banneret.ownerOfThread")(
+  function* (threadId: ThreadId, environment: EnvironmentId) {
+    const thread = yield* (yield* ThreadManagementService).getThreadShell(threadId);
+    return thread
+      ? (yield* threadWorkspace(threadId, thread.projectId, environment))?.owner
+      : undefined;
+  },
+  Effect.catchCause(() => Effect.undefined),
+);
+
+/**
+ * Whether the Hub offers its own memory, skills or search to a thread's agent. In an Enterprise
+ * workspace the relay's owners decide. In a Solo one, a plugin that provides the capability takes it,
+ * and the machine's skills switch turns the Hub's skills off. The person's own pages do not ask this.
+ */
+export const hubServes = Effect.fn("Banneret.serves")(function* (
+  threadId: ThreadId,
+  environment: EnvironmentId,
+  capability: "memory" | "skills" | "search",
+) {
+  const owner = yield* ownerOfThread(threadId, environment);
+  if (owner?.kind === "enterprise") return !(yield* relayElsewhere(owner))?.[capability];
+  if (capability === "search") return true;
+  if (yield* hasPluginCapability(owner, capability)) return false;
+  return capability !== "skills" || (yield* soloSkillsEnabled);
+});
+
+/** A skill proposal is stored as a note, so it needs Banneret's memory as well as its skills. */
+export const offersSkillProposals = Effect.fn("Banneret.skillProposals")(function* (
   threadId: ThreadId,
   environment: EnvironmentId,
 ) {
-  const workspace = yield* (yield* ThreadManagementService).getThreadShell(threadId).pipe(
-    Effect.flatMap((thread) =>
-      thread ? threadWorkspace(threadId, thread.projectId, environment) : Effect.succeed(null),
-    ),
-    Effect.catchCause(() => Effect.succeed(null)),
+  return (
+    (yield* hubServes(threadId, environment, "skills")) &&
+    (yield* hubServes(threadId, environment, "memory"))
   );
-  return !(yield* hasPluginCapability(workspace?.owner));
 });
 export const memoryAccess = Effect.fn("BanneretMemory.access")(
   function* (

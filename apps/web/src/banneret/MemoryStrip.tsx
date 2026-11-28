@@ -17,6 +17,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 
 import { MemoryTransfer } from "./MemoryTransfer";
+import { useEnterpriseFeed } from "./useEnterpriseFeed";
 import {
   useMemoryAvailability,
   memoryThreadKey,
@@ -45,6 +46,20 @@ const summary = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "banneret:memory-summary",
   tag: "memory.summary",
 });
+
+/** Your notes stay readable here when the company's memory is somewhere else. */
+function MemoryOwnerLine() {
+  const enterprise = useEnterpriseFeed();
+  const owner = enterprise?.feed.elsewhere?.memory;
+  return owner ? (
+    <p className="px-4 pb-1 text-xs">
+      {owner.owner === "external"
+        ? `Memory is managed by ${owner.title}.`
+        : `Memory is turned off at ${enterprise.workspace.name}.`}{" "}
+      Agents here do not get these notes. Your own notes stay on this machine.
+    </p>
+  ) : null;
+}
 
 export function MemoryStrip({
   environmentId,
@@ -239,6 +254,7 @@ export function MemoryStrip({
             </span>
             <span>Stored unencrypted on this machine</span>
           </button>
+          <MemoryOwnerLine />
           {counts.reminders && (
             <div className="px-4 text-xs">
               Rule reminders: {counts.reminders.fired} fired · {counts.reminders.acknowledged}{" "}
