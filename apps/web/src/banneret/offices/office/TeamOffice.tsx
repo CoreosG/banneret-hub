@@ -445,6 +445,8 @@ export default function TeamOffice(props: Props) {
   const maxY = Math.max(0, grid.height * camera.zoom - camera.height);
   const x = Math.min(camera.x, maxX),
     y = Math.min(camera.y, maxY);
+  // Rooms narrower than the map sit in its middle, so a wide window leaves no one-sided gap.
+  const inset = Math.max(0, Math.floor((camera.width - grid.width * camera.zoom) / 2));
   const ratio = pixelRatio(camera.width, camera.height, window.devicePixelRatio);
   const rooms = slots.flatMap(({ room, boardId }, i) => {
     const point = grid.positions[i]!;
@@ -556,7 +558,7 @@ export default function TeamOffice(props: Props) {
         const point = grid.positions[i]!;
         const key = (boardId === null ? "team.hallway" : "team.room." + boardId) + "/room";
         if (all.some((b) => b.dataset.officeTarget === key)) return [];
-        const dx = (point.x + 84) * camera.zoom - x - cx,
+        const dx = (point.x + 84) * camera.zoom - x + inset - cx,
           dy = (point.y + 14) * camera.zoom - y - cy;
         if (dx * dir[0] + dy * dir[1] <= 0) return [];
         return [{ key, point, distance: Math.hypot(dx, dy) + Math.abs(dx * dir[1] - dy * dir[0]) }];
@@ -655,7 +657,7 @@ export default function TeamOffice(props: Props) {
               open={(item) => pick({ item, boardId: r.boardId })}
               ratio={ratio}
               zoom={camera.zoom}
-              x={r.x * camera.zoom - x}
+              x={r.x * camera.zoom - x + inset}
               y={r.y * camera.zoom - y}
               render={render}
               paint={palette.paint}

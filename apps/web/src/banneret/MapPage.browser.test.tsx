@@ -30,6 +30,14 @@ import { FILTER_MEMORY_KEY } from "./filterMemory";
 import { TaskDialogHost } from "./TaskDialog";
 import { openTaskDialog } from "./taskStore";
 import { useWorkspacesStore } from "./workspacesStore";
+import {
+  expectCentred,
+  expectClickable,
+  expectNoOverlap,
+  expectReadableLines,
+  expectUnclipped,
+  forEachViewport,
+} from "./test/viewports";
 
 vi.mock(import("~/environments/primary/target"), async (original) => ({
   ...(await original()),
@@ -222,8 +230,13 @@ function Shell() {
   );
 }
 
-async function openMap(stack: DisposableStack, path = "/map") {
-  await page.viewport(1600, 900);
+/** `size: null` keeps the window as it is, for a layout test at its matrix size. */
+async function openMap(
+  stack: DisposableStack,
+  path = "/map",
+  size: { readonly width: number; readonly height: number } | null = { width: 1600, height: 900 },
+) {
+  if (size) await page.viewport(size.width, size.height);
   const style = document.createElement("style");
   style.textContent = appCss;
   document.head.append(style);
@@ -288,6 +301,59 @@ async function pick(title: string) {
   await userEvent.fill(page.getByRole("combobox", { name: "Search items" }), title);
   await userEvent.click(page.getByRole("option", { name: new RegExp(`^${title}`) }));
 }
+
+const mapMain = () => document.querySelector('[role="main"]')!;
+const mapPage = () => mapMain().querySelector('[data-layout="page"]')!;
+
+forEachViewport("the Map lays out its stage list", async (at) => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openMap(stack, "/map", null);
+  await using _screen = screen;
+  await emit(state(["today", "map"], mapRead(MAP())));
+  await expect.element(page.getByText("Old idea")).toBeVisible();
+  expectCentred(mapPage(), mapMain(), "the map page");
+  expect(mapPage().getBoundingClientRect().width).toBeLessThanOrEqual(1200);
+  expectNoOverlap(
+    Object.fromEntries(
+      [...document.querySelectorAll("li[data-stage-id]")].map((row) => [
+        `stage ${row.getAttribute("data-stage-id")}`,
+        row,
+      ]),
+    ),
+  );
+  expectNoOverlap(
+    Object.fromEntries(
+      [...document.querySelectorAll("li[data-stage-id] [data-slot=map-item]")].map(
+        (card, index) => [`item ${index}`, card],
+      ),
+    ),
+  );
+  for (const card of document.querySelectorAll("[data-slot=map-item]")) {
+    expectUnclipped(card, `item ${card.textContent}`, "x");
+  }
+  expectUnclipped(legend(), "the status legend", "x");
+  expectClickable(viewToggle("Neighbourhood").element(), "the Neighbourhood switch");
+  expectReadableLines(mapPage(), "the map page");
+  await at.screenshot();
+});
+
+forEachViewport("the Map lays out the neighbourhood", async (at) => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openMap(stack, "/map?view=neighbourhood&item=rate-limits", null);
+  await using _screen = screen;
+  await emit(state(["map"], mapRead(MAP())));
+  await vi.waitFor(() => expect(centre()?.getAttribute("data-item-id")).toBe("rate-limits"));
+  expectCentred(mapPage(), mapMain(), "the map page");
+  const nodes = [...document.querySelectorAll("[data-slot=graph-node]")];
+  await vi.waitFor(() =>
+    expectNoOverlap(
+      Object.fromEntries(nodes.map((entry) => [entry.getAttribute("data-item-id")!, entry])),
+    ),
+  );
+  expectClickable(picker().element(), "the item picker");
+  expectClickable(centre()!, "the centre node");
+  await at.screenshot();
+});
 
 describe("Enterprise build map", () => {
   it("narrows the map to the items a text filter matches, kept in the URL", async () => {
