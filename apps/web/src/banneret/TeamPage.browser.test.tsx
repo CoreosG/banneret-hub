@@ -1221,3 +1221,132 @@ it("shows the same people, presence, claims and agent counts in Floor, List and 
     }
   }
 });
+
+it("shows relay work on the matching robots and clears it when chat is disabled", async () => {
+  using stack = new DisposableStack();
+  const { emit, screen } = await openTeam(stack, "/team?view=office");
+  await using _screen = screen;
+  const team = TEAM();
+  const [ada, bo] = team.people;
+  const handles = [ada!, bo!].map((p, i) => ({
+    id: "h" + i,
+    owner: { id: p.id, login: p.login },
+    shortName: i ? "reviewer" : "builder",
+    claimName: "codex-" + i,
+    provider: "codex",
+    reachable: true,
+    wake: "everyone",
+    machine: { id: p.machines[0]!.id, label: "Hub" },
+    paused: i === 1,
+  }));
+  vi.mocked(feedRpc.room).mockImplementation(async (_, board) => ({
+    sessions:
+      board !== "platform"
+        ? []
+        : handles.map((h) => ({
+            id: h.id,
+            handle: h.owner.login + "/" + h.shortName,
+            personId: h.owner.id,
+            provider: h.provider,
+            state: "working",
+            since: ago(1),
+          })),
+    nextCursor: null,
+  }));
+  const ask = {
+    id: "question",
+    state: "open",
+    kind: "question",
+    question: "Which build?",
+    choices: [],
+    depth: 1,
+    receipts: [],
+    createdAt: ago(1),
+    expiresAt: ago(-10),
+    onBehalfOf: handles[0]!.owner,
+    from: { handle: "h0", owner: handles[0]!.owner },
+    to: { kind: "agent", handle: "h1", owner: handles[1]!.owner },
+  };
+  const handoff = {
+    id: "offer",
+    taskId: "task",
+    from: ask.from.owner,
+    fromHandle: "h0",
+    fromMachineId: "machine",
+    to: ask.to.owner,
+    receipts: [],
+    state: "offered",
+    createdAt: ago(1),
+    expiresAt: ago(-10),
+    note: { goal: "Ship", done: "Built", next: "Test" },
+  };
+  using rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => ({
+    items:
+      action.kind === "handles"
+        ? handles
+        : action.kind === "handoffs"
+          ? [handoff]
+          : action.kind === "officeAsks" && action.state === "open"
+            ? [ask]
+            : [],
+    nextCursor: null,
+  }));
+  const feed = state([...ALL, "chat"], teamRead(team));
+  await emit(feed);
+  const robot = page.getByRole("button", { name: "codex · working" }).first();
+  await expect.element(robot).toBeVisible();
+  const shots = import.meta.env.VITE_H4_SCREENSHOTS;
+  if (shots) await page.screenshot({ path: shots + "/office-before.png" });
+  {
+    using _timers = fakeTimers();
+    await emit({ ...feed, chatFlags: ["agents", "agent_asks", "handoffs", "agent_pause"] });
+    await expect
+      .element(page.getByText("asking bo-example/reviewer", { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText("answering ada-example/builder", { exact: true }))
+      .toBeVisible();
+    await expect.element(page.getByText("pending hand-off", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("paused", { exact: true })).toBeVisible();
+    vi.advanceTimersToNextFrame();
+    if (shots) await page.screenshot({ path: shots + "/office-after.png" });
+    using frames = vi.spyOn(window, "requestAnimationFrame");
+    const surface = page
+      .getByRole("group", { name: /Office map/ })
+      .element()
+      .querySelector("canvas")!;
+    using paints = vi.spyOn(surface.getContext("2d")!, "drawImage");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(frames).not.toHaveBeenCalled();
+    expect(paints).not.toHaveBeenCalled();
+  }
+  await page.getByRole("button", { name: "Floor", exact: true }).click();
+  const room = page.getByRole("button", { name: /Platform.*desks/ });
+  if (room.element().getAttribute("aria-expanded") === "false") await room.click();
+  await expect
+    .element(page.getByText(/codex · working · asking bo-example\/reviewer · pending hand-off/))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(/codex · working · answering ada-example\/builder · paused/))
+    .toBeVisible();
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  await expect.element(page.getByText(/bo-example\/reviewer.*paused/)).toBeVisible();
+  rpc.mockImplementation(async (_, action) => ({
+    items: action.kind === "handles" ? handles : [],
+    nextCursor: null,
+  }));
+  await emit({
+    ...feed,
+    chatFlags: ["agents", "agent_asks", "handoffs", "agent_pause"],
+    chatRevision: 2,
+  });
+  await expect
+    .element(page.getByText("bo-example/reviewer · paused", { exact: true }))
+    .toBeVisible();
+  expect(page.getByText(/pending hand-off/).elements()).toHaveLength(0);
+  await emit({ ...feed, chatFlags: [] });
+  await vi.waitFor(() =>
+    expect(page.getByText(/bo-example\/reviewer · paused/).elements()).toHaveLength(0),
+  );
+  expect(rpc).toHaveBeenCalled();
+});

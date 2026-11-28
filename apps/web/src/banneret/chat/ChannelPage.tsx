@@ -624,10 +624,9 @@ function Timeline({
                               .flatMap((c) => c.prs)
                               .find((p) => matchesReview(p, m.ask?.pr))?.headSha
                           }
+                          viewer={enterprise.enrolment.me?.login}
                           postReview={
-                            m.ask.kind === "review" &&
-                            flags.includes("promote") &&
-                            m.ask.to.owner.login === enterprise.enrolment.me?.login
+                            flags.includes("promote")
                               ? () =>
                                   chatRpc.run(enterprise.target, {
                                     kind: "postReview",

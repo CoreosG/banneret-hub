@@ -1,3 +1,5 @@
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
+import { Button } from "../../components/ui/button";
 import { matchesReview } from "./reviewPr";
 import { askHome } from "./askHome";
 import type { ReactNode } from "react";
@@ -16,17 +18,29 @@ import { chatRpc, conversations, handles, pageItems, useChatRead } from "./clien
 
 const decode = Schema.decodeUnknownSync(ChatAsks);
 const settings = Schema.decodeUnknownSync(ChatSettings);
+function CommitSha({ sha }: { sha: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger>
+        <code>{sha.slice(0, 7)}</code>
+      </TooltipTrigger>
+      <TooltipPopup>{sha}</TooltipPopup>
+    </Tooltip>
+  );
+}
 export function AskCard({
   ask,
   names = new Map(),
   children,
   currentHead,
+  viewer,
   postReview,
 }: {
   ask: ChatAsk;
   names?: ReadonlyMap<string, string>;
   children?: ReactNode;
   currentHead?: string | undefined;
+  viewer?: string | undefined;
   postReview?: (() => Promise<unknown>) | undefined;
 }) {
   const [post, setPost] = useState("");
@@ -49,7 +63,7 @@ export function AskCard({
           <>
             <dt>Pull request</dt>
             <dd>
-              {ask.pr.repo}#{ask.pr.number} at {ask.pr.headSha}
+              {ask.pr.repo}#{ask.pr.number} at <CommitSha sha={ask.pr.headSha} />
             </dd>
           </>
         )}
@@ -84,7 +98,7 @@ export function AskCard({
       )}
       {ask.reason && ask.reason !== "auto_accepted" && <p>{ask.reason}</p>}
       {ask.state === "answered" && answer && (
-        <section className="border-t pt-2">
+        <section className="grid justify-items-start gap-1.5 border-t pt-2 text-sm">
           <strong>
             {ask.kind === "review"
               ? "Review result: " + answer.verdict?.replaceAll("_", " ")
@@ -93,11 +107,22 @@ export function AskCard({
           {reviewed && (
             <p>
               {stale ? "Stale: reviewed at " : "Reviewed at "}
-              {reviewed}
+              <CommitSha sha={reviewed} />
             </p>
           )}
-          {postReview && !stale && (
-            <button
+          <p className="whitespace-pre-wrap">{answer.text}</p>
+          {ask.receipts.map((r) => (
+            <small key={r.handle} className="block">
+              {label(r.handle)} ·{" "}
+              {r.tokens ? r.tokens.toLocaleString() + " tokens" : "No tokens reported"} ·{" "}
+              {r.seconds} s{r.tools.length ? " · " + r.tools.join(", ") : ""}
+            </small>
+          ))}
+          {ask.kind === "review" && viewer === ask.to.owner.login && postReview && !stale && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
               disabled={post === "Posting..." || post === "Posted to GitHub"}
               onClick={async () => {
                 setPost("Posting...");
@@ -110,17 +135,9 @@ export function AskCard({
               }}
             >
               Post as review
-            </button>
+            </Button>
           )}
           {post && <p role="status">{post}</p>}
-          <p>{answer.text}</p>
-          {ask.receipts.map((r) => (
-            <small key={r.handle} className="block">
-              {label(r.handle)} ·{" "}
-              {r.tokens ? r.tokens.toLocaleString() + " tokens" : "No tokens reported"} ·{" "}
-              {r.seconds} s{r.tools.length ? " · " + r.tools.join(", ") : ""}
-            </small>
-          ))}
         </section>
       )}
       {children}
@@ -154,11 +171,8 @@ export function TaskReviews({
       key={ask.id}
       ask={ask}
       currentHead={card.prs.find((p) => matchesReview(p, ask.pr))?.headSha}
-      postReview={
-        owner && ask.to.kind === "agent" && owner === ask.to.owner.login
-          ? () => chatRpc.run(target, { kind: "postReview", id: ask.id })
-          : undefined
-      }
+      viewer={owner}
+      postReview={() => chatRpc.run(target, { kind: "postReview", id: ask.id })}
     />
   ));
 }

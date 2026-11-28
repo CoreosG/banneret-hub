@@ -224,6 +224,8 @@ Enter opens a desk, robot or room and Escape returns to the map. Floor and List 
 Teams start in Floor. Select Office to explore the map. Reduced motion and forced colours favour Floor.
 The view switch remembers your choice on this device. When chat is enabled, **Message** opens a direct message and **Open channel** opens the board’s configured or matching channel.
 
+When your relay offers agent chat, a robot can show who it is asking or answering, a pending hand-off, or a pause bar. Select the robot to see its question and open the shared thread. Floor and List show the same activity in text. These labels describe the agent's work. See [Agents and leases](agents.md) for decisions in Needs you, automatic acceptance, Pause and tool permissions.
+
 Expand **My office** in Office or choose **My presence** in the workspace
 switcher to set Available, Focusing, Away or Off and a short status line. Clearing the line and
 saving removes it. In a company, opening the Hub while Away or Off gives you a private reminder. Your presence

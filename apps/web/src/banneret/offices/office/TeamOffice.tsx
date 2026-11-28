@@ -19,6 +19,7 @@ import { useRoomSessions } from "../useRoomSessions";
 import type { Theme } from "../sprites";
 import { frameQueue, intersects, pixelRatio, packRooms, zoomSteps } from "./camera";
 import { detailFor, dimensions, layout, type Desk, type Item, type Person } from "./layout";
+import { useAgentActivity, RobotActivity, OfficeAskLink, activityText } from "../AgentActivity";
 import { officePaint } from "./paint";
 
 type Room = OfficeSummary["rooms"][number];
@@ -110,6 +111,7 @@ function OfficeRoom({
   close: () => void;
   open: (item: Item) => void;
 }) {
+  const activityFor = useAgentActivity();
   const { office, target, boards, people } = props;
   const key = boardId === null ? "team.hallway" : "team.room." + boardId;
   const { sessions, retry } = useRoomSessions(target, boardId, office.files[key], zoom >= 0.5);
@@ -236,10 +238,11 @@ function OfficeRoom({
   function button(item: Item, kind: "room" | "more" | "sprite") {
     const left = x + item.x * zoom,
       top = y + item.y * zoom;
+    const agentActivity = activityFor(item);
     const label =
       kind === "room"
         ? [title, summary, meeting && "Meeting link"].filter(Boolean).join(" · ")
-        : item.label;
+        : [item.label, agentActivity && activityText(agentActivity)].filter(Boolean).join(" · ");
     return (
       <button
         type="button"
@@ -268,6 +271,7 @@ function OfficeRoom({
           transform: detail === "mark" ? "" : "translate(-50%, -50%)",
         }}
       >
+        {agentActivity && <RobotActivity activity={agentActivity} />}
         {detail !== "mark" && item.id.startsWith("desk/") && (
           <span
             aria-hidden
@@ -328,6 +332,9 @@ function OfficeRoom({
           </button>
           {selectedPerson ? (
             <>
+              {activityFor(picked)?.notes.map(
+                (n) => n.ask && <OfficeAskLink key={n.ask.id} ask={n.ask} target={target} />,
+              )}
               <DeskDetails
                 p={selectedPerson}
                 counts={indexState.byPerson.get(selectedPerson.id)?.counts}
