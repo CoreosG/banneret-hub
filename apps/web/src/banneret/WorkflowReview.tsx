@@ -7,7 +7,9 @@ import { useQuietThreadShell } from "../state/entities";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useWorkspacesStore } from "./workspacesStore";
-import type { RelayTarget } from "./enrolmentStore";
+import { resolveWorkspaces } from "./workspaces.logic";
+import { relayKey, type RelayTarget } from "./enrolmentStore";
+import { useRelayFeedStore } from "./relayFeedStore";
 import { randomUUID } from "../lib/utils";
 import { chatRpc, conversations, useChatRead } from "./chat/client";
 
@@ -19,6 +21,22 @@ const needs = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "Pending workflow reviews",
   tag: "memory.workflowNeeds",
 });
+export const isWorkflowPhrase = (prompt: string) =>
+  /^review\s+my\s+workflow\s*[.!?]*$/i.test(prompt.trim());
+export const WORKFLOW_HINT = {
+  title: "Workflow review runs in your main orchestrator chat",
+  description: "Open that chat and choose Review my workflow, or use the command palette.",
+};
+/** Only a company workspace has a main orchestrator, and only while Banneret owns its memory. */
+export function workflowReviewOffered(environmentId: EnvironmentId) {
+  const state = useWorkspacesStore.getState();
+  const relayOrigin = resolveWorkspaces(state.local, ...Object.values(state.byEnvironment)).find(
+    (w) => w.id === state.activeId && w.kind === "enterprise",
+  )?.relay?.origin;
+  if (!relayOrigin) return false;
+  const feed = useRelayFeedStore.getState().feeds[relayKey({ environmentId, relayOrigin })];
+  return feed?.elsewhere?.memory === undefined;
+}
 type Action = "read" | "run" | "enable" | "disable" | "dismiss" | "setup" | "rule" | "propose";
 const useWorkflowRevision = create<Record<string, number>>(() => ({}));
 export async function workflowAction(ref: ScopedThreadRef, action: Action, created?: number) {
@@ -194,10 +212,12 @@ export function WorkflowReview({
   revision = 0,
   settings = false,
   inbox = false,
+  runInHeader = false,
   openProposal,
 }: {
   revision?: number;
   settings?: boolean;
+  runInHeader?: boolean;
   inbox?: boolean;
   openProposal?: (key: string) => void;
 } & ScopedThreadRef) {
@@ -231,7 +251,7 @@ export function WorkflowReview({
   if (!state.value) return state.error && !settings ? <p role="alert">{state.error}</p> : null;
   return (
     <fieldset disabled={busy} className="grid gap-1">
-      <button onClick={() => void act("run")}>Review my workflow</button>
+      {!runInHeader && <button onClick={() => void act("run")}>Review my workflow</button>}
       {settings && (
         <label>
           <input

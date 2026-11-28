@@ -3,8 +3,19 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useCommandPaletteShowPortsItem } from "../components/ports/showPortsCommand";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { buildThreadRouteParams } from "../threadRoutes";
 import { changePause, usePause } from "./Pause";
-import { PauseIcon, LayersIcon, PanelTopIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { reviewMyWorkflow } from "./workflowPalette";
+import { useEnvironmentFeed } from "./relayFeedStore";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  ClipboardCheckIcon,
+  PauseIcon,
+  LayersIcon,
+  PanelTopIcon,
+  PlusIcon,
+  SearchIcon,
+} from "lucide-react";
 
 import {
   ADDON_ICON_CLASS,
@@ -42,6 +53,7 @@ export function useBanneretPaletteItems(
   panelRef: ScopedThreadRef | null,
 ): Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> {
   const showPorts = useCommandPaletteShowPortsItem({ panelRef });
+  const navigate = useNavigate();
   const machine = usePrimaryEnvironmentId();
   const pause = usePause((s) => machine && s[machine]?.status);
   const workspaces = useWorkspaces();
@@ -50,6 +62,12 @@ export function useBanneretPaletteItems(
   const activeId = effectiveWorkspaceId(
     useWorkspacesStore((state) => state.activeId),
     workspaces,
+  );
+  // Only a company workspace has a main orchestrator chat.
+  const relayOrigin = workspaces.find((w) => w.id === activeId && w.kind === "enterprise")?.relay
+    ?.origin;
+  const relayFeed = useEnvironmentFeed(
+    machine && relayOrigin ? { environmentId: machine, relayOrigin } : null,
   );
   const targets = [
     { id: null, name: "Personal" },
@@ -82,6 +100,21 @@ export function useBanneretPaletteItems(
             searchTerms: ["pause", "stop", "new work", "resume"],
             icon: <PauseIcon className={ITEM_ICON_CLASS} />,
             run: () => changePause(machine, { kind: pause.paused ? "resume" : "pause" }),
+          },
+        ]
+      : []),
+    ...(machine && relayOrigin && !relayFeed.elsewhere?.memory
+      ? [
+          {
+            kind: "action" as const,
+            value: "action:review-my-workflow",
+            title: "Review my workflow",
+            searchTerms: ["review", "workflow", "agents", "retries"],
+            icon: <ClipboardCheckIcon className={ITEM_ICON_CLASS} />,
+            run: () =>
+              reviewMyWorkflow({ environmentId: machine, relayOrigin }, (ref) =>
+                navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) }),
+              ),
           },
         ]
       : []),

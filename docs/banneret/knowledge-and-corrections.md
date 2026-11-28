@@ -16,7 +16,9 @@ The first correction stays private as a candidate. After two separate messages, 
 
 ## Review my workflow
 
-Type **Review my workflow** in the main orchestrator chat or use its review button. The report reads
+In your main orchestrator chat, choose **Review my workflow** at the top or send that phrase. The command
+palette's **Review my workflow** opens that chat and runs the review. If you send the phrase in another company
+chat, it goes to that chat's agent as usual and the Hub shows where to run the review. The report reads
 the workspace owner's local orchestrator records and Banneret notes. It counts retries, tool failures,
 completed approval waits, proposed or disputed notes, stale notes and reminder responses. The main chat sends those counts to its usual model.
 The model can suggest a setup change, a standing rule and a platform draft. Choosing a setup change

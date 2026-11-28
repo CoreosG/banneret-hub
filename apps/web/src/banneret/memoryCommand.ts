@@ -1,15 +1,36 @@
 import type { ChatComposerProps } from "../components/chat/ChatComposer";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { workflowAction } from "./WorkflowReview";
+import {
+  isWorkflowPhrase,
+  WORKFLOW_HINT,
+  workflowAction,
+  workflowReviewOffered,
+} from "./WorkflowReview";
 import { toastManager } from "../components/ui/toast";
 import { create } from "zustand";
 import type { ScopedThreadRef } from "@t3tools/contracts";
+import { relayKey } from "./enrolmentStore";
+import { useOrchestrators } from "./orchestratorStore";
 export const memoryThreadKey = (ref: ScopedThreadRef) =>
   JSON.stringify([ref.environmentId, ref.threadId]);
 export const useMemoryCard = create<{ open: Record<string, string> }>(() => ({ open: {} }));
-export const useMemoryAvailability = create<{ threads: Record<string, boolean> }>(() => ({
+/** `threads`: the chat has memory commands. `mains`: it is also the main orchestrator chat. */
+export const useMemoryAvailability = create<{
+  threads: Record<string, boolean>;
+  mains: Record<string, boolean>;
+}>(() => ({
   threads: {},
+  mains: {},
 }));
+/** The chat's memory summary decides. Until it arrives, the designation list answers. */
+function isMainChat(ref: ScopedThreadRef) {
+  const summary = useMemoryAvailability.getState().mains[memoryThreadKey(ref)];
+  if (summary !== undefined) return summary;
+  const prefix = relayKey({ environmentId: ref.environmentId, relayOrigin: "" });
+  return Object.entries(useOrchestrators.getState().byRelay).some(
+    ([key, roles]) => key.startsWith(prefix) && roles.main === ref.threadId,
+  );
+}
 
 export function setMemoryCard(ref: ScopedThreadRef, query?: string) {
   useMemoryCard.setState((state) => {
@@ -37,7 +58,13 @@ export function openMemoryCommand(
   detached = false,
 ) {
   const match = /^\/memory(?:\s+([\s\S]*))?$/i.exec(prompt.trim());
-  if (/^review my workflow[.!?]?$/i.test(prompt.trim())) {
+  if (isWorkflowPhrase(prompt)) {
+    if (!isMainChat(routeThreadRef)) {
+      // The message still goes to the agent.
+      if (workflowReviewOffered(routeThreadRef.environmentId))
+        toastManager.add({ type: "info", ...WORKFLOW_HINT });
+      return false;
+    }
     void workflowAction(routeThreadRef, "run").catch(() =>
       toastManager.add({
         type: "error",

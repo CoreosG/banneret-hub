@@ -148,8 +148,14 @@ it("runs Review my workflow locally from the composer and presents the report in
     };
   });
   await using screen = await render(<MemoryStrip {...ref} />);
-  await expect.element(screen.getByRole("button", { name: "Review my workflow" })).toBeVisible();
+  // One visible action at the top of the main chat, with or without an earlier report.
+  const action = screen.getByRole("button", { name: "Review my workflow" });
+  await expect.element(action).toBeVisible();
   expect(runs).toBe(0);
+  await action.click();
+  await vi.waitFor(() => expect(runs).toBe(1));
+  await expect.element(action).toBeEnabled();
+  runs = 0;
   const { openMemoryCommand } = await import("./memoryCommand");
   const promptRef = { current: "Review my workflow" };
   expect(

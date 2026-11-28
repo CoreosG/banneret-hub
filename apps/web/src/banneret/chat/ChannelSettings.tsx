@@ -3,6 +3,7 @@ import type { ChatConversation, ChatMember, ChannelTemplate } from "@t3tools/con
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { Button } from "../../components/ui/button";
 import type { EnterpriseFeed } from "../useEnterpriseFeed";
+import { ArchiveChannel } from "./ArchiveChannel";
 import { chatRpc } from "./client";
 
 type Channel = Extract<ChatConversation, { kind: "channel" }>;
@@ -98,7 +99,9 @@ export function ChannelSettings({
     >
       <SheetContent>
         <SheetHeader>
-          <SheetTitle>#{channel.name} settings</SheetTitle>
+          <SheetTitle>
+            <span className="wrap-anywhere">#{channel.name} settings</span>
+          </SheetTitle>
           <p className="text-xs text-muted-foreground">
             Managed by{" "}
             {channel.managers.map((m) => m.login).join(", ") || "workspace administrators"}
@@ -302,6 +305,16 @@ export function ChannelSettings({
             )}
           </fieldset>
           {error && <p role="alert">{error}</p>}
+          <div className="mt-4 border-t pt-4 empty:hidden">
+            <ArchiveChannel
+              target={enterprise.target}
+              channel={channel}
+              done={() => {
+                saved();
+                close();
+              }}
+            />
+          </div>
         </form>
       </SheetContent>
     </Sheet>

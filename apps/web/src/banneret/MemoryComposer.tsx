@@ -2,6 +2,7 @@ import { memo } from "react";
 import type { ServerProvider } from "@t3tools/contracts";
 import { ChatComposer as Composer, type ChatComposerProps } from "../components/chat/ChatComposer";
 import { memoryThreadKey, useMemoryAvailability, openMemoryCommand } from "./memoryCommand";
+import { isWorkflowPhrase } from "./WorkflowReview";
 export type { ChatComposerHandle } from "../components/chat/ChatComposer";
 
 const memory = { name: "memory", description: "Search and review private Banneret notes" };
@@ -12,26 +13,30 @@ const commands = (list: ServerProvider["slashCommands"]) => [
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
   const ref = props.routeThreadRef;
   const enabled = useMemoryAvailability((s) => s.threads[memoryThreadKey(ref)]);
-  if (!enabled) return <Composer {...props} />;
-  const providers = props.providerStatuses.map((provider) => ({
-    ...provider,
-    slashCommands: commands(provider.slashCommands),
-    ...(provider.workspaceSnapshots
-      ? {
-          workspaceSnapshots: provider.workspaceSnapshots.map((s) => ({
-            ...s,
-            slashCommands: commands(s.slashCommands),
-          })),
-        }
-      : {}),
-  }));
+  const providers = enabled
+    ? props.providerStatuses.map((provider) => ({
+        ...provider,
+        slashCommands: commands(provider.slashCommands),
+        ...(provider.workspaceSnapshots
+          ? {
+              workspaceSnapshots: provider.workspaceSnapshots.map((s) => ({
+                ...s,
+                slashCommands: commands(s.slashCommands),
+              })),
+            }
+          : {}),
+      }))
+    : props.providerStatuses;
+  // The workflow phrase is read in every chat, new ones too, to run it or point to it.
+  const intercept = (prompt: string, detached = false) =>
+    (enabled || isWorkflowPhrase(prompt)) && openMemoryCommand(props, prompt, detached);
   const capture = props.captureDetachedSend;
   return (
     <Composer
       {...props}
       providerStatuses={providers}
       onSend={(...args) => {
-        if (openMemoryCommand(props, props.promptRef.current)) args[0]?.preventDefault();
+        if (intercept(props.promptRef.current)) args[0]?.preventDefault();
         else props.onSend(...args);
       }}
       {...(capture
@@ -41,11 +46,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               return (...args: Parameters<typeof send>) => {
                 if (
                   !args[3] &&
-                  openMemoryCommand(
-                    props,
-                    args[4]?.prompt ?? props.promptRef.current,
-                    Boolean(args[4]),
-                  )
+                  intercept(args[4]?.prompt ?? props.promptRef.current, Boolean(args[4]))
                 )
                   args[0]?.preventDefault();
                 else send(...args);

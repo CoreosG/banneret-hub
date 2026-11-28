@@ -1,3 +1,7 @@
+import { Link } from "@tanstack/react-router";
+import { PauseControls } from "../Pause";
+import { Button } from "../../components/ui/button";
+import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { AskSettings } from "./AskSettings";
 import { CallApprovals } from "../CallApprovals";
 import { ThreadToolLevels } from "../ThreadToolLevels";
@@ -13,7 +17,7 @@ import { chatRpc, useChatRead } from "./client";
 const decodeSettings = Schema.decodeUnknownSync(ChatSettings);
 const decodeHandle = Schema.decodeUnknownOption(ChatHandle);
 
-export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
+function useDmSettings(enterprise: EnterpriseFeed) {
   const [revision, refresh] = useState(0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -33,6 +37,89 @@ export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
     }
     setPending(false);
   }
+  return { settings, pending, save, error: error || setting.error };
+}
+
+/** The person's default for new agents, and the button that applies it to the existing ones. */
+function WakeDefault({
+  settings,
+  save,
+}: {
+  settings: ChatSettings | undefined;
+  save: (action: Parameters<typeof chatRpc.run>[1]) => Promise<void>;
+}) {
+  return (
+    <>
+      <label>
+        Who can wake new agents{" "}
+        <select
+          aria-label="Who can wake new agents"
+          value={settings?.agentWakeDefault ?? "everyone"}
+          onChange={(e) =>
+            settings &&
+            void save({
+              kind: "setDmSettings",
+              settings: { ...settings, agentWakeDefault: wakeValue(e.target.value) },
+            })
+          }
+        >
+          <WakeOptions />
+        </select>
+      </label>
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={() =>
+          settings && void save({ kind: "applyWake", wake: settings.agentWakeDefault })
+        }
+      >
+        Apply to all my agents
+      </Button>
+    </>
+  );
+}
+
+/** Settings > Chat. The section always renders, so a search for "wake" has somewhere to land. */
+export function AgentWakeSetting() {
+  const enterprise = useEnterpriseFeed();
+  return (
+    <SettingsSection id="agent-wake" title="Wake agents">
+      {enterprise?.feed.chatFlags?.includes("agent_inbox") ? (
+        <WakeDefaultRow key={enterprise.target.relayOrigin} enterprise={enterprise} />
+      ) : (
+        <SettingsRow
+          title="Who can wake your agents"
+          description="Switch to a company workspace whose relay delivers messages to agents to choose this."
+        />
+      )}
+    </SettingsSection>
+  );
+}
+function WakeDefaultRow({ enterprise }: { enterprise: EnterpriseFeed }) {
+  const { settings, pending, save, error } = useDmSettings(enterprise);
+  return (
+    <SettingsRow
+      title={`Who can wake your agents in ${enterprise.workspace.name}`}
+      description={
+        enterprise.feed.chatFlags?.includes("agents")
+          ? "The default for new agents. Change one agent from its thread header."
+          : "The default for new agents. This relay does not offer a separate setting for each agent yet."
+      }
+      status={error}
+      control={
+        <fieldset
+          className="flex flex-wrap items-center gap-2 text-xs"
+          disabled={!settings || pending}
+        >
+          <WakeDefault settings={settings} save={save} />
+        </fieldset>
+      }
+    />
+  );
+}
+
+export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
+  const { settings, pending, save, error } = useDmSettings(enterprise);
   return (
     <fieldset className="grid gap-2 p-2 text-xs" disabled={!settings || pending}>
       {enterprise.feed.chatFlags?.includes("agent_owner_dm_read") && (
@@ -52,31 +139,7 @@ export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
         </label>
       )}
       {enterprise.feed.chatFlags?.includes("agent_inbox") && (
-        <>
-          <label>
-            Who can wake new agents{" "}
-            <select
-              aria-label="Who can wake new agents"
-              value={settings?.agentWakeDefault ?? "everyone"}
-              onChange={(e) =>
-                settings &&
-                void save({
-                  kind: "setDmSettings",
-                  settings: { ...settings, agentWakeDefault: wakeValue(e.target.value) },
-                })
-              }
-            >
-              <WakeOptions />
-            </select>
-          </label>
-          <button
-            onClick={() =>
-              settings && void save({ kind: "applyWake", wake: settings.agentWakeDefault })
-            }
-          >
-            Apply to all my agents
-          </button>
-        </>
+        <WakeDefault settings={settings} save={save} />
       )}
       {settings && enterprise.feed.chatFlags?.includes("agent_asks") && (
         <AskSettings
@@ -130,21 +193,20 @@ export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
             })}
         </fieldset>
       )}
-      {(error || setting.error) && <span role="alert">{error || setting.error}</span>}
+      {error && <span role="alert">{error}</span>}
     </fieldset>
   );
 }
 function wakeValue(value: FormDataEntryValue | null) {
   return value === "owner" || value === "nobody" ? value : "everyone";
 }
+const wakeLabels = { everyone: "Everyone", owner: "Only me", nobody: "Nobody" } as const;
 function WakeOptions() {
-  return (
-    <>
-      <option value="everyone">Everyone</option>
-      <option value="owner">Only me</option>
-      <option value="nobody">Nobody</option>
-    </>
-  );
+  return Object.entries(wakeLabels).map(([value, label]) => (
+    <option key={value} value={value}>
+      {label}
+    </option>
+  ));
 }
 
 export function AgentThreadHeader({
@@ -155,13 +217,25 @@ export function AgentThreadHeader({
   thread: string;
 }) {
   const enterprise = useEnterpriseFeed();
-  return enterprise?.environmentId === environmentId &&
-    enterprise.feed.chatFlags?.includes("agents") ? (
-    <ThreadSettings
-      key={enterprise.target.relayOrigin + thread}
-      enterprise={enterprise}
-      thread={thread}
-    />
+  if (enterprise?.environmentId !== environmentId) return null;
+  if (enterprise.feed.chatFlags?.includes("agents"))
+    return (
+      <ThreadSettings
+        key={enterprise.target.relayOrigin + thread}
+        enterprise={enterprise}
+        thread={thread}
+      />
+    );
+  // A relay with an agent inbox but no per-agent handles still has the person's wake default.
+  return enterprise.feed.chatFlags?.includes("agent_inbox") ? (
+    <Link
+      className="text-xs underline"
+      to="/settings/chat"
+      hash="agent-wake"
+      hashScrollIntoView={false}
+    >
+      Wake settings
+    </Link>
   ) : null;
 }
 function ThreadSettings({ enterprise, thread }: { enterprise: EnterpriseFeed; thread: string }) {
@@ -207,7 +281,8 @@ function ThreadSettings({ enterprise, thread }: { enterprise: EnterpriseFeed; th
       }}
     >
       <summary className="cursor-pointer">
-        {h ? h.owner.login + "/" + (h.shortName ?? h.claimName) : "Give a chat name"}{" "}
+        {h ? h.owner.login + "/" + (h.shortName ?? h.claimName) : "Give a chat name"}
+        {(h?.wake ?? defaults.value) && ` · Wake: ${wakeLabels[h?.wake ?? defaults.value!]}`}{" "}
         {waiting ? <b>{waiting} waiting</b> : null}
       </summary>
       <form
@@ -270,9 +345,14 @@ export function ThreadTimeline(props: ComponentProps<typeof Timeline>) {
       working={props.isWorking}
       renderTimeline={(cards) => (
         <>
-          <header className="flex items-center gap-3">
-            <ThreadToolLevels {...thread} />
-            <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
+          <header className="py-1 text-xs">
+            <div className="chat-content-lane flex flex-wrap items-center gap-3 px-4">
+              <ThreadToolLevels {...thread} />
+              <AgentThreadHeader environmentId={thread.environmentId} thread={thread.threadId} />
+              <div className="ml-auto">
+                <PauseControls key={thread.environmentId} id={thread.environmentId} size="xs" />
+              </div>
+            </div>
           </header>
           <Timeline
             {...props}

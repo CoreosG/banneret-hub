@@ -67,7 +67,8 @@ export function ThreadToolLevels({
 }) {
   return (
     // Outlined and padded off the breadcrumb: bare text flush against it read as a stuck tooltip.
-    <div className="ps-(--workspace-gutter-start) pt-1">
+    // The thread's header row places it at the start of the chat column.
+    <div className="pt-1">
       <Popover>
         <PopoverTrigger render={<Button variant="outline" size="xs" />}>Tool access</PopoverTrigger>
         <PopoverPopup align="start" width="md">

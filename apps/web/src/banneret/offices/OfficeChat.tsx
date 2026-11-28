@@ -7,8 +7,10 @@ import { conversations, offersConversation, chatRpc, useChatRead } from "../chat
 import type { EnterpriseFeed } from "../useEnterpriseFeed";
 import type { RelayTarget } from "../enrolmentStore";
 type Person = { id: string; login: string };
+/** Null while chat is off or not read yet; an empty object when this board has no readable channel. */
+type BoardChat = { channelId?: string | undefined } | null;
 const Chat = createContext<{
-  boardChannel?: string | undefined;
+  boardChat: BoardChat;
   dms: boolean;
   viewer?: string | undefined;
   channels: Map<string, string>;
@@ -41,10 +43,15 @@ export function OfficeChat({
     <Chat.Provider
       value={{
         channels,
-        boardChannel:
-          board && feed.boardChannels && Object.hasOwn(feed.boardChannels, board)
-            ? channels.get(feed.boardChannels[board]!)
-            : undefined,
+        boardChat:
+          enabled && rows.value
+            ? {
+                channelId:
+                  board && feed.boardChannels && Object.hasOwn(feed.boardChannels, board)
+                    ? channels.get(feed.boardChannels[board]!)
+                    : undefined,
+              }
+            : null,
         dms:
           flags.includes("dms") &&
           !!enterprise.enrolment.me?.permissions.some(
@@ -58,8 +65,8 @@ export function OfficeChat({
     </Chat.Provider>
   );
 }
-export function useBoardChannel() {
-  return useContext(Chat)?.boardChannel;
+export function useBoardChat(): BoardChat {
+  return useContext(Chat)?.boardChat ?? null;
 }
 export function RoomChannel({ board, title }: { board: string; title: string }) {
   const chat = useContext(Chat);
