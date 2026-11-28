@@ -431,6 +431,6 @@ booking ends. Cleanup deletes the sandbox's local work.
 
 With chat search enabled, press `/` and choose Search all messages to filter by channel, author, kind, linked task or date. Open a result to jump to the message. With posting enabled, choose Post to GitHub on a message, select the issue and confirm.
 
-In Settings → Chat, **Use Banneret memory** turns off Claude and Codex memory in new
-Hub sessions on the selected environment. It defaults to off. Hub memory tools
-and the Memory line are available in either mode.
+In Settings → Chat, **Use Banneret memory** adds shared Banneret notes to Hub
+chats on the selected machine. It defaults to off. Claude and Codex keep their
+own memory. Agents flag conflicts with confirmed Banneret notes for you to resolve.

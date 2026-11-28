@@ -144,20 +144,19 @@ or keep a stale note. Proposals and disputes appear in the conversation even wit
 collapsed. Confirm or dismiss a proposal, or resolve a dispute by keeping, editing or
 removing the note. Notes are stored unencrypted in the local Hub state directory.
 
-With **Use Banneret memory** enabled in Settings → Chat for an environment, the
-Hub sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for Claude chats. For Codex chats,
-it passes `memories.generate_memories=false` and `memories.use_memories=false` as
-app-server config overrides. These settings apply to Hub-launched sessions.
-The switch defaults to off. The Hub memory tools and Memory line work in either mode.
+In Settings → Chat, enable **Use Banneret memory** to add shared Banneret notes on the
+selected machine. The switch defaults to off. Claude and Codex keep their own memory
+settings and repository instructions. When provider memory conflicts with a confirmed
+Banneret note, the agent flags the note and cites both sources for you to resolve.
 
 Send `/memory` in an orchestrator chat to open its private notes in the conversation.
 Add a search phrase after the command or search and edit in the card. **Export to folder**
 writes Markdown files and a Claude-compatible MEMORY.md index into a new folder.
 Browsers without a directory picker download that folder as a ZIP. Exports are unencrypted.
 
-Choose **Import memory folder** for a Claude memory directory, or **Import Markdown or
-rules** to select individual files such as AGENTS.md or CLAUDE.md. Settings also offers
-import before enabling provider memory replacement. Choose the receiving orchestrator.
+Choose **Import memory folder** for a Claude memory directory, or **Import provider notes**
+to copy selected Markdown files from Claude or Codex memory. You can also select
+AGENTS.md or CLAUDE.md. In Settings, choose the receiving orchestrator. The original files stay in place.
 Import reads directly selected files or the top-level Markdown files in a selected folder.
 It skips existing keys and refuses suspected credentials. Imported notes are proposals.
 Review them individually or explicitly confirm an import batch in the command card.

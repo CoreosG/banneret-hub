@@ -4,7 +4,7 @@ import { levelHandlers } from "../plugins/levelHandlers.ts";
 import { pluginHandlers } from "../plugins/registry.ts";
 import { readDesignations } from "../OrchestratorState.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
-import { memorySettingsHandlers } from "../memory/providerMemoryPolicy.ts";
+import { memorySettingsHandlers } from "../memory/settings.ts";
 import type { memoryReviewInput } from "@t3tools/contracts";
 import { skillCatalog, describeSkill } from "../skills/catalog.ts";
 import { memoryAccess, unavailable } from "../memory/access.ts";
