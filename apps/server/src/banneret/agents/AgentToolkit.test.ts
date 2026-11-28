@@ -21,6 +21,7 @@ import { RelayClient, generateMachineKey, type FakeRelay } from "@t3tools/banner
 import {
   allBoardCards,
   BANNERET_AGENT_TOOLS,
+  BANNERET_CHAT_TOOLS,
   BANNERET_POOL_TOOLS,
   type BanneretBoardCard,
   type BanneretEnrolmentView,
@@ -1541,7 +1542,7 @@ describe("agent lease tools against the fake relay", () => {
             expect([...(yield* relays.offered(COMPANY_THREAD))].sort()).toEqual(
               BANNERET_AGENT_TOOLS.filter(
                 (name) =>
-                  !name.startsWith("banneret_chat_") &&
+                  !BANNERET_CHAT_TOOLS.some((chatTool) => chatTool === name) &&
                   !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name),
               ).sort(),
             );

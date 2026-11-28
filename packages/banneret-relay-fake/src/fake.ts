@@ -872,6 +872,11 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   const agentAsksEnabled = chatConfig?.agentAsks?.enabled === true;
   const handoffsEnabled = chatConfig?.handoffs?.enabled === true;
   const reviewsEnabled = agentAsksEnabled && chatConfig?.reviews?.enabled === true;
+  const chatToolFlags = new Map<string, boolean>([
+    ["banneret_agent_ask", agentAsksEnabled],
+    ["banneret_agent_answer", agentAsksEnabled],
+    ["banneret_handoff_offer", handoffsEnabled],
+  ]);
   const cfg = chatConfig?.agentAsks;
   const askLimits = {
     pairOpen: cfg?.pairOpen ?? 3,
@@ -3602,28 +3607,21 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
               stoppedKeptSeconds: 3600,
             },
           }),
-          // The Hub's agent toolkit, enabled for everyone; the Hub keeps its own descriptions.
-          mcpTools: [
-            ...[
-              ...(agentAsksEnabled ? ["banneret_agent_ask", "banneret_agent_answer"] : []),
-              ...(handoffsEnabled ? ["banneret_handoff_offer"] : []),
-            ].map((name) => ({
-              name,
-              description: "Work in a shared chat thread.",
-              requires: "agents.ask",
-            })),
-            ...BANNERET_AGENT_TOOLS.filter(
-              (name) =>
-                offersOwnedTool(owners, name) &&
-                ((options.pool?.enabled && has(caller.person, "hub.pool")) ||
-                  !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
-            ).map((name) => ({
-              name,
-              description: "A Banneret Hub agent tool.",
-              ...(name === "banneret_team" && { requires: "hub.team" }),
-              ...(BANNERET_POOL_TOOLS.some((tool) => tool === name) && { requires: "hub.pool" }),
-            })),
-          ],
+          mcpTools: BANNERET_AGENT_TOOLS.filter(
+            (name) =>
+              offersOwnedTool(owners, name) &&
+              chatToolFlags.get(name) !== false &&
+              ((options.pool?.enabled && has(caller.person, "hub.pool")) ||
+                !BANNERET_POOL_TOOLS.some((poolTool) => poolTool === name)),
+          ).map((name) => ({
+            name,
+            description: chatToolFlags.has(name)
+              ? "Work in a shared chat thread."
+              : "A Banneret Hub agent tool.",
+            ...(chatToolFlags.has(name) && { requires: "agents.ask" }),
+            ...(name === "banneret_team" && { requires: "hub.team" }),
+            ...(BANNERET_POOL_TOOLS.some((tool) => tool === name) && { requires: "hub.pool" }),
+          })),
           adapters: [
             { role: "work_tracker", kind: "none" },
             { role: "staff_directory", kind: "none" },

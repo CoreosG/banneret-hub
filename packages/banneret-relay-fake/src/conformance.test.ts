@@ -340,10 +340,23 @@ describe("capabilities", () => {
     const reply = await call(machine, "GET", "/relay/v1/capabilities");
     expect(reply.status).toBe(200);
     expectSchema("Capabilities", reply.body);
-    const body = reply.body as { me: { login: string; machineId?: string }; sections: unknown[] };
+    const body = reply.body as {
+      me: { login: string; machineId?: string };
+      sections: { kind: string; flags: string[] }[];
+      mcpTools: { name: string; requires?: string }[];
+    };
     expect(body.me.login).toBe(machine.login);
     expect(body.me.machineId).toBe(machine.machineId);
-    expect(Array.isArray(body.sections)).toBe(true);
+    const chat = body.sections.find((section) => section.kind === "chat");
+    for (const [name, flag] of [
+      ["banneret_agent_ask", "agent_asks"],
+      ["banneret_agent_answer", "agent_asks"],
+      ["banneret_handoff_offer", "handoffs"],
+    ] as const) {
+      expect(
+        body.mcpTools.filter((tool) => tool.name === name).map((tool) => tool.requires),
+      ).toEqual(chat?.flags.includes(flag) ? ["agents.ask"] : []);
+    }
     if ("skills" in body) {
       expect(body.skills).toEqual({ registry: true });
       const catalog = await call(machine, "GET", "/relay/v1/skills");
