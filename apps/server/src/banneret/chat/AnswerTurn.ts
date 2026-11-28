@@ -1,8 +1,12 @@
-import type { AgentAskPolicy, OrchestrationV2Run, ThreadId } from "@t3tools/contracts";
+import { ThreadId, type AgentAskPolicy, type OrchestrationV2Run } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import type { ThreadManagementServiceShape } from "../../orchestration-v2/ThreadManagementService.ts";
+
+import { handleId } from "./AgentChat.ts";
+export const reviewThreadId = (origin: string, ask: string) =>
+  ThreadId.make("review-" + handleId(origin + "/" + ask));
 
 export const answerMessageId = (ask: string, delivery: string) =>
   "agent-ask:" + ask + ":" + delivery;

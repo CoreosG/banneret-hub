@@ -1,8 +1,10 @@
+import { matchesReview } from "./reviewPr";
 import { askHome } from "./askHome";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import {
   ChatAsks,
+  type BanneretBoardCard,
   ChatSettings,
   type ChatAsk,
   type ChannelAction,
@@ -18,11 +20,18 @@ export function AskCard({
   ask,
   names = new Map(),
   children,
+  currentHead,
+  postReview,
 }: {
   ask: ChatAsk;
   names?: ReadonlyMap<string, string>;
   children?: ReactNode;
+  currentHead?: string | undefined;
+  postReview?: (() => Promise<unknown>) | undefined;
 }) {
+  const [post, setPost] = useState("");
+  const reviewed = ask.answer?.headSha;
+  const stale = reviewed && currentHead && currentHead !== reviewed;
   if (ask.to.kind !== "agent") return null;
   const label = (id: string) => names.get(id) ?? id;
   const answer = ask.answer;
@@ -30,12 +39,21 @@ export function AskCard({
     <section className="my-2 grid gap-2 rounded-md border bg-card p-3">
       <header className="flex flex-wrap items-center gap-2">
         <strong>
-          {label(ask.from.handle)} asks {label(ask.to.handle)}
+          {label(ask.from.handle)} {ask.kind === "review" ? "requests a review from" : "asks"}{" "}
+          {label(ask.to.handle)}
         </strong>
         <span className="ml-auto text-xs">{ask.state.replace("_", " ")}</span>
       </header>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-        <dt>Question</dt>
+        {ask.pr && (
+          <>
+            <dt>Pull request</dt>
+            <dd>
+              {ask.pr.repo}#{ask.pr.number} at {ask.pr.headSha}
+            </dd>
+          </>
+        )}
+        <dt>{ask.kind === "review" ? "Review request" : "Question"}</dt>
         <dd>{ask.question}</dd>
         {ask.context && (
           <>
@@ -61,10 +79,40 @@ export function AskCard({
       <small>
         Expires <time dateTime={ask.expiresAt}>{new Date(ask.expiresAt).toLocaleString()}</time>
       </small>
+      {ask.reason === "auto_accepted" && (
+        <small>Auto-accepted by {ask.to.owner.login}’s rule</small>
+      )}
       {ask.reason && ask.reason !== "auto_accepted" && <p>{ask.reason}</p>}
       {ask.state === "answered" && answer && (
         <section className="border-t pt-2">
-          <strong>Answer</strong>
+          <strong>
+            {ask.kind === "review"
+              ? "Review result: " + answer.verdict?.replaceAll("_", " ")
+              : "Answer"}
+          </strong>
+          {reviewed && (
+            <p>
+              {stale ? "Stale: reviewed at " : "Reviewed at "}
+              {reviewed}
+            </p>
+          )}
+          {postReview && !stale && (
+            <button
+              disabled={post === "Posting..." || post === "Posted to GitHub"}
+              onClick={async () => {
+                setPost("Posting...");
+                try {
+                  await postReview();
+                  setPost("Posted to GitHub");
+                } catch (e) {
+                  setPost(String(e));
+                }
+              }}
+            >
+              Post as review
+            </button>
+          )}
+          {post && <p role="status">{post}</p>}
           <p>{answer.text}</p>
           {ask.receipts.map((r) => (
             <small key={r.handle} className="block">
@@ -78,6 +126,41 @@ export function AskCard({
       {children}
     </section>
   );
+}
+
+export function TaskReviews({
+  target,
+  card,
+  revision,
+  owner,
+}: {
+  target: RelayTarget;
+  card: BanneretBoardCard;
+  revision: number;
+  owner: string | undefined;
+}) {
+  const reviews = useChatRead(
+    async () =>
+      (
+        await pageItems(async (cursor) =>
+          decode(await chatRpc.run(target, { kind: "reviewAsks", ...(cursor && { cursor }) })),
+        )
+      ).filter((a) => a.kind === "review" && card.prs.some((p) => matchesReview(p, a.pr))),
+    [card.task.id, card.prs.map((p) => p.number).join(","), revision].join(":"),
+  );
+  if (reviews.error) return <small role="alert">{reviews.error}</small>;
+  return reviews.value?.map((ask) => (
+    <AskCard
+      key={ask.id}
+      ask={ask}
+      currentHead={card.prs.find((p) => matchesReview(p, ask.pr))?.headSha}
+      postReview={
+        owner && ask.to.kind === "agent" && owner === ask.to.owner.login
+          ? () => chatRpc.run(target, { kind: "postReview", id: ask.id })
+          : undefined
+      }
+    />
+  ));
 }
 
 function AskDecision({
@@ -119,21 +202,25 @@ function AskDecision({
             change({
               kind: "askDecision",
               id,
-              decision: always ? { allow: "always", kinds: ["question"] } : { allow: "once" },
+              decision: always ? { allow: "always", kinds: [ask.kind] } : { allow: "once" },
             })
           }
         >
-          Let it answer
+          {ask.kind === "review" ? "Review in a new thread" : "Let it answer"}
         </button>
-        <button
-          disabled={always}
-          onClick={() => change({ kind: "askDecision", id, decision: { allow: "draft" } })}
-        >
-          Draft first
-        </button>
-        <button disabled={always} onClick={() => setMode("answer")}>
-          Answer myself
-        </button>
+        {ask.kind === "question" && (
+          <>
+            <button
+              disabled={always}
+              onClick={() => change({ kind: "askDecision", id, decision: { allow: "draft" } })}
+            >
+              Draft first
+            </button>
+            <button disabled={always} onClick={() => setMode("answer")}>
+              Answer myself
+            </button>
+          </>
+        )}
         <button disabled={always} onClick={() => setMode("decline")}>
           Decline
         </button>
@@ -147,7 +234,8 @@ function AskDecision({
             setMode(null);
           }}
         />{" "}
-        Always allow {ask.from.owner.login}'s agents (questions)
+        Always allow {ask.from.owner.login}'s agents (
+        {ask.kind === "review" ? "reviews" : "questions"})
       </label>
       {mode && (
         <form
@@ -201,8 +289,10 @@ export function WaitingAsks({
       chatRpc.run(target, { kind: "dmSettings" }),
     ]);
     const policy = settings(current).agentAsks;
-    const asks = [...waiting, ...drafts].filter(
-      (a) => a.kind === "question" && a.from.owner.login === item.owner?.login,
+    const asks = [...waiting, ...drafts].filter((a) =>
+      item.kind === "review_request"
+        ? a.kind === "review" && a.id === item.id
+        : a.kind === "question" && a.from.owner.login === item.owner?.login,
     );
     const channels = await conversations(target);
     const homes = new Map(
@@ -236,7 +326,9 @@ export function WaitingAsks({
   return (
     <li className="p-3">
       <strong>
-        {item.owner?.login}'s agents: {item.count} waiting
+        {item.kind === "review_request"
+          ? "Review request"
+          : item.owner?.login + "'s agents: " + item.count + " waiting"}
       </strong>
       {data.value?.asks.map((ask) => (
         <AskCard key={ask.id} ask={ask} names={data.value!.names}>

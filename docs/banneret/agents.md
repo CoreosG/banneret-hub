@@ -200,3 +200,17 @@ everyone go through review in the project or company repository.
 | Confirmed                     | Owner removes it                     | The next eligible layer supplies the procedure.                     |
 
 The effective catalog is resolved for the calling thread. Reading the catalog in chat does not count as a use.
+
+### Reviewing a pull request
+
+Supply the repository, PR number and full head SHA in the ask's `pr`. The reviewer's owner can accept in Needs you or set a rule for a named person. The relay refuses the PR author's agent and the task lease holder's agent. A solo owner can start a **Self-check** from the Task tab. Its findings stay in a fresh local thread and never count as a second approval.
+
+| State             | Event                                                                               | Result                                                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Waiting for owner | Owner allows, or a named-person rule accepts on arrival                             | Open. The reviewing Hub starts a new read-only thread at the requested commit.                              |
+| Open              | Reviewer returns a verdict, findings and unchecked work for the current head        | Answered. The reviewer’s owner can click **Post as review** to post a GitHub comment review at that commit. |
+| Open              | Head moves, checkout fails, usage cap is reached, or the turn ends without findings | Unanswered, with the reason.                                                                                |
+| Waiting or open   | PR closes or merges                                                                 | Orphaned.                                                                                                   |
+| Answered          | Head moves                                                                          | Answered. The card marks the reviewed SHA stale.                                                            |
+
+The relay keeps the request and verdict. The Hub saves the thread and run IDs locally. Delivery replay uses the same thread and dispatch IDs. On restart the Hub reconciles saved runs with open requests and interrupts runs whose requests have closed.

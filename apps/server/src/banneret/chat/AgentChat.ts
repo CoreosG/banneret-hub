@@ -3,6 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import {
   ChatConversations,
   ChatHandles,
+  ChatAsks,
   ChatSettings,
   ChatDeliveries,
   ChatThread,
@@ -38,7 +39,9 @@ export function chatClient(
         invalid(
           e.code === "agent_ask_no_home"
             ? "Ask your owner to add you both to a channel."
-            : e.message,
+            : e.code === "review_same_owner"
+              ? "Choose another person’s reviewer. This agent’s owner wrote the pull request or holds the task lease."
+              : e.message,
         ),
       ),
     );
@@ -51,6 +54,23 @@ export function chatClient(
       Effect.map((r) => r.root),
     );
   return {
+    review: Effect.fn(function* (id: string) {
+      let cursor: string | null = null;
+      do {
+        const page: ChatAsks = yield* request(
+          "GET",
+          "asks?role=answerer&state=open&limit=100" +
+            (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""),
+        ).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(ChatAsks)),
+          Effect.mapError(() => invalid("Cannot read the review request.")),
+        );
+        const ask = page.items.find((a) => a.id === id && a.kind === "review");
+        if (ask) return ask;
+        cursor = page.nextCursor;
+      } while (cursor);
+      return yield* invalid("This review is closed.");
+    }),
     checkDmHome: Effect.fn(function* (home: string, ownerText: string) {
       const message = yield* root(home);
       let cursor: string | null = null;
@@ -107,8 +127,8 @@ export function chatClient(
     read,
     root,
     asHandle,
-    write: (method: "PUT" | "POST", path: string, body: object) =>
-      request(method, path, { ...body, asHandle }).pipe(
+    write: (method: "PUT" | "POST", path: string, body: object, handle = asHandle) =>
+      request(method, path, { ...body, asHandle: handle }).pipe(
         Effect.flatMap((value) =>
           decodeId(value).pipe(
             Effect.mapError(() => invalid("The relay returned no id for this message.")),

@@ -1258,7 +1258,7 @@ The receiver calls `/accept` with its selected machine (and `newThread: true` to
 
 ### Review asks
 
-A review names the repository, PR number and requested head SHA. Reject the PR author or task lease holder as reviewer with 403 `review_same_owner`. Allow one open review per head and reviewer owner. Reviews follow the ask state table with direct posting only. A result carries the reviewed head and a verdict of `clean`, `findings` or `could_not_review`. A moved head ends a running review as unanswered with reason `head_moved`. Closing or merging the PR orphans active reviews. A later head change marks a finished review stale in the client. Only a person posts a review or approval to GitHub.
+A review names the repository, PR number and requested head SHA. Reject the PR author or task lease holder as reviewer with 403 `review_same_owner`. Allow one open review per head and reviewer owner. Reviews follow the ask state table with direct posting only. A result carries the reviewed head and a verdict of `clean`, `findings` or `could_not_review`. A moved head ends a running review as unanswered with reason `head_moved`. Closing or merging the PR orphans active reviews. A later head change marks a finished review stale in the client. The board exposes the current commit in the linked PR’s optional `headSha`. An answered review’s `answerMessageId` identifies the result card for the human-only message promotion check. Only a person posts a review or approval to GitHub.
 
 ### Progress message (`messages.progress_state`)
 

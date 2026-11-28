@@ -1,3 +1,5 @@
+import { vi } from "vite-plus/test";
+import * as ReviewCheckout from "../chat/ReviewCheckout.ts";
 import { handleId } from "../chat/AgentChat.ts";
 import { makeAnswerRuns } from "../chat/AnswerRuns.ts";
 import { approvalMachine } from "../plugins/approvals.ts";
@@ -1141,6 +1143,86 @@ describe("agent lease tools against the fake relay", () => {
     );
   });
 
+  it.live("dispatches a review ask on a distinct thread at the requested checkout", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            using checkout = vi
+              .spyOn(ReviewCheckout, "reviewCheckout")
+              .mockResolvedValue("/tmp/test-review-checkout");
+            yield* joinWithBoard(fake, relay);
+            const pr = { repo: "example-org/example-app", number: 17, headSha: "a".repeat(40) };
+            yield* control(fake, "/board/seed", {
+              tasks: [
+                {
+                  id: "t_free",
+                  title: "Review",
+                  projectKey: pr.repo,
+                  prs: [{ ...pr, state: "open", author: "another-person" }],
+                },
+              ],
+            });
+            const root = yield* call("banneret_chat_post", {
+              conversation: "c_general",
+              key: "root",
+              text: "Please check the retry change.",
+            });
+            const ask = yield* call("banneret_agent_ask", {
+              pr,
+              to: handleId(COMPANY_THREAD),
+              thread: root.messageId,
+              question: "Check retries",
+              context: "Review retry handling",
+              doneWhen: "List findings",
+              key: "review",
+            });
+            const device = (yield* (yield* Enrolment.BanneretEnrolment).relay(relay.origin))!;
+            const service = yield* ThreadManagementService.ThreadManagementService;
+            const create = vi.fn(service.dispatch);
+            create.mockImplementation(() => Effect.succeed({ sequence: 1, storedEvents: [] }));
+            const send = vi.fn(service.sendToThread);
+            send.mockImplementation((input) =>
+              Effect.succeed({
+                run: { id: RunId.make("review-run"), threadId: input.threadId },
+              } as ThreadManagementService.ThreadManagementSendResult),
+            );
+            const deliveries = yield* makeDeliveries.pipe(
+              Effect.provideService(ThreadManagementService.ThreadManagementService, {
+                ...service,
+                hasReceipt: () => Effect.succeed(false),
+                dispatch: create,
+                sendToThread: send,
+              }),
+            );
+            yield* deliveries.reconcile(device);
+            expect(checkout).toHaveBeenCalledWith(pr);
+            const threadId = send.mock.calls[0]?.[0].threadId;
+            expect(threadId).toBeDefined();
+            expect(threadId).not.toBe(COMPANY_THREAD);
+            expect(create).toHaveBeenCalledWith(
+              expect.objectContaining({
+                type: "thread.create",
+                threadId,
+                runtimeMode: "approval-required",
+                worktreePath: "/tmp/test-review-checkout",
+              }),
+            );
+            expect(send).toHaveBeenCalledWith(
+              expect.objectContaining({
+                threadId,
+                messageId: expect.stringContaining("agent-ask:" + ask.askId + ":"),
+              }),
+            );
+            expect(yield* (yield* makeAnswerRuns).rows(device)).toMatchObject([
+              { ask: ask.askId, handle: handleId(COMPANY_THREAD), thread: threadId },
+            ]);
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true }, reviews: { enabled: true } } },
+    ),
+  );
   it.live("closes a consumed agent question after a restart loses its answering run", () =>
     withFake(
       (fake, relay) =>

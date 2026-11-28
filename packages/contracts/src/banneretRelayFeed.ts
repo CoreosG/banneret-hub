@@ -253,6 +253,7 @@ export const BanneretPrRules = Schema.Struct({
   youCanApprove: Schema.Boolean,
 });
 export const BanneretBoardPr = Schema.Struct({
+  headSha: Schema.optional(Schema.String),
   number: Schema.Number,
   url: Schema.String,
   state: Schema.String,

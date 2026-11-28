@@ -259,6 +259,10 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
               runIds: [shell.activeRunId],
             });
             const messageId = records.runs.find((r) => r.id === shell.activeRunId)?.userMessageId;
+            if (thread.startsWith("review-") && messageId && answeringAsk(messageId))
+              return yield* error(
+                "This review is read only. Its owner can post findings from the result card.",
+              );
             const message = messageId
               ? (yield* threads.getMessagesById(thread, [messageId])).get(messageId)
               : undefined;
