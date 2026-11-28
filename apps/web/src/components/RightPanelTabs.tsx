@@ -70,7 +70,7 @@ import {
 import { isElectron } from "~/env";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
 import { linkedThreadTitle } from "~/linkedThreadSurface";
-import { taskTabTitle } from "~/banneret/taskSurface";
+import * as BanneretSurfaces from "~/banneret/rightPanelSurfaces";
 import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { issueStatePresentation } from "~/components/issue/issuePresentation";
@@ -108,7 +108,6 @@ import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
 import { FaviconImage } from "./preview/PreviewFaviconIcon";
-import { PortsIcon, portsSurfaceActions } from "./ports/PortsIcon";
 import { previewBridge } from "./preview/previewBridge";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
 import { preventThumbButtonFocus, takeThumbButtonNavigation } from "./preview/thumbButtons";
@@ -408,7 +407,7 @@ function RightPanelEmptyState(props: {
       disabledReason: messages(SURFACE_UNAVAILABLE_HINTS.pullRequests),
       onClick: props.onAddPullRequests,
     },
-    ...portsSurfaceActions(props.onAddPorts),
+    ...BanneretSurfaces.portsSurfaceActions(props.onAddPorts),
     {
       label: msg("Device"),
       description: msg("Watch an iOS Simulator or Android Emulator."),
@@ -619,10 +618,8 @@ function surfaceTitle(
     case "pull-requests":
       return resolve(msg("Linked items"));
     case "ports":
-      // oxlint-disable-next-line t3code/no-untranslated-copy -- Banneret fork label, English-only
-      return "Ports";
     case "task":
-      return taskTabTitle(surface);
+      return BanneretSurfaces.title(surface);
     case "issue":
       // A git host numbers its issues; a tracker with keys of its own, such as Linear, names them.
       return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;
@@ -725,9 +722,8 @@ function SurfaceIcon({
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "ports":
-      return <PortsIcon className="size-3" />;
     case "task":
-      return <CircleDotIcon className="size-3 shrink-0" />;
+      return BanneretSurfaces.icon(surface);
     case "issue":
       return <IssueSurfaceIcon surface={surface} environmentId={environmentId} />;
     case "thread":
@@ -1219,7 +1215,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: messages(SURFACE_DISABLED_REASONS.pullRequests),
       onClick: props.onAddPullRequests,
     },
-    ...portsSurfaceActions(props.onAddPorts),
+    ...BanneretSurfaces.portsSurfaceActions(props.onAddPorts),
     {
       label: msg("Device"),
       icon: Smartphone,

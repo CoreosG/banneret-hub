@@ -645,10 +645,7 @@ const make = Effect.fn("WorkflowEngine.make")(function* (
         hookStarts.set(hook.hookId, [...recent, now]);
       }
       return Option.some(
-        yield* pause.whenRunning(
-          start(hook.workflow, delivery.request, { idempotencyKey }),
-          Effect.fail(new WorkflowInputError({ problem: "Automatic work is paused." })),
-        ),
+        yield* pause.hookStart(start(hook.workflow, delivery.request, { idempotencyKey })),
       );
     },
   );

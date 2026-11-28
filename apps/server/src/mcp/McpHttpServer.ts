@@ -1674,7 +1674,7 @@ export const layerMilestoneEvents = Layer.effectDiscard(
   Layer.provide(layerWebhookTransport),
 );
 
-const banneretAgents = BanneretAgentMcp.layer(toolkitRegistration);
-export const layer = layerMcpTransport(
-  Layer.mergeAll(layerTools, layerToolSearch, layerMilestoneEvents, banneretAgents),
-).pipe(Layer.merge(BanneretAgentMcp.pluginRoute));
+export const layer = BanneretAgentMcp.transport(
+  layerMcpTransport,
+  toolkitRegistration,
+)(Layer.mergeAll(layerTools, layerToolSearch, layerMilestoneEvents));
