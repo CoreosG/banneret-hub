@@ -121,6 +121,12 @@ it("previews the exact public draft and only opens it on a click", async () => {
         target={target}
         report={{
           created: 1,
+          judgment: {
+            summary: "Retries are the main source of friction.",
+            setup: "Review retry settings.",
+            rule: "Inspect the failure before retrying.",
+            draft: { title: "Explain each retry", body: "Show the reason next to the retry." },
+          },
           topRule: null,
           topCount: 0,
           proposalKey: null,
@@ -138,14 +144,20 @@ it("previews the exact public draft and only opens it on a click", async () => {
         }}
       />,
     );
-    await expect.element(screen.getByText("Explain agent retries")).toBeVisible();
+    await expect.element(screen.getByText("Explain each retry")).toBeVisible();
+    await expect
+      .element(screen.getByText("Retries are the main source of friction."))
+      .toBeVisible();
+    await expect
+      .element(screen.getByRole("button", { name: /Review retry settings/ }))
+      .toBeVisible();
     expect(feedback.list).not.toHaveBeenCalled();
     expect(feedback.send).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
     expect(act).not.toHaveBeenCalled();
     await screen.getByRole("button", { name: "Open draft as a public issue" }).click();
     const url = new URL(String(open.mock.calls[0]?.[0]));
-    expect(url.searchParams.get("title")).toBe("Explain agent retries");
+    expect(url.searchParams.get("title")).toBe("Explain each retry");
     await expect
       .element(screen.getByText(url.searchParams.get("body")!, { exact: true }))
       .toBeVisible();

@@ -1,7 +1,7 @@
 import { workflowHandlers } from "../memory/workflowHandlers.ts";
 import { knowledgeConfigured } from "../memory/KbIndex.ts";
 import * as Path from "effect/Path";
-import type { AuthSessionId } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, type AuthSessionId } from "@t3tools/contracts";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { approvalHandlers } from "../plugins/approvalHandlers.ts";
 import { levelHandlers } from "../plugins/levelHandlers.ts";
@@ -1013,6 +1013,29 @@ export const sessionHandlers = (
   auth: EnvironmentAuth.EnvironmentAuth["Service"],
 ) => ({
   ...rpcHandlers,
+  "memory.workflow": Effect.fn(function* (
+    input: Parameters<(typeof workflowHandlers)["memory.workflow"]>[0],
+  ) {
+    if (input.action === "run" || input.action === "enable") {
+      const sessions = yield* auth.listClientSessions(session).pipe(
+        Effect.mapError(
+          () =>
+            new TaskLeaseError({
+              reason: "unavailable",
+              detail: "Could not verify chat permission.",
+            }),
+        ),
+      );
+      if (
+        !sessions.find((row) => row.current)?.permissions?.includes(AuthOrchestrationOperateScope)
+      )
+        return yield* new TaskLeaseError({
+          reason: "unavailable",
+          detail: "Running a workflow review requires permission to start chat turns.",
+        });
+    }
+    return yield* workflowHandlers["memory.workflow"](input);
+  }),
   ...approvalHandlers(
     auth.listClientSessions(session).pipe(
       Effect.map((rows) =>
