@@ -88,19 +88,43 @@ Hub never asks for the `memory.person` scope for a thread's calls.
 
 ## Tasks
 
-| Tool                | Arguments                                 | Successful output                      |
-| ------------------- | ----------------------------------------- | -------------------------------------- |
-| `tasks_list_boards` | `{}`                                      | `{boards: [{id, title}]}`              |
-| `tasks_list_tasks`  | `{boardId}`                               | `{tasks: [BoardCard]}`                 |
-| `tasks_read`        | `{taskId}`                                | One `TaskRead` object                  |
-| `tasks_claim`       | `{taskId}`                                | `{status: "claimed" \| "conflict"}`    |
-| `tasks_release`     | `{taskId, reason, freeToContinue, note?}` | `{status: "released" \| "not_holder"}` |
+| Tool                | Arguments                                                  | Successful output                      |
+| ------------------- | ---------------------------------------------------------- | -------------------------------------- |
+| `tasks_list_boards` | `{}`                                                       | `{boards: [{id, title}]}`              |
+| `tasks_list_tasks`  | `{boardId}`                                                | `{tasks: [BoardCard]}`                 |
+| `tasks_read`        | `{taskId}`                                                 | One `TaskRead` object                  |
+| `tasks_claim`       | `{taskId, idempotencyKey?}`                                | `{status: "claimed" \| "conflict"}`    |
+| `tasks_release`     | `{taskId, reason, freeToContinue, note?, idempotencyKey?}` | `{status: "released" \| "not_holder"}` |
 
 Keep task IDs stable across boards. Map tracker records to the relay's board card fields and return the card directly on read, with optional preview and sign-off. The kit validates both shapes. See the [annotated schemas](relay-v1/openapi.yaml) and [worked task read](relay-v1/examples/task.json).
 
-The Hub also calls `tasks_claim` and `tasks_release` when a person presses Take or Release. Those calls carry an extra `idempotencyKey`. If you support it, answer a repeated key with the first outcome, so a retry after a lost answer changes nothing. An `other` release also carries `reasonText`, and the same words start the `note`. To match a task to the relay's board, `tasks_read` and `tasks_list_tasks` must return the same `ref` the board shows.
+The Hub also calls `tasks_claim` and `tasks_release` when a person presses Take or Release. An `other` release then also carries `reasonText`, and the same words start the `note`. To match a task to the relay's board, `tasks_read` and `tasks_list_tasks` must return the same `ref` the board shows.
 
 Claim for the authenticated actor. A repeated claim by the current holder succeeds. A competing holder gets a conflict. Release only the caller's own claim. Use one of `done`, `blocked`, `handing_over`, `out_of_usage`, `wrong_approach`, `duplicate`, `deprioritised` or `other` for the reason. For example, release with `{"taskId":"T42","reason":"handing_over","freeToContinue":true,"note":"Tests pass. Next: review the diff."}`.
+
+### Repeated claims and releases
+
+`tasks_claim` and `tasks_release` take an optional `idempotencyKey`, a string of 1 to 128 characters. A caller
+may leave it out, and each such call is a new one. The Hub sends it with Take and Release, so it can retry after
+a lost answer. A server treats a repeat with the same key as the same call: it returns the same result and
+changes nothing. A repeated claim makes no second claim, even if the task was released in between. A repeated
+release answers `released` again, releases nothing newer and does not rewrite the release record.
+
+- A key belongs to the authenticated caller and the tool. The same key from another person, or on the other
+  tool, is a different call.
+- Remember each successful output for at least 10 minutes. The Hub reuses a key for up to 10 minutes. Keep keys
+  where you keep claims, so every instance of your server sees them.
+- A caller uses a new key for any other call. The contract does not say what happens if a key comes back with
+  other arguments. Answering with a tool error is a safe choice.
+
+| Key state | Event                               | Next state                                           |
+| --------- | ----------------------------------- | ---------------------------------------------------- |
+| Unknown   | A call with this key                | Running                                              |
+| Running   | The same key again                  | Running. The repeat waits and gets the first result  |
+| Running   | The first call returns a status     | Answered                                             |
+| Running   | The first call ends in a tool error | Unknown. A repeat runs again                         |
+| Answered  | The same key again                  | Answered. Return the saved result and change nothing |
+| Answered  | At least 10 minutes have passed     | May become Unknown                                   |
 
 Every task provider must set `atomicClaim`. Set it to true only when the backing store can guarantee one winner across simultaneous competing claims. If your tracker uses a read followed by a separate write, declare false so clients can account for that race.
 
@@ -147,7 +171,7 @@ for (const { name } of skills) {
 }
 ```
 
-Check discovery separately with your MCP client. For tasks, exercise competing actors, retry a claim and verify that only the holder can release. For memory, repeat a use in one chat, propose a note, and flag it. Verify the stored trust and use count after each call.
+Check discovery separately with your MCP client. For tasks, exercise competing actors, retry a claim, repeat a claim and a release with the same `idempotencyKey`, and verify that only the holder can release. For memory, repeat a use in one chat, propose a note, and flag it. Verify the stored trust and use count after each call.
 
 ## Test your plugin
 
@@ -160,7 +184,7 @@ node banneret-plugin-check.mjs --manifest plugin.json --url https://example.org/
 
 Use a disposable workspace. For skills, seed at least one entry. The checker compares discovery, tool output, resource text and SKILL.md metadata. For memory it creates a unique project proposal, searches and uses it twice in the same chat, then flags it. The disputed test note remains for inspection.
 
-For tasks, seed an unclaimed task visible to two distinct actors and pass its ID with `--task-id T42`. Set `BANNERET_CHECK_TOKEN` and `BANNERET_CHECK_PEER_TOKEN` to their credentials. HTTP uses bearer authentication. For stdio the checker starts one process per actor with its credential in `PLUGIN_TOKEN`. Both processes must share the same test store. If your server needs additional environment configuration, launch it through a wrapper. The checker exercises discovery, reads, tool errors, holder retries and release permissions. It sends concurrent claims when the manifest declares atomic claims.
+For tasks, seed an unclaimed task visible to two distinct actors and pass its ID with `--task-id T42`. Set `BANNERET_CHECK_TOKEN` and `BANNERET_CHECK_PEER_TOKEN` to their credentials. HTTP uses bearer authentication. For stdio the checker starts one process per actor with its credential in `PLUGIN_TOKEN`. Both processes must share the same test store. If your server needs additional environment configuration, launch it through a wrapper. The checker exercises discovery, reads, tool errors, holder retries, repeated idempotency keys and release permissions. It repeats keys one call after another, so test a repeat that arrives during the first call yourself. It sends concurrent claims when the manifest declares atomic claims.
 
 A failing check prints a hint and exits with status 1. Use `--json` for a report with a `passed` boolean and individual check statuses. Capabilities without a published contract show as skipped. A pass requires at least one tested provider contract.
 
