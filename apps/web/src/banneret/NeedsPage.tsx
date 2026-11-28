@@ -1,3 +1,4 @@
+import { JoinRequests } from "./chat/JoinRequests";
 // Banneret Hub: Needs you for an Enterprise workspace, from the relay's GET /needs in the order the
 // relay returns it (most urgent first). Pages load on request.
 import { InboxIcon } from "lucide-react";
@@ -18,7 +19,14 @@ import { useEnterpriseFeed } from "./useEnterpriseFeed";
 const groups = {
   Questions: ["chat_ask", "thread_question", "founder_question", "persona_ask"],
   Mentions: ["mention", "agent_message"],
-  Reviews: ["thread_approval", "pr_approval", "waiting_for_approver", "pull_request", "promotion"],
+  Reviews: [
+    "chat_join_requests",
+    "thread_approval",
+    "pr_approval",
+    "waiting_for_approver",
+    "pull_request",
+    "promotion",
+  ],
 };
 const filters = ["All", "Questions", "Mentions", "Reviews"] as const;
 export function NeedsPage() {
@@ -103,14 +111,26 @@ export function NeedsPage() {
             />
           ) : (
             <ul aria-label="Needs you items">
-              {items.map((item) => (
-                <NeedsRow
-                  asks={feed.chatFlags?.includes("asks")}
-                  key={item.id}
-                  item={item}
-                  target={target}
-                />
-              ))}
+              {items.map((item) =>
+                item.kind === "chat_join_requests" &&
+                item.conversationId &&
+                feed.chatFlags?.includes("join_requests") ? (
+                  <JoinRequests
+                    key={item.id}
+                    item={item}
+                    target={target}
+                    people={feed.team?.value?.people}
+                    revision={feed.chatRevision}
+                  />
+                ) : (
+                  <NeedsRow
+                    asks={feed.chatFlags?.includes("asks")}
+                    key={item.id}
+                    item={item}
+                    target={target}
+                  />
+                ),
+              )}
             </ul>
           )}
         </Section>

@@ -1,3 +1,4 @@
+import { Directory } from "./JoinRequests";
 import { useTabsStore, retitle } from "../tabs/tabsStore";
 import { useState, useEffect } from "react";
 import { useRouter } from "@tanstack/react-router";
@@ -35,7 +36,7 @@ export function ChannelRows({
   const { environmentId, relayOrigin } = enterprise.target;
   const load = () => conversations({ environmentId, relayOrigin });
   const router = useRouter();
-  const [creating, setCreating] = useState<"channel" | "dm" | null>(null);
+  const [creating, setCreating] = useState<"channel" | "dm" | "directory" | null>(null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const rows = useChatRead(load, enterprise.feed.chatRevision ?? 0);
@@ -93,6 +94,11 @@ export function ChannelRows({
       {flags.includes("channels") && (
         <header className="mt-3 flex items-center justify-between px-2 text-xs font-semibold text-muted-foreground">
           Channels
+          {flags.includes("channel_access") && (
+            <button onClick={() => setCreating(creating === "directory" ? null : "directory")}>
+              Browse channels
+            </button>
+          )}
           {available.length > 0 && (
             <button
               aria-label="Create channel"
@@ -103,6 +109,7 @@ export function ChannelRows({
           )}
         </header>
       )}
+      {creating === "directory" && <Directory enterprise={enterprise} open={open} />}
       {flags.includes("channels") && creating === "channel" && available.length > 0 && (
         <form
           className="grid gap-2 p-2"
@@ -254,9 +261,7 @@ export function ChannelRows({
               <button disabled={pending}>Open conversation</button>
             </form>
           )}
-          {flags.includes("agents") && flags.includes("agent_owner_dm_read") && (
-            <DmSettings enterprise={enterprise} />
-          )}
+
           {rows.value
             ?.filter((c) => c.kind === "dm" && offersConversation(c, flags))
             .map((c) => (
@@ -272,6 +277,10 @@ export function ChannelRows({
             ))}
         </>
       )}
+      {flags.includes("agents") &&
+        (flags.includes("agent_inbox") || flags.includes("agent_owner_dm_read")) && (
+          <DmSettings enterprise={enterprise} />
+        )}
     </section>
   );
 }

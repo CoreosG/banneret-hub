@@ -187,6 +187,20 @@ export async function command(operation, arg) {
       (item) => item.kind === "chat_ask",
     );
   }
+  if (op === "leo" && arg.kind === "threadChat" && arg.thread === "review1") {
+    const response = arg.settings
+      ? await session.leo.call("PUT", "chat/handles/h_review", {
+          threadRef: arg.thread,
+          machineId: session.leo.me.machineId,
+          provider: "codex",
+          ...arg.settings,
+        })
+      : await session.leo.call("GET", "chat/handles");
+    return {
+      ok: true,
+      value: arg.settings ? response.body : response.body.items.find((h) => h.id === "h_review"),
+    };
+  }
   if (op === "leo") return session.leo(arg);
   if (op === "call") return session.ada(arg);
   throw new Error("Unknown chat test command.");

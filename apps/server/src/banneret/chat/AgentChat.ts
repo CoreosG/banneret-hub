@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - stable synchronous SHA-256 identifiers shared with delivery receipt validation.
 import * as NodeCrypto from "node:crypto";
-import { ChatThread, OrchestratorMcpFailure } from "@t3tools/contracts";
+import { ChatDeliveries, ChatThread, OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { RelayEnrolment } from "../relay/Enrolment.ts";
@@ -10,9 +10,10 @@ export const handleId = (thread: string) =>
 export const invalid = (message: string) =>
   new OrchestratorMcpFailure({ code: "invalid_request", message });
 const decodeId = Schema.decodeUnknownEffect(Schema.Struct({ id: Schema.String }));
+const decodeInbox = Schema.decodeUnknownEffect(ChatDeliveries);
 const decodeThread = Schema.decodeUnknownEffect(ChatThread);
 export function chatClient(
-  relay: RelayEnrolment,
+  relay: Pick<RelayEnrolment, "signedChat">,
   thread: string,
   provider: string,
   machineId: string,
@@ -37,7 +38,11 @@ export function chatClient(
     );
   return {
     ensure: request("PUT", "handles/" + asHandle, { threadRef: thread, provider, machineId }),
-    consumeInbox: request("POST", "inbox", { asHandle }),
+    consumeInbox: request("POST", "inbox", { asHandle }).pipe(
+      Effect.flatMap((body) =>
+        decodeInbox(body).pipe(Effect.mapError(() => invalid("Invalid inbox response."))),
+      ),
+    ),
     read,
     root,
     asHandle,

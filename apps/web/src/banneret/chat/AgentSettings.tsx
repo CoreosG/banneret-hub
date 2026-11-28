@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import { ThreadTimeline as Timeline } from "../../components/chat/ThreadTimeline";
 import { type ComponentProps, useState } from "react";
 import { useEnterpriseFeed, type EnterpriseFeed } from "../useEnterpriseFeed";
+import { feedRpc } from "../relayFeedStore";
 import { chatRpc, useChatRead } from "./client";
 const decodeSettings = Schema.decodeUnknownSync(ChatSettings);
 const decodeHandle = Schema.decodeUnknownOption(ChatHandle);
@@ -18,38 +19,81 @@ export function DmSettings({ enterprise }: { enterprise: EnterpriseFeed }) {
     async () => decodeSettings(await chatRpc.run(enterprise.target, { kind: "dmSettings" })),
     revision + ":" + (enterprise.feed.chatRevision ?? 0),
   );
+  const settings = setting.value;
+  async function save(action: Parameters<typeof chatRpc.run>[1]) {
+    setPending(true);
+    try {
+      await chatRpc.run(enterprise.target, action);
+      refresh((n) => n + 1);
+      setError("");
+    } catch (e) {
+      setError(String(e));
+    }
+    setPending(false);
+  }
   return (
-    <label className="block p-2 text-xs">
-      <input
-        type="checkbox"
-        checked={setting.value?.agentsReadMyDms ?? false}
-        disabled={!setting.value || pending}
-        onChange={async (e) => {
-          const enabled = e.target.checked;
-          setPending(true);
-          try {
-            await chatRpc.run(enterprise.target, {
-              kind: "setDmSettings",
-              settings: {
-                agentWakeDefault: setting.value?.agentWakeDefault ?? "everyone",
-                agentsReadMyDms: enabled,
-              },
-            });
-            refresh((n) => n + 1);
-            setError("");
-          } catch (e) {
-            setError(String(e));
-          }
-          setPending(false);
-        }}
-      />{" "}
-      My agents can read my DMs{" "}
+    <fieldset className="grid gap-2 p-2 text-xs" disabled={!settings || pending}>
+      {enterprise.feed.chatFlags?.includes("agent_owner_dm_read") && (
+        <label>
+          <input
+            type="checkbox"
+            checked={settings?.agentsReadMyDms ?? false}
+            onChange={(e) =>
+              settings &&
+              void save({
+                kind: "setDmSettings",
+                settings: { ...settings, agentsReadMyDms: e.target.checked },
+              })
+            }
+          />{" "}
+          My agents can read my DMs
+        </label>
+      )}
+      {enterprise.feed.chatFlags?.includes("agent_inbox") && (
+        <>
+          <label>
+            Who can wake new agents{" "}
+            <select
+              aria-label="Who can wake new agents"
+              value={settings?.agentWakeDefault ?? "everyone"}
+              onChange={(e) =>
+                settings &&
+                void save({
+                  kind: "setDmSettings",
+                  settings: { ...settings, agentWakeDefault: wakeValue(e.target.value) },
+                })
+              }
+            >
+              <WakeOptions />
+            </select>
+          </label>
+          <button
+            onClick={() =>
+              settings && void save({ kind: "applyWake", wake: settings.agentWakeDefault })
+            }
+          >
+            Apply to all my agents
+          </button>
+        </>
+      )}
       {(error || setting.error) && <span role="alert">{error || setting.error}</span>}
-    </label>
+    </fieldset>
+  );
+}
+function wakeValue(value: FormDataEntryValue | null) {
+  return value === "owner" || value === "nobody" ? value : "everyone";
+}
+function WakeOptions() {
+  return (
+    <>
+      <option value="everyone">Everyone</option>
+      <option value="owner">Only me</option>
+      <option value="nobody">Nobody</option>
+    </>
   );
 }
 
-function AgentThreadHeader({
+export function AgentThreadHeader({
   environmentId,
   thread,
 }: {
@@ -67,42 +111,68 @@ function AgentThreadHeader({
   ) : null;
 }
 function ThreadSettings({ enterprise, thread }: { enterprise: EnterpriseFeed; thread: string }) {
-  const [saved, setSaved] = useState<ChatHandle>();
+  const [revision, refresh] = useState(0);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const state = useChatRead(
     () => chatRpc.run(enterprise.target, { kind: "threadChat", thread }),
-    thread,
+    [thread, revision, enterprise.feed.chatRevision].join(":"),
   );
+  const h = Option.getOrUndefined(decodeHandle(state.value));
+  const defaults = useChatRead(
+    async () =>
+      state.value && !h
+        ? decodeSettings(await chatRpc.run(enterprise.target, { kind: "dmSettings" }))
+            .agentWakeDefault
+        : null,
+    [Boolean(state.value), h?.id, revision].join(":"),
+  );
+  const feed = enterprise.feed;
+  const direct = feed.needs?.find(
+    (item) => item.kind === "agent_inbox" && item.handleId === h?.id,
+  )?.count;
+  const more = useChatRead(async () => {
+    if (!h || direct !== undefined || !feed.chatFlags?.includes("agent_inbox")) return undefined;
+    let cursor = feed.needsNextCursor;
+    while (cursor) {
+      const page = (await feedRpc.needs(enterprise.target, cursor))?.value;
+      if (!page) break;
+      const item = page.items.find((item) => item.kind === "agent_inbox" && item.handleId === h.id);
+      if (item) return item.count;
+      cursor = page.nextCursor;
+    }
+    return undefined;
+  }, [h?.id, direct, feed.needsFetchedAt, feed.needsNextCursor].join(":"));
+  const waiting = direct ?? more.value;
   if (!state.value) return null;
-  const h = saved ?? Option.getOrUndefined(decodeHandle(state.value));
   return (
-    <details className="relative text-xs">
+    <details
+      className="relative text-xs"
+      onToggle={(e) => {
+        if (e.currentTarget.open) refresh((n) => n + 1);
+      }}
+    >
       <summary className="cursor-pointer">
-        {h ? h.owner.login + "/" + (h.shortName ?? h.claimName) : "Give a chat name"}
+        {h ? h.owner.login + "/" + (h.shortName ?? h.claimName) : "Give a chat name"}{" "}
+        {waiting ? <b>{waiting} waiting</b> : null}
       </summary>
       <form
-        key={h?.shortName + "-" + h?.wake}
+        key={[h?.shortName, h?.wake, defaults.value].join(":")}
         className="absolute right-0 z-30 grid w-64 gap-3 rounded-md border bg-popover p-3"
         onSubmit={async (e) => {
           e.preventDefault();
           const data = new FormData(e.currentTarget);
           setPending(true);
           try {
-            const updated = await chatRpc.run(enterprise.target, {
+            await chatRpc.run(enterprise.target, {
               kind: "threadChat",
               thread,
               settings: {
                 name: String(data.get("name") ?? ""),
-                wake:
-                  data.get("wake") === "owner"
-                    ? "owner"
-                    : data.get("wake") === "nobody"
-                      ? "nobody"
-                      : "everyone",
+                wake: wakeValue(data.get("wake")),
               },
             });
-            setSaved(Option.getOrThrow(decodeHandle(updated)));
+            refresh((n) => n + 1);
             setError("");
           } catch (e) {
             setError(String(e));
@@ -121,13 +191,15 @@ function ThreadSettings({ enterprise, thread }: { enterprise: EnterpriseFeed; th
         </label>
         <label>
           Who can wake this agent{" "}
-          <select name="wake" defaultValue={h?.wake ?? "everyone"}>
-            <option value="everyone">Everyone</option>
-            <option value="owner">Only me</option>
-            <option value="nobody">Nobody</option>
+          <select
+            aria-label="Who can wake this agent"
+            name="wake"
+            defaultValue={h?.wake ?? defaults.value ?? "everyone"}
+          >
+            <WakeOptions />
           </select>
         </label>
-        <button disabled={pending}>Save</button>
+        <button disabled={pending || (!h && !defaults.value)}>Save</button>
         {error && <span role="alert">{error}</span>}
       </form>
     </details>

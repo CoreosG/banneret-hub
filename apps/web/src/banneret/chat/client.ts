@@ -157,14 +157,14 @@ export async function history(
   }
   return { items: items.sort((a, b) => a.seq - b.seq), more: cursor !== null };
 }
-export async function members(target: RelayTarget, id: string) {
+export async function channelMembers(target: RelayTarget, id: string) {
   const result = [];
   let cursor: string | null = null;
   do {
     const page = decodeChatMembers(
       await chatRpc.run(target, { kind: "members", id, ...(cursor ? { cursor } : {}) }),
     );
-    result.push(...page.items.filter((m) => m.kind === "person"));
+    result.push(...page.items);
     cursor = page.nextCursor;
   } while (cursor);
   return result;
@@ -215,6 +215,22 @@ export async function handles(target: RelayTarget) {
       })),
     );
     cursor = page.nextCursor;
+  } while (cursor);
+  return result;
+}
+
+export async function members(target: RelayTarget, id: string) {
+  return (await channelMembers(target, id)).filter((member) => member.kind === "person");
+}
+export async function pageItems<T>(
+  load: (cursor?: string) => Promise<{ items: readonly T[]; nextCursor: string | null }>,
+) {
+  const result: T[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await load(cursor);
+    result.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
   } while (cursor);
   return result;
 }
