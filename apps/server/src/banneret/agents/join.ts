@@ -25,7 +25,12 @@ interface JoinInput {
 const ownerLines = (input: JoinInput) => {
   const rows = [
     ["skills", "Skills", "them", ["skills_list", "skills_get"]],
-    ["memory", "Memory", "it", ["memory_search", "memory_read", "memory_propose"]],
+    [
+      "memory",
+      "Memory",
+      "it",
+      ["banneret_memory_search", "banneret_memory_read", "banneret_memory_propose"],
+    ],
     ["search", "Search", "it", ["search_query"]],
     ["chat", "Chat", "it", []],
   ] as const;
@@ -58,7 +63,7 @@ const externalTasks = (input: JoinInput) => {
     input.offered?.has("banneret_needs") && `banneret_needs for what waits on ${input.login}`,
   ].filter(Boolean);
   return [
-    `Tasks and claims: ${owner.title} owns them. Use the co-${owner.source} tools: ${tool("tasks_list")} to find work, ${tool("tasks_read")} to read a task, ${tool("tasks_claim")} before you change anything, and ${tool("tasks_release")} with a reason when you stop.`,
+    `Tasks and claims: ${owner.title} owns them. Use the co-${owner.source} tools: ${tool("tasks_list_boards")} and then ${tool("tasks_list_tasks")} to find work, ${tool("tasks_read")} to read a task, ${tool("tasks_claim")} before you change anything, and ${tool("tasks_release")} with a reason when you stop.`,
     views.length ? `Before you claim, check ${views.join(", and ")}.` : "",
     `Tell ${input.login} which task you are about to claim, unless ${input.login} already asked for it. If the task owner is unreachable, stop and tell ${input.login}. Do not edit without a claim.`,
   ]

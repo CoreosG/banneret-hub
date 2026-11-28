@@ -27,6 +27,7 @@ import { classify, levelFor, pluginSource, toolkitSource } from "./levels.ts";
 import { threadWorkspace } from "./workspace.ts";
 import { pluginsForThread } from "./session.ts";
 import { isPersonTool, offeredToThread } from "../sources/filters.ts";
+import { applyCredential, sourceAccess } from "../sources/tokens.ts";
 
 const isApprovalError = Schema.is(McpSchema.InvalidParams);
 const error = (message: string) => new McpSchema.InvalidParams({ message });
@@ -204,7 +205,7 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
           // Owners may have changed since the call was held.
           if (
             isPersonTool(row.name) ||
-            (plugin.company && !(plugin.signedIn && offeredToThread(row.name, plugin.company)))
+            (plugin.company && !offeredToThread(row.name, plugin.company))
           )
             return yield* error("The tool source changed.");
           if (
@@ -213,18 +214,33 @@ export const approvalLifecycle = (mcp: typeof McpServer.McpServer) =>
             !(yield* memoryEnabled)
           )
             return yield* error("Banneret memory is off on this machine.");
-          const response = yield* Effect.tryPromise({
-            try: async (signal) =>
-              rpcResponse(
-                await forward(
-                  new Request(plugin.endpoint, { method: "POST", headers: transport.headers }),
-                  plugin.endpoint,
-                  plugin.token,
-                  signal,
-                  transport.body,
-                ),
-                wire.id,
+          // A company source gets the sign-in as it is now, not as it was when the call was held.
+          const access = plugin.company
+            ? yield* sourceAccess(plugin.relayOrigin, plugin.company)
+            : { state: "ready" as const, token: plugin.token };
+          if (access.state !== "ready")
+            return yield* error(`You are not signed in to ${plugin.manifest.description}.`);
+          const sent = yield* Effect.tryPromise({
+            try: (signal) =>
+              forward(
+                new Request(plugin.endpoint, { method: "POST", headers: transport.headers }),
+                plugin.endpoint,
+                access.token,
+                signal,
+                transport.body,
               ),
+            catch: () => error("The plugin did not return a tool result."),
+          });
+          if (sent.status === 401 && plugin.company && plugin.company.auth !== "none") {
+            yield* applyCredential(plugin.relayOrigin, plugin.company.id, {
+              type: "rejected",
+              token: access.token,
+              as: "expired",
+            });
+            return yield* error(`You are not signed in to ${plugin.manifest.description}.`);
+          }
+          const response = yield* Effect.tryPromise({
+            try: () => rpcResponse(sent, wire.id),
             catch: () => error("The plugin did not return a tool result."),
           });
           if (response.error) return resultError(String(response.error.message));

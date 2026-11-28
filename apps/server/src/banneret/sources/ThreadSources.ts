@@ -29,9 +29,9 @@ export function transition(from: SourceState, event: SourceEvent): SourceState {
     case "turn_changed":
       return configured;
     case "credential":
-      return from.state === "configured"
-        ? { state: event.present ? "connecting" : "sign_in_needed" }
-        : from;
+      // A sign-in that goes away closes the source at once. One that arrives waits for the next turn.
+      if (!event.present) return from.state === "failed" ? from : { state: "sign_in_needed" };
+      return from.state === "configured" ? { state: "connecting" } : from;
     case "listed":
       if (!open) return from;
       return event.missing.length
@@ -45,9 +45,11 @@ export function transition(from: SourceState, event: SourceEvent): SourceState {
 }
 
 /** The plain message a thread gets while a source cannot be used; undefined while it can. */
-export const sourceNotice = (title: string, state: SourceState) =>
+export const sourceNotice = (title: string, auth: CompanySource["auth"], state: SourceState) =>
   state.state === "sign_in_needed"
-    ? `${title} needs a sign-in, and this Hub version cannot do that yet. Tell your person.`
+    ? auth === "none"
+      ? `${title} did not accept this machine on your company network. Tell your person.`
+      : `${title} needs your person to sign in. Tell them to sign in to it in Banneret Hub, under Settings, Chat, Company servers. Try again in your next turn. If its tools are still missing, they can start a new chat.`
     : state.state === "failed"
       ? `${title} is unavailable in this chat (${state.reason}). A new chat tries again. Tell your person, and do not use another tool in its place.`
       : undefined;
@@ -83,33 +85,25 @@ export const makeSourceStates = () => {
 };
 
 /**
- * The credential the Hub sends a source: empty for a source that needs none, undefined when the person
- * has to sign in. Sign-in and the secret store (PL5) plug in here.
+ * A company source in the shape the plugin proxy, tool levels and approvals already read. It carries
+ * no token: `sourceAccess` (tokens.ts) reads the person's own one when a request is sent.
  */
-const sourceCredential = (source: CompanySource): string | undefined =>
-  source.auth === "none" ? "" : undefined;
-
-/** A company source in the shape the plugin proxy, tool levels and approvals already read. */
-const threadSource = (source: CompanySource) => {
-  const credential = sourceCredential(source);
-  return {
-    company: source,
-    signedIn: credential !== undefined,
-    token: credential ?? "",
-    endpoint: source.url,
-    manifest: {
-      source: `co-${source.id}`,
-      description: source.title,
-      auth: source.auth === "none" ? ("service" as const) : ("per-user-token" as const),
-      capabilities: source.owns,
-      toolPrefix: source.prefix,
-    },
-  };
-};
+const threadSource = (source: CompanySource, relayOrigin: string) => ({
+  company: source,
+  relayOrigin,
+  endpoint: source.url,
+  manifest: {
+    source: `co-${source.id}`,
+    description: source.title,
+    auth: source.auth === "none" ? ("service" as const) : ("per-user-token" as const),
+    capabilities: source.owns,
+    toolPrefix: source.prefix,
+  },
+});
 export type ThreadSource = ReturnType<typeof threadSource>;
 
 /** The company sources of a relay's workspace, from the owners last read from that relay. */
 export const sourcesFor = Effect.fn("BanneretSources.forRelay")(function* (relayOrigin: string) {
   const saved = yield* readSavedOwnership(relayOrigin);
-  return saved ? companySources(saved).map(threadSource) : [];
+  return saved ? companySources(saved).map((source) => threadSource(source, relayOrigin)) : [];
 });

@@ -68,6 +68,24 @@ Accept the input object as `tools/call` arguments. Return the output object in M
 
 The contract is versionless by shape. Both sides ignore unknown fields, including fields in nested objects. Validate required fields and known values, and apply only recognized inputs. When generating input JSON Schema from Zod, use `z.toJSONSchema(schema, { io: "input" })` so additional fields remain acceptable. Independently released plugins can then add optional information without coordinating upgrades. Relay-v1 takes the opposite approach and rejects unknown fields in closed payloads to detect defects at its versioned boundary.
 
+## Sign people in to a company source
+
+A company that runs your server as a [relay source](relay-v1/README.md#capability-owners-and-plugin-sources)
+chooses how people sign in. Each person signs in from their own Hub, and the Hub sends their token straight to
+your server. See [what a person sees](agents.md#signing-in-to-a-company-server).
+
+- **`oauth`** follows MCP authorization. Answer 401 to a request without a token, with
+  `WWW-Authenticate: Bearer resource_metadata="…"`. Serve protected-resource metadata and authorization-server
+  metadata. Support dynamic client registration, the authorization code grant with PKCE (`S256`), and a
+  `http://127.0.0.1:<port>/…` redirect address. Give a refresh token if the sign-in should outlast the access
+  token. The Hub cannot yet use a client ID that you register for it in advance.
+- **`bearer_per_person`** takes a token the person creates. Say where in `auth.help`. The Hub checks it with one
+  `initialize` request, which must answer 401 or 403 for a bad token.
+- **`none`** means your network already knows who is calling.
+
+Answer 401 when a token no longer works. The Hub then asks the person to sign in again. It does not retry. The
+Hub never asks for the `memory.person` scope for a thread's calls.
+
 ## Tasks
 
 | Tool                | Arguments                                 | Successful output                      |

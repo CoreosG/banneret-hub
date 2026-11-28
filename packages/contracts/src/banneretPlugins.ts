@@ -38,7 +38,52 @@ export const CallApproval = Schema.Struct({
   reason: Schema.String,
 });
 export type CallApproval = typeof CallApproval.Type;
+/** One company source and this machine's sign-in to it. No token is part of it. */
+export const SourceSignIn = Schema.Struct({
+  relayOrigin: Schema.String,
+  company: Schema.String,
+  sourceId: Schema.String,
+  title: Schema.String,
+  /** The host a sign-in is sent to. */
+  address: Schema.String,
+  auth: Schema.Literals(["none", "oauth", "bearer_per_person"]),
+  state: Schema.Literals(["network", "signed_in", "signed_out", "expired", "refused"]),
+  /** Where a person gets a token. */
+  help: Schema.optionalKey(Schema.String),
+  /** The sign-in page, while one is waiting. */
+  authorizationUrl: Schema.optionalKey(Schema.String),
+});
+export type SourceSignIn = typeof SourceSignIn.Type;
+const signInTarget = { relayOrigin: Schema.NonEmptyString, sourceId: Schema.NonEmptyString };
+/** What a person does about one sign-in. A pasted token or address travels redacted. */
+export const SignInAction = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("start"), ...signInTarget }),
+  Schema.Struct({
+    kind: Schema.Literal("finish"),
+    callbackUrl: Schema.RedactedFromValue(Schema.String),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("token"),
+    ...signInTarget,
+    token: Schema.RedactedFromValue(Schema.String),
+  }),
+  Schema.Struct({ kind: Schema.Literal("sign_out"), ...signInTarget }),
+]);
+export type SignInAction = typeof SignInAction.Type;
+
 export const PLUGIN_RPCS = [
+  Rpc.make("plugins.signIns", {
+    stream: true,
+    payload: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+    success: Schema.Array(SourceSignIn),
+    error: levels.error,
+  }),
+  // One command for every action: the server's RPC group is near the compiler's type depth limit.
+  Rpc.make("plugins.signIn", {
+    payload: Schema.Struct({ action: SignInAction }),
+    success: Schema.Void,
+    error: levels.error,
+  }),
   Rpc.make("plugins.approvals", {
     stream: true,
     payload: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
@@ -75,6 +120,8 @@ export const PLUGIN_RPCS = [
   }),
 ] as const;
 export const PLUGIN_SCOPES = {
+  "plugins.signIns": AuthEnvironmentMaintainScope,
+  "plugins.signIn": AuthEnvironmentMaintainScope,
   "plugins.approvals": AuthEnvironmentMaintainScope,
   "plugins.decide": AuthEnvironmentMaintainScope,
   "plugins.levels": AuthEnvironmentMaintainScope,
@@ -84,6 +131,8 @@ export const PLUGIN_SCOPES = {
   "plugins.remove": AuthEnvironmentMaintainScope,
 } as const;
 export const PLUGIN_AGGREGATES = {
+  "plugins.signIns": "banneret-plugins",
+  "plugins.signIn": "banneret-plugins",
   "plugins.approvals": "banneret-plugins",
   "plugins.decide": "banneret-plugins",
   "plugins.levels": "banneret-plugins",

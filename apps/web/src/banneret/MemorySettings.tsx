@@ -3,6 +3,7 @@ import { AgentWakeSetting } from "./chat/AgentSettings";
 import { useSearchableSetting } from "../components/settings/settingsSearch";
 import { MemoryImportSetting } from "./MemoryTransfer";
 import { OwnedElsewhere } from "./OwnedElsewhere";
+import { CompanySignInSettings } from "./SourceSignIns";
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentRpcCommand, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -172,6 +173,7 @@ export function MemorySettings() {
           <SkillsRow key={environmentId} environmentId={environmentId} label={label} />
         ))}
       </SettingsSection>
+      <CompanySignInSettings />
     </>
   );
 }

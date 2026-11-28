@@ -1,9 +1,6 @@
 // Banneret Hub: a relay's last capability owners and the sources they name, saved so a start with the
 // relay down keeps them. Only the relay feed writes. Thread sources read the file because the layer that
 // issues a thread's MCP set sits below the feed, where the feed reference only answers "not joined".
-// @effect-diagnostics nodeBuiltinImport:off - node:net classifies a source's literal IP address.
-import * as NodeNet from "node:net";
-
 import { ElsewhereOwners, type RelayCapability } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -12,6 +9,8 @@ import * as Schema from "effect/Schema";
 
 import { relayHash } from "../relay/Enrolment.ts";
 import { workspacesFilePath } from "../Workspaces.ts";
+import { sourceUrlAllowed } from "./addresses.ts";
+import { applyCredential, notifySignIns } from "./tokens.ts";
 
 const Capability = Schema.Literals(["tasks", "skills", "memory", "chat", "search", "health"]);
 const isCapability = Schema.is(Capability);
@@ -27,6 +26,8 @@ const SavedSource = Schema.Struct({
   prefix: Schema.String,
   provides: Schema.Array(Capability),
   auth: AuthKind,
+  /** Where a person gets a token, for `bearer_per_person`. */
+  help: Schema.optionalKey(Schema.String),
 });
 export type SavedSource = typeof SavedSource.Type;
 
@@ -56,25 +57,6 @@ export const companySources = (saved: SavedOwnership): ReadonlyArray<CompanySour
     return first ? [{ ...source, owns: [first, ...rest] as const }] : [];
   });
 
-// The relay-v1 source rules, checked again here: the Hub later sends a person's credential to this URL.
-const privateNetworks = new NodeNet.BlockList();
-privateNetworks.addSubnet("10.0.0.0", 8);
-privateNetworks.addSubnet("172.16.0.0", 12);
-privateNetworks.addSubnet("192.168.0.0", 16);
-privateNetworks.addSubnet("100.64.0.0", 10);
-privateNetworks.addSubnet("fc00::", 7, "ipv6");
-
-export function sourceUrlAllowed(value: string): boolean {
-  const url = URL.parse(value);
-  if (!url || url.username || url.password || url.hash || url.search) return false;
-  if (url.protocol === "https:") return true;
-  if (url.protocol !== "http:") return false;
-  const host = url.hostname.replace(/^\[|\]$/g, "");
-  if (host.endsWith(".ts.net")) return true;
-  const family = NodeNet.isIP(host);
-  return family !== 0 && privateNetworks.check(host, family === 6 ? "ipv6" : "ipv4");
-}
-
 // No dots: Codex splits config override keys on them. `banneret*` and T3's own server names are reserved.
 const SOURCE_ID = /^(?!banneret|t3-code(?:-direct)?$)[a-z0-9][a-z0-9_-]{0,47}$/;
 
@@ -83,20 +65,25 @@ const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =
     ? (value as Readonly<Record<string, unknown>>)
     : undefined;
 
+const oneLine = (value: unknown, max: number) =>
+  typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
+
 const savedSource = (value: unknown): SavedSource | undefined => {
   const source = record(value);
   const auth = record(source?.auth)?.kind;
+  const help = record(source?.auth)?.help;
   const { id, title, url, prefix } = source ?? {};
   if (typeof id !== "string" || !SOURCE_ID.test(id) || !isAuthKind(auth)) return undefined;
   if (typeof url !== "string" || url.length > 2048 || !sourceUrlAllowed(url)) return undefined;
   return {
     id,
     // Titles reach agent-facing messages, so they stay on one short line.
-    title: (typeof title === "string" && title.replace(/\s+/g, " ").trim().slice(0, 80)) || id,
+    title: oneLine(title, 80) || id,
     url,
     prefix: typeof prefix === "string" && /^[a-z0-9_]{0,31}_$/.test(prefix) ? prefix : "",
     provides: Array.isArray(source?.provides) ? source.provides.filter(isCapability) : [],
     auth,
+    ...(auth === "bearer_per_person" && oneLine(help, 300) ? { help: oneLine(help, 300) } : {}),
   };
 };
 
@@ -140,17 +127,38 @@ export const readSavedOwnership = Effect.fn("BanneretOwnership.read")(
   ),
 );
 
+/**
+ * Signs the person out of every source the relay no longer names, or names at another address, so no
+ * token stays behind that the person cannot see. Leaving the relay names none.
+ */
+const forgetSignIns = Effect.fn("BanneretOwnership.forget")(function* (
+  relayOrigin: string,
+  next: SavedOwnership | null,
+) {
+  const before = yield* readSavedOwnership(relayOrigin);
+  for (const source of before?.sources ?? []) {
+    if (source.auth === "none") continue;
+    if (next?.sources.some((kept) => kept.id === source.id && kept.url === source.url)) continue;
+    yield* applyCredential(relayOrigin, source.id, { type: "signed_out" });
+  }
+});
+
 /** Replaces or removes a relay's saved owners. A failure is logged: the live owners still apply. */
 export const writeSavedOwnership = Effect.fn("BanneretOwnership.write")(
   function* (relayOrigin: string, next: SavedOwnership | null) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const file = yield* location(relayOrigin);
-    if (next === null) return yield* fs.remove(file, { force: true });
-    yield* fs.makeDirectory(path.dirname(file), { recursive: true });
-    const staging = `${file}.staging-${process.pid}`;
-    yield* fs.writeFileString(staging, yield* encodeSaved(next));
-    yield* fs.rename(staging, file);
+    // First, so a stop in between leaves a sign-out and never a hidden token.
+    yield* forgetSignIns(relayOrigin, next);
+    if (next === null) yield* fs.remove(file, { force: true });
+    else {
+      yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+      const staging = `${file}.staging-${process.pid}`;
+      yield* fs.writeFileString(staging, yield* encodeSaved(next));
+      yield* fs.rename(staging, file);
+    }
+    notifySignIns();
   },
   Effect.catch((error) => Effect.logWarning("Could not save the capability owners", error)),
 );
