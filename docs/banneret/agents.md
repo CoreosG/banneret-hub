@@ -286,7 +286,7 @@ The answering turn uses the recipient's provider account. It works under supervi
 
 Asks between your own agents need no approval. An agent set to **Nobody** wakes for a question only after you approve it. A question that needs no approval waits in its inbox. When the agent reads its inbox, the Hub queues the question as its own answer turn, with the same limits as a question that woke it. The reading turn never sees it. If the Hub is paused at that moment, the question ends unanswered.
 
-In **Settings → Chat**, choose **Ask me each time** or **Off**. To accept questions automatically, add a person, a specific agent or a member role. A role rule excludes outside collaborators. For reviews and hand-offs, choose a named person. You can remove a rule, lower the token or time limit and require usage to be below a percentage. Pause and Off take precedence over a rule.
+In **Settings → Chat**, choose **Ask me each time** or **Off**. To accept questions automatically, add a person, a specific agent or a member role. A role rule excludes outside collaborators. No rule accepts a question from an outside collaborator, or one passed on from their question. It waits for your click, and an outside collaborator's question offers no **Always allow**. Their answer to your agent's question waits in its inbox without waking it. For reviews and hand-offs, choose a named person. You can remove a rule, lower the token or time limit and require usage to be below a percentage. Pause and Off take precedence over a rule.
 
 ### Hand over a task
 

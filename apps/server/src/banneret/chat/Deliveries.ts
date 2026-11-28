@@ -180,7 +180,7 @@ const startAnswerTurn = Effect.fn("Chat.startAnswerTurn")(function* (
 });
 
 // The relay consumes on an inbox read, and no ask may run in the reading turn. Open ask for this
-// handle -> answer turn. Hub paused -> closed `paused`. Start failed -> closed `start_failed`.
+// handle -> answer turn. Hub or owner paused -> `paused`. Start failed -> `start_failed`.
 // Any other ask is withheld (approval delivers it again). A stop before the run is saved records
 // nothing, and the relay expires the ask.
 export const answerInboxAsks = Effect.fn("Chat.answerInboxAsks")(function* (
@@ -200,21 +200,23 @@ export const answerInboxAsks = Effect.fn("Chat.answerInboxAsks")(function* (
       ask.to.handle !== handleId(t.id)
     )
       continue;
-    const turn = yield* pause
-      .whenRunning(
-        startAnswerTurn(services, relay, t, d, ask),
-        noAnswer(relay, ask, d.handleId, "paused"),
-      )
-      .pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Could not start an answer turn for an inbox question", cause).pipe(
-            Effect.andThen(noAnswer(relay, ask, d.handleId, "start_failed")),
-          ),
+    const paused = noAnswer(relay, ask, d.handleId, "paused");
+    // A relay pause turns queued wakes inbox-only, so an inbox read must not start one either.
+    const turn = yield* services.answers.settings(relay).pipe(
+      Effect.flatMap((settings) =>
+        settings.agentsPaused
+          ? paused
+          : pause.whenRunning(startAnswerTurn(services, relay, t, d, ask), paused),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not start an answer turn for an inbox question", cause).pipe(
+          Effect.andThen(noAnswer(relay, ask, d.handleId, "start_failed")),
         ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Could not close an inbox question", cause).pipe(Effect.as(false)),
-        ),
-      );
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not close an inbox question", cause).pipe(Effect.as(false)),
+      ),
+    );
     if (turn) started++;
   }
   return started;

@@ -1926,6 +1926,28 @@ describe("agent lease tools against the fake relay", () => {
     ),
   );
 
+  it.live("starts no turn for an inbox question while the owner is paused at the relay", () =>
+    withFake(
+      (fake, relay) =>
+        onHub(
+          newTracker(),
+          Effect.gen(function* () {
+            const { device, ask } = yield* askIntoInbox(fake, relay);
+            const settings = (yield* device.signedChat("GET", "me/settings")).body as object;
+            yield* device.signedChat("PUT", "me/settings", { ...settings, agentsPaused: true });
+            const { threads, sent } = yield* answerThreads;
+            const inbox = yield* call("banneret_chat_inbox", {}).pipe(
+              Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+            );
+            expect(inbox).toMatchObject({ items: [], answerTurns: 0 });
+            expect(sent).toEqual([]);
+            expect(yield* askStates(device)).toMatchObject({ [ask]: "unanswered:paused" });
+          }),
+        ),
+      { chat: { agentAsks: { enabled: true } } },
+    ),
+  );
+
   it.live("keeps an unapproved question out of the turn that reads the inbox", () =>
     withFake(
       (fake, relay) =>

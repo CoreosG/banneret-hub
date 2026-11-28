@@ -3394,9 +3394,11 @@ describe("chat access and role administration", () => {
 });
 
 describe("chat contract", () => {
-  async function sharedAskThread() {
-    const asker = await enrol(),
-      answerer = await enrol(),
+  async function sharedAskThread(
+    options: { asker?: Parameters<typeof enrol>[0]; answerer?: Parameters<typeof enrol>[0] } = {},
+  ) {
+    const asker = await enrol(options.asker),
+      answerer = await enrol(options.answerer),
       chat = "/relay/v1/chat/";
     const register = async (machine: Enrolled, name: string) => {
       const id = "h_" + randomText(8);
@@ -3411,13 +3413,17 @@ describe("chat contract", () => {
     };
     const from = await register(asker, "builder"),
       to = await register(answerer, "reader");
-    const created = await call(asker, "POST", chat + "conversations", {
+    // An outsider joins only a channel open to outsiders, and a member opens it.
+    const outsideAsker = options.asker?.admission === "outside";
+    const [host, guest] = outsideAsker ? [answerer, from.owner] : [asker, to.owner];
+    const created = await call(host, "POST", chat + "conversations", {
       kind: "channel",
-      template: "team",
+      template: outsideAsker || options.answerer?.admission === "outside" ? "community" : "team",
+      agents: "allowed",
       name: "work-" + randomText(4),
     });
     const conversationId = (created.body as { id: string }).id;
-    await call(asker, "PUT", chat + "conversations/" + conversationId + "/members/" + to.owner.id);
+    await call(host, "PUT", chat + "conversations/" + conversationId + "/members/" + guest.id);
     const root = await call(asker, "POST", chat + "messages", {
       conversationId,
       text: "Release question",
@@ -3944,6 +3950,245 @@ describe("chat contract", () => {
         { reason: "ask_result", wakes: false, message: { ask: { id: ask.id, state: "declined" } } },
       ],
     });
+  });
+
+  /** An outside collaborator whose custom role may ask agents. */
+  const askingOutsider = async () => {
+    const founder = await enrol();
+    const roles = (await call(founder, "GET", "/relay/v1/roles")).body as {
+      items: { id: string; permissions: object }[];
+    };
+    const id = "asking_" + randomText(4).toLowerCase();
+    const saved = await call(founder, "PUT", "/relay/v1/roles/" + id, {
+      name: "Asking outsider",
+      forOutside: true,
+      permissions: {
+        ...roles.items.find((r) => r.id === "outside")!.permissions,
+        "agents.ask": true,
+      },
+    });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    return { admission: "outside" as const, role: id };
+  };
+  const policyOf = async (t: AskThread, machine: Enrolled) =>
+    (await call(machine, "GET", t.chat + "me/settings")).body as {
+      agentAsks: { auto: object[] };
+      agentsPaused: boolean;
+    };
+  const saveRules = async (t: AskThread, machine: Enrolled, from: object[], extra = {}) => {
+    const settings = await policyOf(t, machine);
+    return call(machine, "PUT", t.chat + "me/settings", {
+      ...settings,
+      ...extra,
+      agentAsks: {
+        ...settings.agentAsks,
+        auto: from.map((source) => ({ from: source, kinds: ["question"] })),
+      },
+    });
+  };
+  const askList = async (t: AskThread) =>
+    (
+      (await call(t.asker, "GET", t.chat + "asks?role=asker")).body as {
+        items: (AskRow & { byRule?: boolean })[];
+      }
+    ).items;
+
+  it("never wakes the asker with an outside collaborator's answer", async () => {
+    const t = await sharedAskThread({ answerer: { admission: "outside" } });
+    const path = (ask: AskRow) => t.chat + "asks/" + ask.id;
+    const typed = await postAsk(t, { question: "One?", key: "one" });
+    expect(
+      (await call(t.answerer, "POST", path(typed) + "/answer", { text: "Typed." })).body,
+    ).toMatchObject({ state: "answered" });
+    const run = await postAsk(t, { question: "Two?", key: "two" });
+    await call(t.answerer, "POST", path(run) + "/decision", { allow: "once" });
+    // The outsider's click wakes the outsider's own agent.
+    expect(await waking(t, t.answerer)).toEqual([
+      expect.objectContaining({ reason: "ask", wakes: true }),
+    ]);
+    expect(
+      (
+        await call(t.answerer, "POST", path(run) + "/answer", {
+          text: "Run.",
+          asHandle: t.to.id,
+        })
+      ).body,
+    ).toMatchObject({ state: "answered" });
+    const declined = await postAsk(t, { question: "Three?", key: "three" });
+    await call(t.answerer, "POST", path(declined) + "/decision", {
+      decline: true,
+      reason: "No.",
+    });
+    expect(await waking(t, t.asker)).toEqual([]);
+    expect((await needs(t.asker)).filter((i) => i.kind === "agent_inbox")).toEqual([
+      expect.objectContaining({ handleId: t.from.id, count: 3 }),
+    ]);
+    const inbox = (await call(t.asker, "POST", t.chat + "inbox", { asHandle: t.from.id })).body as {
+      items: {
+        reason: string;
+        wakes: boolean;
+        expiresAt: string;
+        message: { ask: { createdAt: string } };
+      }[];
+    };
+    expect(inbox.items.map((d) => [d.reason, d.wakes])).toEqual([
+      ["ask_result", false],
+      ["ask_result", false],
+      ["ask_result", false],
+    ]);
+    // Inbox-only deliveries last seven days.
+    for (const d of inbox.items)
+      expect(Date.parse(d.expiresAt) - Date.parse(d.message.ask.createdAt)).toBeGreaterThan(
+        6 * 86400000,
+      );
+  });
+
+  /** A third founder with an agent that can reply in the thread. */
+  const thirdOwner = async (t: AskThread, host: Enrolled) => {
+    const machine = await enrol(),
+      handle = "h_" + randomText(8);
+    const registered = await call(machine, "PUT", t.chat + "handles/" + handle, {
+      threadRef: handle,
+      name: "checker",
+      provider: "codex",
+      machineId: machine.machineId,
+    });
+    const owner = (registered.body as { owner: { id: string } }).owner;
+    await call(host, "PUT", t.chat + "conversations/" + t.conversationId + "/members/" + owner.id);
+    return { machine, handle };
+  };
+
+  it("waits for a click when the asker or the chain's origin is an outside collaborator", async () => {
+    const t = await sharedAskThread({ asker: await askingOutsider() });
+    // Rules that match this asker by person and by agent still leave the ask to a click.
+    expect(
+      (await saveRules(t, t.answerer, [{ person: t.from.owner }, { agent: t.from.id }])).status,
+    ).toBe(200);
+    const direct = await postAsk(t);
+    expect(direct.state).toBe("waiting_owner");
+    expect(direct).not.toHaveProperty("byRule");
+    await call(t.answerer, "POST", t.chat + "asks/" + direct.id + "/decision", { allow: "once" });
+    const third = await thirdOwner(t, t.answerer);
+    // The third owner auto-accepts founders, which the answerer is.
+    expect(
+      (await saveRules(t, third.machine, [{ role: { id: "founder", name: "Founder" } }])).status,
+    ).toBe(200);
+    const onward = { to: { kind: "agent", handle: third.handle }, asHandle: t.to.id };
+    const sub = await call(t.answerer, "POST", t.chat + "asks", {
+      ...t.newAsk,
+      ...onward,
+      parentAskId: direct.id,
+      question: "For the outsider?",
+      key: "sub",
+    });
+    expect(sub.body).toMatchObject({ state: "waiting_owner", depth: 2 });
+    expect(sub.body).not.toHaveProperty("byRule");
+    // The control: the same rule opens the founder's own question.
+    const own = await call(t.answerer, "POST", t.chat + "asks", {
+      ...t.newAsk,
+      ...onward,
+      question: "For myself?",
+      key: "own",
+    });
+    expect(own.body).toMatchObject({ state: "open", byRule: true });
+  });
+
+  it("waits for a click when an outside collaborator's agent passes a member's question on", async () => {
+    const t = await sharedAskThread({ answerer: await askingOutsider() });
+    const first = await postAsk(t);
+    await call(t.answerer, "POST", t.chat + "asks/" + first.id + "/decision", { allow: "once" });
+    const third = await thirdOwner(t, t.asker);
+    // Rules that match the outsider, who asks onward. The chain's origin is a member.
+    expect(
+      (await saveRules(t, third.machine, [{ person: t.to.owner }, { agent: t.to.id }])).status,
+    ).toBe(200);
+    const sub = await call(t.answerer, "POST", t.chat + "asks", {
+      ...t.newAsk,
+      to: { kind: "agent", handle: third.handle },
+      asHandle: t.to.id,
+      parentAskId: first.id,
+      question: "Passed on?",
+      key: "onward",
+    });
+    expect(sub.body).toMatchObject({ state: "waiting_owner", onBehalfOf: t.from.owner });
+    expect(sub.body).not.toHaveProperty("byRule");
+  });
+
+  it("refuses Always allow for an outside collaborator's ask", async () => {
+    const t = await sharedAskThread({ asker: await askingOutsider() });
+    const ask = await postAsk(t);
+    const decide = (allow: string) =>
+      call(t.answerer, "POST", t.chat + "asks/" + ask.id + "/decision", { allow });
+    expectError(await decide("always"), 403, "auto_accept_scope");
+    expect(await askList(t)).toEqual([
+      expect.objectContaining({ id: ask.id, state: "waiting_owner" }),
+    ]);
+    expect((await policyOf(t, t.answerer)).agentAsks.auto).toEqual([]);
+    expect((await decide("once")).body).toMatchObject({ state: "open" });
+  });
+
+  it("turns wakes already queued into inbox-only on a pause, and keeps them so", async () => {
+    const t = await sharedAskThread();
+    const approved = await postAsk(t, { question: "One?", key: "one" });
+    await call(t.answerer, "POST", t.chat + "asks/" + approved.id + "/decision", {
+      allow: "once",
+    });
+    const declined = await postAsk(t, { question: "Two?", key: "two" });
+    await call(t.answerer, "POST", t.chat + "asks/" + declined.id + "/decision", {
+      decline: true,
+      reason: "No.",
+    });
+    const pause = async (machine: Enrolled, agentsPaused: boolean) =>
+      expect(
+        (
+          await call(machine, "PUT", t.chat + "me/settings", {
+            ...(await policyOf(t, machine)),
+            agentsPaused,
+          })
+        ).status,
+      ).toBe(200);
+    await pause(t.answerer, true);
+    expect(await waking(t, t.answerer)).toEqual([]);
+    expect((await waking(t, t.asker)).map((d) => d.reason)).toEqual(["ask_result"]);
+    await pause(t.asker, true);
+    expect(await waking(t, t.asker)).toEqual([]);
+    for (const machine of [t.asker, t.answerer]) await pause(machine, false);
+    for (const [machine, asHandle, reason] of [
+      [t.answerer, t.to.id, "ask"],
+      [t.asker, t.from.id, "ask_result"],
+    ] as const) {
+      expect(await waking(t, machine)).toEqual([]);
+      expect((await call(machine, "POST", t.chat + "inbox", { asHandle })).body).toMatchObject({
+        items: [{ reason, wakes: false }],
+      });
+    }
+    // The company pause reaches every queued row, so a shared relay is left alone.
+    if (external) return;
+    const queued = await postAsk(t, { question: "Three?", key: "three" });
+    await call(t.answerer, "POST", t.chat + "asks/" + queued.id + "/decision", { allow: "once" });
+    expect(await waking(t, t.answerer)).toHaveLength(1);
+    const company = (paused: boolean) => call(t.asker, "PUT", t.chat + "agents/pause", { paused });
+    try {
+      expect((await company(true)).status).toBe(200);
+      expect(await waking(t, t.answerer)).toEqual([]);
+    } finally {
+      await company(false);
+    }
+    expect(await waking(t, t.answerer)).toEqual([]);
+  });
+
+  it("refuses an auto rule with an unknown source, and still saves when a stored one goes away", async () => {
+    const t = await sharedAskThread();
+    for (const source of [
+      { person: { id: "p_" + randomText(6), login: "nobody" } },
+      { agent: "h_" + randomText(6) },
+      { role: { id: "nobody", name: "Nobody" } },
+    ])
+      expectError(await saveRules(t, t.answerer, [source]), 403, "auto_accept_scope");
+    expect((await saveRules(t, t.answerer, [{ agent: t.from.id }])).status).toBe(200);
+    expect((await call(t.asker, "DELETE", t.chat + "handles/" + t.from.id)).status).toBe(204);
+    const paused = await saveRules(t, t.answerer, [{ agent: t.from.id }], { agentsPaused: true });
+    expect(paused.status, JSON.stringify(paused.body)).toBe(200);
   });
 
   it("checks the named hand-off rule again on the receiver machine and leaves a stalled take actionable", async () => {

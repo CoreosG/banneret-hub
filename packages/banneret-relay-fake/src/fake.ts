@@ -2595,6 +2595,9 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
   };
   const paused = new Set<string>();
   let companyPaused = false;
+  // Someone the relay does not know counts as outside.
+  const outside = (personId: string) => people.get(personId)?.admission !== "member";
+  const held = (ownerId: string) => companyPaused || paused.has(ownerId);
   const askOwner = (ask: ChatAsk | undefined) =>
     ask?.to.kind === "agent" ? ask.to.owner.id : ask?.to.person.id;
   const activeAsk = (ask: ChatAsk) => ["waiting_owner", "open", "draft"].includes(ask.state);
@@ -2957,10 +2960,32 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         !!follows.get(rootId)?.has(handleId))
     );
   }
+  /** A pause also reaches wakes already queued. A claimed row keeps its wake until it returns. */
+  function holdQueued() {
+    const owners = new Set<string>();
+    for (const d of deliveries.values()) {
+      const owner = handles.get(d.row.handleId)?.view.owner.id;
+      if (!owner || !held(owner) || !d.row.wakes || d.row.state !== "pending") continue;
+      d.row = {
+        ...d.row,
+        wakes: false,
+        expiresAt: d.row.reason === "ask" ? d.row.expiresAt : iso(Date.now() + inboxLifetime),
+      };
+      owners.add(owner);
+    }
+    for (const owner of owners) notifyWork(owner);
+  }
   function askDelivery(message: ChatMessage, handleId: string, reason: "ask" | "ask_result") {
     const h = handles.get(handleId);
     const c = channels.get(message.conversationId)!;
     if (!h || !handleReadsHome(c, handleId, message.threadRootId ?? message.id)) return;
+    // A result wakes unless an outside collaborator answered. A nobody agent wakes for an ask
+    // only after its owner's click.
+    const wakes =
+      !held(h.view.owner.id) &&
+      (reason === "ask_result"
+        ? !outside(askOwner(message.ask)!)
+        : message.ask?.state === "open" && (h.view.wake !== "nobody" || !!message.ask.decidedBy));
     const row: ChatDelivery = {
       id: randomId("d"),
       handleId,
@@ -2970,15 +2995,13 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
       machineId: h.view.machine.id,
       threadRef: h.threadRef,
       wake: h.view.wake,
-      // A result always wakes. A nobody agent wakes for an ask only after its owner's click.
-      wakes:
-        !companyPaused &&
-        !paused.has(h.view.owner.id) &&
-        (reason === "ask_result" ||
-          (message.ask?.state === "open" && (h.view.wake !== "nobody" || !!message.ask.decidedBy))),
+      wakes,
       fromOwner: false,
       state: "pending",
-      expiresAt: reason === "ask" ? message.ask!.expiresAt : iso(Date.now() + deliveryLifetime),
+      expiresAt:
+        reason === "ask"
+          ? message.ask!.expiresAt
+          : iso(Date.now() + (wakes ? deliveryLifetime : inboxLifetime)),
     };
     deliveries.set(row.id, { row, claimedAt: 0 });
     emit(
@@ -3953,6 +3976,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           });
         const value = parseJson(body, "AgentPause") as { paused: boolean };
         companyPaused = value.paused;
+        holdQueued();
         return send("AgentPause", value);
       }
       const messageMentions = (text: string, card?: ChatMessage["card"]) => {
@@ -4051,6 +4075,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             if (a.kind === "review" && decision.allow === "draft")
               throw new RelayError("malformed", "Reviews return findings directly.");
             if (decision.allow === "always") {
+              if (outside(a.from.owner.id))
+                throw new RelayError(
+                  "auto_accept_scope",
+                  "An outside collaborator's ask needs your click each time.",
+                  { account: account(person), owner: personRef(person) },
+                );
               const policy = policyFor(person.id);
               policies.set(person.id, {
                 ...policy,
@@ -4407,6 +4437,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
           } else if (d.row.state === "claimed" && now - d.claimedAt >= 600000)
             d.row = { ...d.row, state: "pending" };
         }
+        holdQueued();
         if (resource === "inbox") {
           if (method !== "POST" || id) throw new RelayError("not_found", "Unknown inbox call.");
           const { asHandle } = parseJson(body, "ChatAct") as ChatAct;
@@ -4738,6 +4769,8 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
             agentHops.set(root!.id, hops + 1);
             auto =
               !sameOwner &&
+              !outside(person.id) &&
+              !outside(origin.id) &&
               usageAllows(policy, target.machine.id, target.provider) &&
               policy.auto.some(
                 (r) =>
@@ -4746,9 +4779,7 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                     ? r.from.person.id === person.id
                     : "agent" in r.from
                       ? r.from.agent === h.id
-                      : person.admission !== "outside" &&
-                        !roleOf(person).forOutside &&
-                        r.from.role.id === person.role),
+                      : !roleOf(person).forOutside && r.from.role.id === person.role),
               );
           } else if (kind === "review" || ask.parentAskId) reject("malformed");
           row = {
@@ -4919,6 +4950,12 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
         return send("ChatSearch", paged(results));
       }
       if (resource === "me" && id === "settings" && !action) {
+        const badSource = (): never => {
+          throw new RelayError("auto_accept_scope", "Choose a permitted source for this rule.", {
+            account: account(person),
+            owner: personRef(person),
+          });
+        };
         if (method === "GET")
           return send("ChatSettings", {
             agentAsks: policyFor(person.id),
@@ -4940,18 +4977,34 @@ export const startFakeRelay = async (options: FakeRelayOptions = {}): Promise<Fa
                 rule?.from &&
                 typeof rule.from === "object" &&
                 Array.isArray(rule.kinds) &&
-                ((!("person" in rule.from) && rule.kinds.some((k: unknown) => k !== "question")) ||
-                  ("role" in rule.from && roles.get(rule.from.role?.id)?.forOutside !== false)),
+                !("person" in rule.from) &&
+                rule.kinds.some((k: unknown) => k !== "question"),
             )
           )
-            throw new RelayError("auto_accept_scope", "Choose a permitted source for this rule.", {
-              account: account(person),
-              owner: personRef(person),
-            });
+            badSource();
           const settings = parseJson(body, "ChatSettings") as ChatSettings;
+          // Only a new source is checked: a stored one that has since gone must not block a save.
+          const sourceOf = ({ from }: AgentAskPolicy["auto"][number]) =>
+            "person" in from
+              ? "person:" + from.person.id
+              : "agent" in from
+                ? "agent:" + from.agent
+                : "role:" + from.role.id;
+          const stored = new Set(policyFor(person.id).auto.map(sourceOf));
+          for (const rule of settings.agentAsks.auto)
+            if (
+              !stored.has(sourceOf(rule)) &&
+              !("person" in rule.from
+                ? people.get(rule.from.person.id)?.removed === false
+                : "agent" in rule.from
+                  ? handles.has(rule.from.agent)
+                  : roles.get(rule.from.role.id)?.forOutside === false)
+            )
+              badSource();
           policies.set(person.id, settings.agentAsks);
           if (settings.agentsPaused) paused.add(person.id);
           else paused.delete(person.id);
+          holdQueued();
           for (const h of handles.values())
             if (h.view.owner.id === person.id)
               h.view = { ...h.view, paused: settings.agentsPaused };

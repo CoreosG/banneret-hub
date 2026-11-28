@@ -10,14 +10,23 @@ it("lets the owner allow a question, posts its receipt and auto-accepts the next
   await commands.companyChat("h1:start");
   await using resources = new AsyncDisposableStack();
   resources.defer(() => commands.companyChat("h1:stop"));
+  let askerOutside = true;
   using _rpc = vi.spyOn(chatRpc, "run").mockImplementation(async (_, action) => {
     const result = await commands.companyChat("h1:leo", action);
     if (!result.ok) throw new Error(result.message);
-    return result.value;
+    if (action.kind !== "members" || !askerOutside) return result.value;
+    const members = result.value as { items: object[] };
+    return { ...members, items: members.items.map((m) => ({ ...m, admission: "outside" })) };
   });
   const { ask, item } = await commands.companyChat("h1:agentAsk", "first");
   expect(ask.state).toBe("waiting_owner");
   const target = { environmentId: EnvironmentId.make("local"), relayOrigin: "https://relay.test" };
+  // An outside collaborator's ask can be allowed once, never always.
+  const outsider = await render(<WaitingAsks item={item} target={target} />);
+  await expect.element(outsider.getByRole("button", { name: "Let it answer" })).toBeVisible();
+  expect(outsider.getByRole("checkbox").elements()).toHaveLength(0);
+  await outsider.unmount();
+  askerOutside = false;
   await using needs = await render(<WaitingAsks item={item} target={target} />);
   await expect.element(needs.getByText("Which file defines retries?")).toBeVisible();
   await expect.element(needs.getByRole("link", { name: /#platform/ })).toBeVisible();

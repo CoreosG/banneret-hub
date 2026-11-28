@@ -14,7 +14,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import type { RelayTarget } from "../enrolmentStore";
-import { chatRpc, conversations, handles, pageItems, useChatRead } from "./client";
+import { chatRpc, conversations, handles, members, pageItems, useChatRead } from "./client";
 
 const decode = Schema.decodeUnknownSync(ChatAsks);
 const settings = Schema.decodeUnknownSync(ChatSettings);
@@ -179,10 +179,12 @@ function AskDecision({
   ask,
   change,
   busy,
+  canAlways,
 }: {
   ask: ChatAsk;
   change: (action: ChannelAction) => void;
   busy: boolean;
+  canAlways: boolean;
 }) {
   const [always, setAlways] = useState(false);
   const [mode, setMode] = useState<"answer" | "decline" | null>(null);
@@ -237,18 +239,20 @@ function AskDecision({
           Decline
         </button>
       </div>
-      <label>
-        <input
-          type="checkbox"
-          checked={always}
-          onChange={(e) => {
-            setAlways(e.target.checked);
-            setMode(null);
-          }}
-        />{" "}
-        Always allow {ask.from.owner.login}'s agents (
-        {ask.kind === "review" ? "reviews" : "questions"})
-      </label>
+      {canAlways && (
+        <label>
+          <input
+            type="checkbox"
+            checked={always}
+            onChange={(e) => {
+              setAlways(e.target.checked);
+              setMode(null);
+            }}
+          />{" "}
+          Always allow {ask.from.owner.login}'s agents (
+          {ask.kind === "review" ? "reviews" : "questions"})
+        </label>
+      )}
       {mode && (
         <form
           onSubmit={(e) => {
@@ -316,8 +320,19 @@ export function WaitingAsks({
       ),
     );
 
+    // "Always allow" needs a member list that shows the asker as a member, not an outsider.
+    const unseen = new Set(asks.map((ask) => ask.from.owner.id));
+    const insiders = new Set<string>();
+    for (const channel of channels) {
+      if (!unseen.size) break;
+      if (channel.kind !== "channel" || !channel.me.member) continue;
+      for (const person of await members(target, channel.id).catch(() => []))
+        if (unseen.delete(person.id) && person.admission === "member") insiders.add(person.id);
+    }
+
     return {
       asks,
+      insiders,
       homes,
       names: new Map(agents.map((h) => [h.id, h.login])),
       policy,
@@ -360,7 +375,13 @@ export function WaitingAsks({
             Runs read only on your usage. Stops at {data.value!.policy.maxTokens.toLocaleString()}{" "}
             tokens or {data.value!.policy.maxSeconds} seconds.
           </small>
-          <AskDecision key={ask.state} ask={ask} change={change} busy={busy} />
+          <AskDecision
+            key={ask.state}
+            ask={ask}
+            change={change}
+            busy={busy}
+            canAlways={data.value!.insiders.has(ask.from.owner.id)}
+          />
         </AskCard>
       ))}
       {(error || data.error) && <p role="alert">{error || data.error}</p>}

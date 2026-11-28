@@ -40,11 +40,9 @@ export const makeAnswerRuns = Effect.gen(function* () {
   yield* sql`CREATE TABLE IF NOT EXISTS banneret_answer_runs (origin TEXT, ask TEXT, handle TEXT, thread TEXT, project TEXT, run TEXT, maxTokens INTEGER, maxSeconds INTEGER, expires INTEGER, PRIMARY KEY(origin,ask))`.pipe(
     Effect.orDie,
   );
-  const policy = (relay: RelayEnrolment) =>
-    relay.signedChat("GET", "me/settings").pipe(
-      Effect.flatMap((r) => decodeSettings(r.body)),
-      Effect.map((s) => s.agentAsks),
-    );
+  const settings = (relay: RelayEnrolment) =>
+    relay.signedChat("GET", "me/settings").pipe(Effect.flatMap((r) => decodeSettings(r.body)));
+  const policy = (relay: RelayEnrolment) => settings(relay).pipe(Effect.map((s) => s.agentAsks));
   const remember = (
     relay: RelayEnrolment,
     ask: string,
@@ -115,5 +113,5 @@ export const makeAnswerRuns = Effect.gen(function* () {
         Effect.catchCause((c) => Effect.logWarning("Could not reconcile an answer turn", c)),
       );
   });
-  return { remember, policy, reconcile, rows };
+  return { remember, settings, policy, reconcile, rows };
 });
